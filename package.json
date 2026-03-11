@@ -35,6 +35,8 @@
     "deploy:keeper:avax": "bun run --cwd packages/hyperbet-avax keeper:service",
     "market-maker:start": "bun run --cwd packages/market-maker-bot start",
     "market-maker:start:multi": "bun run --cwd packages/market-maker-bot start:multi",
+    "market-maker:simulate:adversarial": "bun run --cwd packages/market-maker-bot simulate:adversarial",
+    "market-maker:simulate:adversarial:ci": "bun run --cwd packages/market-maker-bot simulate:adversarial:ci",
     "market-maker:wallets:generate": "bun run --cwd packages/market-maker-bot wallets:generate",
     "market-maker:wallets:ui-env": "bun run --cwd packages/market-maker-bot wallets:ui-env"
   },

@@ -3,21 +3,54 @@ import { mkdtempSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+function sleepMs(durationMs: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, durationMs);
+}
+
+function cleanupTempDir(tempDir: string): void {
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    try {
+      rmSync(tempDir, { recursive: true, force: true });
+      return;
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code === "ENOENT") {
+        return;
+      }
+      if (!["EBUSY", "EPERM", "ENOTEMPTY"].includes(code ?? "")) {
+        throw error;
+      }
+      if (attempt === 5) {
+        return;
+      }
+      sleepMs(25 * (attempt + 1));
+    }
+  }
+}
+
 describe("keeper db persistence", () => {
   let tempDir = "";
+  let loadedModules: Array<typeof import("./db.ts")> = [];
 
   beforeEach(() => {
     tempDir = mkdtempSync(path.join(os.tmpdir(), "keeper-db-"));
     process.env.KEEPER_DB_PATH = path.join(tempDir, "keeper.sqlite");
+    loadedModules = [];
   });
 
   afterEach(() => {
     delete process.env.KEEPER_DB_PATH;
-    rmSync(tempDir, { recursive: true, force: true });
+    for (const module of loadedModules) {
+      module.closeDb();
+    }
+    cleanupTempDir(tempDir);
   });
 
   test("round-trips agent ratings through SQLite", async () => {
-    const db = await import(`./db.ts?case=${Date.now()}-ratings`);
+    const db = (await import(
+      `./db.ts?case=${Date.now()}-ratings`
+    )) as typeof import("./db.ts");
+    loadedModules.push(db);
 
     db.saveAgentRating("gpt-4.1", {
       mu: 1125,
@@ -35,7 +68,10 @@ describe("keeper db persistence", () => {
   });
 
   test("stores oracle snapshots for later history queries", async () => {
-    const db = await import(`./db.ts?case=${Date.now()}-snapshots`);
+    const db = (await import(
+      `./db.ts?case=${Date.now()}-snapshots`
+    )) as typeof import("./db.ts");
+    loadedModules.push(db);
 
     db.savePerpsOracleSnapshot({
       agentId: "claude-sonnet",
@@ -61,7 +97,10 @@ describe("keeper db persistence", () => {
   });
 
   test("stores canonical perps market registry rows", async () => {
-    const db = await import(`./db.ts?case=${Date.now()}-markets`);
+    const db = (await import(
+      `./db.ts?case=${Date.now()}-markets`
+    )) as typeof import("./db.ts");
+    loadedModules.push(db);
 
     db.savePerpsMarket({
       agentId: "gpt-4.1",

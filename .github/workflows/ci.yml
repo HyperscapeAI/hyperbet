@@ -11,6 +11,7 @@ on:
       - "packages/hyperbet-avax/app/**"
       - "packages/hyperbet-avax/keeper/**"
       - "packages/hyperbet-ui/**"
+      - "packages/market-maker-bot/**"
       - "docs/hyperbet-production-deploy.md"
       - ".github/workflows/ci.yml"
       - "package.json"
@@ -25,6 +26,7 @@ on:
       - "packages/hyperbet-avax/app/**"
       - "packages/hyperbet-avax/keeper/**"
       - "packages/hyperbet-ui/**"
+      - "packages/market-maker-bot/**"
       - "docs/hyperbet-production-deploy.md"
       - ".github/workflows/ci.yml"
       - "package.json"
@@ -150,3 +152,26 @@ jobs:
             echo "Provider key leak detected in dist"
             exit 1
           fi
+
+  market-maker:
+    name: Validate market-maker-bot
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.1.38
+
+      - name: Install dependencies
+        run: |
+          bun install --frozen-lockfile
+          bun install --cwd packages/market-maker-bot --frozen-lockfile
+
+      - name: Run market-maker unit tests
+        run: bun run --cwd packages/market-maker-bot test
+
+      - name: Run adversarial suite gate
+        run: bun run --cwd packages/market-maker-bot simulate:adversarial:ci

@@ -804,3 +804,7 @@ export function savePerpsMarket(record: DbPerpsMarketRecord): void {
     $updatedAt: record.updatedAt,
   });
 }
+
+export function closeDb(): void {
+  db.close();
+}
