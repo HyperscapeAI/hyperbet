@@ -73,3 +73,16 @@ Gate env controls:
 - `MM_ADVERSARIAL_CHAIN` (`solana` | `bsc` | `avax`, optional; unset means all chains)
 - `MM_ADVERSARIAL_MIN_PASSES` (default is all scenarios in scope: `18` for all chains, `6` for one chain)
 - `MM_ADVERSARIAL_OUTPUT_DIR` (default `simulations`)
+- `MM_ADVERSARIAL_ENFORCE_BASELINE` (`1` by default, set `0` to skip baseline regression checks)
+
+Gate behavior now enforces three layers:
+
+- mitigation pass threshold
+- hard invariants (`max mitigated attacker pnl`, `max exploit events`, `max inventory peak`, `max toxic fill rate`, `max adverse slippage`, `min loss reduction`)
+- baseline regression deltas from `src/adversarial/baseline.snapshot.json`
+
+Refresh baseline snapshot after intentional model changes:
+
+```bash
+bun run simulate:adversarial:baseline:update
+```

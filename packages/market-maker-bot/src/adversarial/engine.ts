@@ -76,21 +76,26 @@ export function scenarioIntensity(
 ): number {
   const chainRisk = chain.riskMultiplier;
   if (scenario === "latency_sniping") {
-    return 0.6 * vuln.latency * chainRisk;
+    return 0.55 * vuln.latency * chainRisk * (1 + chain.mempoolFriction * 0.4);
   }
   if (scenario === "spoof_pressure") {
-    return 0.55 * vuln.spoof * chainRisk;
+    return 0.5 * vuln.spoof * chainRisk * (1 + chain.mempoolFriction * 0.35);
   }
   if (scenario === "toxic_flow_poisoning") {
     return 0.7 * vuln.toxic * chainRisk;
   }
   if (scenario === "stale_signal_arbitrage") {
-    return 0.65 * vuln.stale * chainRisk;
+    return 0.6 * vuln.stale * chainRisk * (1 + chain.oracleLagAmplifier * 0.45);
   }
   if (scenario === "liquidation_cascade") {
     return 0.75 * ((vuln.inventory + vuln.cancel) / 2) * chainRisk;
   }
-  return 0.6 * ((vuln.latency + vuln.cancel) / 2) * chainRisk;
+  return (
+    0.6 *
+    ((vuln.latency + vuln.cancel) / 2) *
+    chainRisk *
+    (1 + chain.mevRisk * 0.55)
+  );
 }
 
 export function shouldExploit(

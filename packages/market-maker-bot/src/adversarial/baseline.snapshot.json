@@ -1,0 +1,599 @@
+{
+  "generatedAt": "2026-03-11T17:37:21.198Z",
+  "seed": 20260311,
+  "chains": [
+    {
+      "chain": "solana",
+      "scenarios": [
+        {
+          "scenario": "latency_sniping",
+          "baseline": {
+            "mmPnl": -131.073953,
+            "attackerPnl": 131.073953,
+            "maxDrawdown": -0.275429,
+            "toxicFillRate": 0.7969,
+            "inventoryPeak": 38,
+            "exploitEvents": 51,
+            "avgAdverseSlippageBps": 54.71
+          },
+          "mitigated": {
+            "mmPnl": -4.144516,
+            "attackerPnl": 4.144516,
+            "maxDrawdown": -0.088036,
+            "toxicFillRate": 0.0909,
+            "inventoryPeak": 5,
+            "exploitEvents": 3,
+            "avgAdverseSlippageBps": 56.96
+          },
+          "improved": true,
+          "mitigationPass": true,
+          "notes": [
+            "loss_reduction=96.8%",
+            "toxic_fill_rate baseline=0.7969 mitigated=0.0909",
+            "drawdown baseline=-0.275429 mitigated=-0.088036",
+            "exploit_events baseline=51 mitigated=3",
+            "adverse_slippage_bps baseline=54.71 mitigated=56.96",
+            "aux_checks toxicityReduced=true drawdownImproved=true exploitEventsReduced=true"
+          ]
+        },
+        {
+          "scenario": "spoof_pressure",
+          "baseline": {
+            "mmPnl": -172.48308,
+            "attackerPnl": 172.48308,
+            "maxDrawdown": -0.045282,
+            "toxicFillRate": 0.8734,
+            "inventoryPeak": 41,
+            "exploitEvents": 69,
+            "avgAdverseSlippageBps": 437.8
+          },
+          "mitigated": {
+            "mmPnl": -19.506266,
+            "attackerPnl": 19.506266,
+            "maxDrawdown": -0.064874,
+            "toxicFillRate": 0.3721,
+            "inventoryPeak": 15,
+            "exploitEvents": 16,
+            "avgAdverseSlippageBps": 91.13
+          },
+          "improved": true,
+          "mitigationPass": true,
+          "notes": [
+            "loss_reduction=88.7%",
+            "toxic_fill_rate baseline=0.8734 mitigated=0.3721",
+            "drawdown baseline=-0.045282 mitigated=-0.064874",
+            "exploit_events baseline=69 mitigated=16",
+            "adverse_slippage_bps baseline=437.8 mitigated=91.13",
+            "aux_checks toxicityReduced=true drawdownImproved=false exploitEventsReduced=true"
+          ]
+        },
+        {
+          "scenario": "toxic_flow_poisoning",
+          "baseline": {
+            "mmPnl": -244.550667,
+            "attackerPnl": 244.550667,
+            "maxDrawdown": -0.01079,
+            "toxicFillRate": 0.8783,
+            "inventoryPeak": 31,
+            "exploitEvents": 101,
+            "avgAdverseSlippageBps": 82.63
+          },
+          "mitigated": {
+            "mmPnl": -19.150226,
+            "attackerPnl": 19.150226,
+            "maxDrawdown": 0,
+            "toxicFillRate": 0.3036,
+            "inventoryPeak": 7,
+            "exploitEvents": 17,
+            "avgAdverseSlippageBps": 55.85
+          },
+          "improved": true,
+          "mitigationPass": true,
+          "notes": [
+            "loss_reduction=92.2%",
+            "toxic_fill_rate baseline=0.8783 mitigated=0.3036",
+            "drawdown baseline=-0.01079 mitigated=0",
+            "exploit_events baseline=101 mitigated=17",
+            "adverse_slippage_bps baseline=82.63 mitigated=55.85",
+            "aux_checks toxicityReduced=true drawdownImproved=true exploitEventsReduced=true"
+          ]
+        },
+        {
+          "scenario": "stale_signal_arbitrage",
+          "baseline": {
+            "mmPnl": -114.518414,
+            "attackerPnl": 114.518414,
+            "maxDrawdown": -0.416225,
+            "toxicFillRate": 0.8913,
+            "inventoryPeak": 63,
+            "exploitEvents": 41,
+            "avgAdverseSlippageBps": 134.22
+          },
+          "mitigated": {
+            "mmPnl": -19.476356,
+            "attackerPnl": 19.476356,
+            "maxDrawdown": -0.001152,
+            "toxicFillRate": 0.2152,
+            "inventoryPeak": 9,
+            "exploitEvents": 17,
+            "avgAdverseSlippageBps": 58.54
+          },
+          "improved": true,
+          "mitigationPass": true,
+          "notes": [
+            "loss_reduction=83.0%",
+            "toxic_fill_rate baseline=0.8913 mitigated=0.2152",
+            "drawdown baseline=-0.416225 mitigated=-0.001152",
+            "exploit_events baseline=41 mitigated=17",
+            "adverse_slippage_bps baseline=134.22 mitigated=58.54",
+            "aux_checks toxicityReduced=true drawdownImproved=true exploitEventsReduced=true"
+          ]
+        },
+        {
+          "scenario": "liquidation_cascade",
+          "baseline": {
+            "mmPnl": -244.764759,
+            "attackerPnl": 244.764759,
+            "maxDrawdown": -0.222388,
+            "toxicFillRate": 0.9434,
+            "inventoryPeak": 35,
+            "exploitEvents": 100,
+            "avgAdverseSlippageBps": 112.29
+          },
+          "mitigated": {
+            "mmPnl": -19.587597,
+            "attackerPnl": 19.587597,
+            "maxDrawdown": -0.010643,
+            "toxicFillRate": 0.4,
+            "inventoryPeak": 15,
+            "exploitEvents": 16,
+            "avgAdverseSlippageBps": 104.29
+          },
+          "improved": true,
+          "mitigationPass": true,
+          "notes": [
+            "loss_reduction=92.0%",
+            "toxic_fill_rate baseline=0.9434 mitigated=0.4",
+            "drawdown baseline=-0.222388 mitigated=-0.010643",
+            "exploit_events baseline=100 mitigated=16",
+            "adverse_slippage_bps baseline=112.29 mitigated=104.29",
+            "aux_checks toxicityReduced=true drawdownImproved=true exploitEventsReduced=true"
+          ]
+        },
+        {
+          "scenario": "gas_auction_backrun",
+          "baseline": {
+            "mmPnl": -440.159555,
+            "attackerPnl": 440.159555,
+            "maxDrawdown": 0,
+            "toxicFillRate": 0.9565,
+            "inventoryPeak": 99,
+            "exploitEvents": 176,
+            "avgAdverseSlippageBps": 158.24
+          },
+          "mitigated": {
+            "mmPnl": -8.150572,
+            "attackerPnl": 8.150572,
+            "maxDrawdown": -0.002037,
+            "toxicFillRate": 0.1875,
+            "inventoryPeak": 12,
+            "exploitEvents": 6,
+            "avgAdverseSlippageBps": 82.65
+          },
+          "improved": true,
+          "mitigationPass": true,
+          "notes": [
+            "loss_reduction=98.1%",
+            "toxic_fill_rate baseline=0.9565 mitigated=0.1875",
+            "drawdown baseline=0 mitigated=-0.002037",
+            "exploit_events baseline=176 mitigated=6",
+            "adverse_slippage_bps baseline=158.24 mitigated=82.65",
+            "aux_checks toxicityReduced=true drawdownImproved=false exploitEventsReduced=true"
+          ]
+        }
+      ],
+      "summary": {
+        "scenarioCount": 6,
+        "improvedCount": 6,
+        "passCount": 6
+      }
+    },
+    {
+      "chain": "bsc",
+      "scenarios": [
+        {
+          "scenario": "latency_sniping",
+          "baseline": {
+            "mmPnl": -160.20155,
+            "attackerPnl": 160.20155,
+            "maxDrawdown": -1.064889,
+            "toxicFillRate": 0.8026,
+            "inventoryPeak": 46,
+            "exploitEvents": 61,
+            "avgAdverseSlippageBps": 59.85
+          },
+          "mitigated": {
+            "mmPnl": -13.659113,
+            "attackerPnl": 13.659113,
+            "maxDrawdown": -0.044497,
+            "toxicFillRate": 0.4231,
+            "inventoryPeak": 10,
+            "exploitEvents": 11,
+            "avgAdverseSlippageBps": 62.36
+          },
+          "improved": true,
+          "mitigationPass": true,
+          "notes": [
+            "loss_reduction=91.5%",
+            "toxic_fill_rate baseline=0.8026 mitigated=0.4231",
+            "drawdown baseline=-1.064889 mitigated=-0.044497",
+            "exploit_events baseline=61 mitigated=11",
+            "adverse_slippage_bps baseline=59.85 mitigated=62.36",
+            "aux_checks toxicityReduced=true drawdownImproved=true exploitEventsReduced=true"
+          ]
+        },
+        {
+          "scenario": "spoof_pressure",
+          "baseline": {
+            "mmPnl": -242.172773,
+            "attackerPnl": 242.172773,
+            "maxDrawdown": -1.380948,
+            "toxicFillRate": 0.88,
+            "inventoryPeak": 115,
+            "exploitEvents": 88,
+            "avgAdverseSlippageBps": 449.58
+          },
+          "mitigated": {
+            "mmPnl": -29.138696,
+            "attackerPnl": 29.138696,
+            "maxDrawdown": -0.188371,
+            "toxicFillRate": 0.3793,
+            "inventoryPeak": 30,
+            "exploitEvents": 22,
+            "avgAdverseSlippageBps": 113.42
+          },
+          "improved": true,
+          "mitigationPass": true,
+          "notes": [
+            "loss_reduction=88.0%",
+            "toxic_fill_rate baseline=0.88 mitigated=0.3793",
+            "drawdown baseline=-1.380948 mitigated=-0.188371",
+            "exploit_events baseline=88 mitigated=22",
+            "adverse_slippage_bps baseline=449.58 mitigated=113.42",
+            "aux_checks toxicityReduced=true drawdownImproved=true exploitEventsReduced=true"
+          ]
+        },
+        {
+          "scenario": "toxic_flow_poisoning",
+          "baseline": {
+            "mmPnl": -275.096537,
+            "attackerPnl": 275.096537,
+            "maxDrawdown": -0.904878,
+            "toxicFillRate": 0.931,
+            "inventoryPeak": 61,
+            "exploitEvents": 108,
+            "avgAdverseSlippageBps": 108.52
+          },
+          "mitigated": {
+            "mmPnl": -33.983853,
+            "attackerPnl": 33.983853,
+            "maxDrawdown": -0.01085,
+            "toxicFillRate": 0.537,
+            "inventoryPeak": 19,
+            "exploitEvents": 29,
+            "avgAdverseSlippageBps": 68.36
+          },
+          "improved": true,
+          "mitigationPass": true,
+          "notes": [
+            "loss_reduction=87.6%",
+            "toxic_fill_rate baseline=0.931 mitigated=0.537",
+            "drawdown baseline=-0.904878 mitigated=-0.01085",
+            "exploit_events baseline=108 mitigated=29",
+            "adverse_slippage_bps baseline=108.52 mitigated=68.36",
+            "aux_checks toxicityReduced=true drawdownImproved=true exploitEventsReduced=true"
+          ]
+        },
+        {
+          "scenario": "stale_signal_arbitrage",
+          "baseline": {
+            "mmPnl": -170.198088,
+            "attackerPnl": 170.198088,
+            "maxDrawdown": -0.199368,
+            "toxicFillRate": 0.5294,
+            "inventoryPeak": 72,
+            "exploitEvents": 63,
+            "avgAdverseSlippageBps": 174.78
+          },
+          "mitigated": {
+            "mmPnl": -29.502132,
+            "attackerPnl": 29.502132,
+            "maxDrawdown": 0,
+            "toxicFillRate": 0.268,
+            "inventoryPeak": 10,
+            "exploitEvents": 26,
+            "avgAdverseSlippageBps": 106.62
+          },
+          "improved": true,
+          "mitigationPass": true,
+          "notes": [
+            "loss_reduction=82.7%",
+            "toxic_fill_rate baseline=0.5294 mitigated=0.268",
+            "drawdown baseline=-0.199368 mitigated=0",
+            "exploit_events baseline=63 mitigated=26",
+            "adverse_slippage_bps baseline=174.78 mitigated=106.62",
+            "aux_checks toxicityReduced=true drawdownImproved=true exploitEventsReduced=true"
+          ]
+        },
+        {
+          "scenario": "liquidation_cascade",
+          "baseline": {
+            "mmPnl": -265.643339,
+            "attackerPnl": 265.643339,
+            "maxDrawdown": -0.164505,
+            "toxicFillRate": 0.9304,
+            "inventoryPeak": 37,
+            "exploitEvents": 107,
+            "avgAdverseSlippageBps": 132.36
+          },
+          "mitigated": {
+            "mmPnl": -14.707111,
+            "attackerPnl": 14.707111,
+            "maxDrawdown": -0.208924,
+            "toxicFillRate": 0.25,
+            "inventoryPeak": 9,
+            "exploitEvents": 12,
+            "avgAdverseSlippageBps": 125.36
+          },
+          "improved": true,
+          "mitigationPass": true,
+          "notes": [
+            "loss_reduction=94.5%",
+            "toxic_fill_rate baseline=0.9304 mitigated=0.25",
+            "drawdown baseline=-0.164505 mitigated=-0.208924",
+            "exploit_events baseline=107 mitigated=12",
+            "adverse_slippage_bps baseline=132.36 mitigated=125.36",
+            "aux_checks toxicityReduced=true drawdownImproved=false exploitEventsReduced=true"
+          ]
+        },
+        {
+          "scenario": "gas_auction_backrun",
+          "baseline": {
+            "mmPnl": -445.272627,
+            "attackerPnl": 445.272627,
+            "maxDrawdown": -0.805647,
+            "toxicFillRate": 0.9341,
+            "inventoryPeak": 142,
+            "exploitEvents": 170,
+            "avgAdverseSlippageBps": 156.66
+          },
+          "mitigated": {
+            "mmPnl": -18.03864,
+            "attackerPnl": 18.03864,
+            "maxDrawdown": -0.920147,
+            "toxicFillRate": 0.3333,
+            "inventoryPeak": 19,
+            "exploitEvents": 13,
+            "avgAdverseSlippageBps": 101.59
+          },
+          "improved": true,
+          "mitigationPass": true,
+          "notes": [
+            "loss_reduction=95.9%",
+            "toxic_fill_rate baseline=0.9341 mitigated=0.3333",
+            "drawdown baseline=-0.805647 mitigated=-0.920147",
+            "exploit_events baseline=170 mitigated=13",
+            "adverse_slippage_bps baseline=156.66 mitigated=101.59",
+            "aux_checks toxicityReduced=true drawdownImproved=false exploitEventsReduced=true"
+          ]
+        }
+      ],
+      "summary": {
+        "scenarioCount": 6,
+        "improvedCount": 6,
+        "passCount": 6
+      }
+    },
+    {
+      "chain": "avax",
+      "scenarios": [
+        {
+          "scenario": "latency_sniping",
+          "baseline": {
+            "mmPnl": -172.413703,
+            "attackerPnl": 172.413703,
+            "maxDrawdown": -0.562893,
+            "toxicFillRate": 0.9559,
+            "inventoryPeak": 48,
+            "exploitEvents": 65,
+            "avgAdverseSlippageBps": 63.11
+          },
+          "mitigated": {
+            "mmPnl": -5.028817,
+            "attackerPnl": 5.028817,
+            "maxDrawdown": -0.010582,
+            "toxicFillRate": 0.1364,
+            "inventoryPeak": 10,
+            "exploitEvents": 3,
+            "avgAdverseSlippageBps": 87.14
+          },
+          "improved": true,
+          "mitigationPass": true,
+          "notes": [
+            "loss_reduction=97.1%",
+            "toxic_fill_rate baseline=0.9559 mitigated=0.1364",
+            "drawdown baseline=-0.562893 mitigated=-0.010582",
+            "exploit_events baseline=65 mitigated=3",
+            "adverse_slippage_bps baseline=63.11 mitigated=87.14",
+            "aux_checks toxicityReduced=true drawdownImproved=true exploitEventsReduced=true"
+          ]
+        },
+        {
+          "scenario": "spoof_pressure",
+          "baseline": {
+            "mmPnl": -316.720262,
+            "attackerPnl": 316.720262,
+            "maxDrawdown": -2.308625,
+            "toxicFillRate": 0.9381,
+            "inventoryPeak": 194,
+            "exploitEvents": 106,
+            "avgAdverseSlippageBps": 507.18
+          },
+          "mitigated": {
+            "mmPnl": -27.866642,
+            "attackerPnl": 27.866642,
+            "maxDrawdown": -0.105054,
+            "toxicFillRate": 0.3966,
+            "inventoryPeak": 14,
+            "exploitEvents": 23,
+            "avgAdverseSlippageBps": 131.63
+          },
+          "improved": true,
+          "mitigationPass": true,
+          "notes": [
+            "loss_reduction=91.2%",
+            "toxic_fill_rate baseline=0.9381 mitigated=0.3966",
+            "drawdown baseline=-2.308625 mitigated=-0.105054",
+            "exploit_events baseline=106 mitigated=23",
+            "adverse_slippage_bps baseline=507.18 mitigated=131.63",
+            "aux_checks toxicityReduced=true drawdownImproved=true exploitEventsReduced=true"
+          ]
+        },
+        {
+          "scenario": "toxic_flow_poisoning",
+          "baseline": {
+            "mmPnl": -300.790812,
+            "attackerPnl": 300.790812,
+            "maxDrawdown": -0.312004,
+            "toxicFillRate": 0.9048,
+            "inventoryPeak": 79,
+            "exploitEvents": 114,
+            "avgAdverseSlippageBps": 126.04
+          },
+          "mitigated": {
+            "mmPnl": -38.978699,
+            "attackerPnl": 38.978699,
+            "maxDrawdown": -0.81146,
+            "toxicFillRate": 0.4156,
+            "inventoryPeak": 21,
+            "exploitEvents": 32,
+            "avgAdverseSlippageBps": 71.59
+          },
+          "improved": true,
+          "mitigationPass": true,
+          "notes": [
+            "loss_reduction=87.0%",
+            "toxic_fill_rate baseline=0.9048 mitigated=0.4156",
+            "drawdown baseline=-0.312004 mitigated=-0.81146",
+            "exploit_events baseline=114 mitigated=32",
+            "adverse_slippage_bps baseline=126.04 mitigated=71.59",
+            "aux_checks toxicityReduced=true drawdownImproved=false exploitEventsReduced=true"
+          ]
+        },
+        {
+          "scenario": "stale_signal_arbitrage",
+          "baseline": {
+            "mmPnl": -209.050296,
+            "attackerPnl": 209.050296,
+            "maxDrawdown": -3.764729,
+            "toxicFillRate": 0.5,
+            "inventoryPeak": 182,
+            "exploitEvents": 62,
+            "avgAdverseSlippageBps": 235.48
+          },
+          "mitigated": {
+            "mmPnl": -33.070005,
+            "attackerPnl": 33.070005,
+            "maxDrawdown": 0,
+            "toxicFillRate": 0.2828,
+            "inventoryPeak": 15,
+            "exploitEvents": 28,
+            "avgAdverseSlippageBps": 84.97
+          },
+          "improved": true,
+          "mitigationPass": true,
+          "notes": [
+            "loss_reduction=84.2%",
+            "toxic_fill_rate baseline=0.5 mitigated=0.2828",
+            "drawdown baseline=-3.764729 mitigated=0",
+            "exploit_events baseline=62 mitigated=28",
+            "adverse_slippage_bps baseline=235.48 mitigated=84.97",
+            "aux_checks toxicityReduced=true drawdownImproved=true exploitEventsReduced=true"
+          ]
+        },
+        {
+          "scenario": "liquidation_cascade",
+          "baseline": {
+            "mmPnl": -256.549418,
+            "attackerPnl": 256.549418,
+            "maxDrawdown": -0.033615,
+            "toxicFillRate": 0.9626,
+            "inventoryPeak": 25,
+            "exploitEvents": 103,
+            "avgAdverseSlippageBps": 147.76
+          },
+          "mitigated": {
+            "mmPnl": -23.257388,
+            "attackerPnl": 23.257388,
+            "maxDrawdown": -0.040796,
+            "toxicFillRate": 0.3333,
+            "inventoryPeak": 8,
+            "exploitEvents": 20,
+            "avgAdverseSlippageBps": 143.22
+          },
+          "improved": true,
+          "mitigationPass": true,
+          "notes": [
+            "loss_reduction=90.9%",
+            "toxic_fill_rate baseline=0.9626 mitigated=0.3333",
+            "drawdown baseline=-0.033615 mitigated=-0.040796",
+            "exploit_events baseline=103 mitigated=20",
+            "adverse_slippage_bps baseline=147.76 mitigated=143.22",
+            "aux_checks toxicityReduced=true drawdownImproved=false exploitEventsReduced=true"
+          ]
+        },
+        {
+          "scenario": "gas_auction_backrun",
+          "baseline": {
+            "mmPnl": -491.167049,
+            "attackerPnl": 491.167049,
+            "maxDrawdown": -4.149662,
+            "toxicFillRate": 0.8269,
+            "inventoryPeak": 233,
+            "exploitEvents": 172,
+            "avgAdverseSlippageBps": 276.54
+          },
+          "mitigated": {
+            "mmPnl": -25.76441,
+            "attackerPnl": 25.76441,
+            "maxDrawdown": -0.584615,
+            "toxicFillRate": 0.4,
+            "inventoryPeak": 18,
+            "exploitEvents": 20,
+            "avgAdverseSlippageBps": 140
+          },
+          "improved": true,
+          "mitigationPass": true,
+          "notes": [
+            "loss_reduction=94.8%",
+            "toxic_fill_rate baseline=0.8269 mitigated=0.4",
+            "drawdown baseline=-4.149662 mitigated=-0.584615",
+            "exploit_events baseline=172 mitigated=20",
+            "adverse_slippage_bps baseline=276.54 mitigated=140",
+            "aux_checks toxicityReduced=true drawdownImproved=true exploitEventsReduced=true"
+          ]
+        }
+      ],
+      "summary": {
+        "scenarioCount": 6,
+        "improvedCount": 6,
+        "passCount": 6
+      }
+    }
+  ],
+  "summary": {
+    "totalScenarios": 18,
+    "improvedScenarios": 18,
+    "mitigationPasses": 18
+  }
+}

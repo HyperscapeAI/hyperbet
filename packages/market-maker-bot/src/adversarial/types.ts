@@ -27,6 +27,9 @@ export type ChainProfile = {
   feeBps: number;
   settlementLagTicks: number;
   riskMultiplier: number;
+  mevRisk: number;
+  mempoolFriction: number;
+  oracleLagAmplifier: number;
 };
 
 export type Metrics = {

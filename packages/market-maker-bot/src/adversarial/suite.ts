@@ -92,9 +92,12 @@ export function runAdversarialSuite(
   chainFilter?: ChainId,
 ): SuiteReport {
   const selectedChains = selectChainProfiles(chainFilter);
-  const chains = selectedChains.map((chain, chainIndex) =>
-    buildChainReport(chain, seed + chainIndex * 1000),
-  );
+  const chains = selectedChains.map((chain) => {
+    const canonicalIndex = CHAIN_PROFILES.findIndex(
+      (entry) => entry.chain === chain.chain,
+    );
+    return buildChainReport(chain, seed + canonicalIndex * 1000);
+  });
 
   const flat = chains.flatMap((chain) => chain.scenarios);
   return {

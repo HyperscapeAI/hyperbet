@@ -19,6 +19,9 @@ export const CHAIN_PROFILES: ChainProfile[] = [
     feeBps: 12,
     settlementLagTicks: 1,
     riskMultiplier: 0.95,
+    mevRisk: 0.45,
+    mempoolFriction: 0.35,
+    oracleLagAmplifier: 0.55,
   },
   {
     chain: "bsc",
@@ -27,6 +30,9 @@ export const CHAIN_PROFILES: ChainProfile[] = [
     feeBps: 14,
     settlementLagTicks: 2,
     riskMultiplier: 1,
+    mevRisk: 0.75,
+    mempoolFriction: 0.7,
+    oracleLagAmplifier: 0.8,
   },
   {
     chain: "avax",
@@ -35,6 +41,9 @@ export const CHAIN_PROFILES: ChainProfile[] = [
     feeBps: 15,
     settlementLagTicks: 2,
     riskMultiplier: 1.05,
+    mevRisk: 0.82,
+    mempoolFriction: 0.76,
+    oracleLagAmplifier: 0.9,
   },
 ];
 
