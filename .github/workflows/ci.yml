@@ -154,8 +154,15 @@ jobs:
           fi
 
   market-maker:
-    name: Validate market-maker-bot
+    name: Validate market-maker-bot (${{ matrix.chain }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - chain: solana
+          - chain: bsc
+          - chain: avax
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -173,5 +180,9 @@ jobs:
       - name: Run market-maker unit tests
         run: bun run --cwd packages/market-maker-bot test
 
-      - name: Run adversarial suite gate
+      - name: Run adversarial suite gate for ${{ matrix.chain }}
         run: bun run --cwd packages/market-maker-bot simulate:adversarial:ci
+        env:
+          MM_ADVERSARIAL_CHAIN: ${{ matrix.chain }}
+          MM_ADVERSARIAL_MIN_PASSES: 6
+          MM_ADVERSARIAL_OUTPUT_DIR: packages/market-maker-bot/simulations/ci-${{ matrix.chain }}

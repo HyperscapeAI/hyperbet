@@ -1,4 +1,5 @@
-﻿import type {
+import type {
+  ChainId,
   ChainProfile,
   ChainReport,
   ScenarioId,
@@ -74,8 +75,24 @@ function buildChainReport(chain: ChainProfile, seed: number): ChainReport {
   };
 }
 
-export function runAdversarialSuite(seed = DEFAULT_SEED): SuiteReport {
-  const chains = CHAIN_PROFILES.map((chain, chainIndex) =>
+function selectChainProfiles(chainFilter?: ChainId): ChainProfile[] {
+  if (!chainFilter) {
+    return CHAIN_PROFILES;
+  }
+
+  const chain = CHAIN_PROFILES.find((entry) => entry.chain === chainFilter);
+  if (!chain) {
+    throw new Error(`unknown adversarial chain filter: ${chainFilter}`);
+  }
+  return [chain];
+}
+
+export function runAdversarialSuite(
+  seed = DEFAULT_SEED,
+  chainFilter?: ChainId,
+): SuiteReport {
+  const selectedChains = selectChainProfiles(chainFilter);
+  const chains = selectedChains.map((chain, chainIndex) =>
     buildChainReport(chain, seed + chainIndex * 1000),
   );
 

@@ -38,34 +38,7 @@ bun run wallets:ui-env -- --config wallets.generated.json --out ../hyperbet-sola
 
 This writes `VITE_HEADLESS_WALLETS=...` for the UI headless wallet adapters.
 
-## Adversarial market-maker simulation (Solana, BSC, AVAX)
-
-```bash
-bun run simulate:adversarial
-```
-
-This executes scam-oriented scenarios against a baseline profile and a mitigated profile:
-
-- `latency_sniping`
-- `spoof_pressure`
-- `toxic_flow_poisoning`
-- `stale_signal_arbitrage`
-
-Output report:
-
-- `packages/market-maker-bot/simulations/market-maker-adversarial-report.json`
-
-Use this in CI as a safety gate: mitigation pass counts should not regress.
-
-CI gate command:
-
-```bash
-bun run simulate:adversarial:ci
-```
-
-This runs the simulation and fails if `mitigationPasses` is below `MM_ADVERSARIAL_MIN_PASSES` (default `12`).
-
-## Full adversarial suite (entire simulation battery)
+## Full adversarial suite (Solana, BSC, AVAX)
 
 ```bash
 bun run simulate:adversarial
@@ -84,6 +57,9 @@ Outputs:
 
 - `simulations/market-maker-adversarial-report.json`
 - `simulations/market-maker-adversarial-summary.md`
+- Per-chain mode writes:
+  - `simulations/market-maker-adversarial-report-<chain>.json`
+  - `simulations/market-maker-adversarial-summary-<chain>.md`
 
 Strict CI gate (fails on regression):
 
@@ -94,4 +70,6 @@ bun run simulate:adversarial:ci
 Gate env controls:
 
 - `MM_ADVERSARIAL_SEED` (default `20260311`)
-- `MM_ADVERSARIAL_MIN_PASSES` (default `18`)
+- `MM_ADVERSARIAL_CHAIN` (`solana` | `bsc` | `avax`, optional; unset means all chains)
+- `MM_ADVERSARIAL_MIN_PASSES` (default is all scenarios in scope: `18` for all chains, `6` for one chain)
+- `MM_ADVERSARIAL_OUTPUT_DIR` (default `simulations`)

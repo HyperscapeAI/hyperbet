@@ -1,14 +1,31 @@
-﻿import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { DEFAULT_SEED } from "./config.js";
+import { CHAIN_PROFILES, DEFAULT_SEED, SCENARIOS } from "./config.js";
 import { runAdversarialSuite, toMarkdownSummary } from "./suite.js";
-import type { SuiteReport } from "./types.js";
+import type { ChainId, SuiteReport } from "./types.js";
 
 export type GateVerdict = {
   ok: boolean;
   message: string;
 };
+
+function parseChainFilter(value?: string): ChainId | undefined {
+  if (!value) {
+    return undefined;
+  }
+
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "solana" || normalized === "bsc" || normalized === "avax") {
+    return normalized;
+  }
+  throw new Error(`invalid MM_ADVERSARIAL_CHAIN value: ${value}`);
+}
+
+function defaultThreshold(chainFilter?: ChainId): number {
+  const chainCount = chainFilter ? 1 : CHAIN_PROFILES.length;
+  return chainCount * SCENARIOS.length;
+}
 
 export function assertMitigationThreshold(
   report: SuiteReport,
@@ -26,36 +43,50 @@ export function assertMitigationThreshold(
   };
 }
 
-export function writeSuiteOutputs(seed: number, outputDir: string): SuiteReport {
-  const report = runAdversarialSuite(seed);
-  const jsonPath = join(outputDir, "market-maker-adversarial-report.json");
-  const mdPath = join(outputDir, "market-maker-adversarial-summary.md");
+export function writeSuiteOutputs(
+  seed: number,
+  outputDir: string,
+  chainFilter?: ChainId,
+): SuiteReport {
+  const report = runAdversarialSuite(seed, chainFilter);
+  const suffix = chainFilter ? `-${chainFilter}` : "";
+  const jsonPath = join(outputDir, `market-maker-adversarial-report${suffix}.json`);
+  const mdPath = join(outputDir, `market-maker-adversarial-summary${suffix}.md`);
 
   mkdirSync(outputDir, { recursive: true });
   writeFileSync(jsonPath, JSON.stringify(report, null, 2), "utf8");
   writeFileSync(mdPath, toMarkdownSummary(report), "utf8");
 
   console.log(
-    `[simulate-adversarial-mm] scenarios=${report.summary.totalScenarios} improved=${report.summary.improvedScenarios} pass=${report.summary.mitigationPasses} output=${jsonPath}`,
+    `[simulate-adversarial-mm] chain=${chainFilter ?? "all"} scenarios=${report.summary.totalScenarios} improved=${report.summary.improvedScenarios} pass=${report.summary.mitigationPasses} output=${jsonPath}`,
   );
   console.log(`[simulate-adversarial-mm] summary=${mdPath}`);
 
   return report;
 }
 
-export function runGate(outputDir: string, threshold: number): GateVerdict {
-  const reportPath = join(outputDir, "market-maker-adversarial-report.json");
+export function runGate(
+  outputDir: string,
+  threshold: number,
+  chainFilter?: ChainId,
+): GateVerdict {
+  const suffix = chainFilter ? `-${chainFilter}` : "";
+  const reportPath = join(outputDir, `market-maker-adversarial-report${suffix}.json`);
   const report = JSON.parse(readFileSync(reportPath, "utf8")) as SuiteReport;
   return assertMitigationThreshold(report, threshold);
 }
 
 export function runCli() {
-  const outputDir = process.env.MM_ADVERSARIAL_OUTPUT_DIR || join(process.cwd(), "simulations");
+  const outputDir =
+    process.env.MM_ADVERSARIAL_OUTPUT_DIR || join(process.cwd(), "simulations");
   const seed = Number(process.env.MM_ADVERSARIAL_SEED || DEFAULT_SEED);
-  const threshold = Number(process.env.MM_ADVERSARIAL_MIN_PASSES || 18);
+  const chainFilter = parseChainFilter(process.env.MM_ADVERSARIAL_CHAIN);
+  const threshold = Number(
+    process.env.MM_ADVERSARIAL_MIN_PASSES || defaultThreshold(chainFilter),
+  );
 
   if (process.argv.includes("--gate")) {
-    const verdict = runGate(outputDir, threshold);
+    const verdict = runGate(outputDir, threshold, chainFilter);
     if (!verdict.ok) {
       throw new Error(verdict.message);
     }
@@ -63,5 +94,5 @@ export function runCli() {
     return;
   }
 
-  writeSuiteOutputs(seed, outputDir);
+  writeSuiteOutputs(seed, outputDir, chainFilter);
 }

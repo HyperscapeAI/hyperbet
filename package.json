@@ -38,7 +38,8 @@
     "market-maker:simulate:adversarial": "bun run --cwd packages/market-maker-bot simulate:adversarial",
     "market-maker:simulate:adversarial:ci": "bun run --cwd packages/market-maker-bot simulate:adversarial:ci",
     "market-maker:wallets:generate": "bun run --cwd packages/market-maker-bot wallets:generate",
-    "market-maker:wallets:ui-env": "bun run --cwd packages/market-maker-bot wallets:ui-env"
+    "market-maker:wallets:ui-env": "bun run --cwd packages/market-maker-bot wallets:ui-env",
+    "ci:prepr": "node scripts/check-pr-ready.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
