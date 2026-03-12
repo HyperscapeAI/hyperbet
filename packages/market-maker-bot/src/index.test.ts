@@ -1,41 +1,78 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import bs58 from "bs58";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-// ─── Mock ethers before importing the bot ─────────────────────────────────────
-const mockContract = {
-  target: "0x1234567890123456789012345678901234567890",
-  nextMatchId: vi.fn().mockResolvedValue(2n),
-  tradeTreasuryFeeBps: vi.fn().mockResolvedValue(100n),
-  tradeMarketMakerFeeBps: vi.fn().mockResolvedValue(100n),
-  matches: vi
-    .fn()
-    .mockResolvedValue({ status: 1n, winner: 0n, yesPool: 0n, noPool: 0n }),
-  bestBids: vi.fn().mockResolvedValue(450n),
-  bestAsks: vi.fn().mockResolvedValue(550n),
-  placeOrder: vi.fn().mockResolvedValue({
-    wait: vi.fn().mockResolvedValue({ logs: [] }),
-  }),
-  cancelOrder: vi.fn().mockResolvedValue({
-    wait: vi.fn().mockResolvedValue({}),
-  }),
+const TEST_DUEL_KEY =
+  "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+const TEST_SOLANA_PUBLIC_KEY =
+  "TestSolanaPublicKey1111111111111111111111111";
+const TEST_SOLANA_PROGRAM_ID =
+  "MockProgram111111111111111111111111111111111";
+const TEST_FIGHT_ORACLE_ID =
+  "FightOracle11111111111111111111111111111111";
+
+const contractInstances: Array<Record<string, any>> = [];
+
+type SolanaOrderRecord = {
+  id: bigint;
+  side: number;
+  price: number;
+  amount: bigint;
+  filled: bigint;
+  active: boolean;
 };
 
-const mockFromSecretKey = vi.fn(() => ({
-  publicKey: { toBase58: () => "TestSolanaPublicKey" },
-  secretKey: new Uint8Array(64),
-}));
-const mockFromSeed = vi.fn(() => ({
-  publicKey: { toBase58: () => "TestSolanaPublicKey" },
-  secretKey: new Uint8Array(64),
-}));
-const mockGenerate = vi.fn(() => ({
-  publicKey: { toBase58: () => "TestSolanaPublicKey" },
-  secretKey: new Uint8Array(64),
-}));
+const solanaState = {
+  marketExists: true,
+  marketStatus: "open",
+  bestBid: 480,
+  bestAsk: 520,
+  nextOrderId: 1n,
+  orders: new Map<number, SolanaOrderRecord>(),
+  userBalance: {
+    aShares: 0n,
+    bShares: 0n,
+  },
+  calls: {
+    sync: 0,
+    place: [] as Array<{ orderId: bigint; side: number; price: number; amount: bigint }>,
+    cancel: [] as Array<{ orderId: bigint; side: number; price: number }>,
+    claim: 0,
+  },
+};
+
+let duelPhase = "FIGHTING";
+let agent1Hp = 90;
+let agent2Hp = 30;
+let solanaLifecycleStatus = "OPEN";
+let activePredictionChains = ["bsc", "base", "avax", "solana"];
+
+function resetSolanaState() {
+  solanaState.marketExists = true;
+  solanaState.marketStatus = "open";
+  solanaState.bestBid = 480;
+  solanaState.bestAsk = 520;
+  solanaState.nextOrderId = 1n;
+  solanaState.orders.clear();
+  solanaState.userBalance.aShares = 0n;
+  solanaState.userBalance.bShares = 0n;
+  solanaState.calls.sync = 0;
+  solanaState.calls.place = [];
+  solanaState.calls.cancel = [];
+  solanaState.calls.claim = 0;
+}
+
+function mockEnum(name: string) {
+  return { [name]: {} };
+}
+
+function parseOrderIdFromPda(value: string): number {
+  const seedHex = value.split(":").at(-1) || "";
+  const bytes = Buffer.from(seedHex, "hex");
+  return Number(bytes.readBigUInt64LE(0));
+}
 
 vi.mock("ethers", () => {
   class MockJsonRpcProvider {
-    private nonce = 0;
+    constructor(readonly url: string) {}
 
     async getNetwork() {
       return { chainId: 31337n };
@@ -50,22 +87,74 @@ vi.mock("ethers", () => {
     }
 
     async getTransactionCount() {
-      const current = this.nonce;
-      this.nonce += 1;
-      return current;
+      return 0;
     }
   }
+
   class MockWallet {
-    address = "0xTestWallet";
-    constructor() { }
-  }
-  class MockContract {
-    constructor() {
-      return mockContract;
+    address = "0x1234567890123456789012345678901234567890";
+
+    constructor(readonly privateKey: string, readonly provider?: unknown) {
+      void privateKey;
+      void provider;
     }
   }
+
+  class MockContract {
+    target: string;
+    nextOrderId = 1n;
+    feeBps = vi.fn().mockResolvedValue(200n);
+    tradeTreasuryFeeBps = vi.fn().mockResolvedValue(100n);
+    tradeMarketMakerFeeBps = vi.fn().mockResolvedValue(100n);
+    marketKey = vi.fn().mockResolvedValue("0xmarket");
+    getMarket = vi.fn().mockResolvedValue({
+      exists: true,
+      status: 1n,
+      winner: 0n,
+      nextOrderId: 1n,
+      bestBid: 480n,
+      bestAsk: 520n,
+      totalAShares: 0n,
+      totalBShares: 0n,
+    });
+    positions = vi.fn().mockResolvedValue({
+      aShares: 0n,
+      bShares: 0n,
+      aStake: 0n,
+      bStake: 0n,
+    });
+    cancelOrder = vi.fn().mockResolvedValue({
+      wait: vi.fn().mockResolvedValue({}),
+    });
+    placeOrder = vi.fn().mockImplementation(() => {
+      const orderId = this.nextOrderId;
+      this.nextOrderId += 1n;
+      return {
+        hash: `0xtx-${orderId.toString()}`,
+        wait: vi.fn().mockResolvedValue({
+          hash: `0xtx-${orderId.toString()}`,
+          logs: [{ kind: "orderPlaced", orderId }],
+        }),
+      };
+    });
+
+    constructor(target: string) {
+      this.target = target;
+      contractInstances.push(this as unknown as Record<string, any>);
+    }
+  }
+
   class MockInterface {
-    parseLog() {
+    parseLog(log: Record<string, any>) {
+      if (log.kind === "orderPlaced") {
+        return {
+          name: "OrderPlaced",
+          args: {
+            marketKey: "0xmarket",
+            orderId: log.orderId ?? 1n,
+          },
+        };
+      }
       return null;
     }
   }
@@ -76,12 +165,46 @@ vi.mock("ethers", () => {
       Wallet: MockWallet,
       Contract: MockContract,
       Interface: MockInterface,
-      getAddress: (value: string) => value,
+      ZeroAddress: "0x0000000000000000000000000000000000000000",
+      getAddress: (value: string) => {
+        const trimmed = value.trim();
+        if (!/^0x[0-9a-fA-F]{40}$/.test(trimmed)) {
+          throw new Error("invalid address");
+        }
+        return trimmed;
+      },
     },
   };
 });
 
 vi.mock("@solana/web3.js", () => {
+  class MockPublicKey {
+    constructor(private readonly value = TEST_SOLANA_PROGRAM_ID) {}
+
+    toBase58() {
+      return this.value;
+    }
+
+    toBuffer() {
+      return Buffer.from(this.value.padEnd(32, "0").slice(0, 32));
+    }
+
+    static findProgramAddressSync(
+      seeds: Array<Uint8Array | Buffer>,
+      programId: MockPublicKey,
+    ) {
+      const seedHex = seeds
+        .map((seed) => Buffer.from(seed).toString("hex"))
+        .join(":");
+      return [new MockPublicKey(`pda:${programId.toBase58()}:${seedHex}`), 255];
+    }
+  }
+
+  const buildKeypair = () => ({
+    publicKey: new MockPublicKey(TEST_SOLANA_PUBLIC_KEY),
+    secretKey: new Uint8Array(64),
+  });
+
   class MockConnection {
     rpcEndpoint = "http://localhost:8899";
 
@@ -96,364 +219,434 @@ vi.mock("@solana/web3.js", () => {
     async getLatestBlockhash() {
       return { blockhash: "test-blockhash", lastValidBlockHeight: 1 };
     }
+
+    async getBalance() {
+      return 10n ** 9n;
+    }
+
+    async getSignatureStatuses() {
+      return {
+        value: [{ confirmationStatus: "confirmed", err: null }],
+      };
+    }
   }
+
+  class MockTransaction {
+    partialSign() {}
+  }
+
+  class MockVersionedTransaction {
+    sign() {}
+  }
+
   return {
     Connection: MockConnection,
     Keypair: {
-      // `vi.mock` is hoisted, so defer access to test-local mocks until runtime.
-      generate: (...args: any[]) => mockGenerate(...args),
-      fromSecretKey: (...args: any[]) => mockFromSecretKey(...args),
-      fromSeed: (...args: any[]) => mockFromSeed(...args),
+      generate: buildKeypair,
+      fromSeed: buildKeypair,
+      fromSecretKey: buildKeypair,
     },
-    PublicKey: class MockPublicKey {
-      private value: string;
-      constructor(value?: string) {
-        this.value = value ?? "MockSolanaProgram111111111111111111111111111";
-      }
-      toBase58() {
-        return this.value;
-      }
-      toBuffer() {
-        return Buffer.from(this.value);
-      }
-      static findProgramAddressSync() {
-        return [new MockPublicKey("MockPda1111111111111111111111111111111111"), 255];
-      }
+    PublicKey: MockPublicKey,
+    SystemProgram: {
+      programId: new MockPublicKey("11111111111111111111111111111111"),
     },
+    Transaction: MockTransaction,
+    VersionedTransaction: MockVersionedTransaction,
   };
 });
 
-vi.mock("@coral-xyz/anchor", () => {
+vi.mock("@coral-xyz/anchor", async () => {
+  const web3 = await import("@solana/web3.js");
+
   class MockAnchorProvider {
-    constructor() {}
+    connection: unknown;
+    wallet: any;
+    opts: Record<string, unknown>;
+
+    constructor(connection: unknown, wallet: any, opts: Record<string, unknown>) {
+      this.connection = connection;
+      this.wallet = wallet;
+      this.opts = opts;
+    }
   }
+
   class MockProgram {
+    programId: InstanceType<typeof web3.PublicKey>;
+    provider: MockAnchorProvider;
+
     account = {
       marketConfig: {
-        fetch: vi.fn().mockResolvedValue({
+        fetchNullable: vi.fn(async () => ({
+          treasury: new web3.PublicKey("Treasury111111111111111111111111111111111"),
+          marketMaker: new web3.PublicKey("MarketMaker11111111111111111111111111111"),
           tradeTreasuryFeeBps: 100,
           tradeMarketMakerFeeBps: 100,
-          treasury: { toBase58: () => "Treasury" },
-          marketMaker: { toBase58: () => "MarketMaker" },
-        }),
+          winningsMarketMakerFeeBps: 200,
+        })),
       },
       marketState: {
-        fetch: vi.fn().mockResolvedValue({
-          status: { open: {} },
-          bestBid: 450,
-          bestAsk: 550,
-          nextOrderId: 100n,
+        fetchNullable: vi.fn(async () => {
+          if (!solanaState.marketExists) return null;
+          return {
+            bestBid: solanaState.bestBid,
+            bestAsk: solanaState.bestAsk,
+            nextOrderId: solanaState.nextOrderId,
+            status: mockEnum(solanaState.marketStatus),
+          };
+        }),
+      },
+      userBalance: {
+        fetchNullable: vi.fn(async () => ({
+          aShares: solanaState.userBalance.aShares,
+          bShares: solanaState.userBalance.bShares,
+        })),
+      },
+      order: {
+        fetchNullable: vi.fn(async (address: { toBase58: () => string }) => {
+          const orderId = parseOrderIdFromPda(address.toBase58());
+          const order = solanaState.orders.get(orderId);
+          if (!order || !order.active) {
+            return null;
+          }
+          return {
+            id: order.id,
+            side: order.side,
+            price: order.price,
+            amount: order.amount,
+            filled: order.filled,
+            active: order.active,
+          };
         }),
       },
     };
+
     methods = {
-      placeOrder: vi.fn(() => ({
-        accountsPartial: vi.fn(() => ({
-          remainingAccounts: vi.fn(() => ({
-            rpc: vi.fn().mockResolvedValue("mock-tx-signature"),
-            transaction: vi.fn().mockResolvedValue({}),
-          })),
-        })),
-      })),
+      syncMarketFromDuel: () => ({
+        accountsPartial: () => ({
+          rpc: async () => {
+            solanaState.calls.sync += 1;
+            return `sol-sync-${solanaState.calls.sync}`;
+          },
+        }),
+      }),
+      placeOrder: (
+        orderId: { toString: () => string },
+        side: number,
+        price: number,
+        amount: { toString: () => string },
+      ) => ({
+        accountsPartial: () => ({
+          rpc: async () => {
+            const id = BigInt(orderId.toString());
+            const rawAmount = BigInt(amount.toString());
+            solanaState.orders.set(Number(id), {
+              id,
+              side,
+              price,
+              amount: rawAmount,
+              filled: 0n,
+              active: true,
+            });
+            solanaState.nextOrderId = id + 1n;
+            solanaState.calls.place.push({
+              orderId: id,
+              side,
+              price,
+              amount: rawAmount,
+            });
+            return `sol-place-${id.toString()}`;
+          },
+        }),
+      }),
+      cancelOrder: (
+        orderId: { toString: () => string },
+        side: number,
+        price: number,
+      ) => ({
+        accountsPartial: () => ({
+          rpc: async () => {
+            const id = BigInt(orderId.toString());
+            const order = solanaState.orders.get(Number(id));
+            if (order) {
+              order.active = false;
+            }
+            solanaState.calls.cancel.push({
+              orderId: id,
+              side,
+              price,
+            });
+            return `sol-cancel-${id.toString()}`;
+          },
+        }),
+      }),
+      claim: () => ({
+        accountsPartial: () => ({
+          rpc: async () => {
+            solanaState.userBalance.aShares = 0n;
+            solanaState.userBalance.bShares = 0n;
+            solanaState.calls.claim += 1;
+            return `sol-claim-${solanaState.calls.claim}`;
+          },
+        }),
+      }),
     };
+
+    constructor(idl: { address?: string }, provider: MockAnchorProvider) {
+      this.programId = new web3.PublicKey(idl.address || TEST_SOLANA_PROGRAM_ID);
+      this.provider = provider;
+    }
   }
+
   return {
     AnchorProvider: MockAnchorProvider,
     Program: MockProgram,
   };
 });
 
-type MarketMakerCtor = typeof import("./index.js").CrossChainMarketMaker;
+async function loadMarketMaker() {
+  vi.resetModules();
+  const { CrossChainMarketMaker } = await import("./index.ts");
+  return new CrossChainMarketMaker();
+}
+
+function invalidateBotCaches(mm: any) {
+  mm.lastPredictionMarkets = null;
+  mm.lastPredictionMarketsAt = 0;
+  mm.lastDuelSignal = null;
+  mm.lastDuelSignalAt = 0;
+}
 
 describe("CrossChainMarketMaker", () => {
-  let CrossChainMarketMaker: MarketMakerCtor;
-  let mm: InstanceType<MarketMakerCtor>;
+  beforeEach(() => {
+    vi.useRealTimers();
+    contractInstances.length = 0;
+    resetSolanaState();
+    duelPhase = "FIGHTING";
+    agent1Hp = 90;
+    agent2Hp = 30;
+    solanaLifecycleStatus = "OPEN";
+    activePredictionChains = ["bsc", "base", "avax", "solana"];
 
-  beforeEach(async () => {
-    process.env.EVM_BSC_RPC_URL = "http://localhost:8545";
-    process.env.EVM_BASE_RPC_URL = "http://localhost:8546";
+    process.env.MM_ENV = "testnet";
+    process.env.EVM_PRIVATE_KEY =
+      "0x1111111111111111111111111111111111111111111111111111111111111111";
+    process.env.EVM_PRIVATE_KEY_AVAX =
+      "0x2222222222222222222222222222222222222222222222222222222222222222";
     process.env.CLOB_CONTRACT_ADDRESS_BSC =
       "0x1234567890123456789012345678901234567890";
     process.env.CLOB_CONTRACT_ADDRESS_BASE =
-      "0x1234567890123456789012345678901234567890";
-    process.env.EVM_PRIVATE_KEY = "a".repeat(64);
+      "0x1234567890123456789012345678901234567891";
+    process.env.CLOB_CONTRACT_ADDRESS_AVAX =
+      "0x1234567890123456789012345678901234567892";
+    process.env.MM_ENABLE_BSC = "true";
+    process.env.MM_ENABLE_BASE = "true";
+    process.env.MM_ENABLE_AVAX = "true";
+    process.env.MM_ENABLE_SOLANA = "true";
+    process.env.MM_MARKETS_CACHE_MS = "0";
+    process.env.MM_DUEL_SIGNAL_CACHE_MS = "0";
+    process.env.MM_DUEL_SIGNAL_FETCH_TIMEOUT_MS = "50";
+    process.env.MM_PREDICTION_MARKETS_API_URL =
+      "http://localhost:8080/api/arena/prediction-markets/active";
+    process.env.MM_DUEL_STATE_API_URL = "http://localhost:8080/api/streaming/state";
+    process.env.SOLANA_PRIVATE_KEY = JSON.stringify(
+      Array.from({ length: 64 }, (_, index) => (index + 1) % 255),
+    );
     process.env.SOLANA_RPC_URL = "http://localhost:8899";
-    process.env.SOLANA_PRIVATE_KEY = bs58.encode(new Uint8Array(64).fill(7));
-    process.env.TARGET_SPREAD_BPS = "200";
-    process.env.MAX_INVENTORY_CAP = "500";
-    process.env.MAX_ORDERS_PER_SIDE = "3";
-    process.env.CANCEL_STALE_AGE_MS = "30000";
-    Object.values(mockContract).forEach((value) => {
-      if (
-        typeof value === "function" &&
-        "mockClear" in value &&
-        typeof value.mockClear === "function"
-      ) {
-        value.mockClear();
+    process.env.FIGHT_ORACLE_PROGRAM_ID = TEST_FIGHT_ORACLE_ID;
+    process.env.GOLD_CLOB_MARKET_PROGRAM_ID = TEST_SOLANA_PROGRAM_ID;
+    process.env.CANCEL_STALE_AGE_MS = "12000";
+
+    globalThis.fetch = vi.fn(async (url: string | URL | Request) => {
+      const resolved = String(url);
+      if (resolved.includes("/api/arena/prediction-markets/active")) {
+        const markets = [];
+        if (activePredictionChains.includes("bsc")) {
+          markets.push({
+            chainKey: "bsc",
+            duelKey: TEST_DUEL_KEY,
+            marketRef: "0xmarket",
+            lifecycleStatus: "OPEN",
+          });
+        }
+        if (activePredictionChains.includes("base")) {
+          markets.push({
+            chainKey: "base",
+            duelKey: TEST_DUEL_KEY,
+            marketRef: "0xmarket",
+            lifecycleStatus: "OPEN",
+          });
+        }
+        if (activePredictionChains.includes("avax")) {
+          markets.push({
+            chainKey: "avax",
+            duelKey: TEST_DUEL_KEY,
+            marketRef: "0xmarket",
+            lifecycleStatus: "OPEN",
+          });
+        }
+        if (activePredictionChains.includes("solana")) {
+          markets.push({
+            chainKey: "solana",
+            duelKey: TEST_DUEL_KEY,
+            marketRef: null,
+            lifecycleStatus: solanaLifecycleStatus,
+            programId: TEST_SOLANA_PROGRAM_ID,
+          });
+        }
+
+        return {
+          ok: true,
+          json: async () => ({
+            duel: {
+              duelKey: TEST_DUEL_KEY,
+              duelId: "duel-1",
+              phase: "ANNOUNCEMENT",
+              betCloseTime: Date.now() + 60_000,
+            },
+            markets,
+            updatedAt: Date.now(),
+          }),
+        } as Response;
       }
-    });
-    mockFromSecretKey.mockClear();
-    mockFromSeed.mockClear();
-    mockGenerate.mockClear();
-    ({ CrossChainMarketMaker } = await import("./index.js"));
-    mm = new CrossChainMarketMaker();
+
+      return {
+        ok: true,
+        json: async () => ({
+          cycle: {
+            phase: duelPhase,
+            agent1: { hp: agent1Hp, maxHp: 100 },
+            agent2: { hp: agent2Hp, maxHp: 100 },
+          },
+        }),
+      } as Response;
+    }) as unknown as typeof fetch;
   });
 
-  describe("Initialization", () => {
-    it("should initialize with zero inventory", () => {
-      const inv = mm.getInventory();
-      expect(inv.yes).toBe(0);
-      expect(inv.no).toBe(0);
-    });
+  it("quotes on all enabled EVM chains using lifecycle discovery", async () => {
+    const mm = await loadMarketMaker();
 
-    it("should start with no active orders", () => {
-      expect(mm.getActiveOrders()).toHaveLength(0);
-    });
+    await mm.marketMakeCycle();
 
-    it("should accept a bs58 Solana private key", () => {
-      expect(mockFromSecretKey).toHaveBeenCalledTimes(1);
-      expect(mockGenerate).not.toHaveBeenCalled();
-    });
-
-    it("should fall back to generated Solana wallet on invalid key material", () => {
-      process.env.SOLANA_PRIVATE_KEY = "not-a-valid-solana-key";
-      const fallback = new CrossChainMarketMaker();
-      expect(fallback).toBeTruthy();
-      expect(mockGenerate).toHaveBeenCalledTimes(1);
-    });
-
-    it("should have correct config values", () => {
-      const config = mm.getConfig();
-      expect(config.targetSpreadBps).toBe(200);
-      expect(config.maxInventoryCap).toBe(500);
-      expect(config.toxicityThresholdBps).toBe(1000);
-      expect(config.maxOrdersPerSide).toBe(3);
-      expect(config.cancelStaleAgeMs).toBe(30_000);
-      expect(typeof config.solanaProgramId).toBe("string");
-    });
+    expect(mm.getActiveOrders().filter((order) => order.chainKey !== "solana")).toHaveLength(6);
+    expect(mm.getActiveOrders().some((order) => order.chainKey === "avax")).toBe(true);
+    expect(contractInstances.every((instance) => instance.placeOrder.mock.calls.length > 0)).toBe(true);
   });
 
-  describe("Market Making Cycle", () => {
-    it("should execute a full cycle without errors", async () => {
-      await expect(mm.marketMakeCycle()).resolves.toBeUndefined();
-    });
+  it("keeps active EVM quotes inside the refresh window when fair value moves", async () => {
+    process.env.MM_ENABLE_SOLANA = "false";
+    activePredictionChains = ["bsc", "base", "avax"];
+    const mm = await loadMarketMaker();
 
-    it("should send the payable native value required by the contract", async () => {
-      await mm.marketMakeCycle();
-      expect(mockContract.placeOrder).toHaveBeenCalled();
-      const firstCall = mockContract.placeOrder.mock.calls[0];
-      expect(firstCall).toHaveLength(5);
-      expect(typeof firstCall[4]?.value).toBe("bigint");
-      expect(firstCall[4].value).toBeGreaterThan(0n);
-    });
+    await mm.marketMakeCycle();
+    const initialOrderCount = mm.getActiveOrders().length;
 
-    it("should place orders on both sides after a cycle", async () => {
-      await mm.marketMakeCycle();
-      const orders = mm.getActiveOrders();
-      expect(orders.length).toBeGreaterThan(0);
-    });
+    agent1Hp = 10;
+    agent2Hp = 95;
 
-    it("should track inventory after placing orders", async () => {
-      await mm.marketMakeCycle();
-      const inv = mm.getInventory();
-      expect(inv.yes + inv.no).toBeGreaterThan(0);
-    });
+    await mm.marketMakeCycle();
+
+    expect(mm.getActiveOrders()).toHaveLength(initialOrderCount);
+    expect(contractInstances.every((instance) => instance.cancelOrder.mock.calls.length === 0)).toBe(true);
+    expect(contractInstances.every((instance) => instance.placeOrder.mock.calls.length === 2)).toBe(true);
   });
 
-  describe("Inventory Management", () => {
-    it("should respect MAX_ORDERS_PER_SIDE limit", async () => {
-      for (let i = 0; i < 5; i++) {
-        await mm.marketMakeCycle();
-      }
-      const orders = mm.getActiveOrders();
-      const bscBuys = orders.filter(
-        (o) => o.chain === "evm-bsc" && o.isBuy,
-      ).length;
-      const bscSells = orders.filter(
-        (o) => o.chain === "evm-bsc" && !o.isBuy,
-      ).length;
-      expect(bscBuys).toBeLessThanOrEqual(3);
-      expect(bscSells).toBeLessThanOrEqual(3);
-    });
+  it("places bid and ask orders on an open Solana market", async () => {
+    process.env.MM_ENABLE_BSC = "false";
+    process.env.MM_ENABLE_BASE = "false";
+    process.env.MM_ENABLE_AVAX = "false";
+    activePredictionChains = ["solana"];
+    const mm = await loadMarketMaker();
 
-    it("should stop quoting when inventory cap is hit", async () => {
-      for (let i = 0; i < 30; i++) {
-        await mm.marketMakeCycle();
-      }
-      const inv = mm.getInventory();
-      expect(inv.yes).toBeLessThanOrEqual(500);
-      expect(inv.no).toBeLessThanOrEqual(500);
-    });
+    await mm.marketMakeCycle();
+
+    expect(mm.getActiveOrders().filter((order) => order.chainKey === "solana")).toHaveLength(2);
+    expect(solanaState.calls.sync).toBeGreaterThan(0);
+    expect(solanaState.calls.place).toHaveLength(2);
+    expect(mm.getConfig().solanaWalletPublicKey).toBe(TEST_SOLANA_PUBLIC_KEY);
   });
 
-  describe("Anti-Bot Strategy", () => {
-    it("should cancel stale orders after timeout", async () => {
-      await mm.marketMakeCycle();
-      const initialOrders = mm.getActiveOrders().length;
-      expect(initialOrders).toBeGreaterThan(0);
-      // Orders are not stale yet, so cancellation shouldn't remove them
-      await mm.marketMakeCycle();
-      expect(mm.getActiveOrders().length).toBeGreaterThanOrEqual(initialOrders);
-    });
+  it("keeps active Solana quotes inside the refresh window when fair value moves", async () => {
+    process.env.MM_ENABLE_BSC = "false";
+    process.env.MM_ENABLE_BASE = "false";
+    process.env.MM_ENABLE_AVAX = "false";
+    activePredictionChains = ["solana"];
+    const mm = await loadMarketMaker();
 
-    it("should produce varied order sizes across cycles", async () => {
-      const config = mm.getConfig();
-      expect(config.targetSpreadBps).toBeGreaterThan(0);
-      // Verify randomization is configured
-      expect(config.maxOrdersPerSide).toBeGreaterThan(0);
-    });
+    await mm.marketMakeCycle();
+    const initialOrderCount = mm.getActiveOrders().length;
+    const initialPlaceCount = solanaState.calls.place.length;
 
-    it("should widen spreads during toxic conditions", async () => {
-      // Mocked bestBids=450, bestAsks=550, spread = 100/500 = 20% = 2000bps > 1000bps threshold
-      await mm.marketMakeCycle();
-      const orders = mm.getActiveOrders();
-      expect(orders.length).toBeGreaterThan(0);
-    });
+    agent1Hp = 10;
+    agent2Hp = 95;
+
+    await mm.marketMakeCycle();
+
+    expect(mm.getActiveOrders().filter((order) => order.chainKey === "solana")).toHaveLength(initialOrderCount);
+    expect(solanaState.calls.cancel).toHaveLength(0);
+    expect(solanaState.calls.place).toHaveLength(initialPlaceCount);
   });
 
-  describe("Basic Action Regression", () => {
-    it("cancels stale evm orders and refunds tracked inventory", async () => {
-      await mm.marketMakeCycle();
-      const initialOrders = mm.getActiveOrders();
-      expect(initialOrders.length).toBeGreaterThan(0);
+  it("cancels and replaces stale Solana orders", async () => {
+    process.env.MM_ENABLE_BSC = "false";
+    process.env.MM_ENABLE_BASE = "false";
+    process.env.MM_ENABLE_AVAX = "false";
+    process.env.CANCEL_STALE_AGE_MS = "1000";
+    activePredictionChains = ["solana"];
+    const mm = await loadMarketMaker();
 
-      const staleYes = initialOrders
-        .filter((order) => order.isBuy)
-        .reduce((sum, order) => sum + order.amount, 0);
-      const staleNo = initialOrders
-        .filter((order) => !order.isBuy)
-        .reduce((sum, order) => sum + order.amount, 0);
-      const before = mm.getInventory();
+    await mm.marketMakeCycle();
+    expect(solanaState.calls.place).toHaveLength(2);
 
-      const internal = mm as unknown as {
-        activeOrders: Array<{ placedAt: number }>;
-        cancelStaleOrders: () => Promise<void>;
-      };
-      internal.activeOrders = internal.activeOrders.map((order) => ({
-        ...order,
-        placedAt: Date.now() - 31_000,
-      }));
+    for (const order of (mm as any).activeOrders as Array<{ placedAt: number }>) {
+      order.placedAt = 0;
+    }
+    invalidateBotCaches(mm);
+    await mm.marketMakeCycle();
 
-      await internal.cancelStaleOrders();
-
-      const after = mm.getInventory();
-      expect(after.yes).toBe(before.yes - staleYes);
-      expect(after.no).toBe(before.no - staleNo);
-      expect(mm.getActiveOrders()).toHaveLength(0);
-      expect(mockContract.cancelOrder).toHaveBeenCalledTimes(initialOrders.length);
-    });
-
-    it("tracks maker orders but not taker orders", async () => {
-      const internal = mm as unknown as {
-        placeEvmOrder: (
-          chain: "bsc" | "base",
-          clob: typeof mockContract,
-          matchId: number,
-          isBuy: boolean,
-          price: number,
-          amount: number,
-          intent?: "maker" | "taker",
-        ) => Promise<void>;
-      };
-
-      await internal.placeEvmOrder("bsc", mockContract, 1, true, 500, 25, "maker");
-      await internal.placeEvmOrder("bsc", mockContract, 1, false, 500, 25, "taker");
-
-      const orders = mm.getActiveOrders();
-      expect(orders).toHaveLength(1);
-      expect(orders[0]?.isBuy).toBe(true);
-      expect(mockContract.placeOrder).toHaveBeenCalledTimes(2);
-    });
-
-    it("ignores nonce-race placement errors without mutating state", async () => {
-      const internal = mm as unknown as {
-        placeEvmOrder: (
-          chain: "bsc" | "base",
-          clob: typeof mockContract,
-          matchId: number,
-          isBuy: boolean,
-          price: number,
-          amount: number,
-          intent?: "maker" | "taker",
-        ) => Promise<void>;
-      };
-      const beforeOrders = mm.getActiveOrders().length;
-      const beforeInv = mm.getInventory();
-
-      mockContract.placeOrder.mockRejectedValueOnce({
-        code: "NONCE_EXPIRED",
-        message: "nonce has already been used",
-      });
-
-      await expect(
-        internal.placeEvmOrder("bsc", mockContract, 1, true, 500, 40, "maker"),
-      ).resolves.toBeUndefined();
-
-      expect(mm.getActiveOrders()).toHaveLength(beforeOrders);
-      expect(mm.getInventory()).toEqual(beforeInv);
-    });
-
-    it("skips orders with invalid amount precision before tx submit", async () => {
-      const internal = mm as unknown as {
-        bscGoldTokenDecimals: number;
-        placeEvmOrder: (
-          chain: "bsc" | "base",
-          clob: typeof mockContract,
-          matchId: number,
-          isBuy: boolean,
-          price: number,
-          amount: number,
-          intent?: "maker" | "taker",
-        ) => Promise<void>;
-      };
-      internal.bscGoldTokenDecimals = 0;
-
-      await internal.placeEvmOrder("bsc", mockContract, 1, true, 501, 1, "maker");
-      expect(mockContract.placeOrder).not.toHaveBeenCalled();
-      expect(mm.getActiveOrders()).toHaveLength(0);
-    });
+    expect(solanaState.calls.cancel.length).toBeGreaterThan(0);
+    expect(solanaState.calls.place.length).toBeGreaterThan(2);
+    expect(mm.getActiveOrders().filter((order) => order.chainKey === "solana")).toHaveLength(2);
   });
 
-  describe("Cross-Chain Parity", () => {
-    it("should produce orders on multiple chains", async () => {
-      await mm.marketMakeCycle();
-      const orders = mm.getActiveOrders();
-      const chains = new Set(orders.map((o) => o.chain));
-      expect(chains.size).toBeGreaterThanOrEqual(2);
-    });
+  it("cancels Solana quotes when the market locks", async () => {
+    process.env.MM_ENABLE_BSC = "false";
+    process.env.MM_ENABLE_BASE = "false";
+    process.env.MM_ENABLE_AVAX = "false";
+    activePredictionChains = ["solana"];
+    const mm = await loadMarketMaker();
 
-    it("should have symmetric inventory tracking", async () => {
-      await mm.marketMakeCycle();
-      const inv = mm.getInventory();
-      expect(inv.yes).toBeGreaterThan(0);
-      expect(inv.no).toBeGreaterThan(0);
-    });
+    await mm.marketMakeCycle();
+    expect(mm.getActiveOrders().filter((order) => order.chainKey === "solana")).toHaveLength(2);
 
-    it("should not emit synthetic solana orders in health-check mode", async () => {
-      await mm.marketMakeCycle();
-      const orders = mm.getActiveOrders();
-      const solanaOrders = orders.filter((o) => o.chain === "solana");
-      expect(solanaOrders).toHaveLength(0);
-    });
+    solanaLifecycleStatus = "LOCKED";
+    solanaState.marketStatus = "locked";
+    invalidateBotCaches(mm);
+
+    await mm.marketMakeCycle();
+
+    expect(solanaState.calls.cancel.length).toBeGreaterThan(0);
+    expect(mm.getActiveOrders().every((order) => order.chainKey !== "solana")).toBe(true);
   });
 
-  describe("Sniper Bot Attack Simulation", () => {
-    it("should survive rapid successive cycles without state corruption", async () => {
-      for (let i = 0; i < 50; i++) {
-        await mm.marketMakeCycle();
-      }
-      const inv = mm.getInventory();
-      expect(inv.yes).toBeGreaterThanOrEqual(0);
-      expect(inv.no).toBeGreaterThanOrEqual(0);
-    });
+  it("claims resolved Solana inventory with non-zero shares", async () => {
+    process.env.MM_ENABLE_BSC = "false";
+    process.env.MM_ENABLE_BASE = "false";
+    process.env.MM_ENABLE_AVAX = "false";
+    activePredictionChains = ["solana"];
+    const mm = await loadMarketMaker();
 
-    it("should not exceed inventory caps under heavy load", async () => {
-      for (let i = 0; i < 100; i++) {
-        await mm.marketMakeCycle();
-      }
-      const inv = mm.getInventory();
-      expect(inv.yes).toBeLessThanOrEqual(500);
-      expect(inv.no).toBeLessThanOrEqual(500);
-    });
+    await mm.marketMakeCycle();
+
+    solanaLifecycleStatus = "RESOLVED";
+    solanaState.marketStatus = "resolved";
+    solanaState.userBalance.aShares = 4_000n;
+    invalidateBotCaches(mm);
+
+    await mm.marketMakeCycle();
+
+    expect(solanaState.calls.cancel.length).toBeGreaterThan(0);
+    expect(solanaState.calls.claim).toBe(1);
+    expect(solanaState.userBalance.aShares).toBe(0n);
+    expect(mm.getActiveOrders().every((order) => order.chainKey !== "solana")).toBe(true);
   });
 });

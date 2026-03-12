@@ -31,6 +31,7 @@
     "./lib/modelMarkets": "./src/lib/modelMarkets.ts",
     "./lib/modelsMarketCopy": "./src/lib/modelsMarketCopy.ts",
     "./lib/pdas": "./src/lib/pdas.ts",
+    "./lib/predictionMarkets": "./src/lib/predictionMarkets.ts",
     "./lib/programAddress": "./src/lib/programAddress.ts",
     "./lib/programs": "./src/lib/programs.ts",
     "./lib/solanaCompat": "./src/lib/solanaCompat.ts",
@@ -67,9 +68,11 @@
     "./spectator/useStreamingState": "./src/spectator/useStreamingState.ts"
   },
   "dependencies": {
+    "@hyperbet/chain-registry": "workspace:*",
     "@coral-xyz/anchor": "0.32.1",
     "@jup-ag/api": "^6.0.48",
     "@noble/curves": "^2.0.1",
+    "@noble/hashes": "^2.0.1",
     "@rainbow-me/rainbowkit": "^2.2.10",
     "@solana/spl-token": "0.4.14",
     "@solana/wallet-adapter-base": "0.9.27",

@@ -1,11 +1,36 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
+import fs_node from "node:fs";
 import path from "node:path";
 
+import {
+  normalizeChainKey,
+  type PredictionMarketLifecycleStatus,
+  resolveLifecycleFromEvmStatus,
+  resolveLifecycleFromStreamPhase,
+  resolveWinnerFromEvmStatus,
+  toRecordedBetChain,
+  type PredictionMarketLifecycleRecord,
+  type PredictionMarketWinner,
+  type RecordedBetChain,
+} from "@hyperbet/chain-registry";
+import {
+  mergePredictionMarketsWithHealth,
+  type KeeperBotHealthSnapshot,
+} from "@hyperbet/mm-core";
+import { PublicKey } from "@solana/web3.js";
 import { createPublicClient, http, type Address } from "viem";
 
-import { createPrograms, findMarketPda, readKeypair } from "./common";
+import {
+  createPrograms,
+  duelKeyHexToBytes,
+  findDuelStatePda,
+  findMarketPda,
+  FIGHT_ORACLE_PROGRAM_ID,
+  GOLD_CLOB_MARKET_PROGRAM_ID,
+  readKeypair,
+} from "./common";
 import {
   deleteIdentityMembers,
   loadAll,
@@ -41,13 +66,15 @@ type StreamState = {
 type BetRecord = {
   id: string;
   bettorWallet: string;
-  chain: "SOLANA" | "BSC" | "BASE";
+  chain: RecordedBetChain;
   sourceAsset: string;
   sourceAmount: number;
   goldAmount: number;
   feeBps: number;
   txSignature: string;
   marketPda: string | null;
+  duelKey: string | null;
+  duelId: string | null;
   inviteCode: string | null;
   externalBetRef: string | null;
   recordedAt: number;
@@ -108,7 +135,23 @@ type ProxyCacheEntry = {
 const encoder = new TextEncoder();
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const keeperRoot = path.resolve(__dirname, "..");
+const KEEPER_BOT_HEALTH_FILE = (
+  process.env.KEEPER_BOT_HEALTH_FILE ||
+  path.resolve(keeperRoot, ".status", "keeper-bot-health.json")
+).trim();
 const IS_PRODUCTION = process.env.NODE_ENV === "production";
+
+function loadKeeperBotHealthSnapshot(): KeeperBotHealthSnapshot | null {
+  if (!KEEPER_BOT_HEALTH_FILE || !fs_node.existsSync(KEEPER_BOT_HEALTH_FILE)) {
+    return null;
+  }
+  try {
+    return JSON.parse(fs_node.readFileSync(KEEPER_BOT_HEALTH_FILE, "utf8"));
+  } catch (error) {
+    console.warn("[service] Failed to read keeper bot health snapshot:", error);
+    return null;
+  }
+}
 
 function readPositiveEnvInteger(
   name: string,
@@ -213,21 +256,37 @@ const DISABLE_RATE_LIMIT = readEnvBoolean("DISABLE_RATE_LIMIT", false);
 const GOLD_CLOB_READ_ABI = [
   {
     type: "function",
-    name: "nextMatchId",
+    name: "marketKey",
     stateMutability: "view",
-    inputs: [],
-    outputs: [{ type: "uint256" }],
+    inputs: [
+      { type: "bytes32" },
+      { type: "uint8" },
+    ],
+    outputs: [{ type: "bytes32" }],
   },
   {
     type: "function",
-    name: "matches",
+    name: "getMarket",
     stateMutability: "view",
-    inputs: [{ type: "uint256" }],
+    inputs: [
+      { type: "bytes32" },
+      { type: "uint8" },
+    ],
     outputs: [
-      { type: "uint8" },
-      { type: "uint8" },
-      { type: "uint256" },
-      { type: "uint256" },
+      {
+        type: "tuple",
+        components: [
+          { name: "exists", type: "bool" },
+          { name: "duelKey", type: "bytes32" },
+          { name: "status", type: "uint8" },
+          { name: "winner", type: "uint8" },
+          { name: "nextOrderId", type: "uint64" },
+          { name: "bestBid", type: "uint16" },
+          { name: "bestAsk", type: "uint16" },
+          { name: "totalAShares", type: "uint128" },
+          { name: "totalBShares", type: "uint128" },
+        ],
+      },
     ],
   },
 ] as const;
@@ -807,6 +866,37 @@ function applyCors(req: Request, headers: Headers): void {
   headers.set("access-control-max-age", "86400");
 }
 
+function normalizeOriginLike(value: string | null): string | null {
+  if (!value) return null;
+  try {
+    return new URL(value).origin;
+  } catch {
+    return value;
+  }
+}
+
+function isAllowedAppOrigin(origin: string | null): boolean {
+  const normalized = normalizeOriginLike(origin);
+  if (!normalized) return false;
+  return (
+    CORS_ORIGINS.includes(normalized) ||
+    normalized === "https://hyperbet.win" ||
+    normalized.endsWith(".hyperbet.win") ||
+    normalized === "https://hyperscape.bet" ||
+    normalized.endsWith(".hyperscape.bet") ||
+    normalized === "https://hyperscape.gg" ||
+    normalized.endsWith(".hyperscape.gg") ||
+    normalized === "https://hyperbet.pages.dev" ||
+    normalized.endsWith(".hyperbet.pages.dev") ||
+    normalized === "https://hyperscape.club" ||
+    normalized.endsWith(".hyperscape.club") ||
+    normalized === "https://hyperscape.pages.dev" ||
+    normalized.endsWith(".hyperscape.pages.dev") ||
+    normalized.includes("localhost") ||
+    normalized.includes("127.0.0.1")
+  );
+}
+
 function jsonResponse(
   req: Request,
   body: unknown,
@@ -1059,6 +1149,197 @@ function handleDuelContext(req: Request): Response {
   );
 }
 
+function currentDuelKey(): string | null {
+  const raw = streamState.cycle?.duelKeyHex;
+  if (typeof raw !== "string") return null;
+  const normalized = raw.trim().replace(/^0x/i, "").toLowerCase();
+  return normalized.length > 0 ? normalized : null;
+}
+
+function currentDuelId(): string | null {
+  const raw = streamState.cycle?.duelId;
+  return typeof raw === "string" && raw.trim().length > 0 ? raw.trim() : null;
+}
+
+function currentBetCloseTime(): number | null {
+  const raw = streamState.cycle?.betCloseTime;
+  return typeof raw === "number" && Number.isFinite(raw) ? raw : null;
+}
+
+function currentWinnerFromCycle(): PredictionMarketWinner {
+  const cycleAgent1 = streamState.cycle?.agent1 as { id?: unknown } | null | undefined;
+  const cycleAgent2 = streamState.cycle?.agent2 as { id?: unknown } | null | undefined;
+  const winnerId =
+    typeof streamState.cycle?.winnerId === "string"
+      ? streamState.cycle.winnerId
+      : null;
+  const agent1Id =
+    typeof cycleAgent1?.id === "string"
+      ? cycleAgent1.id
+      : null;
+  const agent2Id =
+    typeof cycleAgent2?.id === "string"
+      ? cycleAgent2.id
+      : null;
+
+  if (winnerId && agent1Id && winnerId === agent1Id) return "A";
+  if (winnerId && agent2Id && winnerId === agent2Id) return "B";
+  return "NONE";
+}
+
+function enumName(value: unknown): string | null {
+  if (!value || typeof value !== "object") return null;
+  const [key] = Object.keys(value as Record<string, unknown>);
+  return typeof key === "string" && key.length > 0 ? key : null;
+}
+
+function resolveLifecycleFromSolanaStatus(
+  status: string | null,
+  fallback: PredictionMarketLifecycleStatus,
+): PredictionMarketLifecycleStatus {
+  switch (status?.toLowerCase()) {
+    case "open":
+      return "OPEN";
+    case "locked":
+      return "LOCKED";
+    case "resolved":
+      return "RESOLVED";
+    case "cancelled":
+      return "CANCELLED";
+    default:
+      return fallback;
+  }
+}
+
+function resolveWinnerFromSolanaState(
+  winner: string | null,
+  fallback: PredictionMarketWinner,
+): PredictionMarketWinner {
+  switch (winner?.toLowerCase()) {
+    case "a":
+      return "A";
+    case "b":
+      return "B";
+    case "none":
+      return "NONE";
+    default:
+      return fallback;
+  }
+}
+
+function buildPredictionMarketLifecycleRecords(): PredictionMarketLifecycleRecord[] {
+  const duelKey = currentDuelKey();
+  const duelId = currentDuelId();
+  const betCloseTime = currentBetCloseTime();
+  const cycleLifecycle = resolveLifecycleFromStreamPhase(
+    typeof streamState.cycle?.phase === "string" ? streamState.cycle.phase : null,
+  );
+  const cycleWinner = currentWinnerFromCycle();
+  const records: PredictionMarketLifecycleRecord[] = [];
+
+  if (parsers.solana.enabled || parsers.solana.snapshot) {
+    const snapshot = parsers.solana.snapshot as Record<string, any> | null;
+    const solanaMarketPda =
+      duelKey != null
+        ? findMarketPda(
+          GOLD_CLOB_MARKET_PROGRAM_ID,
+          findDuelStatePda(FIGHT_ORACLE_PROGRAM_ID, duelKeyHexToBytes(duelKey)),
+        ).toBase58()
+        : null;
+    const solanaLifecycle = resolveLifecycleFromSolanaStatus(
+      typeof snapshot?.currentMarketStatus === "string"
+        ? snapshot.currentMarketStatus
+        : null,
+      cycleLifecycle,
+    );
+    const solanaWinner = resolveWinnerFromSolanaState(
+      typeof snapshot?.currentMarketWinner === "string"
+        ? snapshot.currentMarketWinner
+        : null,
+      cycleWinner,
+    );
+    records.push({
+      chainKey: "solana",
+      duelKey,
+      duelId,
+      marketId:
+        solanaMarketPda ??
+        snapshot?.derivedMarketPda ??
+        snapshot?.latestMarketAccount ??
+        null,
+      marketRef:
+        solanaMarketPda ??
+        snapshot?.derivedMarketPda ??
+        snapshot?.latestMarketAccount ??
+        null,
+      lifecycleStatus: solanaLifecycle,
+      winner: solanaWinner,
+      betCloseTime,
+      contractAddress: null,
+      programId: snapshot?.marketProgram ?? null,
+      txRef: snapshot?.recentSignature ?? null,
+      syncedAt: parsers.solana.lastSuccessAt,
+      metadata: {
+        fightAccountCount: snapshot?.fightAccountCount ?? null,
+        marketAccountCount: snapshot?.marketAccountCount ?? null,
+      },
+    });
+  }
+
+  for (const chainKey of ["bsc", "base"] as const) {
+    const parser = parsers[chainKey];
+    if (!parser.enabled && !parser.snapshot) continue;
+    const snapshot = parser.snapshot as Record<string, any> | null;
+    const currentMatch = snapshot?.currentMatch as Record<string, any> | undefined;
+    const marketKey = snapshot?.marketKey ?? null;
+    records.push({
+      chainKey,
+      duelKey,
+      duelId,
+      marketId: typeof marketKey === "string" ? marketKey : null,
+      marketRef: typeof marketKey === "string" ? marketKey : null,
+      lifecycleStatus: resolveLifecycleFromEvmStatus(currentMatch?.status),
+      winner: resolveWinnerFromEvmStatus(currentMatch?.winner),
+      betCloseTime,
+      contractAddress: snapshot?.contractAddress ?? null,
+      programId: null,
+      txRef: null,
+      syncedAt: parser.lastSuccessAt,
+      metadata: {
+        marketKey,
+        yesPool: currentMatch?.yesPool ?? null,
+        noPool: currentMatch?.noPool ?? null,
+      },
+    });
+  }
+
+  return records;
+}
+
+function handlePredictionMarkets(req: Request): Response {
+  return jsonResponse(
+    req,
+    {
+      duel: {
+        duelKey: currentDuelKey(),
+        duelId: currentDuelId(),
+        phase:
+          typeof streamState.cycle?.phase === "string"
+            ? streamState.cycle.phase
+            : null,
+        winner: currentWinnerFromCycle(),
+        betCloseTime: currentBetCloseTime(),
+      },
+      markets: buildPredictionMarketLifecycleRecords(),
+      updatedAt: Date.now(),
+    },
+    200,
+    {
+      "cache-control": "no-store",
+    },
+  );
+}
+
 function handleStreamingLeaderboardDetails(req: Request, url: URL): Response {
   const historyLimit = parseBoundedInteger(
     url.searchParams.get("historyLimit"),
@@ -1174,6 +1455,92 @@ function requireWriteAuth(
   if (!fallbackKey) return true;
   const provided = req.headers.get("x-arena-write-key")?.trim() || "";
   return provided === fallbackKey;
+}
+
+async function verifySolanaRecordedBet(
+  bettorWallet: string,
+  txSignature: string,
+): Promise<boolean> {
+  if (!solanaCtx) return true;
+  try {
+    const transaction = await solanaCtx.connection.getParsedTransaction(
+      txSignature,
+      {
+        commitment: "confirmed",
+        maxSupportedTransactionVersion: 0,
+      },
+    );
+    if (!transaction || transaction.meta?.err) {
+      return false;
+    }
+    const walletLower = bettorWallet.trim().toLowerCase();
+    return transaction.transaction.message.accountKeys.some(
+      (key: { pubkey: { toBase58: () => string }; signer: boolean }) =>
+        key.signer && key.pubkey.toBase58().toLowerCase() === walletLower,
+    );
+  } catch {
+    return false;
+  }
+}
+
+async function verifyEvmRecordedBet(
+  client: ReturnType<typeof createPublicClient> | null,
+  contractAddress: string,
+  bettorWallet: string,
+  txSignature: string,
+): Promise<boolean> {
+  if (!client || !contractAddress) return true;
+  if (!/^0x[0-9a-fA-F]{64}$/.test(txSignature)) return false;
+  try {
+    const [receipt, tx] = await Promise.all([
+      client.getTransactionReceipt({ hash: txSignature as `0x${string}` }),
+      client.getTransaction({ hash: txSignature as `0x${string}` }),
+    ]);
+    return (
+      receipt.status === "success" &&
+      tx.from.toLowerCase() === bettorWallet.trim().toLowerCase() &&
+      tx.to?.toLowerCase() === contractAddress.toLowerCase()
+    );
+  } catch {
+    return false;
+  }
+}
+
+async function authorizeExternalBetRecord(
+  req: Request,
+  chainKey: "solana" | "bsc" | "base" | "avax",
+  bettorWallet: string,
+  txSignature: string,
+): Promise<boolean> {
+  if (requireWriteAuth(req)) return true;
+
+  const trustedOrigin =
+    isAllowedAppOrigin(req.headers.get("origin")) ||
+    isAllowedAppOrigin(req.headers.get("referer"));
+  if (!trustedOrigin || !txSignature.trim()) {
+    return false;
+  }
+
+  if (chainKey === "solana") {
+    return verifySolanaRecordedBet(bettorWallet, txSignature);
+  }
+  if (chainKey === "bsc") {
+    return verifyEvmRecordedBet(
+      bscClient,
+      bscContractAddress,
+      bettorWallet,
+      txSignature,
+    );
+  }
+  if (chainKey === "base") {
+    return verifyEvmRecordedBet(
+      baseClient,
+      baseContractAddress,
+      bettorWallet,
+      txSignature,
+    );
+  }
+  return false;
 }
 
 function toStreamState(payload: any): StreamState | null {
@@ -1352,6 +1719,7 @@ function startKeeperBotIfEnabled(): void {
   const childEnv = {
     ...process.env,
     GAME_URL: process.env.GAME_URL || `http://127.0.0.1:${PORT}`,
+    KEEPER_BOT_HEALTH_FILE,
   };
 
   botSubprocess = Bun.spawn(["bun", "--bun", "src/bot.ts"], {
@@ -1445,6 +1813,23 @@ async function pollSolanaSnapshot(): Promise<void> {
             fightAccounts[0]!.pubkey,
           ).toBase58()
         : null;
+    const currentSolanaDuelKey = currentDuelKey();
+    const currentMarketPda =
+      currentSolanaDuelKey != null
+        ? findMarketPda(
+            solanaCtx.marketProgramId,
+            findDuelStatePda(
+              solanaCtx.fightProgram.programId,
+              duelKeyHexToBytes(currentSolanaDuelKey),
+            ),
+          ).toBase58()
+        : null;
+    const currentMarketAccount =
+      currentMarketPda != null
+        ? await solanaCtx.marketProgram.account.marketState.fetchNullable(
+            new PublicKey(currentMarketPda),
+          )
+        : null;
     const recentSignature =
       recentSignatures.find((entry: any) => entry?.signature)?.signature ??
       null;
@@ -1458,6 +1843,9 @@ async function pollSolanaSnapshot(): Promise<void> {
       latestFightAccount,
       latestMarketAccount,
       derivedMarketPda,
+      currentMarketPda,
+      currentMarketStatus: enumName(currentMarketAccount?.status),
+      currentMarketWinner: enumName(currentMarketAccount?.winner),
       recentSignature,
     };
     parsers.solana.lastSuccessAt = Date.now();
@@ -1477,38 +1865,31 @@ async function pollEvmSnapshot(
   const parser = parsers[label];
 
   try {
-    const nextMatchId = (await client.readContract({
-      address: contractAddress as Address,
-      abi: GOLD_CLOB_READ_ABI,
-      functionName: "nextMatchId",
-      args: [],
-    })) as bigint;
+    const duelKey = currentDuelKey();
+    if (!duelKey) return;
 
-    const currentMatchId = nextMatchId > 0n ? nextMatchId - 1n : 0n;
-    const match = (await client.readContract({
+    const normalizedDuelKey = `0x${duelKey}` as `0x${string}`;
+    const marketKey = (await client.readContract({
       address: contractAddress as Address,
       abi: GOLD_CLOB_READ_ABI,
-      functionName: "matches",
-      args: [currentMatchId],
+      functionName: "marketKey",
+      args: [normalizedDuelKey, 0],
+    })) as `0x${string}`;
+    const market = (await client.readContract({
+      address: contractAddress as Address,
+      abi: GOLD_CLOB_READ_ABI,
+      functionName: "getMarket",
+      args: [normalizedDuelKey, 0],
     })) as any;
 
-    const status = Array.isArray(match)
-      ? Number(match[0] ?? 0)
-      : Number(match.status ?? 0);
-    const winner = Array.isArray(match)
-      ? Number(match[1] ?? 0)
-      : Number(match.winner ?? 0);
-    const yesPool = Array.isArray(match)
-      ? String(match[2] ?? 0n)
-      : String(match.yesPool ?? 0n);
-    const noPool = Array.isArray(match)
-      ? String(match[3] ?? 0n)
-      : String(match.noPool ?? 0n);
+    const status = Number(market?.status ?? 0);
+    const winner = Number(market?.winner ?? 0);
+    const yesPool = String(market?.totalAShares ?? 0n);
+    const noPool = String(market?.totalBShares ?? 0n);
 
     parser.snapshot = {
       contractAddress,
-      nextMatchId: nextMatchId.toString(),
-      currentMatchId: currentMatchId.toString(),
+      marketKey,
       currentMatch: {
         status,
         winner,
@@ -1677,10 +2058,6 @@ function multiplierResponse(wallet: string): Record<string, any> {
 }
 
 async function handleBetRecord(req: Request): Promise<Response> {
-  if (!requireWriteAuth(req)) {
-    return jsonResponse(req, { error: "Unauthorized write key" }, 401);
-  }
-
   let payload: any;
   try {
     payload = await req.json();
@@ -1693,9 +2070,13 @@ async function handleBetRecord(req: Request): Promise<Response> {
     return jsonResponse(req, { error: "Missing bettorWallet" }, 400);
   }
 
-  const chain = String(payload.chain || "SOLANA").toUpperCase();
-  const chainValue: "SOLANA" | "BSC" | "BASE" =
-    chain === "BSC" ? "BSC" : chain === "BASE" ? "BASE" : "SOLANA";
+  const chainKey = normalizeChainKey(
+    String(payload.chainKey || payload.chain || "solana"),
+  );
+  const txSignature = String(payload.txSignature || "").trim();
+  if (!(await authorizeExternalBetRecord(req, chainKey, walletRaw, txSignature))) {
+    return jsonResponse(req, { error: "Unauthorized write key" }, 401);
+  }
 
   const sourceAmount = parseNumberInput(payload.sourceAmount, 0);
   const goldAmount = parseNumberInput(payload.goldAmount, sourceAmount);
@@ -1712,16 +2093,24 @@ async function handleBetRecord(req: Request): Promise<Response> {
   const record: BetRecord = {
     id: `${recordedAt}-${Math.random().toString(36).slice(2, 10)}`,
     bettorWallet: displayWallet(normalizedWallet),
-    chain: chainValue,
+    chain: toRecordedBetChain(chainKey),
     sourceAsset: String(payload.sourceAsset || "GOLD"),
     sourceAmount,
     goldAmount,
     feeBps,
-    txSignature: String(payload.txSignature || ""),
-    marketPda: payload.marketPda ? String(payload.marketPda) : null,
+    txSignature,
+    marketPda: payload.marketPda
+      ? String(payload.marketPda)
+      : payload.marketRef
+        ? String(payload.marketRef)
+        : null,
+    duelKey: payload.duelKey ? String(payload.duelKey).trim() : null,
+    duelId: payload.duelId ? String(payload.duelId).trim() : null,
     inviteCode: null,
     externalBetRef: payload.externalBetRef
       ? String(payload.externalBetRef)
+      : txSignature
+        ? `${chainKey}:${txSignature}`
       : null,
     recordedAt,
   };
@@ -2302,6 +2691,18 @@ const server = Bun.serve({
     }
 
     if (url.pathname === "/status") {
+      const predictionMarkets = buildPredictionMarketLifecycleRecords();
+      const botHealthSnapshotRaw = loadKeeperBotHealthSnapshot();
+      const botHealthSnapshot = botHealthSnapshotRaw
+        ? {
+          ...botHealthSnapshotRaw,
+          running: Boolean(botSubprocess),
+        }
+        : null;
+      const marketStatuses = mergePredictionMarketsWithHealth(
+        predictionMarkets,
+        botHealthSnapshot,
+      );
       return jsonResponse(req, {
         ok: true,
         service: "hyperbet-bsc-backend",
@@ -2329,11 +2730,28 @@ const server = Bun.serve({
           running: Boolean(botSubprocess),
           lastExitCode: botExitCode,
           lastExitAt: botLastExitAt,
+          health: botHealthSnapshot,
         },
         stats: {
           trackedBets: bets.length,
           linkedIdentities: identityMembers.size,
           knownWallets: walletDisplay.size,
+        },
+        predictionMarkets: {
+          activeDuelKey: currentDuelKey(),
+          marketCount: predictionMarkets.length,
+          botHealthUpdatedAt: botHealthSnapshot?.updatedAtMs ?? null,
+          chains: marketStatuses.map((market) => ({
+            chainKey: market.chainKey,
+            marketRef: market.marketRef,
+            lifecycleStatus: market.lifecycleStatus,
+            winner: market.winner,
+            betCloseTime: market.betCloseTime,
+            syncedAt: market.syncedAt,
+            txRef: market.txRef,
+            metadata: market.metadata ?? null,
+            health: market.health,
+          })),
         },
       });
     }
@@ -2356,6 +2774,27 @@ const server = Bun.serve({
       url.pathname === "/api/streaming/duel-context"
     ) {
       return handleDuelContext(req);
+    }
+
+    if (
+      req.method === "GET" &&
+      url.pathname === "/api/arena/prediction-markets/active"
+    ) {
+      return handlePredictionMarkets(req);
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/keeper/bot-health") {
+      const botHealthSnapshotRaw = loadKeeperBotHealthSnapshot();
+      return jsonResponse(req, {
+        ok: true,
+        running: Boolean(botSubprocess),
+        health: botHealthSnapshotRaw
+          ? {
+            ...botHealthSnapshotRaw,
+            running: Boolean(botSubprocess),
+          }
+          : null,
+      });
     }
 
     if (

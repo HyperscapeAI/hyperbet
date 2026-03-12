@@ -1,8 +1,21 @@
 import { Buffer } from "buffer";
 import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
+import fs_node from "node:fs";
 import path from "node:path";
 import { type Program } from "@coral-xyz/anchor";
+import {
+  type PredictionMarketLifecycleStatus,
+  resolveLifecycleFromStreamPhase,
+  toRecordedBetChain,
+  type PredictionMarketLifecycleRecord,
+  type PredictionMarketWinner,
+  type RecordedBetChain,
+} from "@hyperbet/chain-registry";
+import {
+  mergePredictionMarketsWithHealth,
+  type KeeperBotHealthSnapshot,
+} from "@hyperbet/mm-core";
 import {
   type Connection,
   PublicKey,
@@ -13,7 +26,9 @@ import {
 
 import {
   createPrograms,
+  duelKeyHexToBytes,
   FIGHT_ORACLE_PROGRAM_ID,
+  findDuelStatePda,
   findMarketPda,
   getSenderUrl,
   GOLD_CLOB_MARKET_PROGRAM_ID,
@@ -58,13 +73,15 @@ type StreamState = {
 type BetRecord = {
   id: string;
   bettorWallet: string;
-  chain: "SOLANA";
+  chain: RecordedBetChain;
   sourceAsset: string;
   sourceAmount: number;
   goldAmount: number;
   feeBps: number;
   txSignature: string;
   marketPda: string | null;
+  duelKey: string | null;
+  duelId: string | null;
   inviteCode: string | null;
   externalBetRef: string | null;
   recordedAt: number;
@@ -114,7 +131,23 @@ type RateBucket = {
 const encoder = new TextEncoder();
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const keeperRoot = path.resolve(__dirname, "..");
+const KEEPER_BOT_HEALTH_FILE = (
+  process.env.KEEPER_BOT_HEALTH_FILE ||
+  path.resolve(keeperRoot, ".status", "keeper-bot-health.json")
+).trim();
 const IS_PRODUCTION = process.env.NODE_ENV === "production";
+
+function loadKeeperBotHealthSnapshot(): KeeperBotHealthSnapshot | null {
+  if (!KEEPER_BOT_HEALTH_FILE || !fs_node.existsSync(KEEPER_BOT_HEALTH_FILE)) {
+    return null;
+  }
+  try {
+    return JSON.parse(fs_node.readFileSync(KEEPER_BOT_HEALTH_FILE, "utf8"));
+  } catch (error) {
+    console.warn("[service] Failed to read keeper bot health snapshot:", error);
+    return null;
+  }
+}
 
 function readPositiveEnvInteger(
   name: string,
@@ -880,6 +913,184 @@ function handleDuelContext(req: Request): Response {
   );
 }
 
+function currentDuelKey(): string | null {
+  const raw = streamState.cycle?.duelKeyHex;
+  if (typeof raw !== "string") return null;
+  const normalized = raw.trim().replace(/^0x/i, "").toLowerCase();
+  return normalized.length > 0 ? normalized : null;
+}
+
+function currentDuelId(): string | null {
+  const raw = streamState.cycle?.duelId;
+  return typeof raw === "string" && raw.trim().length > 0 ? raw.trim() : null;
+}
+
+function currentBetCloseTime(): number | null {
+  const raw = streamState.cycle?.betCloseTime;
+  return typeof raw === "number" && Number.isFinite(raw) ? raw : null;
+}
+
+function currentWinnerFromCycle(): PredictionMarketWinner {
+  const cycleAgent1 = streamState.cycle?.agent1 as { id?: unknown } | null | undefined;
+  const cycleAgent2 = streamState.cycle?.agent2 as { id?: unknown } | null | undefined;
+  const winnerId =
+    typeof streamState.cycle?.winnerId === "string"
+      ? streamState.cycle.winnerId
+      : null;
+  const agent1Id =
+    typeof cycleAgent1?.id === "string"
+      ? cycleAgent1.id
+      : null;
+  const agent2Id =
+    typeof cycleAgent2?.id === "string"
+      ? cycleAgent2.id
+      : null;
+
+  if (winnerId && agent1Id && winnerId === agent1Id) return "A";
+  if (winnerId && agent2Id && winnerId === agent2Id) return "B";
+  return "NONE";
+}
+
+function enumName(value: unknown): string | null {
+  if (!value || typeof value !== "object") return null;
+  const [key] = Object.keys(value as Record<string, unknown>);
+  return typeof key === "string" && key.length > 0 ? key : null;
+}
+
+function resolveLifecycleFromSolanaStatus(
+  status: string | null,
+  fallback: PredictionMarketLifecycleStatus,
+): PredictionMarketLifecycleStatus {
+  switch (status?.toLowerCase()) {
+    case "open":
+      return "OPEN";
+    case "locked":
+      return "LOCKED";
+    case "resolved":
+      return "RESOLVED";
+    case "cancelled":
+      return "CANCELLED";
+    default:
+      return fallback;
+  }
+}
+
+function resolveWinnerFromSolanaState(
+  winner: string | null,
+  fallback: PredictionMarketWinner,
+): PredictionMarketWinner {
+  switch (winner?.toLowerCase()) {
+    case "a":
+      return "A";
+    case "b":
+      return "B";
+    case "none":
+      return "NONE";
+    default:
+      return fallback;
+  }
+}
+
+function buildPredictionMarketLifecycleRecords(): PredictionMarketLifecycleRecord[] {
+  const snapshot = parsers.solana.snapshot as Record<string, unknown> | null;
+  const duelKey = currentDuelKey();
+  const duelId = currentDuelId();
+  const cycleLifecycle = resolveLifecycleFromStreamPhase(
+    typeof streamState.cycle?.phase === "string" ? streamState.cycle.phase : null,
+  );
+  const cycleWinner = currentWinnerFromCycle();
+  const derivedCurrentMarketPda =
+    duelKey != null
+      ? findMarketPda(
+        GOLD_CLOB_MARKET_PROGRAM_ID,
+        findDuelStatePda(FIGHT_ORACLE_PROGRAM_ID, duelKeyHexToBytes(duelKey)),
+      ).toBase58()
+      : null;
+  const solanaLifecycle = resolveLifecycleFromSolanaStatus(
+    typeof snapshot?.currentMarketStatus === "string"
+      ? snapshot.currentMarketStatus
+      : null,
+    cycleLifecycle,
+  );
+  const solanaWinner = resolveWinnerFromSolanaState(
+    typeof snapshot?.currentMarketWinner === "string"
+      ? snapshot.currentMarketWinner
+      : null,
+    cycleWinner,
+  );
+
+  if (!parsers.solana.enabled && !snapshot && !derivedCurrentMarketPda) {
+    return [];
+  }
+
+  return [
+    {
+      chainKey: "solana",
+      duelKey,
+      duelId,
+      marketId:
+        derivedCurrentMarketPda ??
+        (typeof snapshot?.derivedMarketPda === "string"
+          ? snapshot.derivedMarketPda
+          : typeof snapshot?.latestMarketAccount === "string"
+            ? snapshot.latestMarketAccount
+            : null),
+      marketRef:
+        derivedCurrentMarketPda ??
+        (typeof snapshot?.derivedMarketPda === "string"
+          ? snapshot.derivedMarketPda
+          : typeof snapshot?.latestMarketAccount === "string"
+            ? snapshot.latestMarketAccount
+            : null),
+      lifecycleStatus: solanaLifecycle,
+      winner: solanaWinner,
+      betCloseTime: currentBetCloseTime(),
+      contractAddress: null,
+      programId:
+        typeof snapshot?.marketProgram === "string" ? snapshot.marketProgram : null,
+      txRef:
+        typeof snapshot?.recentSignature === "string"
+          ? snapshot.recentSignature
+          : null,
+      syncedAt: parsers.solana.lastSuccessAt,
+      metadata: {
+        fightAccountCount:
+          typeof snapshot?.fightAccountCount === "number"
+            ? snapshot.fightAccountCount
+            : null,
+        marketAccountCount:
+          typeof snapshot?.marketAccountCount === "number"
+            ? snapshot.marketAccountCount
+            : null,
+      },
+    },
+  ];
+}
+
+function handlePredictionMarkets(req: Request): Response {
+  return jsonResponse(
+    req,
+    {
+      duel: {
+        duelKey: currentDuelKey(),
+        duelId: currentDuelId(),
+        phase:
+          typeof streamState.cycle?.phase === "string"
+            ? streamState.cycle.phase
+            : null,
+        winner: currentWinnerFromCycle(),
+        betCloseTime: currentBetCloseTime(),
+      },
+      markets: buildPredictionMarketLifecycleRecords(),
+      updatedAt: Date.now(),
+    },
+    200,
+    {
+      "cache-control": "no-store",
+    },
+  );
+}
+
 function handleStreamingLeaderboardDetails(req: Request, url: URL): Response {
   const historyLimit = parseBoundedInteger(
     url.searchParams.get("historyLimit"),
@@ -995,6 +1206,48 @@ function requireWriteAuth(
   if (!fallbackKey) return true;
   const provided = req.headers.get("x-arena-write-key")?.trim() || "";
   return provided === fallbackKey;
+}
+
+async function verifyRecordedBet(
+  bettorWallet: string,
+  txSignature: string,
+): Promise<boolean> {
+  if (!solanaCtx) return true;
+  try {
+    const transaction = await solanaCtx.connection.getParsedTransaction(
+      txSignature,
+      {
+        commitment: "confirmed",
+        maxSupportedTransactionVersion: 0,
+      },
+    );
+    if (!transaction || transaction.meta?.err) {
+      return false;
+    }
+    const walletLower = bettorWallet.trim().toLowerCase();
+    return transaction.transaction.message.accountKeys.some(
+      (key) => key.signer && key.pubkey.toBase58().toLowerCase() === walletLower,
+    );
+  } catch {
+    return false;
+  }
+}
+
+async function authorizeExternalBetRecord(
+  req: Request,
+  bettorWallet: string,
+  txSignature: string,
+): Promise<boolean> {
+  if (requireWriteAuth(req)) return true;
+
+  const trustedOrigin =
+    isAllowedAppOrigin(req.headers.get("origin")) ||
+    isAllowedAppOrigin(req.headers.get("referer"));
+  if (!trustedOrigin || !txSignature.trim()) {
+    return false;
+  }
+
+  return verifyRecordedBet(bettorWallet, txSignature);
 }
 
 function toStreamState(payload: unknown): StreamState | null {
@@ -1170,7 +1423,13 @@ function startKeeperBotIfEnabled(): void {
   if (!ENABLE_KEEPER_BOT) return;
   if (botSubprocess) return;
 
-  const childEnv = buildKeeperBotChildEnv(process.env, PORT);
+  const childEnv = buildKeeperBotChildEnv(
+    {
+      ...process.env,
+      KEEPER_BOT_HEALTH_FILE,
+    },
+    PORT,
+  );
 
   botSubprocess = Bun.spawn(["bun", "--bun", "src/bot.ts"], {
     cwd: keeperRoot,
@@ -1263,6 +1522,23 @@ async function pollSolanaSnapshot(): Promise<void> {
           fightAccounts[0]!.pubkey,
         ).toBase58()
         : null;
+    const currentSolanaDuelKey = currentDuelKey();
+    const currentMarketPda =
+      currentSolanaDuelKey != null
+        ? findMarketPda(
+          solanaCtx.marketProgramId,
+          findDuelStatePda(
+            solanaCtx.fightProgram.programId,
+            duelKeyHexToBytes(currentSolanaDuelKey),
+          ),
+        ).toBase58()
+        : null;
+    const currentMarketAccount =
+      currentMarketPda != null
+        ? await solanaCtx.marketProgram.account.marketState.fetchNullable(
+          new PublicKey(currentMarketPda),
+        )
+        : null;
     const recentSignature =
       (
         recentSignatures as Array<{ signature?: string } | null>
@@ -1278,6 +1554,9 @@ async function pollSolanaSnapshot(): Promise<void> {
       latestFightAccount,
       latestMarketAccount,
       derivedMarketPda,
+      currentMarketPda,
+      currentMarketStatus: enumName(currentMarketAccount?.status),
+      currentMarketWinner: enumName(currentMarketAccount?.winner),
       recentSignature,
     };
     parsers.solana.lastSuccessAt = Date.now();
@@ -1437,10 +1716,6 @@ function multiplierResponse(wallet: string): Record<string, unknown> {
 }
 
 async function handleBetRecord(req: Request): Promise<Response> {
-  if (!requireWriteAuth(req)) {
-    return jsonResponse(req, { error: "Unauthorized write key" }, 401);
-  }
-
   let payload: Record<string, unknown>;
   try {
     payload = (await req.json()) as Record<string, unknown>;
@@ -1451,6 +1726,11 @@ async function handleBetRecord(req: Request): Promise<Response> {
   const walletRaw = String(payload.bettorWallet || "").trim();
   if (!walletRaw) {
     return jsonResponse(req, { error: "Missing bettorWallet" }, 400);
+  }
+
+  const txSignature = String(payload.txSignature || "").trim();
+  if (!(await authorizeExternalBetRecord(req, walletRaw, txSignature))) {
+    return jsonResponse(req, { error: "Unauthorized write key" }, 401);
   }
 
   const sourceAmount = parseNumberInput(payload.sourceAmount, 0);
@@ -1468,16 +1748,24 @@ async function handleBetRecord(req: Request): Promise<Response> {
   const record: BetRecord = {
     id: `${recordedAt}-${Math.random().toString(36).slice(2, 10)}`,
     bettorWallet: displayWallet(normalizedWallet),
-    chain: "SOLANA",
+    chain: toRecordedBetChain("solana"),
     sourceAsset: String(payload.sourceAsset || "GOLD"),
     sourceAmount,
     goldAmount,
     feeBps,
-    txSignature: String(payload.txSignature || ""),
-    marketPda: payload.marketPda ? String(payload.marketPda) : null,
+    txSignature,
+    marketPda: payload.marketPda
+      ? String(payload.marketPda)
+      : payload.marketRef
+        ? String(payload.marketRef)
+        : null,
+    duelKey: payload.duelKey ? String(payload.duelKey).trim() : null,
+    duelId: payload.duelId ? String(payload.duelId).trim() : null,
     inviteCode: null,
     externalBetRef: payload.externalBetRef
       ? String(payload.externalBetRef)
+      : txSignature
+        ? `solana:${txSignature}`
       : null,
     recordedAt,
   };
@@ -2088,6 +2376,18 @@ const server = Bun.serve({
     }
 
     if (url.pathname === "/status") {
+      const predictionMarkets = buildPredictionMarketLifecycleRecords();
+      const botHealthSnapshotRaw = loadKeeperBotHealthSnapshot();
+      const botHealthSnapshot = botHealthSnapshotRaw
+        ? {
+          ...botHealthSnapshotRaw,
+          running: Boolean(botSubprocess),
+        }
+        : null;
+      const marketStatuses = mergePredictionMarketsWithHealth(
+        predictionMarkets,
+        botHealthSnapshot,
+      );
       return jsonResponse(req, {
         ok: true,
         service: "hyperbet-solana-backend",
@@ -2114,11 +2414,28 @@ const server = Bun.serve({
           running: Boolean(botSubprocess),
           lastExitCode: botExitCode,
           lastExitAt: botLastExitAt,
+          health: botHealthSnapshot,
         },
         stats: {
           trackedBets: bets.length,
           linkedIdentities: identityMembers.size,
           knownWallets: walletDisplay.size,
+        },
+        predictionMarkets: {
+          activeDuelKey: currentDuelKey(),
+          marketCount: predictionMarkets.length,
+          botHealthUpdatedAt: botHealthSnapshot?.updatedAtMs ?? null,
+          chains: marketStatuses.map((market) => ({
+            chainKey: market.chainKey,
+            marketRef: market.marketRef,
+            lifecycleStatus: market.lifecycleStatus,
+            winner: market.winner,
+            betCloseTime: market.betCloseTime,
+            syncedAt: market.syncedAt,
+            txRef: market.txRef,
+            metadata: market.metadata ?? null,
+            health: market.health,
+          })),
         },
       });
     }
@@ -2141,6 +2458,27 @@ const server = Bun.serve({
       url.pathname === "/api/streaming/duel-context"
     ) {
       return handleDuelContext(req);
+    }
+
+    if (
+      req.method === "GET" &&
+      url.pathname === "/api/arena/prediction-markets/active"
+    ) {
+      return handlePredictionMarkets(req);
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/keeper/bot-health") {
+      const botHealthSnapshotRaw = loadKeeperBotHealthSnapshot();
+      return jsonResponse(req, {
+        ok: true,
+        running: Boolean(botSubprocess),
+        health: botHealthSnapshotRaw
+          ? {
+            ...botHealthSnapshotRaw,
+            running: Boolean(botSubprocess),
+          }
+          : null,
+      });
     }
 
     if (

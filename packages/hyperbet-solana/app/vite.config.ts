@@ -103,6 +103,13 @@ export default defineConfig(async ({ mode }) => {
     "dist",
     "index.js",
   );
+  alias["@hyperbet/ui"] = path.resolve(
+    __dirname,
+    "..",
+    "..",
+    "hyperbet-ui",
+    "src",
+  );
 
   const curvesMainPath = require.resolve("@noble/curves");
 

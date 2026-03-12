@@ -11,6 +11,10 @@ on:
       - "packages/hyperbet-avax/app/**"
       - "packages/hyperbet-avax/keeper/**"
       - "packages/hyperbet-ui/**"
+      - "packages/hyperbet-chain-registry/**"
+      - "scripts/**"
+      - ".env.example"
+      - "docs/development-setup.md"
       - "packages/market-maker-bot/**"
       - "docs/hyperbet-production-deploy.md"
       - ".github/workflows/ci.yml"
@@ -26,6 +30,10 @@ on:
       - "packages/hyperbet-avax/app/**"
       - "packages/hyperbet-avax/keeper/**"
       - "packages/hyperbet-ui/**"
+      - "packages/hyperbet-chain-registry/**"
+      - "scripts/**"
+      - ".env.example"
+      - "docs/development-setup.md"
       - "packages/market-maker-bot/**"
       - "docs/hyperbet-production-deploy.md"
       - ".github/workflows/ci.yml"
@@ -83,6 +91,11 @@ jobs:
           bun install --frozen-lockfile
           bun install --cwd packages/${{ matrix.package }}/app --frozen-lockfile
           bun install --cwd packages/${{ matrix.package }}/keeper --frozen-lockfile
+
+      - name: Validate shared chain registry
+        run: |
+          bunx tsc --noEmit -p packages/hyperbet-chain-registry/tsconfig.json
+          bun test packages/hyperbet-chain-registry/tests/chainRegistry.test.ts
 
       - name: Type check app
         run: bunx tsc --noEmit -p packages/${{ matrix.package }}/app/tsconfig.json

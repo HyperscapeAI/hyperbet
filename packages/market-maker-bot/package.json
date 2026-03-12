@@ -13,12 +13,17 @@
     "simulate:adversarial:ci": "bun run simulate:adversarial && bun run simulate:adversarial:gate",
     "wallets:generate": "tsx src/generate-wallets.ts",
     "wallets:ui-env": "tsx src/export-ui-wallets.ts",
+    "build": "bunx tsc --noEmit -p tsconfig.json",
+    "lint": "bunx tsc --noEmit -p tsconfig.json",
+    "typecheck": "bunx tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
     "verify:chains": "tsx src/verify-chains.ts",
     "verify:chains:env": "SOLANA_VERIFY_RPC_URL=$SOLANA_RPC_URL SOLANA_VERIFY_PROGRAM_ID=$SOLANA_ARENA_MARKET_PROGRAM_ID tsx src/verify-chains.ts",
     "verify:forks": "tsx src/fork-harness.ts"
   },
   "dependencies": {
+    "@hyperbet/chain-registry": "workspace:*",
+    "@hyperbet/mm-core": "workspace:*",
     "@coral-xyz/anchor": "^0.32.1",
     "@solana/web3.js": "^1.90.0",
     "bn.js": "^5.2.3",

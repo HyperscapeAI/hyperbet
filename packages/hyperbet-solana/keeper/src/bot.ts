@@ -8,6 +8,16 @@ import {
   SystemProgram,
   Transaction,
 } from "@solana/web3.js";
+import {
+  buildQuotePlan,
+  DEFAULT_MARKET_MAKER_CONFIG,
+  evaluateQuoteDecision,
+  type KeeperBotHealthSnapshot,
+  type KeeperMarketHealthRecord,
+  type KeeperRecoveryState,
+  type MarketSnapshot,
+  type QuotePlan,
+} from "@hyperbet/mm-core";
 import yargs from "yargs";
 import { hideBin } from "yargs/helpers";
 
@@ -332,6 +342,14 @@ function hasProgramMethod(
 }
 
 const RATINGS_FILE = path.resolve(__dirname, "agent_ratings.json");
+const BOT_HEALTH_FILE = (
+  process.env.KEEPER_BOT_HEALTH_FILE ||
+  path.resolve(__dirname, "..", ".status", "keeper-bot-health.json")
+).trim();
+const MARKET_HEALTH_RETENTION_MS = Math.max(
+  60_000,
+  Number(process.env.KEEPER_MARKET_HEALTH_RETENTION_MS || 15 * 60_000),
+);
 let agentRatings: Record<string, AgentRating> = loadAgentRatings();
 if (
   Object.keys(agentRatings).length === 0 &&
@@ -1213,6 +1231,11 @@ let rpcBlockedUntil = 0;
 let lastRpcWarningAt = 0;
 let chainCheckBlockedUntil = 0;
 let lastChainWarningAt = 0;
+const botBootedAtMs = Date.now();
+let lastSuccessfulRpcAtMs: number | null = null;
+let lastStreamEventAtMs: number | null = null;
+let restartRecoveryObservedAtMs: number | null = null;
+let restartRecoveryDetails: string | null = null;
 
 const oracleConfigPda = findOracleConfigPda(fightOracle.programId);
 const marketConfigPda = findMarketConfigPda(goldClobMarket.programId);
@@ -1262,6 +1285,35 @@ const configuredAskPrice = Math.max(
   configuredBidPrice + 1,
   Math.min(999, Math.floor(Number(process.env.MARKET_MAKER_ASK_PRICE || 600))),
 );
+const configuredMidPrice = Math.max(
+  1,
+  Math.round((configuredBidPrice + configuredAskPrice) / 2),
+);
+const configuredSpreadBps = Math.max(
+  DEFAULT_MARKET_MAKER_CONFIG.targetSpreadBps,
+  Math.round(
+    ((configuredAskPrice - configuredBidPrice) * 10_000) /
+      Math.max(1, configuredMidPrice),
+  ),
+);
+const managedClobQuoteConfig = {
+  ...DEFAULT_MARKET_MAKER_CONFIG,
+  targetSpreadBps: configuredSpreadBps,
+  minQuoteUnits: Math.max(1, Math.floor(marketMakerSeedLamports / 4)),
+  maxQuoteUnits: marketMakerSeedLamports,
+  maxInventoryPerSide: Math.max(
+    DEFAULT_MARKET_MAKER_CONFIG.maxInventoryPerSide,
+    marketMakerSeedLamports * 4,
+  ),
+  maxNetExposure: Math.max(
+    DEFAULT_MARKET_MAKER_CONFIG.maxNetExposure,
+    marketMakerSeedLamports * 2,
+  ),
+  maxGrossExposure: Math.max(
+    DEFAULT_MARKET_MAKER_CONFIG.maxGrossExposure,
+    marketMakerSeedLamports * 6,
+  ),
+};
 
 const requiredPrograms = [
   {
@@ -1313,6 +1365,7 @@ async function ensureBotSignerFunding(): Promise<boolean> {
     throw error;
   }
   if (lamports >= minSignerLamports) {
+    markRpcSuccess();
     return true;
   }
 
@@ -1350,6 +1403,7 @@ async function ensureBotSignerFunding(): Promise<boolean> {
   }
 
   if (lamports >= minSignerLamports) {
+    markRpcSuccess();
     return true;
   }
 
@@ -1385,6 +1439,7 @@ async function ensureKeeperChainReady(): Promise<boolean> {
       .map((program) => `${program.label}:${program.programId.toBase58()}`);
 
     if (missingPrograms.length === 0) {
+      markRpcSuccess();
       return true;
     }
 
@@ -1580,13 +1635,18 @@ const ensureMarketConfigReady = async (): Promise<void> => {
 async function getDuelState(
   duelStatePda: PublicKey,
 ): Promise<Record<string, unknown> | null> {
-  return fightProgram.account.duelState.fetchNullable(duelStatePda);
+  const duelState = await fightProgram.account.duelState.fetchNullable(duelStatePda);
+  markRpcSuccess();
+  return duelState;
 }
 
 async function getClobMarketState(
   marketStatePda: PublicKey,
 ): Promise<Record<string, unknown> | null> {
-  return marketProgram.account.marketState.fetchNullable(marketStatePda);
+  const marketState =
+    await marketProgram.account.marketState.fetchNullable(marketStatePda);
+  markRpcSuccess();
+  return marketState;
 }
 
 type ManagedClobOrder = {
@@ -1594,6 +1654,7 @@ type ManagedClobOrder = {
   side: number;
   price: number;
   amountLamports: number;
+  placedAtMs: number;
 };
 
 type ActiveClobMatch = {
@@ -1603,9 +1664,57 @@ type ActiveClobMatch = {
   marketState: PublicKey;
   vault: PublicKey;
   createdAt: number;
+  lastStreamAtMs: number | null;
+  lastOracleAtMs: number | null;
+  lastRpcAtMs: number | null;
+  lastSyncedAtMs: number | null;
+  lastResolvedAtMs: number | null;
+  lastClaimAtMs: number | null;
+  lastQuoteSnapshot: MarketSnapshot | null;
+  lastQuotePlan: QuotePlan | null;
   yesBidOrder: ManagedClobOrder | null;
   noAskOrder: ManagedClobOrder | null;
 };
+
+type ManagedOrderState = ManagedClobOrder & {
+  remainingLamports: number;
+};
+
+type ManagedClobQuoteContext = {
+  snapshot: MarketSnapshot;
+  yesBidOrder: ManagedOrderState | null;
+  noAskOrder: ManagedOrderState | null;
+};
+
+function markRpcSuccess(trackedMatch?: ActiveClobMatch | null): number {
+  const now = Date.now();
+  lastSuccessfulRpcAtMs = now;
+  if (trackedMatch) {
+    trackedMatch.lastRpcAtMs = now;
+  }
+  return now;
+}
+
+function markStreamEvent(trackedMatch?: ActiveClobMatch | null): number {
+  const now = Date.now();
+  lastStreamEventAtMs = now;
+  if (trackedMatch) {
+    trackedMatch.lastStreamAtMs = now;
+  }
+  return now;
+}
+
+function buildManagedClobSignal(snapshot: MarketSnapshot): {
+  signalPrice: number;
+  signalWeight: number;
+} | {} {
+  return snapshot.bestBid == null && snapshot.bestAsk == null
+    ? {
+        signalPrice: configuredMidPrice,
+        signalWeight: 1,
+      }
+    : {};
+}
 
 async function ensureClobVaultReady(vault: PublicKey): Promise<void> {
   const minimumLamports = await connection.getMinimumBalanceForRentExemption(
@@ -1697,6 +1806,7 @@ async function upsertDuelLifecycle(
         .rpc(),
     connection,
   );
+  markRpcSuccess();
 
   return duelState;
 }
@@ -1715,12 +1825,226 @@ async function syncTrackedMarketFromOracle(
         .rpc(),
     connection,
   );
+  const now = markRpcSuccess(trackedMatch);
+  trackedMatch.lastOracleAtMs = now;
+  trackedMatch.lastSyncedAtMs = now;
+}
+
+function toManagedClobOrder(order: ManagedOrderState): ManagedClobOrder {
+  return {
+    orderId: order.orderId,
+    side: order.side,
+    price: order.price,
+    amountLamports: order.amountLamports,
+    placedAtMs: order.placedAtMs,
+  };
+}
+
+function mapClobLifecycleStatus(
+  marketState: Record<string, unknown> | null,
+): MarketSnapshot["lifecycleStatus"] {
+  if (!marketState) return "UNKNOWN";
+  if (enumIs(marketState.status, "open")) return "OPEN";
+  if (enumIs(marketState.status, "locked")) return "LOCKED";
+  if (enumIs(marketState.status, "resolved")) return "RESOLVED";
+  if (enumIs(marketState.status, "cancelled")) return "CANCELLED";
+  return "UNKNOWN";
+}
+
+function normalizeClobBestBid(value: number): number | null {
+  return value > 0 ? value : null;
+}
+
+function normalizeClobBestAsk(value: number): number | null {
+  if (value <= 0 || value >= 1_000) {
+    return null;
+  }
+  return value;
+}
+
+async function getManagedOrderState(
+  trackedMatch: ActiveClobMatch,
+  trackedOrder: ManagedClobOrder | null,
+): Promise<ManagedOrderState | null> {
+  if (!trackedOrder) {
+    return null;
+  }
+
+  const orderPda = findOrderPda(
+    marketProgram.programId,
+    trackedMatch.marketState,
+    BigInt(trackedOrder.orderId),
+  );
+  const orderAccount = await marketProgram.account.order.fetchNullable(orderPda);
+  if (!orderAccount || !Boolean(orderAccount.active)) {
+    return null;
+  }
+
+  const amountLamports = asNum(orderAccount.amount, trackedOrder.amountLamports);
+  const remainingLamports = Math.max(
+    0,
+    amountLamports - asNum(orderAccount.filled),
+  );
+  if (remainingLamports <= 0) {
+    return null;
+  }
+
+  return {
+    orderId: trackedOrder.orderId,
+    side: trackedOrder.side,
+    price: asNum(orderAccount.price, trackedOrder.price),
+    amountLamports,
+    placedAtMs: trackedOrder.placedAtMs,
+    remainingLamports,
+  };
+}
+
+async function buildManagedClobQuoteContext(
+  trackedMatch: ActiveClobMatch,
+  marketState: Record<string, unknown> | null,
+  now = Date.now(),
+): Promise<ManagedClobQuoteContext> {
+  const [duelState, userBalance, yesBidOrder, noAskOrder] = await Promise.all([
+    getDuelState(trackedMatch.duelState),
+    marketProgram.account.userBalance.fetchNullable(
+      findUserBalancePda(
+        marketProgram.programId,
+        trackedMatch.marketState,
+        botKeypair.publicKey,
+      ),
+    ),
+    getManagedOrderState(trackedMatch, trackedMatch.yesBidOrder),
+    getManagedOrderState(trackedMatch, trackedMatch.noAskOrder),
+  ]);
+
+  const activeOrders = [yesBidOrder, noAskOrder].filter(
+    (order): order is ManagedOrderState => order !== null,
+  );
+  const quoteAgeMs =
+    activeOrders.length > 0
+      ? now - Math.min(...activeOrders.map((order) => order.placedAtMs))
+      : null;
+
+  return {
+    snapshot: {
+      chainKey: "solana",
+      lifecycleStatus: mapClobLifecycleStatus(marketState),
+      duelKey: trackedMatch.duelKeyHex,
+      marketRef: trackedMatch.marketState.toBase58(),
+      bestBid: normalizeClobBestBid(asNum(marketState?.bestBid)),
+      bestAsk: normalizeClobBestAsk(asNum(marketState?.bestAsk, 1_000)),
+      betCloseTimeMs: duelState ? asNum(duelState.betCloseTs) * 1_000 : null,
+      lastStreamAtMs: trackedMatch.lastStreamAtMs ?? lastStreamEventAtMs ?? now,
+      lastOracleAtMs: trackedMatch.lastOracleAtMs ?? now,
+      lastRpcAtMs: trackedMatch.lastRpcAtMs ?? lastSuccessfulRpcAtMs ?? now,
+      quoteAgeMs,
+      exposure: {
+        yes: asNum(userBalance?.aShares),
+        no: asNum(userBalance?.bShares),
+        openYes: yesBidOrder?.remainingLamports ?? 0,
+        openNo: noAskOrder?.remainingLamports ?? 0,
+      },
+    },
+    yesBidOrder,
+    noAskOrder,
+  };
+}
+
+async function refreshManagedClobHealth(
+  trackedMatch: ActiveClobMatch,
+  marketState: Record<string, unknown> | null,
+  now = Date.now(),
+): Promise<{ quoteContext: ManagedClobQuoteContext; plan: QuotePlan }> {
+  const quoteContext = await buildManagedClobQuoteContext(
+    trackedMatch,
+    marketState,
+    now,
+  );
+  const plan = buildQuotePlan(
+    quoteContext.snapshot,
+    buildManagedClobSignal(quoteContext.snapshot),
+    managedClobQuoteConfig,
+    now,
+  );
+  trackedMatch.lastQuoteSnapshot = quoteContext.snapshot;
+  trackedMatch.lastQuotePlan = plan;
+  trackedMatch.lastSyncedAtMs = now;
+  trackedMatch.lastStreamAtMs =
+    quoteContext.snapshot.lastStreamAtMs ?? trackedMatch.lastStreamAtMs;
+  trackedMatch.lastOracleAtMs =
+    quoteContext.snapshot.lastOracleAtMs ?? trackedMatch.lastOracleAtMs;
+  trackedMatch.lastRpcAtMs =
+    quoteContext.snapshot.lastRpcAtMs ?? trackedMatch.lastRpcAtMs;
+  return { quoteContext, plan };
+}
+
+async function cancelManagedClobOrder(
+  trackedMatch: ActiveClobMatch,
+  trackedOrder: ManagedOrderState,
+  reason: string,
+): Promise<void> {
+  const order = findOrderPda(
+    marketProgram.programId,
+    trackedMatch.marketState,
+    BigInt(trackedOrder.orderId),
+  );
+  const priceLevel = findPriceLevelPda(
+    marketProgram.programId,
+    trackedMatch.marketState,
+    trackedOrder.side,
+    trackedOrder.price,
+  );
+
+  await runWithRecovery(
+    () =>
+      marketProgram.methods
+        .cancelOrder(
+          new BN(trackedOrder.orderId),
+          trackedOrder.side,
+          trackedOrder.price,
+        )
+        .accountsPartial({
+          marketState: trackedMatch.marketState,
+          duelState: trackedMatch.duelState,
+          order,
+          priceLevel,
+          vault: trackedMatch.vault,
+          user: botKeypair.publicKey,
+          systemProgram: SystemProgram.programId,
+        })
+        .rpc(),
+    connection,
+  );
+
+  console.log(
+    `[bot] Cancelled ${
+      trackedOrder.side === SIDE_BID ? "A-bid" : "B-ask"
+    } liquidity for ${trackedMatch.marketState.toBase58()} orderId=${
+      trackedOrder.orderId
+    } price=${trackedOrder.price} reason=${reason}`,
+  );
+}
+
+async function cancelManagedClobQuotes(
+  trackedMatch: ActiveClobMatch,
+  reason: string,
+): Promise<void> {
+  for (const side of ["yesBidOrder", "noAskOrder"] as const) {
+    const activeOrder = await getManagedOrderState(trackedMatch, trackedMatch[side]);
+    if (!activeOrder) {
+      trackedMatch[side] = null;
+      continue;
+    }
+    await cancelManagedClobOrder(trackedMatch, activeOrder, reason);
+    trackedMatch[side] = null;
+  }
 }
 
 async function placeManagedClobOrder(
   trackedMatch: ActiveClobMatch,
   side: number,
   price: number,
+  amountLamports: number,
 ): Promise<ManagedClobOrder> {
   const marketState = await getClobMarketState(trackedMatch.marketState);
   if (!marketState || !enumIs(marketState.status, "open")) {
@@ -1754,7 +2078,7 @@ async function placeManagedClobOrder(
           new BN(orderId),
           side,
           price,
-          new BN(marketMakerSeedLamports),
+          new BN(amountLamports),
         )
         .accountsPartial({
           marketState: trackedMatch.marketState,
@@ -1774,14 +2098,15 @@ async function placeManagedClobOrder(
   );
 
   console.log(
-    `[bot] Seeded ${side === SIDE_BID ? "A-bid" : "B-ask"} liquidity for ${trackedMatch.marketState.toBase58()} orderId=${orderId} price=${price} amountLamports=${marketMakerSeedLamports}`,
+    `[bot] Seeded ${side === SIDE_BID ? "A-bid" : "B-ask"} liquidity for ${trackedMatch.marketState.toBase58()} orderId=${orderId} price=${price} amountLamports=${amountLamports}`,
   );
 
   return {
     orderId,
     side,
     price,
-    amountLamports: marketMakerSeedLamports,
+    amountLamports,
+    placedAtMs: Date.now(),
   };
 }
 
@@ -1789,28 +2114,66 @@ async function ensureManagedClobOrder(
   trackedMatch: ActiveClobMatch,
   side: "yesBidOrder" | "noAskOrder",
 ): Promise<void> {
-  const trackedOrder = trackedMatch[side];
-  if (trackedOrder) {
-    const orderPda = findOrderPda(
-      marketProgram.programId,
-      trackedMatch.marketState,
-      BigInt(trackedOrder.orderId),
+  const marketState = await getClobMarketState(trackedMatch.marketState);
+  if (!marketState || !enumIs(marketState.status, "open")) {
+    trackedMatch[side] = null;
+    return;
+  }
+
+  const now = Date.now();
+  const { quoteContext, plan } = await refreshManagedClobHealth(
+    trackedMatch,
+    marketState,
+    now,
+  );
+  trackedMatch.yesBidOrder = quoteContext.yesBidOrder
+    ? toManagedClobOrder(quoteContext.yesBidOrder)
+    : null;
+  trackedMatch.noAskOrder = quoteContext.noAskOrder
+    ? toManagedClobOrder(quoteContext.noAskOrder)
+    : null;
+  const activeOrder =
+    side === "yesBidOrder" ? quoteContext.yesBidOrder : quoteContext.noAskOrder;
+  const decision = evaluateQuoteDecision(
+    side === "yesBidOrder" ? "BID" : "ASK",
+    plan,
+    activeOrder
+      ? {
+          price: activeOrder.price,
+          units: activeOrder.remainingLamports,
+          placedAtMs: activeOrder.placedAtMs,
+        }
+      : null,
+    managedClobQuoteConfig,
+    now,
+  );
+
+  if (activeOrder && decision.shouldCancel) {
+    await cancelManagedClobOrder(
+      trackedMatch,
+      activeOrder,
+      decision.reason ?? "quote-refresh",
     );
-    const orderAccount =
-      await marketProgram.account.order.fetchNullable(orderPda);
-    if (
-      orderAccount &&
-      asNum(orderAccount.filled) < asNum(orderAccount.amount) &&
-      Boolean(orderAccount.active)
-    ) {
-      return;
-    }
+    trackedMatch[side] = null;
+  } else if (activeOrder && decision.shouldKeep) {
+    trackedMatch[side] = toManagedClobOrder(activeOrder);
+    return;
+  }
+
+  if (
+    !decision.shouldPlace ||
+    decision.targetPrice == null ||
+    decision.targetUnits <= 0
+  ) {
+    trackedMatch[side] = null;
+    return;
   }
 
   trackedMatch[side] = await placeManagedClobOrder(
     trackedMatch,
     side === "yesBidOrder" ? SIDE_BID : SIDE_ASK,
-    side === "yesBidOrder" ? configuredBidPrice : configuredAskPrice,
+    decision.targetPrice,
+    decision.targetUnits,
   );
 }
 
@@ -1858,6 +2221,14 @@ async function createOrSyncRound(
     marketState,
     vault,
     createdAt: Date.now(),
+    lastStreamAtMs: Date.now(),
+    lastOracleAtMs: null,
+    lastRpcAtMs: null,
+    lastSyncedAtMs: null,
+    lastResolvedAtMs: null,
+    lastClaimAtMs: null,
+    lastQuoteSnapshot: null,
+    lastQuotePlan: null,
     yesBidOrder: null,
     noAskOrder: null,
   };
@@ -1917,6 +2288,199 @@ async function maybeSeedMarket(trackedMatch: ActiveClobMatch): Promise<void> {
 
 const activeClobMatches = new Map<string, ActiveClobMatch>();
 const unresolvedOracleWarningMatches = new Set<string>();
+const settledClobHealth = new Map<string, KeeperMarketHealthRecord>();
+
+function loadPreviousBotHealthSnapshot(): KeeperBotHealthSnapshot | null {
+  if (!BOT_HEALTH_FILE || !fs_node.existsSync(BOT_HEALTH_FILE)) {
+    return null;
+  }
+  try {
+    return JSON.parse(fs_node.readFileSync(BOT_HEALTH_FILE, "utf8"));
+  } catch (error) {
+    console.warn("[bot] Failed to read previous bot health snapshot:", error);
+    return null;
+  }
+}
+
+const previousBotHealthSnapshot = loadPreviousBotHealthSnapshot();
+if (previousBotHealthSnapshot?.markets.some((market) => market.openOrderCount > 0)) {
+  restartRecoveryObservedAtMs = Date.now();
+  restartRecoveryDetails = `previous snapshot recorded open orders in ${previousBotHealthSnapshot.markets
+    .filter((market) => market.openOrderCount > 0)
+    .map((market) => market.marketRef ?? market.duelKey ?? market.duelId ?? "unknown")
+    .join(", ")}`;
+}
+
+function trimSettledClobHealth(now = Date.now()): void {
+  for (const [duelId, record] of settledClobHealth.entries()) {
+    const referenceTime =
+      record.lastClaimAtMs ?? record.lastResolvedAtMs ?? record.lastOracleAtMs ?? 0;
+    if (referenceTime > 0 && now - referenceTime > MARKET_HEALTH_RETENTION_MS) {
+      settledClobHealth.delete(duelId);
+    }
+  }
+}
+
+function buildTrackedMatchRecovery(
+  trackedMatch: ActiveClobMatch,
+  snapshot: MarketSnapshot | null,
+  grossExposure: number,
+): string[] {
+  const recovery: string[] = [];
+  if (unresolvedOracleWarningMatches.has(trackedMatch.duelId)) {
+    recovery.push("awaiting-authoritative-result");
+  }
+  if (
+    trackedMatch.lastResolvedAtMs != null &&
+    trackedMatch.lastClaimAtMs == null &&
+    grossExposure > 0
+  ) {
+    recovery.push("partial-claim");
+  }
+  if (
+    restartRecoveryObservedAtMs != null &&
+    (trackedMatch.yesBidOrder != null || trackedMatch.noAskOrder != null)
+  ) {
+    recovery.push("restart-open-orders");
+  }
+  if (snapshot?.lifecycleStatus === "LOCKED" && grossExposure > 0) {
+    recovery.push("position-reconcile-pending");
+  }
+  return recovery;
+}
+
+function buildManagedClobHealthRecord(
+  trackedMatch: ActiveClobMatch,
+  lifecycleStatusOverride?: MarketSnapshot["lifecycleStatus"],
+): KeeperMarketHealthRecord {
+  const snapshot = trackedMatch.lastQuoteSnapshot;
+  const plan = trackedMatch.lastQuotePlan;
+  const inventoryYes = snapshot?.exposure.yes ?? 0;
+  const inventoryNo = snapshot?.exposure.no ?? 0;
+  const openYes = snapshot?.exposure.openYes ?? 0;
+  const openNo = snapshot?.exposure.openNo ?? 0;
+  const grossExposure = inventoryYes + inventoryNo + openYes + openNo;
+  return {
+    chainKey: "solana",
+    duelId: trackedMatch.duelId,
+    duelKey: trackedMatch.duelKeyHex,
+    marketRef: trackedMatch.marketState.toBase58(),
+    lifecycleStatus: lifecycleStatusOverride ?? snapshot?.lifecycleStatus ?? "UNKNOWN",
+    fairValue: plan?.fairValue ?? null,
+    bidPrice: plan?.bidPrice ?? null,
+    askPrice: plan?.askPrice ?? null,
+    bidUnits: plan?.bidUnits ?? 0,
+    askUnits: plan?.askUnits ?? 0,
+    openOrderCount:
+      Number(trackedMatch.yesBidOrder != null) + Number(trackedMatch.noAskOrder != null),
+    inventoryYes,
+    inventoryNo,
+    openYes,
+    openNo,
+    netExposure: (inventoryYes + openYes) - (inventoryNo + openNo),
+    grossExposure,
+    drawdownBps: plan?.risk.drawdownBps ?? snapshot?.exposure.drawdownBps ?? 0,
+    quoteAgeMs: snapshot?.quoteAgeMs ?? null,
+    lastStreamAtMs: trackedMatch.lastStreamAtMs ?? lastStreamEventAtMs ?? null,
+    lastOracleAtMs: trackedMatch.lastOracleAtMs,
+    lastRpcAtMs: trackedMatch.lastRpcAtMs ?? lastSuccessfulRpcAtMs,
+    circuitBreakerReason: plan?.risk.circuitBreaker.reason ?? null,
+    lastResolvedAtMs: trackedMatch.lastResolvedAtMs,
+    lastClaimAtMs: trackedMatch.lastClaimAtMs,
+    recovery: buildTrackedMatchRecovery(trackedMatch, snapshot, grossExposure),
+  };
+}
+
+async function captureSettledClobHealth(
+  trackedMatch: ActiveClobMatch,
+  lifecycleStatus: MarketSnapshot["lifecycleStatus"],
+): Promise<void> {
+  const marketState = await getClobMarketState(trackedMatch.marketState);
+  const now = Date.now();
+  await refreshManagedClobHealth(trackedMatch, marketState, now);
+  trackedMatch.lastResolvedAtMs = now;
+  trackedMatch.yesBidOrder = null;
+  trackedMatch.noAskOrder = null;
+  settledClobHealth.set(
+    trackedMatch.duelId,
+    buildManagedClobHealthRecord(trackedMatch, lifecycleStatus),
+  );
+  trimSettledClobHealth(now);
+}
+
+function buildBotRecoveryStates(now = Date.now()): KeeperRecoveryState[] {
+  return [
+    {
+      code: "rpc-backoff",
+      active: rpcBlockedUntil > now,
+      sinceMs: rpcBlockedUntil > now ? now : null,
+      untilMs: rpcBlockedUntil > now ? rpcBlockedUntil : null,
+      details: rpcBlockedUntil > now ? "waiting for RPC backoff window" : null,
+    },
+    {
+      code: "funding-backoff",
+      active: fundingBlockedUntil > now,
+      sinceMs: fundingBlockedUntil > now ? now : null,
+      untilMs: fundingBlockedUntil > now ? fundingBlockedUntil : null,
+      details:
+        fundingBlockedUntil > now ? "bot signer funding below threshold" : null,
+    },
+    {
+      code: "chain-backoff",
+      active: chainCheckBlockedUntil > now,
+      sinceMs: chainCheckBlockedUntil > now ? now : null,
+      untilMs: chainCheckBlockedUntil > now ? chainCheckBlockedUntil : null,
+      details:
+        chainCheckBlockedUntil > now
+          ? "keeper chain readiness check cooling down"
+          : null,
+    },
+    {
+      code: "restart-reconcile",
+      active: restartRecoveryObservedAtMs != null,
+      sinceMs: restartRecoveryObservedAtMs,
+      untilMs: null,
+      details: restartRecoveryDetails,
+    },
+    {
+      code: "awaiting-result",
+      active: unresolvedOracleWarningMatches.size > 0,
+      sinceMs: unresolvedOracleWarningMatches.size > 0 ? now : null,
+      untilMs: null,
+      details:
+        unresolvedOracleWarningMatches.size > 0
+          ? `${unresolvedOracleWarningMatches.size} locked duel(s) waiting on authoritative result`
+          : null,
+    },
+  ];
+}
+
+function writeBotHealthSnapshot(): void {
+  if (!BOT_HEALTH_FILE) return;
+  try {
+    trimSettledClobHealth();
+    const activeRecords = Array.from(activeClobMatches.values()).map((trackedMatch) =>
+      buildManagedClobHealthRecord(trackedMatch),
+    );
+    const recentSettledRecords = Array.from(settledClobHealth.entries())
+      .filter(([duelId]) => !activeClobMatches.has(duelId))
+      .map(([, record]) => record);
+    const snapshot: KeeperBotHealthSnapshot = {
+      chainKey: "solana",
+      updatedAtMs: Date.now(),
+      bootedAtMs: botBootedAtMs,
+      running: true,
+      processId: typeof process.pid === "number" ? process.pid : null,
+      lastSuccessfulRpcAtMs,
+      recovery: buildBotRecoveryStates(),
+      markets: [...activeRecords, ...recentSettledRecords],
+    };
+    fs_node.mkdirSync(path.dirname(BOT_HEALTH_FILE), { recursive: true });
+    fs_node.writeFileSync(BOT_HEALTH_FILE, JSON.stringify(snapshot, null, 2));
+  } catch (error) {
+    console.warn("[bot] Failed to write bot health snapshot:", error);
+  }
+}
 
 async function reportRoundResult(data: DuelLifecycleEvent): Promise<void> {
   const trackedMatch = activeClobMatches.get(data.duelId);
@@ -1958,8 +2522,11 @@ async function reportRoundResult(data: DuelLifecycleEvent): Promise<void> {
   const duelState = await getDuelState(trackedMatch.duelState);
   if (duelState && enumIs(duelState.status, "resolved")) {
     await syncTrackedMarketFromOracle(trackedMatch);
+    trackedMatch.lastResolvedAtMs = Date.now();
+    await captureSettledClobHealth(trackedMatch, "RESOLVED");
     activeClobMatches.delete(data.duelId);
     unresolvedOracleWarningMatches.delete(data.duelId);
+    writeBotHealthSnapshot();
     return;
   }
 
@@ -1999,9 +2566,13 @@ async function reportRoundResult(data: DuelLifecycleEvent): Promise<void> {
         .rpc(),
     connection,
   );
+  const resolutionRecordedAt = markRpcSuccess(trackedMatch);
+  trackedMatch.lastOracleAtMs = resolutionRecordedAt;
+  trackedMatch.lastResolvedAtMs = resolutionRecordedAt;
 
   unresolvedOracleWarningMatches.delete(data.duelId);
   await syncTrackedMarketFromOracle(trackedMatch);
+  await captureSettledClobHealth(trackedMatch, "RESOLVED");
   activeClobMatches.delete(data.duelId);
 
   console.log(
@@ -2017,12 +2588,14 @@ async function reportRoundResult(data: DuelLifecycleEvent): Promise<void> {
       2,
     ),
   );
+  writeBotHealthSnapshot();
 }
 
 // Event-driven Logic
 const gameClient = new GameClient(args["game-url"]);
 
 gameClient.onDuelStart(async (data) => {
+  markStreamEvent();
   if (!keeperProgramApiReady) {
     warnMissingKeeperMethodsOnce();
     return;
@@ -2052,9 +2625,11 @@ gameClient.onDuelStart(async (data) => {
   } catch (err) {
     console.error("Failed to create market for duel:", err);
   }
+  writeBotHealthSnapshot();
 });
 
 gameClient.onBettingLocked(async (data) => {
+  markStreamEvent(activeClobMatches.get(data.duelId) ?? null);
   if (!keeperProgramApiReady) {
     warnMissingKeeperMethodsOnce();
     return;
@@ -2070,9 +2645,11 @@ gameClient.onBettingLocked(async (data) => {
   } catch (error) {
     console.error("Failed to lock market for duel:", error);
   }
+  writeBotHealthSnapshot();
 });
 
 gameClient.onDuelEnd(async (data) => {
+  markStreamEvent(activeClobMatches.get(data.duelId) ?? null);
   if (!keeperProgramApiReady) {
     warnMissingKeeperMethodsOnce();
     return;
@@ -2147,8 +2724,10 @@ gameClient.onDuelEnd(async (data) => {
   } catch (err) {
     console.error("Failed to resolve market:", err);
   }
+  writeBotHealthSnapshot();
 });
 
+writeBotHealthSnapshot();
 gameClient.connect();
 
 // Maintenance Loop (Seeding & Cleanup)
@@ -2194,11 +2773,17 @@ async function runMaintenance(): Promise<void> {
     }
 
     if (enumIs(duelState.status, "locked")) {
+      await cancelManagedClobQuotes(trackedMatch, "market-locked");
       await maybeWarnUnresolvedDuel(trackedMatch);
       continue;
     }
 
     if (enumIs(duelState.status, "resolved") || enumIs(duelState.status, "cancelled")) {
+      trackedMatch.lastResolvedAtMs = trackedMatch.lastResolvedAtMs ?? Date.now();
+      await captureSettledClobHealth(
+        trackedMatch,
+        enumIs(duelState.status, "cancelled") ? "CANCELLED" : "RESOLVED",
+      );
       unresolvedOracleWarningMatches.delete(duelId);
       activeClobMatches.delete(duelId);
     }
@@ -2329,6 +2914,8 @@ for (;;) {
       fundingBlockedUntil = Date.now() + fundingBackoffMs;
     }
     console.error(`[bot] cycle failed: ${(error as Error).message}`);
+  } finally {
+    writeBotHealthSnapshot();
   }
 
   if (args.once) break;

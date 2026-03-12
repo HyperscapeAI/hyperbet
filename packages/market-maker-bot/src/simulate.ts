@@ -22,6 +22,9 @@ function bootstrapDefaults() {
   if (!process.env.EVM_BASE_RPC_URL) {
     process.env.EVM_BASE_RPC_URL = process.env.EVM_BSC_RPC_URL;
   }
+  if (!process.env.EVM_AVAX_RPC_URL) {
+    process.env.EVM_AVAX_RPC_URL = process.env.EVM_BSC_RPC_URL;
+  }
   if (!process.env.SOLANA_RPC_URL) {
     process.env.SOLANA_RPC_URL = "http://127.0.0.1:8899";
   }
@@ -56,6 +59,7 @@ async function main() {
         chainStatus: {
           bsc: config.bscEnabled,
           base: config.baseEnabled,
+          avax: config.avaxEnabled,
           solana: config.solanaEnabled,
         },
         inventory,
@@ -66,7 +70,12 @@ async function main() {
     ),
   );
 
-  if (!config.bscEnabled && !config.baseEnabled && !config.solanaEnabled) {
+  if (
+    !config.bscEnabled &&
+    !config.baseEnabled &&
+    !config.avaxEnabled &&
+    !config.solanaEnabled
+  ) {
     throw new Error("No chain endpoints were reachable");
   }
 }

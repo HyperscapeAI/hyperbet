@@ -4,10 +4,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "anchor:build": "bun run --cwd anchor build",
-    "anchor:deploy:mainnet": "bun run --cwd anchor deploy:mainnet",
-    "anchor:deploy:testnet": "bun run --cwd anchor deploy:testnet",
-    "anchor:test": "bun run --cwd anchor test",
+    "anchor:build": "bun run --cwd ../hyperbet-solana/anchor build",
+    "anchor:deploy:mainnet": "bun run --cwd ../hyperbet-solana/anchor deploy:mainnet",
+    "anchor:deploy:testnet": "bun run --cwd ../hyperbet-solana/anchor deploy:testnet",
+    "anchor:test": "bun run --cwd ../hyperbet-solana/anchor test",
     "deploy:evm:base": "bun run --cwd ../evm-contracts deploy:base",
     "deploy:evm:base-sepolia": "bun run --cwd ../evm-contracts deploy:base-sepolia",
     "deploy:evm:bsc": "bun run --cwd ../evm-contracts deploy:bsc",
@@ -39,6 +39,8 @@
     "keeper:resolve": "bun run --cwd keeper resolve"
   },
   "dependencies": {
+    "@hyperbet/chain-registry": "workspace:*",
+    "@hyperbet/mm-core": "workspace:*",
     "@coral-xyz/anchor": "^0.32.1",
     "@noble/curves": "^2.0.1",
     "@rainbow-me/rainbowkit": "^2.2.10",

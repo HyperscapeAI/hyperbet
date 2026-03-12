@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@coral-xyz/anchor": "0.32.1",
+    "@hyperbet/mm-core": "workspace:*",
     "@solana/kit": "latest",
     "@solana/spl-token": "0.4.14",
     "@solana/web3-compat": "latest",

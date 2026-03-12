@@ -36,6 +36,8 @@
     "keeper:resolve": "bun run --cwd keeper resolve"
   },
   "dependencies": {
+    "@hyperbet/chain-registry": "workspace:*",
+    "@hyperbet/mm-core": "workspace:*",
     "@coral-xyz/anchor": "^0.32.1",
     "@noble/curves": "^2.0.1",
     "@solana/wallet-adapter-phantom": "^0.9.28",

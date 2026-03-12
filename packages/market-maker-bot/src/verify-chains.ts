@@ -1,10 +1,15 @@
-import { ethers } from "ethers";
+import {
+  defaultRpcUrlForEvmNetwork,
+  resolveBettingEvmDeploymentForChain,
+} from "@hyperbet/chain-registry";
 import { Connection, PublicKey } from "@solana/web3.js";
 import dotenv from "dotenv";
+import { ethers } from "ethers";
+
+import { normalizeAddress } from "./index.ts";
 
 dotenv.config();
 
-const DEFAULT_CLOB_ADDRESS = "0x1224094aAe93bc9c52FA6F02a0B1F4700721E26E";
 const DEFAULT_SOLANA_PROGRAM_ID =
   process.env.SOLANA_VERIFY_PROGRAM_ID ||
   process.env.SOLANA_ARENA_MARKET_PROGRAM_ID ||
@@ -14,32 +19,16 @@ const DEFAULT_SOLANA_RPC_URL =
   process.env.SOLANA_RPC_URL ||
   "https://api.mainnet-beta.solana.com";
 
-const BSC_EXPECTED_CHAIN_ID = BigInt(
-  process.env.BSC_EXPECTED_CHAIN_ID || "56",
-);
-const BASE_EXPECTED_CHAIN_ID = BigInt(
-  process.env.BASE_EXPECTED_CHAIN_ID || "8453",
-);
-
 const EVM_CLOB_ABI = ["function feeBps() view returns (uint256)"];
 
-type CheckResult = {
-  chain: "bsc" | "base" | "solana";
+export type CheckResult = {
+  chain: "bsc" | "base" | "avax" | "solana";
   ok: boolean;
   details: string;
 };
 
-const normalizeAddress = (value: string): string => {
-  const trimmed = value.trim();
-  try {
-    return ethers.getAddress(trimmed);
-  } catch {
-    return ethers.getAddress(trimmed.toLowerCase());
-  }
-};
-
-const verifyEvmChain = async (params: {
-  chain: "bsc" | "base";
+export const verifyEvmChain = async (params: {
+  chain: "bsc" | "base" | "avax";
   rpcUrl: string;
   expectedChainId: bigint;
   clobAddress: string;
@@ -64,28 +53,23 @@ const verifyEvmChain = async (params: {
       };
     }
 
-    const clob = new ethers.Contract(
-      params.clobAddress,
-      EVM_CLOB_ABI,
-      provider,
-    );
+    const clob = new ethers.Contract(params.clobAddress, EVM_CLOB_ABI, provider);
     const feeBps = (await clob.feeBps()) as bigint;
     return {
       chain: params.chain,
       ok: true,
       details: `chainId=${network.chainId.toString()} clob=${params.clobAddress} feeBps=${feeBps.toString()}`,
     };
-  } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : String(error);
+  } catch (error) {
     return {
       chain: params.chain,
       ok: false,
-      details: message,
+      details: error instanceof Error ? error.message : String(error),
     };
   }
 };
 
-const verifySolanaChain = async (params: {
+export const verifySolanaChain = async (params: {
   rpcUrl: string;
   programId: string;
 }): Promise<CheckResult> => {
@@ -113,41 +97,53 @@ const verifySolanaChain = async (params: {
     return {
       chain: "solana",
       ok: true,
-      details: `rpc=${params.rpcUrl} program=${programId.toBase58()} configPda=${configInfo ? "present" : "missing"
-        } core=${coreVersion}`,
+      details: `rpc=${params.rpcUrl} program=${programId.toBase58()} configPda=${configInfo ? "present" : "missing"} core=${coreVersion}`,
     };
-  } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : String(error);
+  } catch (error) {
     return {
       chain: "solana",
       ok: false,
-      details: `rpc=${params.rpcUrl} ${message}`,
+      details: error instanceof Error ? error.message : String(error),
     };
   }
 };
 
-const run = async () => {
+async function run() {
+  const bscDeployment = resolveBettingEvmDeploymentForChain("bsc", "mainnet-beta");
+  const baseDeployment = resolveBettingEvmDeploymentForChain("base", "mainnet-beta");
+  const avaxDeployment = resolveBettingEvmDeploymentForChain("avax", "mainnet-beta");
   const results = await Promise.all([
     verifyEvmChain({
       chain: "bsc",
       rpcUrl:
         process.env.EVM_BSC_RPC_URL ||
-        process.env.BSC_TESTNET_RPC ||
-        "https://data-seed-prebsc-1-s1.binance.org:8545",
-      expectedChainId: BSC_EXPECTED_CHAIN_ID,
+        process.env[bscDeployment.rpcEnvVar] ||
+        defaultRpcUrlForEvmNetwork(bscDeployment.networkKey),
+      expectedChainId: BigInt(process.env.BSC_EXPECTED_CHAIN_ID || bscDeployment.chainId),
       clobAddress: normalizeAddress(
-        process.env.CLOB_CONTRACT_ADDRESS_BSC || DEFAULT_CLOB_ADDRESS,
+        process.env.CLOB_CONTRACT_ADDRESS_BSC || bscDeployment.goldClobAddress,
       ),
     }),
     verifyEvmChain({
       chain: "base",
       rpcUrl:
         process.env.EVM_BASE_RPC_URL ||
-        process.env.BASE_SEPOLIA_RPC ||
-        "https://sepolia.base.org",
-      expectedChainId: BASE_EXPECTED_CHAIN_ID,
+        process.env[baseDeployment.rpcEnvVar] ||
+        defaultRpcUrlForEvmNetwork(baseDeployment.networkKey),
+      expectedChainId: BigInt(process.env.BASE_EXPECTED_CHAIN_ID || baseDeployment.chainId),
       clobAddress: normalizeAddress(
-        process.env.CLOB_CONTRACT_ADDRESS_BASE || DEFAULT_CLOB_ADDRESS,
+        process.env.CLOB_CONTRACT_ADDRESS_BASE || baseDeployment.goldClobAddress,
+      ),
+    }),
+    verifyEvmChain({
+      chain: "avax",
+      rpcUrl:
+        process.env.EVM_AVAX_RPC_URL ||
+        process.env[avaxDeployment.rpcEnvVar] ||
+        defaultRpcUrlForEvmNetwork(avaxDeployment.networkKey),
+      expectedChainId: BigInt(process.env.AVAX_EXPECTED_CHAIN_ID || avaxDeployment.chainId),
+      clobAddress: normalizeAddress(
+        process.env.CLOB_CONTRACT_ADDRESS_AVAX || avaxDeployment.goldClobAddress,
       ),
     }),
     verifySolanaChain({
@@ -163,16 +159,16 @@ const run = async () => {
     );
   }
 
-  const failures = results.filter((result) => !result.ok);
-  if (failures.length > 0) {
+  if (results.some((result) => !result.ok)) {
     process.exitCode = 1;
-    return;
   }
-  process.exitCode = 0;
-};
+}
 
-run().catch((error: unknown) => {
-  const message = error instanceof Error ? error.message : String(error);
-  console.error(`[verify-chains] fatal: ${message}`);
-  process.exit(1);
-});
+if (import.meta.url === `file://${process.argv[1]}`) {
+  run().catch((error) => {
+    console.error(
+      `[verify-chains] fatal: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    process.exit(1);
+  });
+}

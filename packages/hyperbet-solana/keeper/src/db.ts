@@ -9,6 +9,7 @@
 import { Database } from "bun:sqlite";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import type { RecordedBetChain } from "@hyperbet/chain-registry";
 import type { AgentRating } from "./trueskill";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -19,13 +20,15 @@ const DB_PATH = process.env.KEEPER_DB_PATH?.trim()
 export type DbBetRecord = {
   id: string;
   bettorWallet: string;
-  chain: "SOLANA";
+  chain: RecordedBetChain;
   sourceAsset: string;
   sourceAmount: number;
   goldAmount: number;
   feeBps: number;
   txSignature: string;
   marketPda: string | null;
+  duelKey: string | null;
+  duelId: string | null;
   inviteCode: string | null;
   externalBetRef: string | null;
   recordedAt: number;
@@ -110,10 +113,22 @@ db.run(`CREATE TABLE IF NOT EXISTS bets (
   fee_bps INTEGER NOT NULL DEFAULT 0,
   tx_signature TEXT NOT NULL DEFAULT '',
   market_pda TEXT,
+  duel_key TEXT,
+  duel_id TEXT,
   invite_code TEXT,
   external_bet_ref TEXT,
   recorded_at INTEGER NOT NULL
 )`);
+try {
+  db.run("ALTER TABLE bets ADD COLUMN duel_key TEXT");
+} catch {
+  // Column already exists.
+}
+try {
+  db.run("ALTER TABLE bets ADD COLUMN duel_id TEXT");
+} catch {
+  // Column already exists.
+}
 
 db.run(`CREATE TABLE IF NOT EXISTS wallet_display (
   normalized_wallet TEXT PRIMARY KEY,
@@ -237,9 +252,9 @@ db.run(`CREATE INDEX IF NOT EXISTS idx_perps_markets_status_seen
 
 const insertBet = db.prepare(`INSERT OR IGNORE INTO bets
   (id, bettor_wallet, chain, source_asset, source_amount, gold_amount,
-   fee_bps, tx_signature, market_pda, invite_code, external_bet_ref, recorded_at)
+   fee_bps, tx_signature, market_pda, duel_key, duel_id, invite_code, external_bet_ref, recorded_at)
   VALUES ($id, $bettorWallet, $chain, $sourceAsset, $sourceAmount, $goldAmount,
-          $feeBps, $txSignature, $marketPda, $inviteCode, $externalBetRef, $recordedAt)`);
+          $feeBps, $txSignature, $marketPda, $duelKey, $duelId, $inviteCode, $externalBetRef, $recordedAt)`);
 
 const upsertWalletDisplay =
   db.prepare(`INSERT INTO wallet_display (normalized_wallet, display_name)
@@ -359,7 +374,7 @@ export function loadAll(betLimit = 5000): HydratedState {
     db
       .prepare(
         `SELECT id, bettor_wallet, chain, source_asset, source_amount, gold_amount,
-          fee_bps, tx_signature, market_pda, invite_code, external_bet_ref, recorded_at
+          fee_bps, tx_signature, market_pda, duel_key, duel_id, invite_code, external_bet_ref, recorded_at
          FROM bets ORDER BY recorded_at DESC LIMIT ?`,
       )
       .all(betLimit) as Array<Record<string, unknown>>
@@ -374,6 +389,8 @@ export function loadAll(betLimit = 5000): HydratedState {
       feeBps: Number(row.fee_bps),
       txSignature: String(row.tx_signature),
       marketPda: row.market_pda != null ? String(row.market_pda) : null,
+      duelKey: row.duel_key != null ? String(row.duel_key) : null,
+      duelId: row.duel_id != null ? String(row.duel_id) : null,
       inviteCode: row.invite_code != null ? String(row.invite_code) : null,
       externalBetRef:
         row.external_bet_ref != null ? String(row.external_bet_ref) : null,
@@ -532,6 +549,8 @@ export function saveBet(bet: DbBetRecord): void {
     $feeBps: bet.feeBps,
     $txSignature: bet.txSignature,
     $marketPda: bet.marketPda,
+    $duelKey: bet.duelKey,
+    $duelId: bet.duelId,
     $inviteCode: bet.inviteCode,
     $externalBetRef: bet.externalBetRef,
     $recordedAt: bet.recordedAt,

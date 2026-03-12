@@ -14,6 +14,11 @@
     "build:solana": "bun run --cwd packages/hyperbet-solana build",
     "build:bsc": "bun run --cwd packages/hyperbet-bsc build",
     "build:avax": "bun run --cwd packages/hyperbet-avax build",
+    "dev:doctor": "bun scripts/dev-doctor.ts",
+    "dev:bootstrap": "bun scripts/dev-bootstrap.ts",
+    "dev:local:solana": "bun scripts/run-local-demo.ts solana",
+    "dev:local:bsc": "bun scripts/run-local-demo.ts bsc",
+    "dev:local:avax": "bun scripts/run-local-demo.ts avax",
     "test": "turbo run test",
     "test:solana": "bun run --cwd packages/hyperbet-solana test:e2e:local",
     "test:bsc": "bun run --cwd packages/hyperbet-bsc test:e2e:local",
@@ -58,5 +63,5 @@
     "react-dom": "19.2.4",
     "typescript": "^5.9.3"
   },
-  "packageManager": "bun@1.1.38"
+  "packageManager": "bun@1.3.1"
 }
