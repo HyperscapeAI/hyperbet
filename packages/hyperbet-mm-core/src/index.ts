@@ -225,7 +225,9 @@ export interface PredictionMarketStatusRecord
 }
 
 export interface ScenarioResult {
+  scenarioId: string;
   name: string;
+  family: string;
   seed: string;
   chainKey: BettingChainKey;
   attackerPnl: number;
@@ -238,6 +240,8 @@ export interface ScenarioResult {
   lockTransitionLatencyMs: number | null;
   resolvedCorrectly: boolean;
   claimCorrectly: boolean;
+  passed: boolean;
+  degraded: boolean;
   gates: MitigationGate[];
   traces: AgentActionTrace[];
 }

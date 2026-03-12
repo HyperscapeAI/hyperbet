@@ -347,20 +347,20 @@ contract GoldClob is AccessControl, ReentrancyGuard {
 
         MarketStatus status = syncMarketFromOracle(duelKey, marketKind);
         Position storage position = positions[key][msg.sender];
+        bool hasPosition = position.aShares > 0 || position.bShares > 0 || position.aStake > 0 || position.bStake > 0;
+        require(hasPosition, "nothing to claim");
 
         uint256 payout = 0;
         if (status == MarketStatus.RESOLVED) {
             uint256 winningShares = market.winner == Side.A ? position.aShares : position.bShares;
-            if (winningShares == 0) revert NothingToClaim();
-
-            uint256 fee = (winningShares * winningsMarketMakerFeeBps) / MAX_FEE_BPS;
-            payout = winningShares - fee;
             _clearPosition(position);
-
-            if (fee > 0) payable(marketMaker).sendValue(fee);
+            if (winningShares > 0) {
+                uint256 fee = (winningShares * winningsMarketMakerFeeBps) / MAX_FEE_BPS;
+                payout = winningShares - fee;
+                if (fee > 0) payable(marketMaker).sendValue(fee);
+            }
         } else if (status == MarketStatus.CANCELLED) {
             payout = uint256(position.aStake) + uint256(position.bStake);
-            if (payout == 0) revert NothingToClaim();
             _clearPosition(position);
         } else {
             revert MarketNotSettled();

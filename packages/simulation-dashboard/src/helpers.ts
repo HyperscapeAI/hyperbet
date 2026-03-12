@@ -48,6 +48,18 @@ export type Artifact = {
 };
 
 export function loadArtifact(contractsDir: string, name: string): Artifact {
+    const foundryPath = join(
+        contractsDir,
+        "out",
+        `${name}.sol`,
+        `${name}.json`,
+    );
+    try {
+        return JSON.parse(readFileSync(foundryPath, "utf8")) as Artifact;
+    } catch {
+        // Fall back to Hardhat artifacts.
+    }
+
     // Try the nested contracts/<name>.sol/<name>.json format first
     const nestedPath = join(
         contractsDir,
@@ -76,8 +88,65 @@ export function sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+export async function withTimeout<T>(
+    promise: Promise<T>,
+    ms: number,
+    label: string,
+): Promise<T> {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    try {
+        return await Promise.race([
+            promise,
+            new Promise<never>((_, reject) => {
+                timer = setTimeout(() => {
+                    reject(new Error(`${label} timed out after ${ms}ms`));
+                }, ms);
+            }),
+        ]);
+    } finally {
+        if (timer != null) {
+            clearTimeout(timer);
+        }
+    }
+}
+
+let randomSource: () => number = () => Math.random();
+
+function hashSeed(seed: string | number): number {
+    const value = String(seed);
+    let hash = 2166136261;
+    for (let i = 0; i < value.length; i += 1) {
+        hash ^= value.charCodeAt(i);
+        hash = Math.imul(hash, 16777619);
+    }
+    return hash >>> 0;
+}
+
+function mulberry32(seed: number): () => number {
+    let state = seed >>> 0;
+    return () => {
+        state = (state + 0x6d2b79f5) >>> 0;
+        let next = state;
+        next = Math.imul(next ^ (next >>> 15), next | 1);
+        next ^= next + Math.imul(next ^ (next >>> 7), next | 61);
+        return ((next ^ (next >>> 14)) >>> 0) / 4294967296;
+    };
+}
+
+export function random(): number {
+    return randomSource();
+}
+
+export function setRandomSeed(seed: string | number): void {
+    randomSource = mulberry32(hashSeed(seed));
+}
+
+export function resetRandomSource(): void {
+    randomSource = () => Math.random();
+}
+
 export function randomInt(min: number, max: number): number {
-    return Math.floor(Math.random() * (max - min + 1)) + min;
+    return Math.floor(random() * (max - min + 1)) + min;
 }
 
 export function clamp(value: number, min: number, max: number): number {

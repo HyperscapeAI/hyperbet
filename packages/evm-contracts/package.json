@@ -1,44 +1,44 @@
 {
-    "name": "@hyperbet/evm-contracts",
-    "version": "0.1.0",
-    "private": true,
-    "type": "commonjs",
-    "scripts": {
+  "name": "@hyperbet/evm-contracts",
+  "version": "0.1.0",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
     "compile": "hardhat compile",
     "test": "hardhat test",
     "test:anvil": "bash scripts/run-anvil-contract-suite.sh",
-    "test:fuzz": "hardhat test test/GoldClob.fuzz.ts",
-    "test:foundry": "forge test",
+    "test:fuzz": "forge test --match-path 'test/fuzz/**/*.t.sol'",
+    "test:foundry": "forge test --match-path 'test/**/*.t.sol' --no-match-path 'test/fuzz/**'",
     "analyze:slither": "slither . --exclude-dependencies --filter-paths 'node_modules|out|cache|lib' --exclude timestamp,pragma,solc-version,cyclomatic-complexity",
     "deploy:bsc-testnet": "hardhat run scripts/deploy.ts --network bscTestnet",
-        "deploy:base-sepolia": "hardhat run scripts/deploy.ts --network baseSepolia",
-        "deploy:avax-fuji": "hardhat run scripts/deploy.ts --network avaxFuji",
-        "deploy:bsc": "hardhat run scripts/deploy.ts --network bsc",
-        "deploy:base": "hardhat run scripts/deploy.ts --network base",
-        "deploy:avax": "hardhat run scripts/deploy.ts --network avax",
-        "deploy:duel-oracle:bsc-testnet": "hardhat run scripts/deploy-duel-oracle.ts --network bscTestnet",
-        "deploy:duel-oracle:base-sepolia": "hardhat run scripts/deploy-duel-oracle.ts --network baseSepolia",
-        "deploy:duel-oracle:avax-fuji": "hardhat run scripts/deploy-duel-oracle.ts --network avaxFuji",
-        "deploy:duel-oracle:bsc": "hardhat run scripts/deploy-duel-oracle.ts --network bsc",
-        "deploy:duel-oracle:base": "hardhat run scripts/deploy-duel-oracle.ts --network base",
-        "deploy:duel-oracle:avax": "hardhat run scripts/deploy-duel-oracle.ts --network avax",
-        "simulate:localnet": "hardhat run scripts/simulate-localnet.ts",
+    "deploy:base-sepolia": "hardhat run scripts/deploy.ts --network baseSepolia",
+    "deploy:avax-fuji": "hardhat run scripts/deploy.ts --network avaxFuji",
+    "deploy:bsc": "hardhat run scripts/deploy.ts --network bsc",
+    "deploy:base": "hardhat run scripts/deploy.ts --network base",
+    "deploy:avax": "hardhat run scripts/deploy.ts --network avax",
+    "deploy:duel-oracle:bsc-testnet": "hardhat run scripts/deploy-duel-oracle.ts --network bscTestnet",
+    "deploy:duel-oracle:base-sepolia": "hardhat run scripts/deploy-duel-oracle.ts --network baseSepolia",
+    "deploy:duel-oracle:avax-fuji": "hardhat run scripts/deploy-duel-oracle.ts --network avaxFuji",
+    "deploy:duel-oracle:bsc": "hardhat run scripts/deploy-duel-oracle.ts --network bsc",
+    "deploy:duel-oracle:base": "hardhat run scripts/deploy-duel-oracle.ts --network base",
+    "deploy:duel-oracle:avax": "hardhat run scripts/deploy-duel-oracle.ts --network avax",
+    "simulate:localnet": "hardhat run scripts/simulate-localnet.ts",
     "simulate:adversarial:anvil": "ts-node --transpile-only scripts/simulate-adversarial-localnet.ts"
-    },
-    "devDependencies": {
-        "@types/chai": "^5.2.3",
-        "@nomicfoundation/hardhat-chai-matchers": "^2.1.0",
-        "@nomicfoundation/hardhat-ethers": "^3.1.0",
-        "@types/mocha": "^10.0.6",
-        "@types/node": "^25.3.0",
-        "chai": "^6.2.2",
-        "dotenv": "^17.3.1",
-        "ethers": "^6.11.1",
-        "hardhat": "^2.26.0",
-        "ts-node": "^10.9.2",
-        "typescript": "^5.9.3"
-    },
-    "dependencies": {
-        "@openzeppelin/contracts": "^5.0.0"
-    }
+  },
+  "devDependencies": {
+    "@types/chai": "^5.2.3",
+    "@nomicfoundation/hardhat-chai-matchers": "^2.1.0",
+    "@nomicfoundation/hardhat-ethers": "^3.1.0",
+    "@types/mocha": "^10.0.6",
+    "@types/node": "^25.3.0",
+    "chai": "^6.2.2",
+    "dotenv": "^17.3.1",
+    "ethers": "^6.11.1",
+    "hardhat": "^2.26.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "@openzeppelin/contracts": "^5.0.0"
+  }
 }

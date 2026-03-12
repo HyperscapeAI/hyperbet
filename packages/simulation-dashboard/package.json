@@ -5,9 +5,11 @@
     "type": "module",
     "scripts": {
         "dev": "tsx src/server.ts",
-        "build": "tsc --noEmit"
+        "build": "tsc --noEmit",
+        "scenario": "tsx src/cli.ts"
     },
     "dependencies": {
+        "@hyperbet/mm-core": "workspace:*",
         "ethers": "^6.11.1",
         "ws": "^8.18.0"
     },

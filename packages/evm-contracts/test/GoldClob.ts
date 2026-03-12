@@ -328,6 +328,96 @@ describe("GoldClob", function () {
     expect(claimReceipt?.status).to.equal(1);
   });
 
+  it("clears losing trader state on first post-resolution claim and rejects repeated claims", async function () {
+    const { clob, oracle, operator, reporter, traderA, traderB } =
+      await deployFixture();
+    const duel = duelKey("duel-loser-clear");
+
+    const openedAt = await upsertOpenDuel(oracle, reporter, duel);
+    await clob
+      .connect(operator)
+      .createMarketForDuel(duel, MARKET_KIND_DUEL_WINNER);
+
+    const amount = 1000n;
+    await clob
+      .connect(traderA)
+      .placeOrder(duel, MARKET_KIND_DUEL_WINNER, SELL_SIDE, 600, amount, {
+        value: quoteCost(SELL_SIDE, 600, amount) + 20n,
+      });
+    await clob
+      .connect(traderB)
+      .placeOrder(duel, MARKET_KIND_DUEL_WINNER, BUY_SIDE, 600, amount, {
+        value: quoteCost(BUY_SIDE, 600, amount) + 20n,
+      });
+
+    const marketKey = await clob.marketKey(duel, MARKET_KIND_DUEL_WINNER);
+    const loserBefore = await clob.positions(marketKey, traderA.address);
+    expect(loserBefore.bShares).to.equal(amount);
+    expect(loserBefore.bStake).to.equal(quoteCost(SELL_SIDE, 600, amount));
+
+    await oracle
+      .connect(reporter)
+      .reportResult(
+        duel,
+        SIDE_A,
+        99,
+        ethers.keccak256(ethers.toUtf8Bytes("replay-loser")),
+        ethers.keccak256(ethers.toUtf8Bytes("result-loser")),
+        openedAt + 180n,
+        "resolved-loser",
+      );
+    await clob
+      .connect(operator)
+      .syncMarketFromOracle(duel, MARKET_KIND_DUEL_WINNER);
+
+    await expectTxSuccess(
+      clob.connect(traderA).claim(duel, MARKET_KIND_DUEL_WINNER),
+    );
+
+    const loserAfter = await clob.positions(marketKey, traderA.address);
+    expect(loserAfter.aShares).to.equal(0n);
+    expect(loserAfter.bShares).to.equal(0n);
+    expect(loserAfter.aStake).to.equal(0n);
+    expect(loserAfter.bStake).to.equal(0n);
+
+    await expect(
+      clob.connect(traderA).claim(duel, MARKET_KIND_DUEL_WINNER),
+    ).to.be.revertedWith("nothing to claim");
+    await expectTxSuccess(
+      clob.connect(traderB).claim(duel, MARKET_KIND_DUEL_WINNER),
+    );
+    await expect(
+      clob.connect(traderB).claim(duel, MARKET_KIND_DUEL_WINNER),
+    ).to.be.revertedWith("nothing to claim");
+  });
+
+  it("rejects claims before the market is settled", async function () {
+    const { clob, oracle, operator, reporter, traderA, traderB } =
+      await deployFixture();
+    const duel = duelKey("duel-unresolved-claim");
+
+    await upsertOpenDuel(oracle, reporter, duel);
+    await clob
+      .connect(operator)
+      .createMarketForDuel(duel, MARKET_KIND_DUEL_WINNER);
+
+    const amount = 1000n;
+    await clob
+      .connect(traderA)
+      .placeOrder(duel, MARKET_KIND_DUEL_WINNER, SELL_SIDE, 600, amount, {
+        value: quoteCost(SELL_SIDE, 600, amount) + 20n,
+      });
+    await clob
+      .connect(traderB)
+      .placeOrder(duel, MARKET_KIND_DUEL_WINNER, BUY_SIDE, 600, amount, {
+        value: quoteCost(BUY_SIDE, 600, amount) + 20n,
+      });
+
+    await expect(
+      clob.connect(traderA).claim(duel, MARKET_KIND_DUEL_WINNER),
+    ).to.be.revertedWithCustomError(clob, "MarketNotSettled");
+  });
+
   it("refunds recorded stake on duel cancellation", async function () {
     const { clob, oracle, operator, reporter, traderA, traderB } =
       await deployFixture();
