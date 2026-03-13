@@ -30,8 +30,8 @@ run("bash", [
   "hyperbet-solana-anchor",
   "hyperbet-solana-app",
   "hyperbet-solana-keeper",
-  "hyperbet-bsc-app",
-  "hyperbet-bsc-keeper",
-  "hyperbet-avax-app",
-  "hyperbet-avax-keeper",
+  "hyperbet-evm-app",
+  "hyperbet-evm-keeper",
+  "hyperbet-evm-app",
+  "hyperbet-evm-keeper",
 ]);

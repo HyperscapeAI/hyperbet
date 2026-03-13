@@ -1,0 +1,53 @@
+{
+  "name": "@hyperbet/hyperbet-evm",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "anchor:build": "bun run --cwd ../hyperbet-solana/anchor build",
+    "anchor:deploy:mainnet": "bun run --cwd ../hyperbet-solana/anchor deploy:mainnet",
+    "anchor:deploy:testnet": "bun run --cwd ../hyperbet-solana/anchor deploy:testnet",
+    "anchor:test": "bun run --cwd ../hyperbet-solana/anchor test",
+    "deploy:evm:base": "bun run --cwd ../evm-contracts deploy:base",
+    "deploy:evm:base-sepolia": "bun run --cwd ../evm-contracts deploy:base-sepolia",
+    "deploy:evm:bsc": "bun run --cwd ../evm-contracts deploy:bsc",
+    "deploy:evm:bsc-testnet": "bun run --cwd ../evm-contracts deploy:bsc-testnet",
+    "deploy:preflight:mainnet": "bun run scripts/preflight-contract-deploy.ts --target mainnet",
+    "deploy:preflight:testnet": "bun run scripts/preflight-contract-deploy.ts --target testnet",
+    "sync:anchor-artifacts": "node scripts/sync-anchor-artifacts.mjs",
+    "dev": "bun run --cwd app dev --mode devnet",
+    "dev:local": "bash app/scripts/run-local-demo.sh",
+    "dev:devnet": "bun run --cwd app dev --mode devnet",
+    "dev:stream-ui": "bun run --cwd app dev --mode stream-ui",
+    "dev:app-local": "bun run --cwd app dev --mode local",
+    "dev:testnet": "bun run --cwd app dev --mode testnet",
+    "dev:mainnet": "bun run --cwd app dev --mode mainnet",
+    "build": "bun run --cwd app build",
+    "build:testnet": "bun run --cwd app build --mode testnet",
+    "build:mainnet": "bun run --cwd app build --mode mainnet",
+    "preview": "bun run --cwd app preview",
+    "test:e2e:local": "bun run --cwd app test:e2e:local",
+    "test:e2e:testnet": "bun run --cwd app test:e2e:testnet",
+    "test:e2e:mainnet": "bun run --cwd app test:e2e:mainnet",
+    "keeper:bot": "bun run --cwd keeper bot",
+    "keeper:bot:mainnet": "SOLANA_CLUSTER=mainnet-beta bun run --cwd keeper bot",
+    "keeper:bot:testnet": "SOLANA_CLUSTER=testnet bun run --cwd keeper bot",
+    "keeper:bot:devnet": "SOLANA_CLUSTER=devnet bun run --cwd keeper bot",
+    "keeper:bot:once": "bun run --cwd keeper bot -- --once",
+    "keeper:service": "bun run --cwd keeper service",
+    "keeper:seed": "bun run --cwd keeper seed",
+    "keeper:resolve": "bun run --cwd keeper resolve"
+  },
+  "dependencies": {
+    "@hyperbet/chain-registry": "workspace:*",
+    "@hyperbet/mm-core": "workspace:*",
+    "@noble/curves": "^2.0.1",
+    "@rainbow-me/rainbowkit": "^2.2.10",
+    "@tanstack/react-query": "^5.90.21",
+    "@vitejs/plugin-react": "^5.1.4",
+    "wagmi": "^3.5.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.21.0"
+  }
+}

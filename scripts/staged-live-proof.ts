@@ -468,7 +468,7 @@ function runBscCanary(): BscCanaryResult {
   const result = runJsonCommand<BscCanaryResult>(
     "bsc-canary",
     "bun",
-    ["--bun", "packages/hyperbet-bsc/keeper/src/staged-proof-bsc.ts"],
+    ["--bun", "packages/hyperbet-evm/keeper/src/staged-proof-bsc.ts"],
   );
   writeJsonArtifact(artifactRoot, "bsc/canary.json", result);
   return result;

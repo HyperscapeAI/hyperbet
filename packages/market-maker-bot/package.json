@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "start": "tsx src/index.ts",
+    "start": "tsx src/lvr-sniper.ts",
     "start:multi": "tsx src/run-multi.ts",
     "simulate": "tsx src/simulate.ts",
     "simulate:adversarial": "tsx src/simulate-adversarial.ts",
@@ -13,8 +13,7 @@
     "simulate:adversarial:replay-corpus": "tsx src/simulate-adversarial.ts --replay-corpus",
     "simulate:adversarial:ci": "bun run simulate:adversarial && bun run simulate:adversarial:gate",
     "smoke:runtime": "tsx src/runtime-smoke.ts",
-    "smoke:runtime:bsc": "tsx src/runtime-smoke.ts --chain bsc",
-    "smoke:runtime:avax": "tsx src/runtime-smoke.ts --chain avax",
+    "smoke:runtime:evm": "tsx src/runtime-smoke.ts --chain evm",
     "smoke:runtime:solana": "bash ../hyperbet-solana/anchor/scripts/run-localnet-tests.sh tests/market_maker_bot_smoke.ts",
     "wallets:generate": "tsx src/generate-wallets.ts",
     "wallets:ui-env": "tsx src/export-ui-wallets.ts",
@@ -27,14 +26,15 @@
     "verify:forks": "tsx src/fork-harness.ts"
   },
   "dependencies": {
+    "@coral-xyz/anchor": "^0.32.1",
     "@hyperbet/chain-registry": "workspace:*",
     "@hyperbet/mm-core": "workspace:*",
-    "@coral-xyz/anchor": "^0.32.1",
     "@solana/web3.js": "^1.90.0",
     "bn.js": "^5.2.3",
     "bs58": "^6.0.0",
     "dotenv": "^16.4.5",
-    "ethers": "^6.11.1"
+    "ethers": "^6.11.1",
+    "mathjs": "^15.1.1"
   },
   "devDependencies": {
     "@types/bn.js": "^5.2.0",

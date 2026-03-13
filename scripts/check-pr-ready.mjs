@@ -19,7 +19,7 @@ function runStep(label, args, options = {}) {
   }
 }
 
-const chains = ["hyperbet-solana", "hyperbet-bsc", "hyperbet-avax"];
+const chains = ["hyperbet-solana", "hyperbet-evm", "hyperbet-evm"];
 const mmChains = ["solana", "bsc", "avax"];
 
 runStep("root frozen install", ["install", "--frozen-lockfile"]);

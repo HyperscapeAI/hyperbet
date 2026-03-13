@@ -13,11 +13,11 @@ import { rootDir } from "./ci-lib";
 type AuditTarget =
   | "ci-shared"
   | "pages:solana"
-  | "pages:bsc"
-  | "app:avax"
+  | "pages:evm"
+  | "app:evm"
   | "keeper:solana"
-  | "keeper:bsc"
-  | "keeper:avax"
+  | "keeper:evm"
+  | "keeper:evm"
   | "bot";
 
 type DeploymentMode = "production" | "staging";
@@ -72,11 +72,11 @@ function parseArgs(): {
   if (
     target !== "ci-shared" &&
     target !== "pages:solana" &&
-    target !== "pages:bsc" &&
-    target !== "app:avax" &&
+    target !== "pages:evm" &&
+    target !== "app:evm" &&
     target !== "keeper:solana" &&
-    target !== "keeper:bsc" &&
-    target !== "keeper:avax" &&
+    target !== "keeper:evm" &&
+    target !== "keeper:evm" &&
     target !== "bot"
   ) {
     throw new Error(`unsupported audit target: ${targetArg}`);
@@ -97,12 +97,12 @@ function readTrackedEnvFiles(): string[] {
     "packages/hyperbet-solana/.env.example",
     "packages/hyperbet-solana/app/.env.example",
     "packages/hyperbet-solana/keeper/.env.example",
-    "packages/hyperbet-bsc/.env.example",
-    "packages/hyperbet-bsc/app/.env.example",
-    "packages/hyperbet-bsc/keeper/.env.example",
-    "packages/hyperbet-avax/.env.example",
-    "packages/hyperbet-avax/app/.env.example",
-    "packages/hyperbet-avax/keeper/.env.example",
+    "packages/hyperbet-evm/.env.example",
+    "packages/hyperbet-evm/app/.env.example",
+    "packages/hyperbet-evm/keeper/.env.example",
+    "packages/hyperbet-evm/.env.example",
+    "packages/hyperbet-evm/app/.env.example",
+    "packages/hyperbet-evm/keeper/.env.example",
     "packages/market-maker-bot/.env.example",
   ].map((relativePath) => path.join(rootDir, relativePath));
 }
@@ -250,7 +250,7 @@ function auditPublicRpcUrls(findings: Finding[]): void {
 
 function auditPagesTarget(
   findings: Finding[],
-  target: "pages:solana" | "pages:bsc",
+  target: "pages:solana" | "pages:evm",
   deployment: DeploymentMode,
 ): void {
   requireEnv(findings, "VITE_GAME_API_URL");
@@ -350,13 +350,13 @@ function auditAvaxAppTarget(findings: Finding[]): void {
   if ((process.env.VITE_USE_GAME_RPC_PROXY ?? "").trim() !== "true") {
     findings.push({
       level: "error",
-      message: "app:avax must enable VITE_USE_GAME_RPC_PROXY=true",
+      message: "app:evm must enable VITE_USE_GAME_RPC_PROXY=true",
     });
   }
   if ((process.env.VITE_USE_GAME_EVM_RPC_PROXY ?? "").trim() !== "true") {
     findings.push({
       level: "error",
-      message: "app:avax must enable VITE_USE_GAME_EVM_RPC_PROXY=true",
+      message: "app:evm must enable VITE_USE_GAME_EVM_RPC_PROXY=true",
     });
   }
 
@@ -367,19 +367,19 @@ function auditAvaxAppTarget(findings: Finding[]): void {
     if (cluster === "mainnet-beta") {
       findings.push({
         level: "error",
-        message: `app:avax must not build mainnet-beta while AVAX canonical registry values are missing (${status.missingFields.join(", ")})`,
+        message: `app:evm must not build mainnet-beta while AVAX canonical registry values are missing (${status.missingFields.join(", ")})`,
       });
     }
     if (avaxChainId && Number(avaxChainId) === status.deployment.chainId) {
       findings.push({
         level: "error",
-        message: "app:avax must not inject the AVAX mainnet chain id while canonical registry values are missing",
+        message: "app:evm must not inject the AVAX mainnet chain id while canonical registry values are missing",
       });
     }
     if (avaxClob) {
       findings.push({
         level: "error",
-        message: "app:avax must not inject VITE_AVAX_GOLD_CLOB_ADDRESS while AVAX canonical registry values are missing",
+        message: "app:evm must not inject VITE_AVAX_GOLD_CLOB_ADDRESS while AVAX canonical registry values are missing",
       });
     }
     return;
@@ -388,7 +388,7 @@ function auditAvaxAppTarget(findings: Finding[]): void {
   if (cluster && cluster !== "mainnet-beta") {
     findings.push({
       level: "error",
-      message: "app:avax must build with VITE_SOLANA_CLUSTER=mainnet-beta when AVAX is canonicalized",
+      message: "app:evm must build with VITE_SOLANA_CLUSTER=mainnet-beta when AVAX is canonicalized",
     });
   }
 
@@ -396,19 +396,19 @@ function auditAvaxAppTarget(findings: Finding[]): void {
     if (Number(avaxChainId) !== status.deployment.chainId) {
       findings.push({
         level: "error",
-        message: `app:avax must use AVAX mainnet chain id ${status.deployment.chainId}`,
+        message: `app:evm must use AVAX mainnet chain id ${status.deployment.chainId}`,
       });
     }
   } else {
     findings.push({
       level: "error",
-      message: "app:avax requires VITE_AVAX_CHAIN_ID when AVAX is canonicalized",
+      message: "app:evm requires VITE_AVAX_CHAIN_ID when AVAX is canonicalized",
     });
   }
 
   validateExactAddress(
     findings,
-    "app:avax",
+    "app:evm",
     "VITE_AVAX_GOLD_CLOB_ADDRESS",
     requireEnv(findings, "VITE_AVAX_GOLD_CLOB_ADDRESS"),
     status.deployment.goldClobAddress,
@@ -417,7 +417,7 @@ function auditAvaxAppTarget(findings: Finding[]): void {
 
 function auditKeeperTarget(
   findings: Finding[],
-  target: "keeper:solana" | "keeper:bsc" | "keeper:avax",
+  target: "keeper:solana" | "keeper:evm" | "keeper:evm",
   deployment: DeploymentMode,
 ): void {
   requireEnv(findings, "HYPERBET_KEEPER_URL");
@@ -452,7 +452,7 @@ function auditKeeperTarget(
     if (!canonical.ready) {
       return;
     }
-    if (target === "keeper:avax") {
+    if (target === "keeper:evm") {
       validateExactAddress(
         findings,
         target,
@@ -468,7 +468,7 @@ function auditKeeperTarget(
     return;
   }
 
-  if (target === "keeper:bsc") {
+  if (target === "keeper:evm") {
     requireExactAddress(
       findings,
       target,
@@ -483,7 +483,7 @@ function auditKeeperTarget(
     );
   }
 
-  if (target === "keeper:avax") {
+  if (target === "keeper:evm") {
     requireExactAddress(
       findings,
       target,
@@ -540,15 +540,15 @@ function runAudit(
 
   switch (target) {
     case "pages:solana":
-    case "pages:bsc":
+    case "pages:evm":
       auditPagesTarget(findings, target, deployment);
       break;
-    case "app:avax":
+    case "app:evm":
       auditAvaxAppTarget(findings);
       break;
     case "keeper:solana":
-    case "keeper:bsc":
-    case "keeper:avax":
+    case "keeper:evm":
+    case "keeper:evm":
       auditKeeperTarget(findings, target, deployment);
       break;
     case "bot":
