@@ -336,11 +336,19 @@ export async function initializeCanonicalMarket(
   duelKey: readonly number[],
   config: PublicKey,
   marketKind = DUEL_WINNER_MARKET_KIND,
-  feeBps = 200, // 2% default
-  treasury = operator.publicKey,
+  options?: {
+    feeBps?: number;
+    treasury?: PublicKey;
+    initialLiquidityLamports?: bigint | number;
+    isDynamic?: boolean;
+    description?: string;
+    expirationAt?: bigint | number;
+  },
 ): Promise<{ marketState: PublicKey; vault: PublicKey }> {
   const betIdNum = BigInt(`0x${Buffer.from(duelKey).slice(0, 8).reverse().toString('hex')}`);
   const betId = toBn(betIdNum);
+  const feeBps = options?.feeBps ?? 200;
+  const treasury = options?.treasury ?? operator.publicKey;
   
   const bet = deriveBetPda(
     program.programId,
@@ -350,10 +358,18 @@ export async function initializeCanonicalMarket(
   const mintYes = deriveMintYesPda(program.programId, betIdNum, operator.publicKey);
   const mintNo = deriveMintNoPda(program.programId, betIdNum, operator.publicKey);
 
-  const initialLiq = new BN(LAMPORTS_PER_SOL * 5); // 5 SOL initial liquidity
-  const isDynamic = true;
-  const description = "Test AMM Open Market";
-  const expirationAt = new BN(Date.now() / 1000 + 3600);
+  const initialLiq = new BN(
+    BigInt(
+      options?.initialLiquidityLamports ?? BigInt(LAMPORTS_PER_SOL * 20),
+    ).toString(),
+  );
+  const isDynamic = options?.isDynamic ?? true;
+  const description = options?.description ?? "Test AMM Open Market";
+  const expirationAt = new BN(
+    BigInt(
+      options?.expirationAt ?? BigInt(Math.floor(Date.now() / 1000) + 3600),
+    ).toString(),
+  );
 
   await program.methods
     .createBetAccount(betId, initialLiq, isDynamic, description, expirationAt, feeBps, treasury)
@@ -544,6 +560,11 @@ export async function createOpenMarketFixture(
     betCloseTs?: number;
     duelStartTs?: number;
     metadataUri?: string;
+    feeBps?: number;
+    initialLiquidityLamports?: bigint | number;
+    isDynamic?: boolean;
+    description?: string;
+    expirationAt?: bigint | number;
   },
 ): Promise<{
   config: PublicKey;
@@ -575,6 +596,15 @@ export async function createOpenMarketFixture(
     duelState,
     duelKey,
     config,
+    DUEL_WINNER_MARKET_KIND,
+    {
+      feeBps: options?.feeBps,
+      treasury,
+      initialLiquidityLamports: options?.initialLiquidityLamports,
+      isDynamic: options?.isDynamic,
+      description: options?.description,
+      expirationAt: options?.expirationAt,
+    },
   );
 
   return {

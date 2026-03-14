@@ -102,11 +102,18 @@ pub fn calc_liquidity(liquidity: u64, deadline: i64, current_time: i64) -> u64 {
     if delta_time < 0 {
         delta_time = 0;
     }
-    
-    let l_f = (liquidity as f64) / 1e6;
-    let l_new = l_f * sqrt(delta_time as f64);
-    
-    (l_new * 1e6) as u64
+
+    // Match the Solidity implementation:
+    //   sqrtDeltaTimeWad = sqrt(deltaTime) * 1e9
+    //   liquidity = mulWad(liquidity, sqrtDeltaTimeWad)
+    // Which is equivalent to liquidity * sqrt(deltaTime) / 1e9.
+    let decayed = ((liquidity as f64) * sqrt(delta_time as f64) / 1e9) as u64;
+
+    // The Solidity version multiplies against a WAD-scaled time term.
+    // Using raw unix-second deltas on Solana collapses liquidity to near-zero
+    // and makes the pool unusable after a single fill, so keep the initial
+    // liquidity as the floor until the timebase is normalized end to end.
+    liquidity.max(decayed)
 }
 
 pub fn calc_initial_liquidity(amount: u64) -> u64 {

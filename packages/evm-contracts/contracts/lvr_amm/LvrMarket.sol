@@ -52,6 +52,7 @@ contract LvrMarket {
     address public immutable i_admin;
     address public immutable i_router;
     address public immutable i_collateral;
+    bool public immutable isDynamic;
     uint256 private liquidity;
 
     bool private liquidityInitialized;

@@ -672,7 +672,16 @@ sleep 2
 write_control_file
 
 echo "[e2e] running playwright tests"
-(
+PLAYWRIGHT_ARGS=("$@")
+if [[ ${#PLAYWRIGHT_ARGS[@]} -eq 0 ]]; then
+  PLAYWRIGHT_ARGS=(
+    "tests/e2e/market-flows.spec.ts"
+    "tests/e2e/app-tabs-and-apis.spec.ts"
+  )
+fi
+
+PLAYWRIGHT_EXIT_CODE=0
+if ! (
   cd "$APP_DIR"
   env \
     E2E_BASE_URL="http://127.0.0.1:$APP_PORT" \
@@ -680,5 +689,13 @@ echo "[e2e] running playwright tests"
     E2E_ARENA_WRITE_KEY="$E2E_ARENA_WRITE_KEY" \
     ./node_modules/.bin/playwright test \
       --config "$APP_DIR/tests/e2e/playwright.config.ts" \
-      "$@"
-)
+      "${PLAYWRIGHT_ARGS[@]}"
+); then
+  PLAYWRIGHT_EXIT_CODE=$?
+fi
+
+if [[ "${E2E_KEEP_SERVICES_ALIVE:-false}" == "true" ]]; then
+  sleep "${E2E_KEEP_SERVICES_ALIVE_SECONDS:-3600}"
+fi
+
+exit "$PLAYWRIGHT_EXIT_CODE"

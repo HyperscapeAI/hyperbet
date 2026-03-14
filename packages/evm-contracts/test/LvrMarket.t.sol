@@ -13,6 +13,7 @@ contract LvrMarketTest is Test {
     Router public router;
     MockUSD public mUSD;
     address public admin = address(1);
+    address public treasury = address(4);
     address public user1 = address(2);
     address public user2 = address(3);
     
@@ -26,7 +27,7 @@ contract LvrMarketTest is Test {
         mUSD = new MockUSD();
         
         // Deploy Router
-        router = new Router(address(mUSD));
+        router = new Router(address(mUSD), treasury, 0);
         
         // Setup users
         mUSD.mint(user1, INITIAL_BALANCE);

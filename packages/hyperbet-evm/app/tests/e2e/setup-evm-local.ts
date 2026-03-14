@@ -15,7 +15,7 @@ import { mnemonicToAccount, privateKeyToAccount } from "viem/accounts";
 
 import mockErc20Artifact from "../../../../evm-contracts/out/MockERC20.sol/MockERC20.json";
 import duelOutcomeOracleArtifact from "../../../../evm-contracts/out/DuelOutcomeOracle.sol/DuelOutcomeOracle.json";
-import lvrRouterArtifact from "../../../../evm-contracts/out/LvrRouter.sol/LvrRouter.json";
+import lvrRouterArtifact from "../../../../evm-contracts/out/GoldClob.sol/LvrRouter.json";
 
 type E2eState = Record<string, unknown> & {
   currentDuelKeyHex?: string;

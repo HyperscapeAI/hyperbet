@@ -8,7 +8,7 @@ import {
   writeJsonArtifact,
 } from "./ci-lib";
 
-type ChainKey = "solana" | "bsc" | "avax";
+type ChainKey = "solana" | "evm" | "bsc" | "avax";
 
 type ControlFile = {
   services?: Record<
@@ -26,7 +26,12 @@ function parseArgs(): ChainKey {
       .slice(2)
       .find((arg) => arg.startsWith("--chain="))
       ?.slice("--chain=".length) ?? "solana";
-  if (targetArg !== "solana" && targetArg !== "bsc" && targetArg !== "avax") {
+  if (
+    targetArg !== "solana" &&
+    targetArg !== "evm" &&
+    targetArg !== "bsc" &&
+    targetArg !== "avax"
+  ) {
     throw new Error(`unsupported e2e chain ${targetArg}`);
   }
   return targetArg;
@@ -34,7 +39,13 @@ function parseArgs(): ChainKey {
 
 const chain = parseArgs();
 const artifactRoot = resolveArtifactRoot(`e2e-${chain}`);
-const appRoot = path.join(process.cwd(), `packages/hyperbet-${chain}/app`);
+const appRootByChain: Record<ChainKey, string> = {
+  solana: path.join(process.cwd(), "packages/hyperbet-solana/app"),
+  evm: path.join(process.cwd(), "packages/hyperbet-evm/app"),
+  bsc: path.join(process.cwd(), "packages/hyperbet-evm/app"),
+  avax: path.join(process.cwd(), "packages/hyperbet-evm/app"),
+};
+const appRoot = appRootByChain[chain];
 const anchorRoot = path.join(process.cwd(), "packages/hyperbet-solana/anchor");
 const evmRoot =
   chain === "solana"
@@ -48,6 +59,8 @@ const evmBuildLogPath = path.join("/tmp", `hyperbet-${chain}-e2e-evm-build.log`)
 const marketFlowGrepByChain: Record<ChainKey, string> = {
   solana:
     "solana predictions place YES and NO orders, resolve, and claim|solana prediction markets recover after keeper and proxy restarts|solana cancelled duel refunds and clears claim state",
+  evm:
+    "evm predictions place YES and NO orders, resolve, and claim|bsc prediction markets recover after keeper and anvil restarts|bsc cancelled prediction markets refund and clear positions",
   bsc:
     "evm predictions place YES and NO orders, resolve, and claim|bsc prediction markets recover after keeper and anvil restarts|bsc cancelled prediction markets refund and clear positions",
   avax:

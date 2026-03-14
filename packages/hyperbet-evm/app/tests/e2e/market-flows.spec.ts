@@ -144,7 +144,9 @@ const duelOutcomeOracleArtifact = readFirstExistingJson(
 ) as { abi: readonly unknown[] };
 const lvrRouterArtifact = readFirstExistingJson(
   [
+    path.join(evmArtifactsDir, "GoldClob.sol", "GoldClob.json"),
     path.join(evmArtifactsDir, "LvrRouter.sol", "LvrRouter.json"),
+    path.join(evmFoundryOutDir, "GoldClob.sol", "LvrRouter.json"),
     path.join(evmFoundryOutDir, "LvrRouter.sol", "LvrRouter.json"),
   ],
 ) as { abi: readonly unknown[] };

@@ -9,12 +9,13 @@ const target = process.argv[2];
 
 const packageByTarget: Record<string, string> = {
   solana: "packages/hyperbet-solana",
-  bsc: "packages/hyperbet-bsc",
-  avax: "packages/hyperbet-avax",
+  evm: "packages/hyperbet-evm",
+  bsc: "packages/hyperbet-evm",
+  avax: "packages/hyperbet-evm",
 };
 
 if (!target || !packageByTarget[target]) {
-  console.error("Usage: bun scripts/run-local-demo.ts <solana|bsc|avax>");
+  console.error("Usage: bun scripts/run-local-demo.ts <solana|evm>");
   process.exit(1);
 }
 

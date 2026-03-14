@@ -170,7 +170,7 @@ if [[ ! -x "$ROOT_DIR/node_modules/.bin/ts-mocha" ]]; then
   exit 1
 fi
 
-if [[ ! -f "$ROOT_DIR/target/deploy/fight_oracle.so" || ! -f "$ROOT_DIR/target/deploy/gold_clob_market.so" || ! -f "$ROOT_DIR/target/deploy/gold_perps_market.so" ]]; then
+if [[ ! -f "$ROOT_DIR/target/deploy/fight_oracle.so" || ! -f "$ROOT_DIR/target/deploy/lvr_amm.so" || ! -f "$ROOT_DIR/target/deploy/gold_perps_market.so" ]]; then
   printf 'Missing one or more deploy artifacts under %s\n' "$ROOT_DIR/target/deploy" >&2
   exit 1
 fi
@@ -189,7 +189,7 @@ fi
 WALLET_PATH="$(resolve_wallet_path)"
 MINT_AUTHORITY="$(resolve_mint_authority "$WALLET_PATH")"
 PROGRAM_ORACLE_ID="$(resolve_program_id fight_oracle 6tpRysBFd1yXRipYEYwAw9jxEoVHk15kVXfkDGFLMqcD)"
-PROGRAM_CLOB_ID="$(resolve_program_id gold_clob_market ARVJNJp49VZnkB8QBYZAAFJmufvtVSPhnuuenwwSLwpi)"
+PROGRAM_AMM_ID="$(resolve_program_id lvr_amm Af4LMYfaBtcFFM6dBjwLYH6QJLMqEwneQ8VHfn2z7NY5)"
 PROGRAM_PERPS_ID="$(resolve_program_id gold_perps_market HbXhqEFevpkfYdZCN6YmJGRmQmj9vsBun2ZHjeeaLRik)"
 
 : >"$TEST_LOG"
@@ -218,7 +218,7 @@ for test_target in "${TEST_TARGETS[@]}"; do
     --mint "$MINT_AUTHORITY" \
     --ledger "$LEDGER_DIR" \
     --upgradeable-program "$PROGRAM_ORACLE_ID" "$ROOT_DIR/target/deploy/fight_oracle.so" "$WALLET_PATH" \
-    --upgradeable-program "$PROGRAM_CLOB_ID" "$ROOT_DIR/target/deploy/gold_clob_market.so" "$WALLET_PATH" \
+    --upgradeable-program "$PROGRAM_AMM_ID" "$ROOT_DIR/target/deploy/lvr_amm.so" "$WALLET_PATH" \
     --upgradeable-program "$PROGRAM_PERPS_ID" "$ROOT_DIR/target/deploy/gold_perps_market.so" "$WALLET_PATH" \
     >"$VALIDATOR_LOG" 2>&1 &
   VALIDATOR_PID="$!"
@@ -229,7 +229,7 @@ for test_target in "${TEST_TARGETS[@]}"; do
     exit 1
   fi
 
-  for program_id in "$PROGRAM_ORACLE_ID" "$PROGRAM_CLOB_ID" "$PROGRAM_PERPS_ID"; do
+  for program_id in "$PROGRAM_ORACLE_ID" "$PROGRAM_AMM_ID" "$PROGRAM_PERPS_ID"; do
     if ! wait_for_program "$current_rpc_url" "$program_id"; then
       echo "[anchor-test] program $program_id did not become executable" >&2
       tail -n 120 "$VALIDATOR_LOG" >&2 || true
