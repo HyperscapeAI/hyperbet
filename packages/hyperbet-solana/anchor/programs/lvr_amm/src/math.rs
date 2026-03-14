@@ -142,15 +142,21 @@ mod tests {
     #[test]
     fn test_calc_price() {
         // Equal reserves means z=0, price should be 0.5
-        let price = calc_price(1_000_000, 1_000_000, 1_000_000);
+        let price = calc_price(1_000_000_000, 1_000_000_000, 1_000_000_000);
         // Price is scaled by 1,000,000
         assert_eq!(price, 500_000);
     }
 
     #[test]
     fn test_get_swap_amount() {
-        // Initial state: L=1e6 (1.0 in float WAD logic inside func), R_y = 1e6, R_n = 1e6
-        let amt_out = get_swap_amount(true, 1_000_000, 1_000_000, 1_000_000, 100_000);
+        // Match the live program's 9-decimal lamport-style scale.
+        let amt_out = get_swap_amount(
+            true,
+            1_000_000_000,
+            1_000_000_000,
+            1_000_000_000,
+            100_000_000,
+        );
         assert!(amt_out > 0);
     }
 }

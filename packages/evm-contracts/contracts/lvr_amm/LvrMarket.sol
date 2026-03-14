@@ -2,6 +2,8 @@
 pragma solidity ^0.8.13;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {YesToken, NoToken} from "./Token.sol";
 import {SwapMath} from "./lib/SwapMath.sol";
 import {Math} from "./lib/Math.sol";
@@ -10,7 +12,11 @@ import {IMarketSellCallback} from "./interfaces/IMarketSellCallback.sol";
 import {IMarketRedeemCallback} from "./interfaces/IMarketRedeemCallback.sol";
 import {IMarketBondCallback} from "./interfaces/IMarketBondCallback.sol";
 
-contract LvrMarket {
+contract LvrMarket is ReentrancyGuard {
+    using SafeERC20 for IERC20;
+
+    uint256 private constant MAX_FEE_BPS = 10_000;
+
     event MarketInitialized(uint256 liquidity, uint256 collateralIn, uint256 timestamp);
     
     event OutcomeProposed(uint256 outcome, address indexed proposer, uint256 resolutionTimestamp);
@@ -61,6 +67,11 @@ contract LvrMarket {
     uint256 public immutable feeBps;
 
     constructor(address _router, bool _type, uint256 duration, address _collateral, address admin, address treasury, uint256 _feeBps){
+        require(_router != address(0), "Invalid router");
+        require(_collateral != address(0), "Invalid collateral");
+        require(admin != address(0), "Invalid admin");
+        require(treasury != address(0), "Invalid treasury");
+        require(_feeBps <= MAX_FEE_BPS, "Invalid fee bps");
         i_router = _router;
         isDynamic = _type;
         i_collateral = _collateral;
@@ -77,20 +88,22 @@ contract LvrMarket {
         _;
     }
 
-    function proposeOutcome(uint256 _outcome, address _proposer) external isRouter{
+    function proposeOutcome(uint256 _outcome, address _proposer) external isRouter nonReentrant {
         require(state == MarketState.OPEN, "Market Not Open");
         require(block.timestamp >= deadline, "Market not finished");
         require(_outcome == 0 || _outcome == 1, "Invalid outcome");
+        require(_proposer != address(0), "Invalid proposer");
         // Make a bond with the proposer to keep as collateral incase of false outcome
         uint256 balanceBefore = IERC20(i_collateral).balanceOf(address(this));
         bytes memory data = abi.encode(i_collateral, _proposer);
-        IMarketBondCallback(msg.sender).marketBondCallback(BOND_VALUE, data);
-        require(IERC20(i_collateral).balanceOf(address(this)) >= balanceBefore + BOND_VALUE);
 
         outcome = _outcome;
         state = MarketState.PENDING;
         resolutionTimestamp = block.timestamp + DISPUTE_WINDOW;
         proposer = _proposer;
+
+        IMarketBondCallback(msg.sender).marketBondCallback(BOND_VALUE, data);
+        require(IERC20(i_collateral).balanceOf(address(this)) >= balanceBefore + BOND_VALUE);
 
         emit OutcomeProposed(_outcome, _proposer, resolutionTimestamp);
     }
@@ -104,33 +117,39 @@ contract LvrMarket {
         emit MarketDisputed();
     }
 
-    function settleMarket() external isRouter{
+    function settleMarket() external isRouter nonReentrant {
         require(block.timestamp >= resolutionTimestamp, "Challenge Window Open");
-        // Return bond to proposer with Reward collected through market fees
-        IERC20(i_collateral).transfer(proposer, BOND_VALUE); // Add fees and then reward the proposer
+        address payoutRecipient = proposer;
+        uint256 resolvedOutcome = outcome;
         state = MarketState.RESOLVED;
+        // Return bond to proposer with Reward collected through market fees
+        IERC20(i_collateral).safeTransfer(payoutRecipient, BOND_VALUE);
 
-        emit MarketSettled(outcome, proposer, BOND_VALUE);
+        emit MarketSettled(resolvedOutcome, payoutRecipient, BOND_VALUE);
     }
 
-    function adminResolve(uint256 _outcome) external {
+    function adminResolve(uint256 _outcome) external nonReentrant {
         require(msg.sender == i_admin, "Only Admin can call this method");
         require(block.timestamp >= deadline, "Market not finished");
         require(_outcome == 0 || _outcome == 1, "Invalid outcome");
         require(state == MarketState.DISPUTED || state == MarketState.OPEN, "Invalid Market State");
 
+        address payoutRecipient = proposer;
         // If proposer is intialized then return the bond
-        if(proposer != address(0)){
-            IERC20(i_collateral).transfer(proposer, BOND_VALUE);
-        }
-
         outcome = _outcome;
         state = MarketState.RESOLVED;
+        if (payoutRecipient != address(0)) {
+            IERC20(i_collateral).safeTransfer(payoutRecipient, BOND_VALUE);
+        }
 
         emit MarketResolvedByAdmin(_outcome, msg.sender);
     }
 
-    function redeemCollateralWithToken(uint256 amountYesIn, uint256 amountNoIn, address redeemer) external isRouter {
+    function redeemCollateralWithToken(uint256 amountYesIn, uint256 amountNoIn, address redeemer)
+        external
+        isRouter
+        nonReentrant
+    {
         require(state == MarketState.RESOLVED, "Market Not Resolved");
 
         bytes memory data = abi.encode(address(yesToken), address(noToken), redeemer);
@@ -142,10 +161,10 @@ contract LvrMarket {
         uint256 payout = 0;
         if(outcome == 1) {
             payout = amountYesIn;
-            IERC20(i_collateral).transfer(redeemer, amountYesIn);
+            IERC20(i_collateral).safeTransfer(redeemer, amountYesIn);
         }else {
             payout = amountNoIn;
-            IERC20(i_collateral).transfer(redeemer,  amountNoIn);
+            IERC20(i_collateral).safeTransfer(redeemer, amountNoIn);
         }
 
         emit CollateralRedeemed(redeemer, amountYesIn, amountNoIn, payout);
@@ -162,7 +181,7 @@ contract LvrMarket {
         return liquidity;
     }
 
-    function buy(bool isBuyYes, uint256 amountIn, address buyer) public isRouter {
+    function buy(bool isBuyYes, uint256 amountIn, address buyer) public isRouter nonReentrant {
         require(state == MarketState.OPEN, "Market Not Open");
 
         uint256 feeAmount;
@@ -185,8 +204,8 @@ contract LvrMarket {
 
         require(IERC20(i_collateral).balanceOf(address(this)) >= balanceBefore + amountIn);
 
-        if (feeAmount > 0 && i_treasury != address(0)) {
-            IERC20(i_collateral).transfer(i_treasury, feeAmount);
+        if (feeAmount > 0) {
+            IERC20(i_collateral).safeTransfer(i_treasury, feeAmount);
         }
 
         // Mints yes and no tokens
@@ -196,9 +215,9 @@ contract LvrMarket {
         // returns yes tokens to the user
         unchecked {
             if(isBuyYes){
-                IERC20(yesToken).transfer(buyer, amountInAfterFee + amountOut);
+                IERC20(address(yesToken)).safeTransfer(buyer, amountInAfterFee + amountOut);
             }else{
-                IERC20(noToken).transfer(buyer, amountInAfterFee + amountOut);
+                IERC20(address(noToken)).safeTransfer(buyer, amountInAfterFee + amountOut);
             }
         }
 
@@ -206,7 +225,7 @@ contract LvrMarket {
         _emitPriceSnapshot();
     }
 
-    function sell(bool isSellYes, uint256 amountIn, address seller) public isRouter {
+    function sell(bool isSellYes, uint256 amountIn, address seller) public isRouter nonReentrant {
         require(state == MarketState.OPEN, "Market Not Open");
 
         address tokenIn = isSellYes ? address(yesToken) : address(noToken);
@@ -226,14 +245,14 @@ contract LvrMarket {
 
         require(IERC20(tokenIn).balanceOf(address(this)) >= tokenBalanceBefore + amountIn);
 
-        if (feeAmount > 0 && i_treasury != address(0)) {
-            IERC20(tokenIn).transfer(i_treasury, feeAmount);
+        if (feeAmount > 0) {
+            IERC20(tokenIn).safeTransfer(i_treasury, feeAmount);
         }
 
         if(isSellYes){
-            IERC20(noToken).transfer(seller, amountOut);
+            IERC20(address(noToken)).safeTransfer(seller, amountOut);
         }else{
-            IERC20(yesToken).transfer(seller, amountOut);
+            IERC20(address(yesToken)).safeTransfer(seller, amountOut);
         }
 
         emit MarketSell(seller, isSellYes, amountIn, amountOut);

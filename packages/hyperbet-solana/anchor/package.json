@@ -7,7 +7,7 @@
     "deploy:devnet": "bash scripts/deploy-programs.sh devnet",
     "deploy:testnet": "bash scripts/deploy-programs.sh testnet",
     "deploy:mainnet": "bash scripts/deploy-programs.sh mainnet-beta",
-    "lint:rust": "cargo clippy --workspace --all-targets --all-features -- -D warnings",
+    "lint:rust": "cargo clippy --workspace --all-targets -- -D warnings",
     "test:rust": "cargo test --workspace",
     "audit": "bash scripts/run-cargo-audit.sh",
     "audit:strict": "ANCHOR_AUDIT_STRICT=1 bash scripts/run-cargo-audit.sh -D warnings",

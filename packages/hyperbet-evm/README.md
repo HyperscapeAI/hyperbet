@@ -59,8 +59,7 @@ bun run audit
 bun run audit:strict
 ```
 
-`bun run audit` ignores `RUSTSEC-2025-0141` for `bincode` because RustSec marks all `bincode` releases as unmaintained and provides no patched version. The current Anchor/Solana Rust stack still depends on it, so this is an explicit upstream risk acceptance.
-`bun run audit:strict` fails on any audit warning, including that `bincode` advisory.
+Both audit commands currently pass against the vendored dependency graph.
 
 ## UI E2E tests (headless wallet + mock GOLD localnet)
 

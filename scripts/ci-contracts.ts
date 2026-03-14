@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
 
 import {
   copyIntoArtifacts,
@@ -52,6 +53,17 @@ function hasFoundryFuzzTests(dir: string): boolean {
   return false;
 }
 
+function hasBinary(name: string): boolean {
+  const result = spawnSync("bash", ["-lc", `command -v ${name} >/dev/null 2>&1`], {
+    cwd: contractRoot,
+  });
+  return result.status === 0;
+}
+
+function canRunEchidna(): boolean {
+  return hasBinary("echidna") || hasBinary("docker");
+}
+
 async function runStep(
   name: string,
   command: string,
@@ -95,6 +107,14 @@ try {
     });
   } else {
     await runStep("slither", "bun", ["run", "analyze:slither"]);
+    if (canRunEchidna()) {
+      await runStep("echidna", "bun", ["run", "test:echidna"]);
+    } else {
+      writeJsonArtifact(artifactRoot, "echidna-skip.json", {
+        skipped: true,
+        reason: "Neither echidna nor docker was found in PATH",
+      });
+    }
   }
 } finally {
   if (target === "proof") {

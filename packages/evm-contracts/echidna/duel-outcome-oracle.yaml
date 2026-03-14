@@ -1,0 +1,4 @@
+testMode: property
+testLimit: 10000
+seqLen: 50
+corpusDir: echidna-corpus/duel-outcome-oracle

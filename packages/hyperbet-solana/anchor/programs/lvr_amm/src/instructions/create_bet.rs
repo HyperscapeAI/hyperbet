@@ -6,6 +6,7 @@ use crate::math;
 
 use anchor_spl::token::{Mint, Token};
 
+#[allow(clippy::too_many_arguments)]
 pub fn create_bet(
     ctx: Context<CreateBet>,
     bet_id: u64,

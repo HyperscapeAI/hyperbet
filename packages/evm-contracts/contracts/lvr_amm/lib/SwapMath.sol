@@ -40,8 +40,8 @@ library SwapMath {
             int256 f = ammFunc(t, y, l);
             if(abs(f) < APPROX){
                 // Ensure result is at least MIN_RESERVE to prevent future issues
-                int256 result = abs(t);
-                return result < MIN_RESERVE ? MIN_RESERVE : result;
+                int256 reserve = abs(t);
+                return reserve < MIN_RESERVE ? MIN_RESERVE : reserve;
             }
             int256 deriv = funcDerivative(t, y, l);
             t = t - FixedPointMathLib.sDivWad(f, deriv);

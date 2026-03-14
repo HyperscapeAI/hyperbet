@@ -53,6 +53,12 @@ kill_stale_listener() {
 
 kill_stale_listener "$ANVIL_PORT"
 
+echo "[anvil-suite] building Foundry artifacts"
+(
+  cd "$ROOT_DIR"
+  forge build
+)
+
 echo "[anvil-suite] starting anvil on $ANVIL_RPC_URL"
 anvil \
   --silent \

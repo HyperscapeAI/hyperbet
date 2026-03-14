@@ -2,12 +2,9 @@
 pragma solidity ^0.8.19;
 
 import "forge-std/Test.sol";
-import "forge-std/console.sol";
 import "../contracts/lvr_amm/Router.sol";
 import "../contracts/lvr_amm/LvrMarket.sol";
 import "../contracts/lvr_amm/MockUSD.sol";
-import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {Math} from "../contracts/lvr_amm/lib/Math.sol";
 
 contract LvrMarketTest is Test {
     Router public router;
@@ -65,8 +62,6 @@ contract LvrMarketTest is Test {
         assertEq(mkt, marketAddr);
         assertEq(title, "Will BTC hit 100k?");
         assertTrue(liq > 0);
-        
-        LvrMarket market = LvrMarket(marketAddr);
         
         // Check market balances
         assertEq(mUSD.balanceOf(marketAddr), collateralIn);
@@ -132,5 +127,34 @@ contract LvrMarketTest is Test {
         assertTrue(userNoBalance > buyAmount, "User should receive NO tokens");
         
         vm.stopPrank();
+    }
+
+    function test_OnlyOwnerCanSetFeeConfig() public {
+        vm.prank(user1);
+        vm.expectRevert("Only owner");
+        router.setFeeConfig(user1, 100);
+
+        vm.prank(admin);
+        router.setFeeConfig(user2, 100);
+
+        assertEq(router.treasury(), user2);
+        assertEq(router.feeBps(), 100);
+    }
+
+    function test_RejectsInvalidFeeConfig() public {
+        vm.startPrank(admin);
+        vm.expectRevert("Invalid fee bps");
+        new Router(address(mUSD), treasury, 10_001);
+        vm.expectRevert("Invalid fee bps");
+        router.setFeeConfig(treasury, 10_001);
+        vm.stopPrank();
+    }
+
+    function test_CallbacksRejectUnknownMarkets() public {
+        bytes memory data = abi.encode(address(mUSD), user1);
+
+        vm.prank(user1);
+        vm.expectRevert("Unknown market");
+        router.marketBuyCallback(1 ether, data);
     }
 }

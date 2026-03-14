@@ -20,6 +20,7 @@ pub mod lvr_amm {
         init_admin_state(ctx)
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn create_bet_account(
         ctx: Context<CreateBet>,
         bet_id: u64,
