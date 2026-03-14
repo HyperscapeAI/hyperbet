@@ -21,9 +21,13 @@ import goldPerpsIdl from "../../../anchor/target/idl/gold_perps_market.json";
 import {
   createOpenMarketFixture,
   deriveMintYesPda,
+  deriveMintNoPda,
   uniqueDuelKey,
 } from "../../../anchor/tests/amm-test-helpers";
-import { getAssociatedTokenAddressSync } from "@solana/spl-token";
+import {
+  createAssociatedTokenAccountInstruction,
+  getAssociatedTokenAddressSync,
+} from "@solana/spl-token";
 import { modelMarketIdFromCharacterId } from "../../../../hyperbet-ui/src/lib/modelMarkets";
 
 type SignableTx = Transaction | VersionedTransaction;
@@ -206,6 +210,28 @@ async function ensureTransferredBalance(
     }),
   );
   await provider.sendAndConfirm(transferTx);
+}
+
+async function ensureAssociatedTokenAccount(
+  connection: Connection,
+  provider: AnchorProvider,
+  mint: PublicKey,
+  owner: PublicKey,
+): Promise<PublicKey> {
+  const ata = getAssociatedTokenAddressSync(mint, owner, true);
+  const existing = await connection.getAccountInfo(ata, "confirmed");
+  if (existing) return ata;
+
+  const tx = new Transaction().add(
+    createAssociatedTokenAccountInstruction(
+      provider.wallet.publicKey,
+      ata,
+      owner,
+      mint,
+    ),
+  );
+  await provider.sendAndConfirm(tx);
+  return ata;
 }
 
 async function waitForSignatureConfirmation(
@@ -459,7 +485,19 @@ async function main(): Promise<void> {
 
   const betIdNum = BigInt(`0x${Buffer.from(currentMarket.duelKey).slice(0, 8).reverse().toString('hex')}`);
   const mintYesPda = deriveMintYesPda(clobProgram.programId, betIdNum, authority.publicKey);
-  const clobUserBalancePda = getAssociatedTokenAddressSync(mintYesPda, trader.publicKey, true);
+  const mintNoPda = deriveMintNoPda(clobProgram.programId, betIdNum, authority.publicKey);
+  const clobUserBalancePda = await ensureAssociatedTokenAccount(
+    connection,
+    provider,
+    mintYesPda,
+    trader.publicKey,
+  );
+  await ensureAssociatedTokenAccount(
+    connection,
+    provider,
+    mintNoPda,
+    trader.publicKey,
+  );
 
   const oracleRecordedAt = Date.now();
 

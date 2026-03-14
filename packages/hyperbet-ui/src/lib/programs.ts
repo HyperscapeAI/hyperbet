@@ -8,6 +8,7 @@ import { WalletContextState } from "@solana/wallet-adapter-react";
 import fightOracleIdl from "../idl/fight_oracle.json";
 import lvrMarketIdl from "../idl/lvr_amm.json";
 import { CONFIG } from "./config";
+import { findProgramAddressSync } from "./programAddress";
 
 function extractProgramAddressFromIdl(idlJson: unknown): string | null {
   if (!idlJson || typeof idlJson !== "object") return null;
@@ -171,21 +172,21 @@ export function duelStatusLockedEnum(): { locked: Record<string, never> } {
 }
 
 export function findBetPda(programId: PublicKey, betId: BN, creator: PublicKey): PublicKey {
-  return PublicKey.findProgramAddressSync(
+  return findProgramAddressSync(
     [Buffer.from("bet"), betId.toArrayLike(Buffer, "le", 8), creator.toBuffer()],
     programId
   )[0];
 }
 
 export function findMintYesPda(programId: PublicKey, betId: BN, creator: PublicKey): PublicKey {
-  return PublicKey.findProgramAddressSync(
+  return findProgramAddressSync(
     [Buffer.from("mint_yes"), betId.toArrayLike(Buffer, "le", 8), creator.toBuffer()],
     programId
   )[0];
 }
 
 export function findMintNoPda(programId: PublicKey, betId: BN, creator: PublicKey): PublicKey {
-  return PublicKey.findProgramAddressSync(
+  return findProgramAddressSync(
     [Buffer.from("mint_no"), betId.toArrayLike(Buffer, "le", 8), creator.toBuffer()],
     programId
   )[0];

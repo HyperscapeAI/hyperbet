@@ -1,1 +1,1 @@
-export { LVR_ROUTER_ABI } from "@hyperbet/ui/lib/lvrRouterAbi";
+export { LVR_ROUTER_ABI } from "@hyperbet/ui/lib/goldClobAbi";

@@ -14,6 +14,12 @@ const artifactRoot = resolveArtifactRoot("base-add-chain-smoke");
 const anvilLog = path.join(artifactRoot, "anvil.log");
 const bsc = resolveBettingEvmDeploymentForChain("bsc", "mainnet-beta");
 const base = resolveBettingEvmDeploymentForChain("base", "mainnet-beta");
+const bscGoldClobAddress =
+  (bsc as typeof bsc & { goldClobAddress?: string }).goldClobAddress ||
+  bsc.lvrRouterAddress;
+const baseGoldClobAddress =
+  (base as typeof base & { goldClobAddress?: string }).goldClobAddress ||
+  base.lvrRouterAddress;
 
 let stopAnvil: (() => void) | null = null;
 
@@ -143,7 +149,7 @@ try {
 
   await runCommand(
     "bash",
-    ["scripts/ci-install-verified.sh", "root", "hyperbet-bsc", "hyperbet-bsc-app"],
+    ["scripts/ci-install-verified.sh", "root", "hyperbet-evm", "hyperbet-evm-app"],
     {
       stdoutFile: path.join(artifactRoot, "base-app-install.out.log"),
       stderrFile: path.join(artifactRoot, "base-app-install.err.log"),
@@ -153,7 +159,7 @@ try {
 
   await runCommand(
     "bun",
-    ["run", "--cwd", "packages/hyperbet-bsc/app", "build", "--mode", "mainnet-beta"],
+    ["run", "--cwd", "packages/hyperbet-evm/app", "build", "--mode", "mainnet-beta"],
     {
       env: {
         CF_PAGES_COMMIT_SHA: process.env.GITHUB_SHA || "local-base-smoke",
@@ -163,9 +169,9 @@ try {
         VITE_USE_GAME_RPC_PROXY: "true",
         VITE_USE_GAME_EVM_RPC_PROXY: "true",
         VITE_BSC_CHAIN_ID: String(bsc.chainId),
-        VITE_BSC_GOLD_CLOB_ADDRESS: bsc.goldClobAddress,
+        VITE_BSC_GOLD_CLOB_ADDRESS: bscGoldClobAddress,
         VITE_BASE_CHAIN_ID: String(base.chainId),
-        VITE_BASE_GOLD_CLOB_ADDRESS: base.goldClobAddress,
+        VITE_BASE_GOLD_CLOB_ADDRESS: baseGoldClobAddress,
       },
       stdoutFile: path.join(artifactRoot, "base-app-build.out.log"),
       stderrFile: path.join(artifactRoot, "base-app-build.err.log"),
@@ -175,7 +181,7 @@ try {
 
   copyIntoArtifacts(
     artifactRoot,
-    path.join(process.cwd(), "packages/hyperbet-bsc/app/dist/build-info.json"),
+    path.join(process.cwd(), "packages/hyperbet-evm/app/dist/build-info.json"),
     "build-info.json",
   );
 } finally {

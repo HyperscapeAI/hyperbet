@@ -1,5 +1,6 @@
 import { strict as assert } from "node:assert";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { existsSync, readdirSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -88,7 +89,21 @@ async function loadArtifact<T extends OracleArtifact | ClobArtifact>(
   relativePath: string,
 ): Promise<T> {
   const here = path.dirname(fileURLToPath(import.meta.url));
-  const artifactPath = path.resolve(here, "../../evm-contracts/out", relativePath);
+  const outDir = path.resolve(here, "../../evm-contracts/out");
+  const artifactPath = path.resolve(outDir, relativePath);
+  if (existsSync(artifactPath)) {
+    return JSON.parse(await readFile(artifactPath, "utf8")) as T;
+  }
+
+  const artifactName = path.basename(relativePath);
+  for (const entry of readdirSync(outDir, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    const candidatePath = path.resolve(outDir, entry.name, artifactName);
+    if (existsSync(candidatePath)) {
+      return JSON.parse(await readFile(candidatePath, "utf8")) as T;
+    }
+  }
+
   return JSON.parse(await readFile(artifactPath, "utf8")) as T;
 }
 

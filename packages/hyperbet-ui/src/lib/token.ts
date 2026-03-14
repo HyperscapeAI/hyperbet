@@ -1,9 +1,27 @@
 import {
   TOKEN_2022_PROGRAM_ID,
   TOKEN_PROGRAM_ID,
-  getAssociatedTokenAddressSync,
+  ASSOCIATED_TOKEN_PROGRAM_ID,
 } from "@solana/spl-token";
 import { Connection, PublicKey, Transaction } from "@solana/web3.js";
+import { findProgramAddressSync } from "./programAddress";
+
+export function getAssociatedTokenAddressCompatSync(
+  mint: PublicKey,
+  owner: PublicKey,
+  allowOwnerOffCurve = false,
+  tokenProgramId: PublicKey = TOKEN_PROGRAM_ID,
+  associatedTokenProgramId: PublicKey = ASSOCIATED_TOKEN_PROGRAM_ID,
+): PublicKey {
+  if (!allowOwnerOffCurve && !PublicKey.isOnCurve(owner.toBuffer())) {
+    throw new Error("Token owner is off curve");
+  }
+
+  return findProgramAddressSync(
+    [owner.toBuffer(), tokenProgramId.toBuffer(), mint.toBuffer()],
+    associatedTokenProgramId,
+  )[0];
+}
 
 function isMintLookupError(error: unknown): boolean {
   const message = (error as Error)?.message?.toLowerCase?.() ?? "";
@@ -58,7 +76,7 @@ export async function findAnyGoldAccount(
   );
   if (legacy) return legacy;
 
-  const t22Ata = getAssociatedTokenAddressSync(
+  const t22Ata = getAssociatedTokenAddressCompatSync(
     mint,
     owner,
     false,
@@ -67,7 +85,7 @@ export async function findAnyGoldAccount(
   const t22AtaInfo = await connection.getAccountInfo(t22Ata, "confirmed");
   if (t22AtaInfo) return t22Ata;
 
-  const legacyAta = getAssociatedTokenAddressSync(
+  const legacyAta = getAssociatedTokenAddressCompatSync(
     mint,
     owner,
     false,
@@ -80,7 +98,7 @@ export async function findAnyGoldAccount(
 }
 
 export function getToken2022Ata(owner: PublicKey, mint: PublicKey): PublicKey {
-  return getAssociatedTokenAddressSync(
+  return getAssociatedTokenAddressCompatSync(
     mint,
     owner,
     false,

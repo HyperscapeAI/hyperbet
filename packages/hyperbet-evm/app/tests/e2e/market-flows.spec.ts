@@ -23,7 +23,7 @@ import {
 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 
-import { LVR_ROUTER_ABI } from "../../src/lib/lvrRouterAbi";
+import { LVR_ROUTER_ABI } from "../../src/lib/goldClobAbi";
 
 type E2eState = {
   solanaRpcUrl?: string;

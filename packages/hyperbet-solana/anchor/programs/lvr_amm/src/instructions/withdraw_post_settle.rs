@@ -29,6 +29,7 @@ pub fn withdraw_post_settle_instruction(
         user_share_balance >= q,
         PredictionMarketError::SignerDoesntHaveEnoughTokens
     );
+    let settled_outcome = bet.side_won.unwrap();
 
     // Burn the tokens
     let (burn_destination, burn_mint) = if outcome == 0 {
@@ -47,9 +48,9 @@ pub fn withdraw_post_settle_instruction(
     let cpi_context = CpiContext::new(cpi_program, cpi_accounts);
     token_interface::burn(cpi_context, q)?;
 
-    // Only pay if the user holds the winning shares
-    // In LvrAMM (and PMs generally), winning shares redeem 1:1 for Collateral (Lamports here)
-    if bet.side_won.unwrap() == outcome {
+    // Cancelled markets only support position cleanup because the AMM does not
+    // track per-wallet collateral contributions needed for a precise refund.
+    if settled_outcome == outcome {
         let rent_balance = Rent::get()?.minimum_balance(bet.to_account_info().data_len());
         let bet_sol_balance = **bet.to_account_info().lamports.borrow() - rent_balance;
 

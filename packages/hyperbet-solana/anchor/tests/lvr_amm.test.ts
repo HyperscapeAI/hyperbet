@@ -69,10 +69,6 @@ async function ensureAta(
   return ata;
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 async function settleBet(
   program: Program<LvrAmm>,
   authority: Keypair,
@@ -278,7 +274,6 @@ describe("lvr_amm", () => {
 
     const market = await createOpenMarketFixture(fightProgram, ammProgram, authority, {
       duelKey: uniqueDuelKey("amm-settle-validation"),
-      expirationAt: BigInt(Math.floor(Date.now() / 1000) + 5),
     });
     const bet = await ammProgram.account.bet.fetch(market.marketState);
     const betId = new BN(bet.betId.toString());
@@ -297,10 +292,8 @@ describe("lvr_amm", () => {
       amount: TRADE_AMOUNT_LAMPORTS,
     });
 
-    await sleep(5_500);
-
     try {
-      await settleBet(ammProgram, authority, market.marketState, betId, 2);
+      await settleBet(ammProgram, authority, market.marketState, betId, 3);
       assert.fail("invalid winner side should be rejected");
     } catch (error: unknown) {
       assert.ok(
@@ -324,6 +317,69 @@ describe("lvr_amm", () => {
     }
   });
 
+  it("allows cancelled-market cleanup without paying out extra lamports", async () => {
+    const trader = Keypair.generate();
+    await airdrop(provider.connection, trader.publicKey, 10);
+
+    const market = await createOpenMarketFixture(fightProgram, ammProgram, authority, {
+      duelKey: uniqueDuelKey("amm-cancel-cleanup"),
+    });
+
+    await placeClobOrder(ammProgram, {
+      marketState: market.marketState,
+      duelState: market.duelState,
+      config: market.config,
+      treasury: market.treasury,
+      marketMaker: market.marketMaker,
+      vault: market.vault,
+      user: trader,
+      orderId: 1,
+      side: SIDE_BID,
+      price: 600,
+      amount: TRADE_AMOUNT_LAMPORTS,
+    });
+
+    const bet = await ammProgram.account.bet.fetch(market.marketState);
+    const betId = new BN(bet.betId.toString());
+    const mintYes = deriveMintYesPda(
+      ammProgram.programId,
+      BigInt(betId.toString()),
+      bet.creator,
+    );
+    const traderYesAta = getAssociatedTokenAddressSync(
+      mintYes,
+      trader.publicKey,
+      true,
+    );
+    const traderShares = await fetchSplBalance(provider.connection, traderYesAta);
+    assert.ok(traderShares > 0n, "cancelled trader should hold YES shares");
+
+    const betLamportsBeforeClaim = BigInt(
+      await provider.connection.getBalance(market.marketState, "confirmed"),
+    );
+    await settleBet(ammProgram, authority, market.marketState, betId, 2);
+    await claimClobWinnings(ammProgram, {
+      marketState: market.marketState,
+      duelState: market.duelState,
+      config: market.config,
+      marketMaker: market.marketMaker,
+      vault: market.vault,
+      user: trader,
+    });
+    const betLamportsAfterClaim = BigInt(
+      await provider.connection.getBalance(market.marketState, "confirmed"),
+    );
+
+    assert.strictEqual(
+      await fetchSplBalance(provider.connection, traderYesAta),
+      0n,
+    );
+    assert.strictEqual(
+      betLamportsAfterClaim,
+      betLamportsBeforeClaim,
+    );
+  });
+
   it("pays the winner and burns the loser without draining extra lamports", async () => {
     const winner = Keypair.generate();
     const loser = Keypair.generate();
@@ -334,7 +390,6 @@ describe("lvr_amm", () => {
 
     const market = await createOpenMarketFixture(fightProgram, ammProgram, authority, {
       duelKey: uniqueDuelKey("amm-withdraw-resolution"),
-      expirationAt: BigInt(Math.floor(Date.now() / 1000) + 5),
     });
 
     await placeClobOrder(ammProgram, {
@@ -393,7 +448,6 @@ describe("lvr_amm", () => {
     assert.ok(winnerShares > 0n, "winner should hold YES shares");
     assert.ok(loserShares > 0n, "loser should hold NO shares");
 
-    await sleep(5_500);
     await settleBet(ammProgram, authority, market.marketState, betId, 0);
 
     const betLamportsBeforeWinner = BigInt(

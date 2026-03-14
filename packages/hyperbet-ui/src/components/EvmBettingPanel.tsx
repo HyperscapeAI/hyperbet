@@ -611,6 +611,7 @@ export function EvmBettingPanel({
           getPosition(
             publicClient,
             market.marketAddress,
+            market.marketKey,
             effectiveAddress,
           ),
           getNativeBalance(publicClient, effectiveAddress),

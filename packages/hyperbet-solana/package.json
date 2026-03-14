@@ -24,7 +24,7 @@
     "build:mainnet": "bun run --cwd app build --mode mainnet",
     "preview": "bun run --cwd app preview",
     "test:e2e:local": "bun run --cwd app test:e2e:local",
-    "test:pm-amm:local": "bun run --cwd anchor test:lvr-amm && bun run --cwd app test:e2e:local",
+    "test:pm-amm:local": "bun run --cwd anchor test:lvr-amm && bun run --cwd app test:e2e:pm-amm:local",
     "test:e2e:testnet": "bun run --cwd app test:e2e:testnet",
     "test:e2e:mainnet": "bun run --cwd app test:e2e:mainnet",
     "keeper:bot": "bun run --cwd keeper bot",

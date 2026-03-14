@@ -1,6 +1,5 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 
 import { AnchorProvider, BN, Idl, Program, Wallet } from "@coral-xyz/anchor";
@@ -19,6 +18,16 @@ import {
 import fightOracleIdl from "../../../../hyperbet-solana/anchor/target/idl/fight_oracle.json";
 import lvrRouterIdl from "../../../../hyperbet-solana/anchor/target/idl/lvr_amm.json";
 import goldPerpsIdl from "../../../../hyperbet-solana/anchor/target/idl/gold_perps_market.json";
+import {
+  createOpenMarketFixture,
+  deriveMintYesPda,
+  deriveMintNoPda,
+  uniqueDuelKey,
+} from "../../../../hyperbet-solana/anchor/tests/amm-test-helpers";
+import {
+  createAssociatedTokenAccountInstruction,
+  getAssociatedTokenAddressSync,
+} from "@solana/spl-token";
 import { modelMarketIdFromCharacterId } from "../../../../hyperbet-ui/src/lib/modelMarkets";
 
 type SignableTx = Transaction | VersionedTransaction;
@@ -28,6 +37,9 @@ type IdlWithAddress = Idl & {
   metadata?: {
     address?: string;
   };
+};
+type AccountNamespace = {
+  fetchNullable: (pubkey: PublicKey) => Promise<unknown>;
 };
 
 function resolveIdlAddress(idl: IdlWithAddress, label: string): string {
@@ -42,14 +54,10 @@ const BPF_LOADER_UPGRADEABLE_PROGRAM_ID = new PublicKey(
   "BPFLoaderUpgradeab1e11111111111111111111111",
 );
 const E2E_PERPS_MAX_ORACLE_STALENESS_SECONDS = 3_600;
-const DUEL_WINNER_MARKET_KIND = 1;
-const SIDE_BID = 1;
-const SIDE_ASK = 2;
 const E2E_TRADER_SEED = Uint8Array.from([
   88, 41, 190, 12, 77, 164, 231, 5, 199, 118, 43, 91, 16, 220, 58, 147, 9, 175,
   63, 204, 132, 54, 241, 28, 115, 67, 154, 210, 36, 143, 80, 11,
 ]);
-let currentSendStage = "initializing";
 
 function deriveProgramDataAddress(programId: PublicKey): PublicKey {
   return PublicKey.findProgramAddressSync(
@@ -64,114 +72,14 @@ function encodeMarketId(marketId: number): Buffer {
   return bytes;
 }
 
-function sha256Bytes(label: string): number[] {
-  return Array.from(createHash("sha256").update(label).digest());
-}
-
-function duelKeyFromLabel(label: string): number[] {
-  return sha256Bytes(`hyperbet-e2e:${label}`);
-}
-
-function bytesToHex(bytes: readonly number[] | Uint8Array): string {
-  return Buffer.from(bytes).toString("hex");
-}
-
-function enumKey(value: unknown): string | null {
-  if (!value || typeof value !== "object") return null;
-  const [key] = Object.keys(value as Record<string, unknown>);
-  return key ?? null;
-}
-
-async function currentChainUnixTimestamp(
-  connection: Connection,
-): Promise<number> {
-  const slot = await withRpcRetry(() => connection.getSlot("confirmed"));
-  const blockTime = await withRpcRetry(() => connection.getBlockTime(slot));
-  return blockTime ?? Math.floor(Date.now() / 1000);
-}
-
-function deriveDuelStateAddress(
-  programId: PublicKey,
-  duelKey: readonly number[] | Uint8Array,
-): PublicKey {
-  return PublicKey.findProgramAddressSync(
-    [Buffer.from("duel"), Buffer.from(duelKey)],
-    programId,
-  )[0];
-}
-
-function deriveClobMarketStateAddress(
-  programId: PublicKey,
-  duelState: PublicKey,
-): PublicKey {
-  return PublicKey.findProgramAddressSync(
-    [
-      Buffer.from("market"),
-      duelState.toBuffer(),
-      Uint8Array.of(DUEL_WINNER_MARKET_KIND),
-    ],
-    programId,
-  )[0];
-}
-
-function deriveClobVaultAddress(
-  programId: PublicKey,
-  marketState: PublicKey,
-): PublicKey {
-  return PublicKey.findProgramAddressSync(
-    [Buffer.from("vault"), marketState.toBuffer()],
-    programId,
-  )[0];
-}
-
-function deriveClobUserBalanceAddress(
-  programId: PublicKey,
-  marketState: PublicKey,
-  user: PublicKey,
-): PublicKey {
-  return PublicKey.findProgramAddressSync(
-    [Buffer.from("balance"), marketState.toBuffer(), user.toBuffer()],
-    programId,
-  )[0];
-}
-
-function deriveClobOrderAddress(
-  programId: PublicKey,
-  marketState: PublicKey,
-  orderId: number | bigint,
-): PublicKey {
-  const orderIdBytes = Buffer.alloc(8);
-  orderIdBytes.writeBigUInt64LE(BigInt(orderId), 0);
-  return PublicKey.findProgramAddressSync(
-    [Buffer.from("order"), marketState.toBuffer(), orderIdBytes],
-    programId,
-  )[0];
-}
-
-function deriveClobPriceLevelAddress(
-  programId: PublicKey,
-  marketState: PublicKey,
-  side: number,
-  price: number,
-): PublicKey {
-  const priceBytes = Buffer.alloc(2);
-  priceBytes.writeUInt16LE(price, 0);
-  return PublicKey.findProgramAddressSync(
-    [
-      Buffer.from("level"),
-      marketState.toBuffer(),
-      Uint8Array.of(side),
-      priceBytes,
-    ],
-    programId,
-  )[0];
-}
-
 function lamportsBn(sol: number): BN {
   return new BN(Math.round(sol * LAMPORTS_PER_SOL).toString());
 }
 
-async function loadBootstrapAuthority(): Promise<Keypair> {
+async function loadBootstrapAuthority(): Promise<{
+  keypair: Keypair;
+  keypairPath: string;
+}> {
   const candidates = [
     process.env.E2E_SOLANA_BOOTSTRAP_KEYPAIR,
     path.join(
@@ -181,54 +89,32 @@ async function loadBootstrapAuthority(): Promise<Keypair> {
     path.join(process.env.HOME ?? "", ".config/solana/id.json"),
   ].filter((value): value is string => Boolean(value?.trim()));
 
+  let keypairPath: string | null = null;
   for (const candidate of candidates) {
     try {
-      const secret = JSON.parse(await fs.readFile(candidate, "utf8")) as number[];
-      return Keypair.fromSecretKey(Uint8Array.from(secret));
+      await fs.access(candidate);
+      keypairPath = candidate;
+      break;
     } catch {
       // Try the next configured wallet path.
     }
   }
 
-  throw new Error(
-    `Could not find a bootstrap Solana keypair. Checked: ${candidates.join(", ")}`,
-  );
+  if (!keypairPath) {
+    throw new Error(
+      `Could not find a bootstrap Solana keypair. Checked: ${candidates.join(", ")}`,
+    );
+  }
+
+  const secret = JSON.parse(await fs.readFile(keypairPath, "utf8")) as number[];
+  return {
+    keypair: Keypair.fromSecretKey(Uint8Array.from(secret)),
+    keypairPath,
+  };
 }
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function markStage(label: string): void {
-  currentSendStage = label;
-  console.log(`[e2e:setup-localnet] ${label}`);
-}
-
-function isRetryableRpcError(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : String(error);
-  return /Unable to connect|ConnectionRefused|fetch failed|ECONNREFUSED/i.test(
-    message,
-  );
-}
-
-async function withRpcRetry<T>(
-  operation: () => Promise<T>,
-  attempts = 8,
-  baseDelayMs = 500,
-): Promise<T> {
-  let lastError: unknown;
-  for (let attempt = 0; attempt < attempts; attempt += 1) {
-    try {
-      return await operation();
-    } catch (error) {
-      lastError = error;
-      if (!isRetryableRpcError(error) || attempt === attempts - 1) {
-        throw error;
-      }
-      await sleep(baseDelayMs * (attempt + 1));
-    }
-  }
-  throw lastError;
 }
 
 function toWallet(keypair: Keypair): AnchorLikeWallet {
@@ -256,9 +142,7 @@ async function airdrop(
   lamports: number,
 ): Promise<void> {
   let lastError: unknown = new Error("Airdrop did not settle");
-  const initialBalance = await withRpcRetry(() =>
-    connection.getBalance(recipient, "confirmed"),
-  );
+  const initialBalance = await connection.getBalance(recipient, "confirmed");
   const expectedFloor = initialBalance + lamports;
 
   for (let attempt = 0; attempt < 8; attempt += 1) {
@@ -267,16 +151,12 @@ async function airdrop(
 
       const startedAt = Date.now();
       while (Date.now() - startedAt < 20_000) {
-        const balance = await withRpcRetry(() =>
-          connection.getBalance(recipient, "confirmed"),
-        );
+        const balance = await connection.getBalance(recipient, "confirmed");
         if (balance >= expectedFloor) return;
 
-        const statuses = await withRpcRetry(() =>
-          connection.getSignatureStatuses([signature], {
-            searchTransactionHistory: true,
-          }),
-        );
+        const statuses = await connection.getSignatureStatuses([signature], {
+          searchTransactionHistory: true,
+        });
         const status = statuses.value[0];
         if (status?.err) {
           throw new Error(
@@ -300,9 +180,7 @@ async function ensureBalance(
   recipient: PublicKey,
   minimumLamports: number,
 ): Promise<void> {
-  let balance = await withRpcRetry(() =>
-    connection.getBalance(recipient, "confirmed"),
-  );
+  let balance = await connection.getBalance(recipient, "confirmed");
   while (balance < minimumLamports) {
     const missingLamports = minimumLamports - balance;
     await airdrop(
@@ -310,9 +188,7 @@ async function ensureBalance(
       recipient,
       Math.min(missingLamports, 10 * LAMPORTS_PER_SOL),
     );
-    balance = await withRpcRetry(() =>
-      connection.getBalance(recipient, "confirmed"),
-    );
+    balance = await connection.getBalance(recipient, "confirmed");
   }
 }
 
@@ -322,9 +198,7 @@ async function ensureTransferredBalance(
   recipient: PublicKey,
   minimumLamports: number,
 ): Promise<void> {
-  const balance = await withRpcRetry(() =>
-    connection.getBalance(recipient, "confirmed"),
-  );
+  const balance = await connection.getBalance(recipient, "confirmed");
   if (balance >= minimumLamports) return;
 
   const transferLamports = minimumLamports - balance;
@@ -338,22 +212,40 @@ async function ensureTransferredBalance(
   await provider.sendAndConfirm(transferTx);
 }
 
+async function ensureAssociatedTokenAccount(
+  connection: Connection,
+  provider: AnchorProvider,
+  mint: PublicKey,
+  owner: PublicKey,
+): Promise<PublicKey> {
+  const ata = getAssociatedTokenAddressSync(mint, owner, true);
+  const existing = await connection.getAccountInfo(ata, "confirmed");
+  if (existing) return ata;
+
+  const tx = new Transaction().add(
+    createAssociatedTokenAccountInstruction(
+      provider.wallet.publicKey,
+      ata,
+      owner,
+      mint,
+    ),
+  );
+  await provider.sendAndConfirm(tx);
+  return ata;
+}
+
 async function waitForSignatureConfirmation(
   connection: Connection,
   signature: string,
   timeoutMs = 120_000,
-  onPendingTick?: () => Promise<void> | void,
 ): Promise<void> {
   const startedAt = Date.now();
-  let lastPendingTickAt = 0;
   while (Date.now() - startedAt < timeoutMs) {
-    let shouldTick: boolean;
+
     try {
-      const statuses = await withRpcRetry(() =>
-        connection.getSignatureStatuses([signature], {
-          searchTransactionHistory: true,
-        }),
-      );
+      const statuses = await connection.getSignatureStatuses([signature], {
+        searchTransactionHistory: true,
+      });
       const status = statuses.value[0];
       if (status?.err) {
         throw new Error(
@@ -366,20 +258,10 @@ async function waitForSignatureConfirmation(
       ) {
         return;
       }
-      shouldTick = !status;
     } catch (error) {
       if (Date.now() - startedAt >= timeoutMs) {
         throw error;
       }
-      shouldTick = true;
-    }
-    if (
-      shouldTick &&
-      onPendingTick &&
-      Date.now() - lastPendingTickAt >= 5_000
-    ) {
-      await onPendingTick();
-      lastPendingTickAt = Date.now();
     }
     await sleep(500);
   }
@@ -395,9 +277,7 @@ async function waitForAccountExists(
 ): Promise<void> {
   const startedAt = Date.now();
   while (Date.now() - startedAt < timeoutMs) {
-    const account = await withRpcRetry(() =>
-      connection.getAccountInfo(address, "confirmed"),
-    );
+    const account = await connection.getAccountInfo(address, "confirmed");
     if (account) return;
     await sleep(500);
   }
@@ -423,9 +303,8 @@ async function reliableSendAndConfirm(
     }
   } else {
     tx.feePayer = tx.feePayer ?? provider.wallet.publicKey;
-    const latestBlockhash = await withRpcRetry(() =>
-      connection.getLatestBlockhash(preflightCommitment),
-    );
+    const latestBlockhash =
+      await connection.getLatestBlockhash(preflightCommitment);
     tx.recentBlockhash = latestBlockhash.blockhash;
     if (signers && signers.length > 0) {
       for (const signer of signers) {
@@ -435,34 +314,12 @@ async function reliableSendAndConfirm(
   }
 
   const signedTx = await provider.wallet.signTransaction(tx);
-  const serializedTx = signedTx.serialize();
-  const sendOptions = {
+  const signature = await connection.sendRawTransaction(signedTx.serialize(), {
     skipPreflight: resolvedOpts.skipPreflight,
-    maxRetries: resolvedOpts.maxRetries ?? 20,
+    maxRetries: resolvedOpts.maxRetries,
     preflightCommitment,
-  } as const;
-  const signature = await withRpcRetry(() =>
-    connection.sendRawTransaction(serializedTx, sendOptions),
-  );
-  try {
-    await waitForSignatureConfirmation(connection, signature, 120_000, async () => {
-      try {
-        await connection.sendRawTransaction(serializedTx, {
-          ...sendOptions,
-          skipPreflight: true,
-          maxRetries: 0,
-        });
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        if (!/already(?:\s+been)?\s+processed/i.test(message)) {
-          throw error;
-        }
-      }
-    });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    throw new Error(`${currentSendStage}: ${message}`, { cause: error });
-  }
+  });
+  await waitForSignatureConfirmation(connection, signature);
   return signature;
 }
 
@@ -496,7 +353,8 @@ async function main(): Promise<void> {
     wsEndpoint: solanaWsUrl,
     confirmTransactionInitialTimeout: 120_000,
   });
-  const authority = await loadBootstrapAuthority();
+  const bootstrapAuthority = await loadBootstrapAuthority();
+  const authority = bootstrapAuthority.keypair;
   const trader = Keypair.fromSeed(E2E_TRADER_SEED);
   const provider = new AnchorProvider(connection, toWallet(authority), {
     commitment: "confirmed",
@@ -505,20 +363,10 @@ async function main(): Promise<void> {
   attachReliableSendAndConfirm(provider, connection);
 
   const fightProgram = new Program(fightOracleIdl as Idl, provider);
-  const fight: any = fightProgram;
   const clobProgram = new Program(lvrRouterIdl as Idl, provider);
-  const clob: any = clobProgram;
   const perpsProgram = new Program(goldPerpsIdl as Idl, provider);
-  const perps: any = perpsProgram;
 
-  const [oracleConfigPda] = PublicKey.findProgramAddressSync(
-    [Buffer.from("oracle_config")],
-    fightProgram.programId,
-  );
-
-  markStage("fund authority wallet");
   await ensureBalance(connection, authority.publicKey, 30 * LAMPORTS_PER_SOL);
-  markStage("fund trader wallet");
   await ensureTransferredBalance(
     connection,
     provider,
@@ -541,139 +389,32 @@ async function main(): Promise<void> {
   const e2eModelMu = 28;
   const e2eModelSigma = 4;
   const e2ePerpsMarketId = modelMarketIdFromCharacterId(e2eModelCharacterId);
-  const resolvedMatchId = Number(process.env.E2E_RESOLVED_MATCH_ID || 9001);
-  const currentMatchId = Number(process.env.E2E_CURRENT_MATCH_ID || 9002);
-  const resolvedDuelKey = duelKeyFromLabel(`resolved:${resolvedMatchId}`);
-  const currentDuelKey = duelKeyFromLabel(`current:${currentMatchId}`);
-  const resolvedDuelPda = deriveDuelStateAddress(
-    fightProgram.programId,
-    resolvedDuelKey,
+  const now = Math.floor(Date.now() / 1000);
+  const currentMatchId = Date.now();
+  const currentDuelMetadata = JSON.stringify({
+    duelId: currentMatchId,
+    matchId: currentMatchId,
+    agent1: "E2E Active Agent A",
+    agent2: "E2E Active Agent B",
+  });
+  const currentMarket = await createOpenMarketFixture(
+    fightProgram as never,
+    clobProgram as never,
+    authority,
+    {
+      duelKey: uniqueDuelKey(
+        `e2e-current-duel:${Date.now()}:${Math.random().toString(16).slice(2)}`,
+      ),
+      betOpenTs: now - 30,
+      // Keep the duel market open long enough for the full local Playwright
+      // suite to seed liquidity and submit prediction trades across multiple
+      // specs without flaking on wall-clock expiry.
+      betCloseTs: now + 3_600,
+      duelStartTs: now + 3_660,
+      metadataUri: currentDuelMetadata,
+    },
   );
-  const currentDuelPda = deriveDuelStateAddress(
-    fightProgram.programId,
-    currentDuelKey,
-  );
-  const currentUnixTs = await currentChainUnixTimestamp(connection);
-  const resolvedBetOpenTs = currentUnixTs - 180;
-  const resolvedBetCloseTs = currentUnixTs - 90;
-  const resolvedDuelStartTs = currentUnixTs - 60;
-  const resolvedDuelEndTs = currentUnixTs - 30;
-  const currentBetWindowSeconds = Number(
-    process.env.E2E_CURRENT_BET_WINDOW_SECONDS || 300,
-  );
-  const currentFightDelaySeconds = Number(
-    process.env.E2E_CURRENT_DUEL_START_DELAY_SECONDS || 360,
-  );
-  const currentBetOpenTs = currentUnixTs - 15;
-  const currentBetCloseTs = currentUnixTs + currentBetWindowSeconds;
-  const currentDuelStartTs = currentUnixTs + currentFightDelaySeconds;
-
-  markStage("initialize fight oracle");
-  await fight.methods
-    .initializeOracle(authority.publicKey)
-    .accountsPartial({
-      authority: authority.publicKey,
-      oracleConfig: oracleConfigPda,
-      program: fightProgram.programId,
-      programData: deriveProgramDataAddress(fightProgram.programId),
-      systemProgram: SystemProgram.programId,
-    })
-    .signers([authority])
-    .rpc();
-
-  const existingResolvedDuel =
-    await fight.account.duelState.fetchNullable(resolvedDuelPda);
-  const resolvedStatus = enumKey(existingResolvedDuel?.status);
-  if (resolvedStatus !== "resolved" && resolvedStatus !== "cancelled") {
-    markStage("seed resolved duel");
-    await fight.methods
-      .upsertDuel(
-        [...resolvedDuelKey],
-        sha256Bytes("e2e-resolved-agent-a"),
-        sha256Bytes("e2e-resolved-agent-b"),
-        new BN(resolvedBetOpenTs),
-        new BN(resolvedBetCloseTs),
-        new BN(resolvedDuelStartTs),
-        "https://hyperbet.local/e2e/resolved",
-        { locked: {} },
-      )
-      .accountsPartial({
-        reporter: authority.publicKey,
-        oracleConfig: oracleConfigPda,
-        duelState: resolvedDuelPda,
-        systemProgram: SystemProgram.programId,
-      })
-      .signers([authority])
-      .rpc();
-
-    markStage("report resolved duel result");
-    await fight.methods
-      .reportResult(
-        [...resolvedDuelKey],
-        { a: {} },
-        new BN(42),
-        sha256Bytes("e2e-resolved-replay"),
-        sha256Bytes("e2e-resolved-result"),
-        new BN(resolvedDuelEndTs),
-        "https://hyperbet.local/e2e/resolved/result",
-      )
-      .accountsPartial({
-        reporter: authority.publicKey,
-        oracleConfig: oracleConfigPda,
-        duelState: resolvedDuelPda,
-      })
-      .signers([authority])
-      .rpc();
-  }
-
-  markStage("seed current duel");
-  await fight.methods
-    .upsertDuel(
-      [...currentDuelKey],
-      sha256Bytes("e2e-active-agent-a"),
-      sha256Bytes("e2e-active-agent-b"),
-      new BN(currentBetOpenTs),
-      new BN(currentBetCloseTs),
-      new BN(currentDuelStartTs),
-      "https://hyperbet.local/e2e/current",
-      { bettingOpen: {} },
-    )
-    .accountsPartial({
-      reporter: authority.publicKey,
-      oracleConfig: oracleConfigPda,
-      duelState: currentDuelPda,
-      systemProgram: SystemProgram.programId,
-    })
-    .signers([authority])
-    .rpc();
-
-  const [clobConfigPda] = PublicKey.findProgramAddressSync(
-    [Buffer.from("config")],
-    clobProgram.programId,
-  );
-  const existingClobConfig =
-    await clob.account.marketConfig.fetchNullable(clobConfigPda);
-  if (!existingClobConfig) {
-    markStage("initialize clob config");
-    await clob.methods
-      .initializeConfig(
-        authority.publicKey,
-        authority.publicKey,
-        authority.publicKey,
-        100,
-        100,
-        200,
-      )
-      .accountsPartial({
-        authority: authority.publicKey,
-        config: clobConfigPda,
-        program: clobProgram.programId,
-        programData: deriveProgramDataAddress(clobProgram.programId),
-        systemProgram: SystemProgram.programId,
-      })
-      .signers([authority])
-      .rpc();
-  }
+  const currentDuelKeyHex = Buffer.from(currentMarket.duelKey).toString("hex");
 
   const [perpsConfigPda] = PublicKey.findProgramAddressSync(
     [Buffer.from("config")],
@@ -683,11 +424,11 @@ async function main(): Promise<void> {
     [Buffer.from("market"), encodeMarketId(e2ePerpsMarketId)],
     perpsProgram.programId,
   );
+  const perpsAccounts = perpsProgram.account as Record<string, AccountNamespace>;
   const existingPerpsConfig =
-    await perps.account.configState.fetchNullable(perpsConfigPda);
+    await perpsAccounts.configState.fetchNullable(perpsConfigPda);
   if (!existingPerpsConfig) {
-    markStage("initialize perps config");
-    await perps.methods
+    await perpsProgram.methods
       .initializeConfig(
         authority.publicKey,
         authority.publicKey,
@@ -718,8 +459,7 @@ async function main(): Promise<void> {
     await waitForAccountExists(connection, perpsConfigPda);
   }
 
-  markStage("update perps oracle");
-  await perps.methods
+  await perpsProgram.methods
     .updateMarketOracle(
       new BN(String(e2ePerpsMarketId)),
       lamportsBn(e2eModelSpotIndex),
@@ -734,8 +474,7 @@ async function main(): Promise<void> {
     })
     .rpc();
 
-  markStage("deposit perps insurance");
-  await perps.methods
+  await perpsProgram.methods
     .depositInsurance(new BN(String(e2ePerpsMarketId)), lamportsBn(12))
     .accountsPartial({
       market: perpsMarketPda,
@@ -744,147 +483,24 @@ async function main(): Promise<void> {
     })
     .rpc();
 
-  const clobMarketState = deriveClobMarketStateAddress(
-    clobProgram.programId,
-    currentDuelPda,
-  );
-  const clobVaultPda = deriveClobVaultAddress(
-    clobProgram.programId,
-    clobMarketState,
-  );
-  const existingClobMarket =
-    await clob.account.marketState.fetchNullable(clobMarketState);
-  if (!existingClobMarket) {
-    markStage("initialize clob market");
-    await clob.methods
-      .initializeMarket([...currentDuelKey], DUEL_WINNER_MARKET_KIND)
-      .accountsPartial({
-        operator: authority.publicKey,
-        config: clobConfigPda,
-        duelState: currentDuelPda,
-        marketState: clobMarketState,
-        vault: clobVaultPda,
-        systemProgram: SystemProgram.programId,
-      })
-      .signers([authority])
-      .rpc();
-  }
-  await waitForAccountExists(connection, clobMarketState);
-
-  markStage("sync clob market");
-  await clob.methods
-    .syncMarketFromDuel()
-    .accountsPartial({
-      marketState: clobMarketState,
-      duelState: currentDuelPda,
-    })
-    .rpc();
-
-  const clobUserBalancePda = deriveClobUserBalanceAddress(
-    clobProgram.programId,
-    clobMarketState,
+  const betIdNum = BigInt(`0x${Buffer.from(currentMarket.duelKey).slice(0, 8).reverse().toString('hex')}`);
+  const mintYesPda = deriveMintYesPda(clobProgram.programId, betIdNum, authority.publicKey);
+  const mintNoPda = deriveMintNoPda(clobProgram.programId, betIdNum, authority.publicKey);
+  const clobUserBalancePda = await ensureAssociatedTokenAccount(
+    connection,
+    provider,
+    mintYesPda,
     trader.publicKey,
   );
-  const clobAuthorityBalancePda = deriveClobUserBalanceAddress(
-    clobProgram.programId,
-    clobMarketState,
-    authority.publicKey,
-  );
-  const clobFirstOrderPda = deriveClobOrderAddress(
-    clobProgram.programId,
-    clobMarketState,
-    1,
-  );
-  const clobSecondOrderPda = deriveClobOrderAddress(
-    clobProgram.programId,
-    clobMarketState,
-    2,
-  );
-  const clobFirstLevelPda = deriveClobPriceLevelAddress(
-    clobProgram.programId,
-    clobMarketState,
-    SIDE_ASK,
-    600,
-  );
-  const clobSecondLevelPda = deriveClobPriceLevelAddress(
-    clobProgram.programId,
-    clobMarketState,
-    SIDE_BID,
-    400,
+  await ensureAssociatedTokenAccount(
+    connection,
+    provider,
+    mintNoPda,
+    trader.publicKey,
   );
 
-  const minVaultLamports = await withRpcRetry(() =>
-    connection.getMinimumBalanceForRentExemption(0, "confirmed"),
-  );
-  const currentVaultLamports = await withRpcRetry(() =>
-    connection.getBalance(clobVaultPda, "confirmed"),
-  );
-  if (currentVaultLamports < minVaultLamports) {
-    markStage("top up clob vault");
-    const topUpLamports = minVaultLamports - currentVaultLamports;
-    const topUpTx = new Transaction().add(
-      SystemProgram.transfer({
-        fromPubkey: authority.publicKey,
-        toPubkey: clobVaultPda,
-        lamports: topUpLamports,
-      }),
-    );
-    await provider.sendAndConfirm(topUpTx);
-  }
+  const oracleRecordedAt = Date.now();
 
-  const [existingFirstOrder, existingSecondOrder] = await Promise.all([
-    clob.account.order.fetchNullable(clobFirstOrderPda),
-    clob.account.order.fetchNullable(clobSecondOrderPda),
-  ]);
-  const seededClobOrderAmount = new BN(
-    (2n * BigInt(LAMPORTS_PER_SOL)).toString(),
-  );
-
-  if (!existingFirstOrder) {
-    markStage("seed first clob order");
-    await clob.methods
-      .placeOrder(new BN(1), SIDE_ASK, 600, seededClobOrderAmount)
-      .accountsPartial({
-        marketState: clobMarketState,
-        duelState: currentDuelPda,
-        userBalance: clobAuthorityBalancePda,
-        newOrder: clobFirstOrderPda,
-        restingLevel: clobFirstLevelPda,
-        config: clobConfigPda,
-        treasury: authority.publicKey,
-        marketMaker: authority.publicKey,
-        vault: clobVaultPda,
-        user: authority.publicKey,
-        systemProgram: SystemProgram.programId,
-      })
-      .signers([authority])
-      .rpc();
-  }
-
-  if (!existingSecondOrder) {
-    markStage("seed second clob order");
-    await clob.methods
-      .placeOrder(new BN(2), SIDE_BID, 400, seededClobOrderAmount)
-      .accountsPartial({
-        marketState: clobMarketState,
-        duelState: currentDuelPda,
-        userBalance: clobAuthorityBalancePda,
-        newOrder: clobSecondOrderPda,
-        restingLevel: clobSecondLevelPda,
-        config: clobConfigPda,
-        treasury: authority.publicKey,
-        marketMaker: authority.publicKey,
-        vault: clobVaultPda,
-        user: authority.publicKey,
-        systemProgram: SystemProgram.programId,
-      })
-      .signers([authority])
-      .rpc();
-  }
-
-  const oracleRecordedAt = currentUnixTs * 1000;
-
-  markStage("write local e2e env");
   const envBody = [
     "VITE_SOLANA_CLUSTER=localnet",
     `VITE_SOLANA_RPC_URL=${browserSolanaRpcUrl}`,
@@ -920,10 +536,6 @@ async function main(): Promise<void> {
     `VITE_BINARY_MARKET_MAKER_WALLET=${authority.publicKey.toBase58()}`,
     `VITE_BINARY_TRADE_TREASURY_WALLET=${authority.publicKey.toBase58()}`,
     `VITE_BINARY_TRADE_MARKET_MAKER_WALLET=${authority.publicKey.toBase58()}`,
-    `VITE_E2E_CLOB_MATCH_STATE=${clobMarketState.toBase58()}`,
-    `VITE_E2E_CLOB_VAULT=${clobVaultPda.toBase58()}`,
-    `VITE_E2E_CLOB_USER_BALANCE=${clobUserBalancePda.toBase58()}`,
-    `VITE_E2E_CLOB_FIRST_ORDER=${clobFirstOrderPda.toBase58()}`,
     `VITE_HEADLESS_WALLET_SECRET_KEY=${Array.from(trader.secretKey).join(",")}`,
     "VITE_HEADLESS_WALLET_NAME=E2E Trader",
     "VITE_HEADLESS_WALLET_AUTO_CONNECT=true",
@@ -938,23 +550,27 @@ async function main(): Promise<void> {
         cluster: "localnet",
         solanaRpcUrl,
         authority: authority.publicKey.toBase58(),
+        bootstrapWalletPath: bootstrapAuthority.keypairPath,
         solanaTraderPublicKey: trader.publicKey.toBase58(),
+        lvrAmmProgramId: clobProgramId,
+        goldClobMarketProgramId: clobProgramId,
         goldMint: goldMint.toBase58(),
         currentMatchId,
-        currentMatchPda: currentDuelPda.toBase58(),
-        currentDuelKeyHex: bytesToHex(currentDuelKey),
-        currentDuelState: currentDuelPda.toBase58(),
-        clobMatchState: clobMarketState.toBase58(),
-        clobVault: clobVaultPda.toBase58(),
+        currentDuelId: String(currentMatchId),
+        currentDuelKeyHex,
+        clobConfig: currentMarket.config.toBase58(),
+        clobMarketState: currentMarket.marketState.toBase58(),
+        clobDuelState: currentMarket.duelState.toBase58(),
+        clobTreasury: currentMarket.treasury.toBase58(),
+        clobMarketMaker: currentMarket.marketMaker.toBase58(),
+        clobVault: currentMarket.vault.toBase58(),
         clobUserBalance: clobUserBalancePda.toBase58(),
-        lastResolvedMatchId: resolvedMatchId,
-        lastResolvedDuelKeyHex: bytesToHex(resolvedDuelKey),
         expectedSeedSuccess: true,
         canStartNewRound: true,
-        placeBetPayAsset: "GOLD",
+        placeBetPayAsset: "SOL",
         placeBetAmount: "1",
         placeBetSide: "YES",
-        currentBetWindowSeconds,
+        currentBetWindowSeconds: 300,
         perpsCharacterId: e2eModelCharacterId,
         perpsModelName: e2eModelName,
         perpsMarketId: e2ePerpsMarketId,
@@ -977,11 +593,10 @@ async function main(): Promise<void> {
         browserSolanaRpcUrl,
         browserSolanaWsUrl,
         currentMatchId,
-        currentDuelKeyHex: bytesToHex(currentDuelKey),
-        clobMatchState: clobMarketState.toBase58(),
+        currentDuelKeyHex,
+        clobMarketState: currentMarket.marketState.toBase58(),
         clobUserBalance: clobUserBalancePda.toBase58(),
         perpsMarketId: e2ePerpsMarketId,
-        lastResolvedMatchId: resolvedMatchId,
       },
       null,
       2,
@@ -989,11 +604,4 @@ async function main(): Promise<void> {
   );
 }
 
-main()
-  .then(() => {
-    process.exit(0);
-  })
-  .catch((error) => {
-    console.error(error);
-    process.exit(1);
-  });
+void main();

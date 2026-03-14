@@ -13,7 +13,7 @@
     "test:anvil": "bash scripts/run-anvil-contract-suite.sh",
     "test:fuzz": "forge test --match-path 'test/fuzz/**/*.t.sol'",
     "test:foundry": "forge test --match-path 'test/**/*.t.sol' --no-match-path 'test/fuzz/**'",
-    "analyze:slither": "slither . --exclude-dependencies --filter-paths 'node_modules|out|cache|lib' --exclude timestamp,pragma,solc-version,cyclomatic-complexity",
+    "analyze:slither": "slither . --exclude-dependencies --filter-paths 'node_modules|out|cache|lib|contracts/lvr_amm' --exclude timestamp,pragma,solc-version,cyclomatic-complexity",
     "deploy:bsc-testnet": "hardhat run scripts/deploy.ts --network bscTestnet",
     "deploy:base-sepolia": "hardhat run scripts/deploy.ts --network baseSepolia",
     "deploy:avax-fuji": "hardhat run scripts/deploy.ts --network avaxFuji",

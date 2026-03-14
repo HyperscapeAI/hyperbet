@@ -9,8 +9,7 @@ on:
       - hackathon
     paths:
       - "packages/hyperbet-solana/**"
-      - "packages/hyperbet-bsc/**"
-      - "packages/hyperbet-avax/**"
+      - "packages/hyperbet-evm/**"
       - "packages/hyperbet-ui/**"
       - "packages/hyperbet-chain-registry/**"
       - "packages/hyperbet-mm-core/**"

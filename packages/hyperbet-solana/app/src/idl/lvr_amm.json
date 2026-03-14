@@ -1422,6 +1422,11 @@
       "code": 6012,
       "name": "MathErr",
       "msg": "Overflow or Underflow"
+    },
+    {
+      "code": 6013,
+      "name": "InvalidTreasuryATA",
+      "msg": "Invalid Treasury ATA"
     }
   ],
   "types": [

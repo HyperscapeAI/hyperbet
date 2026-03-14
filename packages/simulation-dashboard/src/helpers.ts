@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { ethers } from "ethers";
 
@@ -55,11 +55,20 @@ export function loadArtifact(contractsDir: string, name: string): Artifact {
         `${name}.sol`,
         `${name}.json`,
     );
-    try {
+    if (existsSync(foundryPath)) {
         return JSON.parse(readFileSync(foundryPath, "utf8")) as Artifact;
-    } catch {
-        // Fall back to Hardhat artifacts.
     }
+
+    const foundryOutDir = join(contractsDir, "out");
+    for (const entry of readdirSync(foundryOutDir, { withFileTypes: true })) {
+        if (!entry.isDirectory()) continue;
+        const candidatePath = join(foundryOutDir, entry.name, `${name}.json`);
+        if (existsSync(candidatePath)) {
+            return JSON.parse(readFileSync(candidatePath, "utf8")) as Artifact;
+        }
+    }
+
+    // Fall back to Hardhat artifacts.
 
     // Try the nested contracts/<name>.sol/<name>.json format first
     const nestedPath = join(

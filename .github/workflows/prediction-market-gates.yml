@@ -5,8 +5,7 @@ on:
     branches: [main, staging, develop, hackathon]
     paths:
       - "packages/hyperbet-solana/**"
-      - "packages/hyperbet-bsc/**"
-      - "packages/hyperbet-avax/**"
+      - "packages/hyperbet-evm/**"
       - "packages/hyperbet-ui/**"
       - "packages/hyperbet-chain-registry/**"
       - "packages/hyperbet-mm-core/**"
@@ -22,8 +21,7 @@ on:
     branches: [main, staging, develop, hackathon]
     paths:
       - "packages/hyperbet-solana/**"
-      - "packages/hyperbet-bsc/**"
-      - "packages/hyperbet-avax/**"
+      - "packages/hyperbet-evm/**"
       - "packages/hyperbet-ui/**"
       - "packages/hyperbet-chain-registry/**"
       - "packages/hyperbet-mm-core/**"
@@ -205,7 +203,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          bash scripts/ci-install-verified.sh root hyperbet-bsc-app market-maker-bot
+          bash scripts/ci-install-verified.sh root hyperbet-evm-app market-maker-bot
 
       - name: Audit shared env
         run: node --import tsx scripts/ci-env-audit.ts --target=ci-shared

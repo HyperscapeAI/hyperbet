@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import path from "node:path";
 
 import {
@@ -35,6 +36,21 @@ const artifactNameByTarget: Record<ContractCiTarget, string> = {
 const artifactRoot = resolveArtifactRoot(artifactNameByTarget[target]);
 const contractRoot = path.join(rootDir, "packages/evm-contracts");
 const anvilLog = path.join(artifactRoot, "anvil.log");
+const foundryFuzzRoot = path.join(contractRoot, "test", "fuzz");
+
+function hasFoundryFuzzTests(dir: string): boolean {
+  if (!fs.existsSync(dir)) return false;
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const entryPath = path.join(dir, entry.name);
+    if (entry.isDirectory() && hasFoundryFuzzTests(entryPath)) {
+      return true;
+    }
+    if (entry.isFile() && entry.name.endsWith(".t.sol")) {
+      return true;
+    }
+  }
+  return false;
+}
 
 async function runStep(
   name: string,
@@ -66,7 +82,14 @@ try {
     await runStep("foundry-fast", "bun", ["run", "test:foundry:fast"]);
   } else if (target === "proof") {
     await runStep("foundry-test", "bun", ["run", "test:foundry"]);
-    await runStep("foundry-fuzz", "bun", ["run", "test:fuzz"]);
+    if (hasFoundryFuzzTests(foundryFuzzRoot)) {
+      await runStep("foundry-fuzz", "bun", ["run", "test:fuzz"]);
+    } else {
+      writeJsonArtifact(artifactRoot, "foundry-fuzz-skip.json", {
+        skipped: true,
+        reason: "No Foundry fuzz tests found under packages/evm-contracts/test/fuzz",
+      });
+    }
     await runStep("anvil-proof", "bun", ["run", "test:anvil"], {
       ANVIL_LOG: anvilLog,
     });

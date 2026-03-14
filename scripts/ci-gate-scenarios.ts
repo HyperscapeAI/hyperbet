@@ -115,6 +115,23 @@ async function runCli(args: string[], name: string): Promise<void> {
   });
 }
 
+async function runSolanaLocalGate(): Promise<void> {
+  await ensureBootstrapWallet();
+  await runCommand(
+    "bun",
+    ["run", "--cwd", "packages/hyperbet-solana", "test:pm-amm:local"],
+    {
+      env: {
+        ANCHOR_WALLET: bootstrapKeypairPath,
+        E2E_SOLANA_BOOTSTRAP_KEYPAIR: bootstrapKeypairPath,
+        SOLANA_BOOTSTRAP_KEYPAIR: bootstrapKeypairPath,
+      },
+      stdoutFile: path.join(artifactRoot, "solana-pm-amm-local.out.log"),
+      stderrFile: path.join(artifactRoot, "solana-pm-amm-local.err.log"),
+    },
+  );
+}
+
 let stopServer: (() => void) | null = null;
 let fatalError: unknown = null;
 
@@ -132,6 +149,11 @@ async function allocateDistinctPort(
 }
 
 try {
+  if (target === "solana") {
+    await runSolanaLocalGate();
+    process.exit(0);
+  }
+
   const preferredHttpPort = target === "evm" ? 3401 : 3501;
   const preferredWsPort = target === "evm" ? 3400 : 3500;
   const preferredAnvilPort = target === "evm" ? 18546 : 18547;

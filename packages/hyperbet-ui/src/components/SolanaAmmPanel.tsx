@@ -40,7 +40,8 @@ import {
   findBetPda,
   type SigningWalletLike,
 } from "../lib/programs";
-import { getAssociatedTokenAddressSync, createAssociatedTokenAccountInstruction, TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID } from "@solana/spl-token";
+import { createAssociatedTokenAccountInstruction, TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID } from "@solana/spl-token";
+import { getAssociatedTokenAddressCompatSync } from "../lib/token";
 import {
   confirmSignatureViaRpc,
   fetchPriorityFeeEstimate,
@@ -87,6 +88,7 @@ type MarketSnapshot = {
   duelState: PublicKey;
   marketState: PublicKey;
   vault: PublicKey;
+  treasury: PublicKey;
   marketMaker: PublicKey;
   marketStatus: string;
   winner: string | null;
@@ -341,6 +343,8 @@ export function SolanaAmmPanel({
   const [lastOrderId, setLastOrderId] = useState<bigint | null>(null);
   const [lastPlaceOrderTx, setLastPlaceOrderTx] = useState("-");
   const [lastPlaceOrderError, setLastPlaceOrderError] = useState("-");
+  const [lastClaimTx, setLastClaimTx] = useState("-");
+  const [lastClaimError, setLastClaimError] = useState("-");
   const [showAdminPanel, setShowAdminPanel] = useState(false);
 
   const lastSnapshotRef = useRef<{ yes: bigint; no: bigint }>({
@@ -466,14 +470,29 @@ export function SolanaAmmPanel({
         claimingWinningsContext: "claiming winnings",
       };
   const walletSnapshot = useMemo<PredictionMarketWalletSnapshot>(
-    () => ({
-      aShares: position.aShares,
-      bShares: position.bShares,
-      aStake: position.aLockedLamports,
-      bStake: position.bLockedLamports,
-      refundableAmount: position.aLockedLamports + position.bLockedLamports,
-    }),
-    [position],
+    () => {
+      const lockedCollateral =
+        position.aLockedLamports + position.bLockedLamports;
+      const lifecycleStatus =
+        lifecycleMarket?.lifecycleStatus ??
+        (activeMarket
+          ? getFallbackLifecycleStatus(activeMarket.marketStatus)
+          : "UNKNOWN");
+      const refundableAmount =
+        lockedCollateral > 0n
+          ? lockedCollateral
+          : lifecycleStatus === "CANCELLED"
+            ? position.aShares + position.bShares
+            : 0n;
+      return {
+        aShares: position.aShares,
+        bShares: position.bShares,
+        aStake: position.aLockedLamports,
+        bStake: position.bLockedLamports,
+        refundableAmount,
+      };
+    },
+    [activeMarket, lifecycleMarket, position],
   );
   const uiState = useMemo(
     () =>
@@ -752,8 +771,8 @@ export function SolanaAmmPanel({
       
       const mintYes = findMintYesPda(clobProgram.programId, betId, creator);
       const mintNo = findMintNoPda(clobProgram.programId, betId, creator);
-      const ataYes = getAssociatedTokenAddressSync(mintYes, wallet.publicKey, true);
-      const ataNo = getAssociatedTokenAddressSync(mintNo, wallet.publicKey, true);
+      const ataYes = getAssociatedTokenAddressCompatSync(mintYes, wallet.publicKey, true);
+      const ataNo = getAssociatedTokenAddressCompatSync(mintNo, wallet.publicKey, true);
       
       const ataYesBal = await connection.getTokenAccountBalance(ataYes, "confirmed").catch(() => ({ value: { amount: "0" } }));
       const ataNoBal = await connection.getTokenAccountBalance(ataNo, "confirmed").catch(() => ({ value: { amount: "0" } }));
@@ -762,8 +781,26 @@ export function SolanaAmmPanel({
       userPosition.bShares = BigInt(ataNoBal.value.amount);
     }
 
-    const marketStatus: string = marketAccount.isInitialized ? "OPEN" : "LOCKED";
-    const winner: string = marketAccount.sideWon != null ? (marketAccount.sideWon === 0 ? "A" : "B") : "NONE";
+    const duelStatus = enumName(duelAccount.status)?.toLowerCase();
+    const duelWinner = enumName(duelAccount.winner)?.toLowerCase();
+    const marketStatus: string =
+      duelStatus === "cancelled" || marketAccount.sideWon === 2
+        ? "CANCELLED"
+        : duelStatus === "resolved" || marketAccount.sideWon != null
+          ? "RESOLVED"
+          : duelStatus === "locked"
+            ? "LOCKED"
+            : marketAccount.isInitialized
+              ? "OPEN"
+              : "LOCKED";
+    const winner: string =
+      duelStatus === "cancelled" || marketAccount.sideWon === 2
+        ? "NONE"
+        : duelWinner === "a" || marketAccount.sideWon === 0
+          ? "A"
+          : duelWinner === "b" || marketAccount.sideWon === 1
+            ? "B"
+            : "NONE";
 
     setActiveMarket({
       duelId: cycleDuelId ?? shortDuelKey(duelKeyHex),
@@ -772,6 +809,7 @@ export function SolanaAmmPanel({
       duelState,
       marketState,
       vault,
+      treasury: marketAccount.treasury as PublicKey,
       marketMaker: marketAccount.creator as PublicKey,
       marketStatus,
       winner,
@@ -925,8 +963,8 @@ export function SolanaAmmPanel({
       
       const mintYes = findMintYesPda(clobProgram.programId, betId, creator);
       const mintNo = findMintNoPda(clobProgram.programId, betId, creator);
-      const destinationYes = getAssociatedTokenAddressSync(mintYes, wallet.publicKey, true);
-      const destinationNo = getAssociatedTokenAddressSync(mintNo, wallet.publicKey, true);
+      const destinationYes = getAssociatedTokenAddressCompatSync(mintYes, wallet.publicKey, true);
+      const destinationNo = getAssociatedTokenAddressCompatSync(mintNo, wallet.publicKey, true);
 
       const preInstructions = [];
       const { connection } = clobProgram.provider;
@@ -955,6 +993,7 @@ export function SolanaAmmPanel({
         .accountsPartial({
           signer: wallet.publicKey,
           bet: activeMarket.marketState,
+          treasury: activeMarket.treasury,
           mintYes,
           mintNo,
           destinationYes,
@@ -1012,13 +1051,50 @@ export function SolanaAmmPanel({
     }
 
     try {
+      setLastClaimTx("-");
+      setLastClaimError("-");
       const creator = activeMarket.marketMaker;
       const betId = activeMarket.betId;
+      const claimOutcome =
+        uiState.claimKind === "WINNER_A"
+          ? 0
+          : uiState.claimKind === "WINNER_B"
+            ? 1
+            : uiState.claimKind === "REFUND"
+              ? position.aShares > 0n
+                ? 0
+                : position.bShares > 0n
+                  ? 1
+                  : null
+            : uiState.winner === "A"
+              ? 1
+              : uiState.winner === "B"
+                ? 0
+                : null;
+      const claimAmount =
+        uiState.claimKind === "WINNER_A"
+          ? position.aShares
+          : uiState.claimKind === "WINNER_B"
+            ? position.bShares
+            : uiState.claimKind === "REFUND"
+              ? position.aShares > 0n
+                ? position.aShares
+                : position.bShares
+            : uiState.winner === "A"
+              ? position.bShares
+              : uiState.winner === "B"
+                ? position.aShares
+                : 0n;
+
+      if (claimOutcome === null || claimAmount <= 0n) {
+        setStatus(copy.claimLocked);
+        return;
+      }
       
       const mintYes = findMintYesPda(clobProgram.programId, betId, creator);
       const mintNo = findMintNoPda(clobProgram.programId, betId, creator);
-      const srcYes = getAssociatedTokenAddressSync(mintYes, wallet.publicKey, true);
-      const srcNo = getAssociatedTokenAddressSync(mintNo, wallet.publicKey, true);
+      const srcYes = getAssociatedTokenAddressCompatSync(mintYes, wallet.publicKey, true);
+      const srcNo = getAssociatedTokenAddressCompatSync(mintNo, wallet.publicKey, true);
 
       const preInstructions = [];
       const { connection } = clobProgram.provider;
@@ -1034,14 +1110,18 @@ export function SolanaAmmPanel({
       }
 
       const tx = await clobProgram.methods
-        .withdrawPostSettle(betId)
+        .withdrawPostSettle(
+          betId,
+          claimOutcome,
+          new BN(claimAmount.toString()),
+        )
         .accountsPartial({
           signer: wallet.publicKey,
           bet: activeMarket.marketState,
           mintYes,
           mintNo,
-          srcYes,
-          srcNo,
+          destinationYes: srcYes,
+          destinationNo: srcNo,
           tokenProgram: TOKEN_PROGRAM_ID,
           systemProgram: SystemProgram.programId,
           associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
@@ -1049,17 +1129,24 @@ export function SolanaAmmPanel({
         .preInstructions(preInstructions)
         .transaction();
 
-      await submitTransaction(tx, copy.claimingWinningsContext);
+      const signature = await submitTransaction(tx, copy.claimingWinningsContext);
+      setLastClaimTx(signature);
       setStatus(copy.claimComplete);
       await refreshData();
     } catch (error) {
-      setStatus(copy.claimFailed((error as Error).message));
+      const message = (error as Error).message;
+      setLastClaimError(message);
+      setStatus(copy.claimFailed(message));
     }
   }, [
     activeMarket,
     copy,
+    position.aShares,
+    position.bShares,
     refreshData,
     submitTransaction,
+    uiState.claimKind,
+    uiState.winner,
     wallet.publicKey,
     writablePrograms,
   ]);
@@ -1097,9 +1184,30 @@ export function SolanaAmmPanel({
   const noPercent = 100 - yesPercent;
   const canClaim = uiState.canClaim;
   const marketStateText = activeMarket?.marketState.toBase58() ?? "-";
+  const debugMintYes =
+    activeMarket != null
+      ? findMintYesPda(
+          readonlyPrograms.lvrMarket.programId,
+          activeMarket.betId,
+          activeMarket.marketMaker,
+        ).toBase58()
+      : "-";
+  const debugMintNo =
+    activeMarket != null
+      ? findMintNoPda(
+          readonlyPrograms.lvrMarket.programId,
+          activeMarket.betId,
+          activeMarket.marketMaker,
+        ).toBase58()
+      : "-";
   const lifecycleDebugText = [
     `duelKey=${lifecycleMarket?.duelKey ?? lifecycleDuel?.duelKey ?? duelKeyHex ?? "-"}`,
+    `betId=${activeMarket?.betId?.toString() ?? "-"}`,
     `marketRef=${lifecycleMarket?.marketRef ?? activeMarket?.marketState.toBase58() ?? "-"}`,
+    `creator=${activeMarket?.marketMaker.toBase58() ?? "-"}`,
+    `treasury=${activeMarket?.treasury.toBase58() ?? "-"}`,
+    `mintYes=${debugMintYes}`,
+    `mintNo=${debugMintNo}`,
     `lifecycleStatus=${uiState.lifecycleStatus}`,
     `winner=${uiState.winner}`,
     `marketStatus=${activeMarket?.marketStatus ?? "-"}`,
@@ -1298,6 +1406,8 @@ export function SolanaAmmPanel({
           </pre>
           <div data-testid="solana-clob-place-order-tx">{lastPlaceOrderTx}</div>
           <div data-testid="solana-clob-place-order-error">{lastPlaceOrderError}</div>
+          <div data-testid="solana-clob-claim-tx">{lastClaimTx}</div>
+          <div data-testid="solana-clob-claim-error">{lastClaimError}</div>
           <div data-testid="solana-clob-init-config-tx">-</div>
           <div data-testid="solana-clob-create-match-tx">-</div>
           <div data-testid="solana-clob-init-orderbook-tx">-</div>

@@ -17,12 +17,14 @@ import {
   type APIRequestContext,
   type Page,
 } from "@playwright/test";
-import { getAssociatedTokenAddressSync } from "@solana/spl-token";
+import {
+  createAssociatedTokenAccountInstruction,
+  getAssociatedTokenAddressSync,
+} from "@solana/spl-token";
 import {
   Connection,
   Keypair,
   PublicKey,
-  SystemProgram,
   Transaction,
   VersionedTransaction,
 } from "@solana/web3.js";
@@ -52,6 +54,31 @@ async function fetchSplBalance(connection: Connection, ata: PublicKey): Promise<
   }
 }
 
+async function ensureAssociatedTokenAccount(
+  connection: Connection,
+  payer: Keypair,
+  mint: PublicKey,
+  owner: PublicKey,
+): Promise<PublicKey> {
+  const ata = getAssociatedTokenAddressSync(mint, owner, true);
+  const existing = await connection.getAccountInfo(ata, "confirmed");
+  if (existing) return ata;
+
+  const tx = new Transaction().add(
+    createAssociatedTokenAccountInstruction(
+      payer.publicKey,
+      ata,
+      owner,
+      mint,
+    ),
+  );
+  const signature = await connection.sendTransaction(tx, [payer], {
+    preflightCommitment: "confirmed",
+  });
+  await connection.confirmTransaction(signature, "confirmed");
+  return ata;
+}
+
 type E2eState = {
   solanaRpcUrl?: string;
   bootstrapWalletPath?: string;
@@ -70,23 +97,6 @@ type E2eState = {
   solanaTraderPublicKey?: string;
   perpsCharacterId?: string;
   perpsMarketId?: number;
-};
-
-type UserBalanceAccount = {
-  aShares?: unknown;
-  bShares?: unknown;
-  aLockedLamports?: unknown;
-  bLockedLamports?: unknown;
-};
-
-type MarketStateAccount = {
-  nextOrderId?: unknown;
-  bestBid?: unknown;
-  bestAsk?: unknown;
-};
-
-type AccountNamespaceFetcher = {
-  fetch: (pubkey: PublicKey) => Promise<Record<string, unknown>>;
 };
 
 type PredictionMarketsResponse = {
@@ -167,6 +177,22 @@ const perpsCoder = new BorshAccountsCoder(goldPerpsIdl);
 const perpsProgramId = new PublicKey(
   (goldPerpsIdl as Idl & { address: string }).address,
 );
+type IdlWithAddress = Idl & {
+  address?: string;
+  metadata?: Record<string, unknown>;
+};
+
+function idlWithProgramAddress(idl: Idl, address: string): IdlWithAddress {
+  const addressableIdl = idl as IdlWithAddress;
+  return {
+    ...addressableIdl,
+    address,
+    metadata: {
+      ...(addressableIdl.metadata ?? {}),
+      address,
+    },
+  };
+}
 
 function loadState(): E2eState {
   return JSON.parse(fs.readFileSync(statePath, "utf8")) as E2eState;
@@ -335,6 +361,25 @@ async function createFreshSolanaOpenMarket(
   
   const duelState = fixture.duelState;
   const marketState = fixture.marketState;
+  const trader = new PublicKey(state.solanaTraderPublicKey || "");
+  const betId = new BN(
+    BigInt(
+      "0x" + Buffer.from(duelKey).slice(0, 8).reverse().toString("hex"),
+    ).toString(),
+  );
+  const mintYes = deriveMintYesPda(
+    clobProgram.programId,
+    BigInt(betId.toString()),
+    authority.publicKey,
+  );
+  const mintNo = deriveMintNoPda(
+    clobProgram.programId,
+    BigInt(betId.toString()),
+    authority.publicKey,
+  );
+
+  await ensureAssociatedTokenAccount(connectionFromProgram(clobProgram), authority, mintYes, trader);
+  await ensureAssociatedTokenAccount(connectionFromProgram(clobProgram), authority, mintNo, trader);
 
   await postJson<{ ok: boolean; seq: number }>(
     request,
@@ -400,6 +445,10 @@ async function createFreshSolanaOpenMarket(
     duelState,
     marketState,
   };
+}
+
+function connectionFromProgram(program: Program<Idl>): Connection {
+  return program.provider.connection;
 }
 
 function buildMockSolanaPredictionMarketsResponse(
@@ -607,10 +656,10 @@ async function fetchDecodedAccount<T>(
 }
 
 async function seedClobLiquidity(
-  connection: Connection,
-  state: E2eState,
-  side: number,
-  overrides?: {
+  _connection: Connection,
+  _state: E2eState,
+  _side: number,
+  _overrides?: {
     marketState?: PublicKey;
     duelState?: PublicKey;
     vault?: PublicKey;
@@ -639,7 +688,10 @@ async function loadMarketBalances(
     preflightCommitment: "confirmed",
   });
   const clobProgramId = new PublicKey(state.lvrAmmProgramId || state.goldClobMarketProgramId || "Amm11111111111111111111111111111111111111111");
-  const clobProgram = new Program({...lvrRouterIdl, address: clobProgramId.toBase58(), metadata: { ...(lvrRouterIdl.metadata as any), address: clobProgramId.toBase58() }} as any, provider) as Program<Idl>;
+  const clobProgram = new Program(
+    idlWithProgramAddress(lvrRouterIdl, clobProgramId.toBase58()),
+    provider,
+  );
   const betIdNumStr = Buffer.from(state.currentDuelKeyHex || "", "hex").slice(0, 8).reverse().toString("hex");
   const betIdStr = betIdNumStr ? `0x${betIdNumStr}` : "0x0";
   const betId = new BN(BigInt(betIdStr).toString());
@@ -676,7 +728,10 @@ function createReadonlyClobProgram(
     preflightCommitment: "confirmed",
   });
   const clobProgramId = new PublicKey(state.lvrAmmProgramId || state.goldClobMarketProgramId || "Amm11111111111111111111111111111111111111111");
-  return new Program({...lvrRouterIdl, address: clobProgramId.toBase58(), metadata: { ...(lvrRouterIdl.metadata as any), address: clobProgramId.toBase58() }} as any, provider);
+  return new Program(
+    idlWithProgramAddress(lvrRouterIdl, clobProgramId.toBase58()),
+    provider,
+  );
 }
 
 function createWritablePrograms(
@@ -702,7 +757,10 @@ function createWritablePrograms(
   return {
     authority,
     fightProgram: new Program(fightOracleIdl, provider),
-    clobProgram: new Program({...lvrRouterIdl, address: clobProgramId.toBase58(), metadata: { ...(lvrRouterIdl.metadata as any), address: clobProgramId.toBase58() }} as any, provider),
+    clobProgram: new Program(
+      idlWithProgramAddress(lvrRouterIdl, clobProgramId.toBase58()),
+      provider,
+    ),
   };
 }
 
@@ -758,9 +816,7 @@ test.describe("market flows", () => {
       state.solanaRpcUrl || "http://127.0.0.1:8899",
       "confirmed",
     );
-    const duelStateStr = state.clobDuelState || "";
     const userBalanceAddressYes = new PublicKey(state.clobUserBalance || "");
-    const clobProgram = createReadonlyClobProgram(connection, state);
     let lifecycleStatus = "OPEN";
     let lifecycleWinner = "NONE";
 
@@ -1084,7 +1140,6 @@ test.describe("market flows", () => {
     await page.getByTestId("refresh-market").click();
     const claimButton = page.getByRole("button", { name: /claim/i }).first();
     await expect(claimButton).toBeEnabled({ timeout: 30_000 });
-    const preClaimBalance = await fetchSplBalance(connection, userBalanceAddressYes);
     await claimButton.click({ force: true });
 
     await expect

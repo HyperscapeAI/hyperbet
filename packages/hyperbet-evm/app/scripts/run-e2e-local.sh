@@ -466,7 +466,7 @@ fi
 
 IDL_ORACLE_ID="$(jq -r '.address // .metadata.address // empty' "$ANCHOR_DIR/target/idl/fight_oracle.json" 2>/dev/null || true)"
 IDL_MARKET_ID="$(jq -r '.address // .metadata.address // empty' "$ANCHOR_DIR/target/idl/gold_perps_market.json" 2>/dev/null || true)"
-IDL_CLOB_ID="$(jq -r '.address // .metadata.address // empty' "$ANCHOR_DIR/target/idl/gold_clob_market.json" 2>/dev/null || true)"
+IDL_CLOB_ID="$(jq -r '.address // .metadata.address // empty' "$ANCHOR_DIR/target/idl/lvr_amm.json" 2>/dev/null || true)"
 if [[ -n "$IDL_ORACLE_ID" && "$IDL_ORACLE_ID" != "null" ]]; then
   PROGRAM_ORACLE_ID="$IDL_ORACLE_ID"
 fi
@@ -490,7 +490,7 @@ solana-test-validator \
   --ledger "$LEDGER_DIR" \
   --upgradeable-program "$PROGRAM_ORACLE_ID" "$ANCHOR_DIR/target/deploy/fight_oracle.so" "$SOLANA_BOOTSTRAP_KEYPAIR" \
   --upgradeable-program "$PROGRAM_MARKET_ID" "$ANCHOR_DIR/target/deploy/gold_perps_market.so" "$SOLANA_BOOTSTRAP_KEYPAIR" \
-  --upgradeable-program "$PROGRAM_CLOB_ID" "$ANCHOR_DIR/target/deploy/gold_clob_market.so" "$SOLANA_BOOTSTRAP_KEYPAIR" \
+  --upgradeable-program "$PROGRAM_CLOB_ID" "$ANCHOR_DIR/target/deploy/lvr_amm.so" "$SOLANA_BOOTSTRAP_KEYPAIR" \
   >"$VALIDATOR_LOG" 2>&1 &
 VALIDATOR_PID="$!"
 write_pid_file "$VALIDATOR_PID_FILE" "$VALIDATOR_PID"
@@ -586,9 +586,9 @@ run_with_retries \
     E2E_EVM_CHAIN_ID="$EVM_CHAIN_ID" \
     bun run "$APP_DIR/tests/e2e/setup-evm-local.ts"
 
-EVM_GOLD_CLOB_ADDRESS="$(jq -r '.evmGoldClobAddress // empty' "$STATE_PATH")"
+EVM_GOLD_CLOB_ADDRESS="$(jq -r '.evmLvrRouterAddress // empty' "$STATE_PATH")"
 if [[ -z "$EVM_GOLD_CLOB_ADDRESS" || "$EVM_GOLD_CLOB_ADDRESS" == "null" ]]; then
-  echo "[e2e] failed to read evmGoldClobAddress from $STATE_PATH"
+  echo "[e2e] failed to read evmLvrRouterAddress from $STATE_PATH"
   exit 1
 fi
 

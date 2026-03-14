@@ -451,6 +451,7 @@ const bscRpcUrl = (
 ).trim();
 const bscContractAddress = (
   process.env.BSC_LVR_ROUTER_ADDRESS ||
+  process.env.BSC_GOLD_CLOB_ADDRESS ||
   process.env.CLOB_CONTRACT_ADDRESS_BSC ||
   ""
 ).trim();
@@ -462,6 +463,7 @@ const baseRpcUrl = (
 const avaxRpcUrl = (process.env.AVAX_RPC_URL || "").trim();
 const baseContractAddress = (
   process.env.BASE_LVR_ROUTER_ADDRESS ||
+  process.env.BASE_GOLD_CLOB_ADDRESS ||
   process.env.CLOB_CONTRACT_ADDRESS_BASE ||
   ""
 ).trim();

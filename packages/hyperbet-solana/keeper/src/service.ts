@@ -1891,12 +1891,55 @@ async function pollSolanaSnapshot(): Promise<void> {
           creator.publicKey
         ).toBase58()
         : null;
+    const currentDuelPda =
+      currentSolanaDuelKey != null
+        ? findDuelStatePda(
+          solanaCtx.fightProgram.programId,
+          duelKeyHexToBytes(currentSolanaDuelKey),
+        ).toBase58()
+        : null;
+    const currentDuelAccount =
+      currentDuelPda != null
+        ? await solanaCtx.fightProgram.account.duelState.fetchNullable(
+          new PublicKey(currentDuelPda),
+        )
+        : null;
     const currentMarketAccount =
       currentMarketPda != null
         ? await solanaCtx.marketProgram.account.bet.fetchNullable(
           new PublicKey(currentMarketPda),
         )
         : null;
+    const currentDuelStatus = enumName(currentDuelAccount?.status);
+    const currentDuelWinner = enumName(currentDuelAccount?.winner);
+    const currentMarketStatus = (() => {
+      switch (currentDuelStatus) {
+        case "resolved":
+          return "RESOLVED";
+        case "cancelled":
+          return "CANCELLED";
+        case "locked":
+          return "LOCKED";
+        case "bettingOpen":
+          return "OPEN";
+        default:
+          if (currentMarketAccount?.sideWon != null) {
+            return currentMarketAccount.sideWon === 2 ? "CANCELLED" : "RESOLVED";
+          }
+          return currentMarketAccount
+            ? (currentMarketAccount.isInitialized ? "OPEN" : "LOCKED")
+            : null;
+      }
+    })();
+    const currentMarketWinner =
+      currentDuelWinner ??
+      (currentMarketAccount?.sideWon != null
+        ? currentMarketAccount.sideWon === 0
+          ? "A"
+          : currentMarketAccount.sideWon === 1
+            ? "B"
+            : "NONE"
+        : null);
     const recentSignature =
       (
         recentSignatures as Array<{ signature?: string } | null>
@@ -1913,8 +1956,8 @@ async function pollSolanaSnapshot(): Promise<void> {
       latestMarketAccount,
       derivedMarketPda,
       currentMarketPda,
-      currentMarketStatus: currentMarketAccount ? (currentMarketAccount.isInitialized ? "OPEN" : "LOCKED") : null,
-      currentMarketWinner: currentMarketAccount?.sideWon != null ? (currentMarketAccount.sideWon === 0 ? "A" : "B") : null,
+      currentMarketStatus,
+      currentMarketWinner,
       recentSignature,
     };
     parsers.solana.lastSuccessAt = Date.now();

@@ -23,6 +23,7 @@
     "./lib/config": "./src/lib/config.ts",
     "./lib/duelKey": "./src/lib/duelKey.ts",
     "./lib/evmClient": "./src/lib/evmClient.ts",
+    "./lib/goldClobAbi": "./src/lib/goldClobAbi.ts",
     "./lib/evmHeadlessWallet": "./src/lib/evmHeadlessWallet.ts",
     "./lib/fight": "./src/lib/fight.ts",
     "./lib/lvrRouterAbi": "./src/lib/lvrRouterAbi.ts",

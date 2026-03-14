@@ -17,6 +17,11 @@ import { confirmSignatureByPolling } from "./test-anchor";
 const BPF_LOADER_UPGRADEABLE_PROGRAM_ID = new PublicKey(
   "BPFLoaderUpgradeab1e11111111111111111111111",
 );
+const DUEL_STATE_DISCRIMINATOR = Buffer.from([
+  149, 213, 59, 165, 124, 116, 145, 120,
+]);
+const DUEL_STATE_STATUS_OFFSET = 8 + 32 + 32 + 32;
+const DUEL_STATE_WINNER_OFFSET = DUEL_STATE_STATUS_OFFSET + 1;
 
 export const DUEL_WINNER_MARKET_KIND = 1;
 export const SIDE_BID = 1;
@@ -65,6 +70,22 @@ export function marketSideA(): { a: Record<string, never> } {
 
 export function marketSideB(): { b: Record<string, never> } {
   return { b: {} };
+}
+
+function readDuelHeader(data: Buffer): {
+  status: number;
+  winner: number;
+} {
+  if (data.length <= DUEL_STATE_WINNER_OFFSET) {
+    throw new Error(`Duel state account is too small: ${data.length} bytes`);
+  }
+  if (!data.subarray(0, 8).equals(DUEL_STATE_DISCRIMINATOR)) {
+    throw new Error("Unexpected duel state discriminator");
+  }
+  return {
+    status: data[DUEL_STATE_STATUS_OFFSET] ?? 0,
+    winner: data[DUEL_STATE_WINNER_OFFSET] ?? 0,
+  };
 }
 
 export function deriveProgramDataAddress(programId: PublicKey): PublicKey {
@@ -411,7 +432,56 @@ export async function syncMarketFromDuel(
   marketState: PublicKey,
   duelState: PublicKey,
 ): Promise<void> {
-    // Not needed in LvrAmm as the external orchestrator doesn't pair state this way, but we will mock it for E2E interface matching.
+  const duelStateInfo = await program.provider.connection.getAccountInfo(
+    duelState,
+    "confirmed",
+  );
+  if (!duelStateInfo) {
+    throw new Error(`Missing duel state account ${duelState.toBase58()}`);
+  }
+
+  const decodedDuelState = readDuelHeader(duelStateInfo.data);
+  let sideWon: number | null = null;
+  if (decodedDuelState.status === 3) {
+    if (decodedDuelState.winner === 1) {
+      sideWon = 0;
+    } else if (decodedDuelState.winner === 2) {
+      sideWon = 1;
+    } else {
+      throw new Error(
+        `Resolved duel ${duelState.toBase58()} has unsupported winner ${decodedDuelState.winner}`,
+      );
+    }
+  } else if (decodedDuelState.status === 4) {
+    sideWon = 2;
+  }
+
+  if (sideWon == null) {
+    return;
+  }
+
+  const bet = await program.account.bet.fetch(marketState);
+  if (bet.sideWon != null) {
+    return;
+  }
+
+  const wallet = (program.provider as anchor.AnchorProvider).wallet as
+    | (anchor.Wallet & { payer?: Keypair })
+    | undefined;
+  const settleSigner = wallet?.payer;
+  if (!settleSigner) {
+    throw new Error("AMM provider wallet cannot sign settleBet during sync");
+  }
+
+  await program.methods
+    .settleBet(bet.betId, sideWon)
+    .accountsPartial({
+      signer: settleSigner.publicKey,
+      adminState: deriveAdminStatePda(program.programId),
+      bet: marketState,
+    })
+    .signers([settleSigner])
+    .rpc();
 }
 
 export async function placeClobOrder(

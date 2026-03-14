@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
     paths:
-      - "packages/hyperbet-avax/keeper/**"
+      - "packages/hyperbet-evm/keeper/**"
       - "scripts/**"
       - ".github/actions/setup-hyperbet/**"
       - ".github/workflows/deploy-avax-keeper.yml"
@@ -48,7 +48,7 @@ jobs:
           printf '%s\n' "$changed_files"
 
           keeper_source_changed=false
-          if printf '%s\n' "$changed_files" | grep -Eq '^packages/hyperbet-avax/keeper/'; then
+          if printf '%s\n' "$changed_files" | grep -Eq '^packages/hyperbet-evm/keeper/'; then
             keeper_source_changed=true
           fi
 
@@ -56,7 +56,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          bash scripts/ci-install-verified.sh root hyperbet-avax-keeper
+          bash scripts/ci-install-verified.sh root hyperbet-evm-keeper
 
       - name: Audit deploy env
         run: node --import tsx scripts/ci-env-audit.ts --target=keeper:avax --deployment=production
@@ -69,17 +69,17 @@ jobs:
       - name: Run keeper tests
         run: |
           bun test \
-            packages/hyperbet-avax/keeper/src/walletKeys.test.ts \
-            packages/hyperbet-avax/keeper/src/modelMarkets.test.ts \
-            packages/hyperbet-avax/keeper/src/db.test.ts \
-            packages/hyperbet-avax/keeper/src/perpsMath.test.ts
+            packages/hyperbet-evm/keeper/src/walletKeys.test.ts \
+            packages/hyperbet-evm/keeper/src/modelMarkets.test.ts \
+            packages/hyperbet-evm/keeper/src/db.test.ts \
+            packages/hyperbet-evm/keeper/src/perpsMath.test.ts
 
       - name: Smoke test keeper service
         run: |
           PORT=18080 \
           ENABLE_KEEPER_BOT=false \
           SOLANA_RPC_URL=https://api.mainnet-beta.solana.com \
-          bun --bun packages/hyperbet-avax/keeper/src/service.ts >/tmp/hyperbet-avax-keeper.log 2>&1 &
+          bun --bun packages/hyperbet-evm/keeper/src/service.ts >/tmp/hyperbet-avax-keeper.log 2>&1 &
           KEEPER_PID=$!
           trap 'kill "$KEEPER_PID" >/dev/null 2>&1 || true' EXIT
 
@@ -99,7 +99,7 @@ jobs:
 
       - name: Write Railway keeper context
         if: steps.keeper_changes.outputs.keeper_source_changed == 'true'
-        working-directory: packages/hyperbet-avax/keeper
+        working-directory: packages/hyperbet-evm/keeper
         run: |
           keeper_path="$(pwd)"
           mkdir -p "${HOME}/.railway"
@@ -125,7 +125,7 @@ jobs:
 
       - name: Deploy keeper
         if: steps.keeper_changes.outputs.keeper_source_changed == 'true'
-        working-directory: packages/hyperbet-avax/keeper
+        working-directory: packages/hyperbet-evm/keeper
         run: |
           railway up . \
             --path-as-root \

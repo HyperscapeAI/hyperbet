@@ -16,8 +16,9 @@ type AuditTarget =
   | "pages:evm"
   | "app:evm"
   | "keeper:solana"
+  | "keeper:bsc"
   | "keeper:evm"
-  | "keeper:evm"
+  | "keeper:avax"
   | "bot";
 
 type DeploymentMode = "production" | "staging";
@@ -75,8 +76,9 @@ function parseArgs(): {
     target !== "pages:evm" &&
     target !== "app:evm" &&
     target !== "keeper:solana" &&
+    target !== "keeper:bsc" &&
     target !== "keeper:evm" &&
-    target !== "keeper:evm" &&
+    target !== "keeper:avax" &&
     target !== "bot"
   ) {
     throw new Error(`unsupported audit target: ${targetArg}`);
@@ -178,6 +180,15 @@ function assertCanonicalMainnetReady(
     });
   }
   return status;
+}
+
+function deploymentGoldClobAddress(
+  deployment: ReturnType<typeof resolveBettingEvmDeploymentForChain>,
+): string {
+  return (
+    (deployment as typeof deployment & { goldClobAddress?: string }).goldClobAddress ||
+    deployment.lvrRouterAddress
+  );
 }
 
 function validateExactAddress(
@@ -283,6 +294,8 @@ function auditPagesTarget(
   if (deployment === "production") {
     const bsc = assertCanonicalMainnetReady(findings, "bsc", target).deployment;
     const base = assertCanonicalMainnetReady(findings, "base", target).deployment;
+    const bscGoldClobAddress = deploymentGoldClobAddress(bsc);
+    const baseGoldClobAddress = deploymentGoldClobAddress(base);
     if (bscChainId && Number(bscChainId) !== bsc.chainId) {
       findings.push({
         level: "error",
@@ -297,7 +310,9 @@ function auditPagesTarget(
     }
     if (
       bscClob &&
-      (PLACEHOLDER_ADDRESS_RE.test(bscClob) || bscClob.toLowerCase() !== bsc.goldClobAddress.toLowerCase())
+      (!bscGoldClobAddress ||
+        PLACEHOLDER_ADDRESS_RE.test(bscClob) ||
+        bscClob.toLowerCase() !== bscGoldClobAddress.toLowerCase())
     ) {
       findings.push({
         level: "error",
@@ -306,7 +321,9 @@ function auditPagesTarget(
     }
     if (
       baseClob &&
-      (PLACEHOLDER_ADDRESS_RE.test(baseClob) || baseClob.toLowerCase() !== base.goldClobAddress.toLowerCase())
+      (!baseGoldClobAddress ||
+        PLACEHOLDER_ADDRESS_RE.test(baseClob) ||
+        baseClob.toLowerCase() !== baseGoldClobAddress.toLowerCase())
     ) {
       findings.push({
         level: "error",
@@ -411,13 +428,13 @@ function auditAvaxAppTarget(findings: Finding[]): void {
     "app:evm",
     "VITE_AVAX_GOLD_CLOB_ADDRESS",
     requireEnv(findings, "VITE_AVAX_GOLD_CLOB_ADDRESS"),
-    status.deployment.goldClobAddress,
+    deploymentGoldClobAddress(status.deployment),
   );
 }
 
 function auditKeeperTarget(
   findings: Finding[],
-  target: "keeper:solana" | "keeper:evm" | "keeper:evm",
+  target: "keeper:solana" | "keeper:bsc" | "keeper:evm" | "keeper:avax",
   deployment: DeploymentMode,
 ): void {
   requireEnv(findings, "HYPERBET_KEEPER_URL");
@@ -443,7 +460,8 @@ function auditKeeperTarget(
     return;
   }
 
-  const chainKey = target.endsWith(":bsc") ? "bsc" : "avax";
+  const chainKey: BettingEvmChain =
+    target === "keeper:bsc" ? "bsc" : "avax";
   const runtimeEnvKey = chainKey === "bsc" ? "BSC_RPC_URL" : "AVAX_RPC_URL";
   requireEnv(findings, runtimeEnvKey, `${target} requires ${runtimeEnvKey} when audited locally`);
 
@@ -452,7 +470,7 @@ function auditKeeperTarget(
     if (!canonical.ready) {
       return;
     }
-    if (target === "keeper:evm") {
+    if (target === "keeper:avax") {
       validateExactAddress(
         findings,
         target,
@@ -462,13 +480,13 @@ function auditKeeperTarget(
           "AVAX_GOLD_CLOB_ADDRESS",
           `${target} requires AVAX_GOLD_CLOB_ADDRESS when audited locally`,
         ),
-        canonical.deployment.goldClobAddress,
+        deploymentGoldClobAddress(canonical.deployment),
       );
     }
     return;
   }
 
-  if (target === "keeper:evm") {
+  if (target === "keeper:bsc") {
     requireExactAddress(
       findings,
       target,
@@ -483,7 +501,7 @@ function auditKeeperTarget(
     );
   }
 
-  if (target === "keeper:evm") {
+  if (target === "keeper:avax") {
     requireExactAddress(
       findings,
       target,
@@ -510,11 +528,17 @@ function auditBotTarget(findings: Finding[]): void {
     requireEnv(findings, rpcKey);
     const address = requireEnv(findings, addressKey);
     if (chain === "avax") {
-      validateExactAddress(findings, "bot", addressKey, address, deployment.goldClobAddress);
+      validateExactAddress(
+        findings,
+        "bot",
+        addressKey,
+        address,
+        deploymentGoldClobAddress(deployment),
+      );
     } else if (
+      deploymentGoldClobAddress(deployment) &&
       address &&
-      deployment.goldClobAddress &&
-      address.toLowerCase() !== deployment.goldClobAddress.toLowerCase()
+      address.toLowerCase() !== deploymentGoldClobAddress(deployment).toLowerCase()
     ) {
       findings.push({
         level: "warning",
@@ -547,8 +571,9 @@ function runAudit(
       auditAvaxAppTarget(findings);
       break;
     case "keeper:solana":
+    case "keeper:bsc":
     case "keeper:evm":
-    case "keeper:evm":
+    case "keeper:avax":
       auditKeeperTarget(findings, target, deployment);
       break;
     case "bot":

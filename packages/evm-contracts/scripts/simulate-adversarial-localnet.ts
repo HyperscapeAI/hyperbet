@@ -1,4 +1,10 @@
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 
 import {
@@ -50,11 +56,22 @@ const SELL_SIDE = 2;
 const ORDER_AMOUNT = 1_000n;
 
 function loadArtifact(projectDir: string, name: string): Artifact {
+  const outDir = join(projectDir, "out");
+  const defaultPath = join(outDir, `${name}.sol`, `${name}.json`);
+  if (existsSync(defaultPath)) {
+    return JSON.parse(readFileSync(defaultPath, "utf8")) as Artifact;
+  }
+
+  for (const entry of readdirSync(outDir, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    const candidatePath = join(outDir, entry.name, `${name}.json`);
+    if (existsSync(candidatePath)) {
+      return JSON.parse(readFileSync(candidatePath, "utf8")) as Artifact;
+    }
+  }
+
   return JSON.parse(
-    readFileSync(
-      join(projectDir, "out", `${name}.sol`, `${name}.json`),
-      "utf8",
-    ),
+    readFileSync(defaultPath, "utf8"),
   ) as Artifact;
 }
 

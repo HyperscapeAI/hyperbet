@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
     paths:
-      - "packages/hyperbet-bsc/app/**"
+      - "packages/hyperbet-evm/app/**"
       - "packages/hyperbet-ui/**"
       - "scripts/**"
       - ".github/actions/setup-hyperbet/**"
@@ -113,10 +113,10 @@ jobs:
 
       - name: Install dependencies
         run: |
-          bash scripts/ci-install-verified.sh root hyperbet-bsc-app
+          bash scripts/ci-install-verified.sh root hyperbet-evm-app
 
       - name: Audit deploy env
-        run: node --import tsx scripts/ci-env-audit.ts --target=pages:bsc --deployment=${DEPLOY_TARGET}
+        run: node --import tsx scripts/ci-env-audit.ts --target=pages:evm --deployment=${DEPLOY_TARGET}
         env:
           VITE_GAME_API_URL: ${{ env.HYPERBET_API_URL }}
           VITE_GAME_WS_URL: ${{ env.HYPERBET_WS_URL }}
@@ -129,7 +129,7 @@ jobs:
           VITE_BASE_GOLD_CLOB_ADDRESS: ${{ env.HYPERBET_BASE_GOLD_CLOB_ADDRESS }}
 
       - name: Build production app
-        run: bun run --cwd packages/hyperbet-bsc/app build --mode mainnet-beta
+        run: bun run --cwd packages/hyperbet-evm/app build --mode mainnet-beta
         env:
           CF_PAGES_COMMIT_SHA: ${{ github.sha }}
           VITE_GAME_API_URL: ${{ env.HYPERBET_API_URL }}
@@ -144,18 +144,18 @@ jobs:
 
       - name: Verify dist hygiene
         run: |
-          test -f packages/hyperbet-bsc/app/dist/build-info.json
-          if find packages/hyperbet-bsc/app/dist -name '*.map' | grep -q .; then
+          test -f packages/hyperbet-evm/app/dist/build-info.json
+          if find packages/hyperbet-evm/app/dist -name '*.map' | grep -q .; then
             echo "Unexpected source maps in production dist"
             exit 1
           fi
-          if grep -R -n "api-key=" packages/hyperbet-bsc/app/dist; then
+          if grep -R -n "api-key=" packages/hyperbet-evm/app/dist; then
             echo "Provider key leak detected in dist"
             exit 1
           fi
 
       - name: Deploy to Cloudflare Pages
-        working-directory: packages/hyperbet-bsc/app
+        working-directory: packages/hyperbet-evm/app
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.environment }}" = "preview" ]; then
             BRANCH="preview-${{ github.run_id }}"
