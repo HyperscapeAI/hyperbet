@@ -68,10 +68,10 @@ pub fn get_swap_amount(
     initial_liquidity: u64,
     amount_in: u64,
 ) -> u64 {
-    let mut ry = (current_reserve_yes as f64) / 1e6; // SPL uses 6 decimals or something, but we just use exact floats
-    let mut rn = (current_reserve_no as f64) / 1e6;
-    let l_float = (initial_liquidity as f64) / 1e6;
-    let amt_in = (amount_in as f64) / 1e6;
+    let mut ry = (current_reserve_yes as f64) / 1e9;
+    let mut rn = (current_reserve_no as f64) / 1e9;
+    let l_float = (initial_liquidity as f64) / 1e9;
+    let amt_in = (amount_in as f64) / 1e9;
 
     if ry < MIN_RESERVE { ry = MIN_RESERVE; }
     if rn < MIN_RESERVE { rn = MIN_RESERVE; }
@@ -82,13 +82,13 @@ pub fn get_swap_amount(
         fabs(ry - get_new_reserve(ry, rn + amt_in, l_float))
     };
 
-    (amount_out * 1e6) as u64
+    (amount_out * 1e9) as u64
 }
 
 pub fn calc_price(x: u64, y: u64, l: u64) -> u64 {
-    let rx = (x as f64) / 1e6;
-    let ry = (y as f64) / 1e6;
-    let l_f = (l as f64) / 1e6;
+    let rx = (x as f64) / 1e9;
+    let ry = (y as f64) / 1e9;
+    let l_f = (l as f64) / 1e9;
 
     let z = (ry - rx) / l_f;
     let price = gaussian_cdf(z);
@@ -117,9 +117,9 @@ pub fn calc_liquidity(liquidity: u64, deadline: i64, current_time: i64) -> u64 {
 }
 
 pub fn calc_initial_liquidity(amount: u64) -> u64 {
-    let a_f = (amount as f64) / 1e6;
+    let a_f = (amount as f64) / 1e9;
     let l = a_f / gaussian_pdf(0.0);
-    (l * 1e6) as u64
+    (l * 1e9) as u64
 }
 
 #[cfg(test)]

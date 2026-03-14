@@ -1428,6 +1428,11 @@ export type LvrAmm = {
       "code": 6012,
       "name": "mathErr",
       "msg": "Overflow or Underflow"
+    },
+    {
+      "code": 6013,
+      "name": "invalidTreasuryAta",
+      "msg": "Invalid Treasury ATA"
     }
   ],
   "types": [

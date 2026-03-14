@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "chainKey": "solana",
+  "appDir": "/Users/shawwalters/eliza-workspace/hyperbet/packages/hyperbet-solana/app",
+  "statePath": "/Users/shawwalters/eliza-workspace/hyperbet/packages/hyperbet-solana/app/tests/e2e/state.json",
+  "controlPath": "/Users/shawwalters/eliza-workspace/hyperbet/packages/hyperbet-solana/app/tests/e2e/control.json",
+  "rpc": {
+    "solanaRpcUrl": "http://127.0.0.1:18899",
+    "solanaWsUrl": "ws://127.0.0.1:18900"
+  },
+  "services": {
+    "app": {
+      "pidFile": "/Users/shawwalters/eliza-workspace/hyperbet/packages/hyperbet-solana/app/.e2e-app.pid",
+      "url": "http://127.0.0.1:4181/"
+    },
+    "keeper": {
+      "pidFile": "/Users/shawwalters/eliza-workspace/hyperbet/packages/hyperbet-solana/app/.e2e-keeper.pid",
+      "logPath": "/Users/shawwalters/eliza-workspace/hyperbet/packages/hyperbet-solana/app/.e2e-keeper.log",
+      "envFile": "/Users/shawwalters/eliza-workspace/hyperbet/packages/hyperbet-solana/app/.e2e-keeper.env",
+      "cwd": "/Users/shawwalters/eliza-workspace/hyperbet/packages/hyperbet-solana/keeper",
+      "healthUrl": "http://127.0.0.1:5555/status",
+      "botHealthUrl": "http://127.0.0.1:5555/api/keeper/bot-health"
+    },
+    "solanaProxy": {
+      "pidFile": "/Users/shawwalters/eliza-workspace/hyperbet/packages/hyperbet-solana/app/.e2e-solana-proxy.pid",
+      "logPath": "/Users/shawwalters/eliza-workspace/hyperbet/packages/hyperbet-solana/app/.e2e-solana-proxy.log",
+      "envFile": "/Users/shawwalters/eliza-workspace/hyperbet/packages/hyperbet-solana/app/.e2e-solana-proxy.env",
+      "rpcUrl": "http://127.0.0.1:23709"
+    },
+    "validator": {
+      "pidFile": "/Users/shawwalters/eliza-workspace/hyperbet/packages/hyperbet-solana/app/.e2e-validator.pid",
+      "logPath": "/Users/shawwalters/eliza-workspace/hyperbet/packages/hyperbet-solana/app/.e2e-validator.log",
+      "rpcUrl": "http://127.0.0.1:18899"
+    }
+  }
+}

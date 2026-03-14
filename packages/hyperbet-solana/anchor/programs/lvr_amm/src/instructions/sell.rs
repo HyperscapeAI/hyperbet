@@ -77,11 +77,25 @@ pub fn sell_instruction(ctx: Context<Sell>, bet_id: u64, outcome: u8, amount_in:
 
     // Transfer fee to treasury ATA
     if fee_amount > 0 {
+        let expected_treasury_ata = if outcome == 0 {
+            anchor_spl::associated_token::get_associated_token_address(
+                &ctx.accounts.treasury.key(),
+                &ctx.accounts.mint_yes.key(),
+            )
+        } else {
+            anchor_spl::associated_token::get_associated_token_address(
+                &ctx.accounts.treasury.key(),
+                &ctx.accounts.mint_no.key(),
+            )
+        };
+
         let treasury_ata = if outcome == 0 {
             ctx.accounts.treasury_yes_ata.to_account_info()
         } else {
             ctx.accounts.treasury_no_ata.to_account_info()
         };
+
+        require_keys_eq!(treasury_ata.key(), expected_treasury_ata, PredictionMarketError::InvalidTreasuryATA);
 
         let cpi_accounts_transfer = token::Transfer {
             from: burn_destination,
@@ -93,12 +107,12 @@ pub fn sell_instruction(ctx: Context<Sell>, bet_id: u64, outcome: u8, amount_in:
     }
 
     // mint the received tokens
-    let (yes_no, bump) = if outcome == 1 {
+    let (seeds, bump) = if outcome == 1 {
         // if sold NO, receive YES
-        ("mint_yes".to_string(), ctx.bumps.mint_yes)
+        (b"mint_yes".as_ref(), ctx.bumps.mint_yes)
     } else {
         // if sold YES, receive NO
-        ("mint_no".to_string(), ctx.bumps.mint_no)
+        (b"mint_no".as_ref(), ctx.bumps.mint_no)
     };
     
     let (mint_destination, receive_mint) = if outcome == 1 {
@@ -109,7 +123,7 @@ pub fn sell_instruction(ctx: Context<Sell>, bet_id: u64, outcome: u8, amount_in:
 
     let bet_id_bytes = bet_id.to_le_bytes();
     let signer_seeds: &[&[&[u8]]] = &[&[
-        yes_no.as_bytes(),
+        seeds,
         &bet_id_bytes,
         &ctx.accounts.bet.creator.key().to_bytes(),
         &[bump],

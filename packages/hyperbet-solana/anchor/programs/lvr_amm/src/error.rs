@@ -40,4 +40,7 @@ pub enum PredictionMarketError {
 
     #[msg("Overflow or Underflow")]
     MathErr,
+
+    #[msg("Invalid Treasury ATA")]
+    InvalidTreasuryATA,
 }

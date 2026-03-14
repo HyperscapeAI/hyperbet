@@ -101,10 +101,10 @@ pub fn buy_instruction(ctx: Context<Buy>, bet_id: u64, outcome: u8, amount_in: u
     )?;
 
     // Mint amount_in + amount_out tokens to the buyer
-    let (yes_no, bump) = if outcome == 0 {
-        ("mint_yes".to_string(), ctx.bumps.mint_yes)
+    let (seeds, bump) = if outcome == 0 {
+        (b"mint_yes".as_ref(), ctx.bumps.mint_yes)
     } else {
-        ("mint_no".to_string(), ctx.bumps.mint_no)
+        (b"mint_no".as_ref(), ctx.bumps.mint_no)
     };
     let (destination_account, mint) = if outcome == 0 {
         (
@@ -121,7 +121,7 @@ pub fn buy_instruction(ctx: Context<Buy>, bet_id: u64, outcome: u8, amount_in: u
     let bet_id_bytes = bet_id.to_le_bytes();
 
     let signer_seeds: &[&[&[u8]]] = &[&[
-        yes_no.as_bytes(),
+        seeds,
         &bet_id_bytes,
         &ctx.accounts.bet.creator.key().to_bytes(),
         &[bump],

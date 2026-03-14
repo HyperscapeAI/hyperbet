@@ -24,7 +24,7 @@ contract LvrMarket {
 
     // Price snapshot for frontend charting - emitted on every trade
     event PriceSnapshot(
-        uint256 indexed timestamp,
+        uint256 timestamp,
         uint256 priceYes,
         uint256 priceNo,
         uint256 reserveYes,
@@ -165,8 +165,12 @@ contract LvrMarket {
     function buy(bool isBuyYes, uint256 amountIn, address buyer) public isRouter {
         require(state == MarketState.OPEN, "Market Not Open");
 
-        uint256 feeAmount = (amountIn * feeBps) / 10000;
-        uint256 amountInAfterFee = amountIn - feeAmount;
+        uint256 feeAmount;
+        uint256 amountInAfterFee;
+        unchecked {
+            feeAmount = (amountIn * feeBps) / 10000;
+            amountInAfterFee = amountIn - feeAmount;
+        }
 
         // Calculates amount of tokens to give after
         uint256 amountOut = _swap(!isBuyYes, int256(amountInAfterFee));
@@ -190,10 +194,12 @@ contract LvrMarket {
         noToken.mint(address(this), amountInAfterFee);
 
         // returns yes tokens to the user
-        if(isBuyYes){
-            IERC20(yesToken).transfer(buyer, amountInAfterFee + amountOut);
-        }else{
-            IERC20(noToken).transfer(buyer, amountInAfterFee + amountOut);
+        unchecked {
+            if(isBuyYes){
+                IERC20(yesToken).transfer(buyer, amountInAfterFee + amountOut);
+            }else{
+                IERC20(noToken).transfer(buyer, amountInAfterFee + amountOut);
+            }
         }
 
         emit MarketBuy(buyer, isBuyYes, amountIn, amountOut);
@@ -204,8 +210,12 @@ contract LvrMarket {
         require(state == MarketState.OPEN, "Market Not Open");
 
         address tokenIn = isSellYes ? address(yesToken) : address(noToken);
-        uint256 feeAmount = (amountIn * feeBps) / 10000;
-        uint256 amountInAfterFee = amountIn - feeAmount;
+        uint256 feeAmount;
+        uint256 amountInAfterFee;
+        unchecked {
+            feeAmount = (amountIn * feeBps) / 10000;
+            amountInAfterFee = amountIn - feeAmount;
+        }
 
         uint256 amountOut = _swap(isSellYes, int256(amountInAfterFee));
 

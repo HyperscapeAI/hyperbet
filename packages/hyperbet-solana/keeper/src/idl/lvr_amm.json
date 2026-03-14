@@ -51,6 +51,10 @@
           }
         },
         {
+          "name": "treasury",
+          "writable": true
+        },
+        {
           "name": "mint_yes",
           "writable": true,
           "pda": {
@@ -447,6 +451,14 @@
         {
           "name": "expiration_at",
           "type": "i64"
+        },
+        {
+          "name": "fee_bps",
+          "type": "u16"
+        },
+        {
+          "name": "treasury",
+          "type": "pubkey"
         }
       ]
     },
@@ -865,6 +877,18 @@
               ]
             }
           }
+        },
+        {
+          "name": "treasury",
+          "writable": true
+        },
+        {
+          "name": "treasury_yes_ata",
+          "writable": true
+        },
+        {
+          "name": "treasury_no_ata",
+          "writable": true
         },
         {
           "name": "token_program",
@@ -1484,6 +1508,14 @@
           {
             "name": "creator",
             "type": "pubkey"
+          },
+          {
+            "name": "treasury",
+            "type": "pubkey"
+          },
+          {
+            "name": "fee_bps",
+            "type": "u16"
           }
         ]
       }
