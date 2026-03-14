@@ -6,7 +6,7 @@
     "MM_ENABLE_SOLANA": "true",
     "SOLANA_RPC_URL": "https://api.testnet.solana.com",
     "FIGHT_ORACLE_PROGRAM_ID": "<fight-oracle-program-id>",
-    "GOLD_CLOB_MARKET_PROGRAM_ID": "<gold-clob-program-id>",
+    "LVR_ROUTER_MARKET_PROGRAM_ID": "<gold-clob-program-id>",
     "TARGET_SPREAD_BPS": "200",
     "MAX_INVENTORY_CAP": "500000"
   },

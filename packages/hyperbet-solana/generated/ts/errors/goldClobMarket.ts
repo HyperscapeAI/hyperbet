@@ -7,88 +7,88 @@
  */
 
 import { isProgramError, type Address, type SOLANA_ERROR__INSTRUCTION_ERROR__CUSTOM, type SolanaError } from '@solana/kit';
-import { GOLD_CLOB_MARKET_PROGRAM_ADDRESS } from '../programs/index.js';
+import { LVR_ROUTER_MARKET_PROGRAM_ADDRESS } from '../programs/index.js';
 
 /** UnauthorizedInitializer: Only the upgrade authority can initialize config */
-export const GOLD_CLOB_MARKET_ERROR__UNAUTHORIZED_INITIALIZER = 0x1770; // 6000
+export const LVR_ROUTER_MARKET_ERROR__UNAUTHORIZED_INITIALIZER = 0x1770; // 6000
 /** UnauthorizedConfigAuthority: Config authority is required for this action */
-export const GOLD_CLOB_MARKET_ERROR__UNAUTHORIZED_CONFIG_AUTHORITY = 0x1771; // 6001
+export const LVR_ROUTER_MARKET_ERROR__UNAUTHORIZED_CONFIG_AUTHORITY = 0x1771; // 6001
 /** UnauthorizedMarketOperator: Market operator is not authorized */
-export const GOLD_CLOB_MARKET_ERROR__UNAUTHORIZED_MARKET_OPERATOR = 0x1772; // 6002
+export const LVR_ROUTER_MARKET_ERROR__UNAUTHORIZED_MARKET_OPERATOR = 0x1772; // 6002
 /** InvalidOperator: Market operator pubkey is invalid */
-export const GOLD_CLOB_MARKET_ERROR__INVALID_OPERATOR = 0x1773; // 6003
+export const LVR_ROUTER_MARKET_ERROR__INVALID_OPERATOR = 0x1773; // 6003
 /** InvalidAuthority: Authority pubkey is invalid */
-export const GOLD_CLOB_MARKET_ERROR__INVALID_AUTHORITY = 0x1774; // 6004
+export const LVR_ROUTER_MARKET_ERROR__INVALID_AUTHORITY = 0x1774; // 6004
 /** InvalidFeeAccount: The provided fee account is invalid */
-export const GOLD_CLOB_MARKET_ERROR__INVALID_FEE_ACCOUNT = 0x1775; // 6005
+export const LVR_ROUTER_MARKET_ERROR__INVALID_FEE_ACCOUNT = 0x1775; // 6005
 /** FeeTooHigh: Fee configuration exceeds 100% */
-export const GOLD_CLOB_MARKET_ERROR__FEE_TOO_HIGH = 0x1776; // 6006
+export const LVR_ROUTER_MARKET_ERROR__FEE_TOO_HIGH = 0x1776; // 6006
 /** InvalidMarketKind: Only duel-winner markets are currently supported */
-export const GOLD_CLOB_MARKET_ERROR__INVALID_MARKET_KIND = 0x1777; // 6007
+export const LVR_ROUTER_MARKET_ERROR__INVALID_MARKET_KIND = 0x1777; // 6007
 /** DuelMismatch: The duel account does not match the market */
-export const GOLD_CLOB_MARKET_ERROR__DUEL_MISMATCH = 0x1778; // 6008
+export const LVR_ROUTER_MARKET_ERROR__DUEL_MISMATCH = 0x1778; // 6008
 /** MarketCreationClosed: Markets can only be created while betting is open or locked */
-export const GOLD_CLOB_MARKET_ERROR__MARKET_CREATION_CLOSED = 0x1779; // 6009
+export const LVR_ROUTER_MARKET_ERROR__MARKET_CREATION_CLOSED = 0x1779; // 6009
 /** MarketNotOpen: Market is not open for new orders */
-export const GOLD_CLOB_MARKET_ERROR__MARKET_NOT_OPEN = 0x177a; // 6010
+export const LVR_ROUTER_MARKET_ERROR__MARKET_NOT_OPEN = 0x177a; // 6010
 /** MarketNotResolved: Market is not resolved */
-export const GOLD_CLOB_MARKET_ERROR__MARKET_NOT_RESOLVED = 0x177b; // 6011
+export const LVR_ROUTER_MARKET_ERROR__MARKET_NOT_RESOLVED = 0x177b; // 6011
 /** MarketAlreadyResolved: Market is already resolved or cancelled */
-export const GOLD_CLOB_MARKET_ERROR__MARKET_ALREADY_RESOLVED = 0x177c; // 6012
+export const LVR_ROUTER_MARKET_ERROR__MARKET_ALREADY_RESOLVED = 0x177c; // 6012
 /** BettingClosed: Betting is closed */
-export const GOLD_CLOB_MARKET_ERROR__BETTING_CLOSED = 0x177d; // 6013
+export const LVR_ROUTER_MARKET_ERROR__BETTING_CLOSED = 0x177d; // 6013
 /** InvalidSide: Side must be bid (1) or ask (2) */
-export const GOLD_CLOB_MARKET_ERROR__INVALID_SIDE = 0x177e; // 6014
+export const LVR_ROUTER_MARKET_ERROR__INVALID_SIDE = 0x177e; // 6014
 /** InvalidPrice: Price must be between 1 and 999 */
-export const GOLD_CLOB_MARKET_ERROR__INVALID_PRICE = 0x177f; // 6015
+export const LVR_ROUTER_MARKET_ERROR__INVALID_PRICE = 0x177f; // 6015
 /** InvalidAmount: Order amount must be greater than zero */
-export const GOLD_CLOB_MARKET_ERROR__INVALID_AMOUNT = 0x1780; // 6016
+export const LVR_ROUTER_MARKET_ERROR__INVALID_AMOUNT = 0x1780; // 6016
 /** InvalidOrderId: Order id does not match the next expected id */
-export const GOLD_CLOB_MARKET_ERROR__INVALID_ORDER_ID = 0x1781; // 6017
+export const LVR_ROUTER_MARKET_ERROR__INVALID_ORDER_ID = 0x1781; // 6017
 /** PrecisionError: The precision implied by amount and price is invalid */
-export const GOLD_CLOB_MARKET_ERROR__PRECISION_ERROR = 0x1782; // 6018
+export const LVR_ROUTER_MARKET_ERROR__PRECISION_ERROR = 0x1782; // 6018
 /** CostTooLow: Order cost is too low */
-export const GOLD_CLOB_MARKET_ERROR__COST_TOO_LOW = 0x1783; // 6019
+export const LVR_ROUTER_MARKET_ERROR__COST_TOO_LOW = 0x1783; // 6019
 /** MathOverflow: Math overflow */
-export const GOLD_CLOB_MARKET_ERROR__MATH_OVERFLOW = 0x1784; // 6020
+export const LVR_ROUTER_MARKET_ERROR__MATH_OVERFLOW = 0x1784; // 6020
 /** PriceLevelMismatch: The supplied price level does not match the order */
-export const GOLD_CLOB_MARKET_ERROR__PRICE_LEVEL_MISMATCH = 0x1785; // 6021
+export const LVR_ROUTER_MARKET_ERROR__PRICE_LEVEL_MISMATCH = 0x1785; // 6021
 /** OrderSideMismatch: The supplied order side does not match the stored order */
-export const GOLD_CLOB_MARKET_ERROR__ORDER_SIDE_MISMATCH = 0x1786; // 6022
+export const LVR_ROUTER_MARKET_ERROR__ORDER_SIDE_MISMATCH = 0x1786; // 6022
 /** OrderPriceMismatch: The supplied order price does not match the stored order */
-export const GOLD_CLOB_MARKET_ERROR__ORDER_PRICE_MISMATCH = 0x1787; // 6023
+export const LVR_ROUTER_MARKET_ERROR__ORDER_PRICE_MISMATCH = 0x1787; // 6023
 /** NotOrderMaker: Only the order maker can cancel this order */
-export const GOLD_CLOB_MARKET_ERROR__NOT_ORDER_MAKER = 0x1788; // 6024
+export const LVR_ROUTER_MARKET_ERROR__NOT_ORDER_MAKER = 0x1788; // 6024
 /** MissingMatchAccounts: Required maker match accounts were not supplied */
-export const GOLD_CLOB_MARKET_ERROR__MISSING_MATCH_ACCOUNTS = 0x1789; // 6025
+export const LVR_ROUTER_MARKET_ERROR__MISSING_MATCH_ACCOUNTS = 0x1789; // 6025
 /** MissingTailOrder: Required resting tail order account was not supplied */
-export const GOLD_CLOB_MARKET_ERROR__MISSING_TAIL_ORDER = 0x178a; // 6026
+export const LVR_ROUTER_MARKET_ERROR__MISSING_TAIL_ORDER = 0x178a; // 6026
 /** MissingLinkedOrderAccount: A linked prev/next order account is missing */
-export const GOLD_CLOB_MARKET_ERROR__MISSING_LINKED_ORDER_ACCOUNT = 0x178b; // 6027
+export const LVR_ROUTER_MARKET_ERROR__MISSING_LINKED_ORDER_ACCOUNT = 0x178b; // 6027
 /** InvalidRemainingAccount: Remaining account verification failed */
-export const GOLD_CLOB_MARKET_ERROR__INVALID_REMAINING_ACCOUNT = 0x178c; // 6028
+export const LVR_ROUTER_MARKET_ERROR__INVALID_REMAINING_ACCOUNT = 0x178c; // 6028
 /** NothingToClaim: Nothing to claim */
-export const GOLD_CLOB_MARKET_ERROR__NOTHING_TO_CLAIM = 0x178d; // 6029
+export const LVR_ROUTER_MARKET_ERROR__NOTHING_TO_CLAIM = 0x178d; // 6029
 
-export type GoldClobMarketError = typeof GOLD_CLOB_MARKET_ERROR__BETTING_CLOSED | typeof GOLD_CLOB_MARKET_ERROR__COST_TOO_LOW | typeof GOLD_CLOB_MARKET_ERROR__DUEL_MISMATCH | typeof GOLD_CLOB_MARKET_ERROR__FEE_TOO_HIGH | typeof GOLD_CLOB_MARKET_ERROR__INVALID_AMOUNT | typeof GOLD_CLOB_MARKET_ERROR__INVALID_AUTHORITY | typeof GOLD_CLOB_MARKET_ERROR__INVALID_FEE_ACCOUNT | typeof GOLD_CLOB_MARKET_ERROR__INVALID_MARKET_KIND | typeof GOLD_CLOB_MARKET_ERROR__INVALID_OPERATOR | typeof GOLD_CLOB_MARKET_ERROR__INVALID_ORDER_ID | typeof GOLD_CLOB_MARKET_ERROR__INVALID_PRICE | typeof GOLD_CLOB_MARKET_ERROR__INVALID_REMAINING_ACCOUNT | typeof GOLD_CLOB_MARKET_ERROR__INVALID_SIDE | typeof GOLD_CLOB_MARKET_ERROR__MARKET_ALREADY_RESOLVED | typeof GOLD_CLOB_MARKET_ERROR__MARKET_CREATION_CLOSED | typeof GOLD_CLOB_MARKET_ERROR__MARKET_NOT_OPEN | typeof GOLD_CLOB_MARKET_ERROR__MARKET_NOT_RESOLVED | typeof GOLD_CLOB_MARKET_ERROR__MATH_OVERFLOW | typeof GOLD_CLOB_MARKET_ERROR__MISSING_LINKED_ORDER_ACCOUNT | typeof GOLD_CLOB_MARKET_ERROR__MISSING_MATCH_ACCOUNTS | typeof GOLD_CLOB_MARKET_ERROR__MISSING_TAIL_ORDER | typeof GOLD_CLOB_MARKET_ERROR__NOTHING_TO_CLAIM | typeof GOLD_CLOB_MARKET_ERROR__NOT_ORDER_MAKER | typeof GOLD_CLOB_MARKET_ERROR__ORDER_PRICE_MISMATCH | typeof GOLD_CLOB_MARKET_ERROR__ORDER_SIDE_MISMATCH | typeof GOLD_CLOB_MARKET_ERROR__PRECISION_ERROR | typeof GOLD_CLOB_MARKET_ERROR__PRICE_LEVEL_MISMATCH | typeof GOLD_CLOB_MARKET_ERROR__UNAUTHORIZED_CONFIG_AUTHORITY | typeof GOLD_CLOB_MARKET_ERROR__UNAUTHORIZED_INITIALIZER | typeof GOLD_CLOB_MARKET_ERROR__UNAUTHORIZED_MARKET_OPERATOR;
+export type LvrMarketError = typeof LVR_ROUTER_MARKET_ERROR__BETTING_CLOSED | typeof LVR_ROUTER_MARKET_ERROR__COST_TOO_LOW | typeof LVR_ROUTER_MARKET_ERROR__DUEL_MISMATCH | typeof LVR_ROUTER_MARKET_ERROR__FEE_TOO_HIGH | typeof LVR_ROUTER_MARKET_ERROR__INVALID_AMOUNT | typeof LVR_ROUTER_MARKET_ERROR__INVALID_AUTHORITY | typeof LVR_ROUTER_MARKET_ERROR__INVALID_FEE_ACCOUNT | typeof LVR_ROUTER_MARKET_ERROR__INVALID_MARKET_KIND | typeof LVR_ROUTER_MARKET_ERROR__INVALID_OPERATOR | typeof LVR_ROUTER_MARKET_ERROR__INVALID_ORDER_ID | typeof LVR_ROUTER_MARKET_ERROR__INVALID_PRICE | typeof LVR_ROUTER_MARKET_ERROR__INVALID_REMAINING_ACCOUNT | typeof LVR_ROUTER_MARKET_ERROR__INVALID_SIDE | typeof LVR_ROUTER_MARKET_ERROR__MARKET_ALREADY_RESOLVED | typeof LVR_ROUTER_MARKET_ERROR__MARKET_CREATION_CLOSED | typeof LVR_ROUTER_MARKET_ERROR__MARKET_NOT_OPEN | typeof LVR_ROUTER_MARKET_ERROR__MARKET_NOT_RESOLVED | typeof LVR_ROUTER_MARKET_ERROR__MATH_OVERFLOW | typeof LVR_ROUTER_MARKET_ERROR__MISSING_LINKED_ORDER_ACCOUNT | typeof LVR_ROUTER_MARKET_ERROR__MISSING_MATCH_ACCOUNTS | typeof LVR_ROUTER_MARKET_ERROR__MISSING_TAIL_ORDER | typeof LVR_ROUTER_MARKET_ERROR__NOTHING_TO_CLAIM | typeof LVR_ROUTER_MARKET_ERROR__NOT_ORDER_MAKER | typeof LVR_ROUTER_MARKET_ERROR__ORDER_PRICE_MISMATCH | typeof LVR_ROUTER_MARKET_ERROR__ORDER_SIDE_MISMATCH | typeof LVR_ROUTER_MARKET_ERROR__PRECISION_ERROR | typeof LVR_ROUTER_MARKET_ERROR__PRICE_LEVEL_MISMATCH | typeof LVR_ROUTER_MARKET_ERROR__UNAUTHORIZED_CONFIG_AUTHORITY | typeof LVR_ROUTER_MARKET_ERROR__UNAUTHORIZED_INITIALIZER | typeof LVR_ROUTER_MARKET_ERROR__UNAUTHORIZED_MARKET_OPERATOR;
 
-let goldClobMarketErrorMessages: Record<GoldClobMarketError, string> | undefined;
+let lvrMarketErrorMessages: Record<LvrMarketError, string> | undefined;
 if (true) {
-  goldClobMarketErrorMessages = { [GOLD_CLOB_MARKET_ERROR__BETTING_CLOSED]: `Betting is closed`, [GOLD_CLOB_MARKET_ERROR__COST_TOO_LOW]: `Order cost is too low`, [GOLD_CLOB_MARKET_ERROR__DUEL_MISMATCH]: `The duel account does not match the market`, [GOLD_CLOB_MARKET_ERROR__FEE_TOO_HIGH]: `Fee configuration exceeds 100%`, [GOLD_CLOB_MARKET_ERROR__INVALID_AMOUNT]: `Order amount must be greater than zero`, [GOLD_CLOB_MARKET_ERROR__INVALID_AUTHORITY]: `Authority pubkey is invalid`, [GOLD_CLOB_MARKET_ERROR__INVALID_FEE_ACCOUNT]: `The provided fee account is invalid`, [GOLD_CLOB_MARKET_ERROR__INVALID_MARKET_KIND]: `Only duel-winner markets are currently supported`, [GOLD_CLOB_MARKET_ERROR__INVALID_OPERATOR]: `Market operator pubkey is invalid`, [GOLD_CLOB_MARKET_ERROR__INVALID_ORDER_ID]: `Order id does not match the next expected id`, [GOLD_CLOB_MARKET_ERROR__INVALID_PRICE]: `Price must be between 1 and 999`, [GOLD_CLOB_MARKET_ERROR__INVALID_REMAINING_ACCOUNT]: `Remaining account verification failed`, [GOLD_CLOB_MARKET_ERROR__INVALID_SIDE]: `Side must be bid (1) or ask (2)`, [GOLD_CLOB_MARKET_ERROR__MARKET_ALREADY_RESOLVED]: `Market is already resolved or cancelled`, [GOLD_CLOB_MARKET_ERROR__MARKET_CREATION_CLOSED]: `Markets can only be created while betting is open or locked`, [GOLD_CLOB_MARKET_ERROR__MARKET_NOT_OPEN]: `Market is not open for new orders`, [GOLD_CLOB_MARKET_ERROR__MARKET_NOT_RESOLVED]: `Market is not resolved`, [GOLD_CLOB_MARKET_ERROR__MATH_OVERFLOW]: `Math overflow`, [GOLD_CLOB_MARKET_ERROR__MISSING_LINKED_ORDER_ACCOUNT]: `A linked prev/next order account is missing`, [GOLD_CLOB_MARKET_ERROR__MISSING_MATCH_ACCOUNTS]: `Required maker match accounts were not supplied`, [GOLD_CLOB_MARKET_ERROR__MISSING_TAIL_ORDER]: `Required resting tail order account was not supplied`, [GOLD_CLOB_MARKET_ERROR__NOTHING_TO_CLAIM]: `Nothing to claim`, [GOLD_CLOB_MARKET_ERROR__NOT_ORDER_MAKER]: `Only the order maker can cancel this order`, [GOLD_CLOB_MARKET_ERROR__ORDER_PRICE_MISMATCH]: `The supplied order price does not match the stored order`, [GOLD_CLOB_MARKET_ERROR__ORDER_SIDE_MISMATCH]: `The supplied order side does not match the stored order`, [GOLD_CLOB_MARKET_ERROR__PRECISION_ERROR]: `The precision implied by amount and price is invalid`, [GOLD_CLOB_MARKET_ERROR__PRICE_LEVEL_MISMATCH]: `The supplied price level does not match the order`, [GOLD_CLOB_MARKET_ERROR__UNAUTHORIZED_CONFIG_AUTHORITY]: `Config authority is required for this action`, [GOLD_CLOB_MARKET_ERROR__UNAUTHORIZED_INITIALIZER]: `Only the upgrade authority can initialize config`, [GOLD_CLOB_MARKET_ERROR__UNAUTHORIZED_MARKET_OPERATOR]: `Market operator is not authorized` };
+  lvrMarketErrorMessages = { [LVR_ROUTER_MARKET_ERROR__BETTING_CLOSED]: `Betting is closed`, [LVR_ROUTER_MARKET_ERROR__COST_TOO_LOW]: `Order cost is too low`, [LVR_ROUTER_MARKET_ERROR__DUEL_MISMATCH]: `The duel account does not match the market`, [LVR_ROUTER_MARKET_ERROR__FEE_TOO_HIGH]: `Fee configuration exceeds 100%`, [LVR_ROUTER_MARKET_ERROR__INVALID_AMOUNT]: `Order amount must be greater than zero`, [LVR_ROUTER_MARKET_ERROR__INVALID_AUTHORITY]: `Authority pubkey is invalid`, [LVR_ROUTER_MARKET_ERROR__INVALID_FEE_ACCOUNT]: `The provided fee account is invalid`, [LVR_ROUTER_MARKET_ERROR__INVALID_MARKET_KIND]: `Only duel-winner markets are currently supported`, [LVR_ROUTER_MARKET_ERROR__INVALID_OPERATOR]: `Market operator pubkey is invalid`, [LVR_ROUTER_MARKET_ERROR__INVALID_ORDER_ID]: `Order id does not match the next expected id`, [LVR_ROUTER_MARKET_ERROR__INVALID_PRICE]: `Price must be between 1 and 999`, [LVR_ROUTER_MARKET_ERROR__INVALID_REMAINING_ACCOUNT]: `Remaining account verification failed`, [LVR_ROUTER_MARKET_ERROR__INVALID_SIDE]: `Side must be bid (1) or ask (2)`, [LVR_ROUTER_MARKET_ERROR__MARKET_ALREADY_RESOLVED]: `Market is already resolved or cancelled`, [LVR_ROUTER_MARKET_ERROR__MARKET_CREATION_CLOSED]: `Markets can only be created while betting is open or locked`, [LVR_ROUTER_MARKET_ERROR__MARKET_NOT_OPEN]: `Market is not open for new orders`, [LVR_ROUTER_MARKET_ERROR__MARKET_NOT_RESOLVED]: `Market is not resolved`, [LVR_ROUTER_MARKET_ERROR__MATH_OVERFLOW]: `Math overflow`, [LVR_ROUTER_MARKET_ERROR__MISSING_LINKED_ORDER_ACCOUNT]: `A linked prev/next order account is missing`, [LVR_ROUTER_MARKET_ERROR__MISSING_MATCH_ACCOUNTS]: `Required maker match accounts were not supplied`, [LVR_ROUTER_MARKET_ERROR__MISSING_TAIL_ORDER]: `Required resting tail order account was not supplied`, [LVR_ROUTER_MARKET_ERROR__NOTHING_TO_CLAIM]: `Nothing to claim`, [LVR_ROUTER_MARKET_ERROR__NOT_ORDER_MAKER]: `Only the order maker can cancel this order`, [LVR_ROUTER_MARKET_ERROR__ORDER_PRICE_MISMATCH]: `The supplied order price does not match the stored order`, [LVR_ROUTER_MARKET_ERROR__ORDER_SIDE_MISMATCH]: `The supplied order side does not match the stored order`, [LVR_ROUTER_MARKET_ERROR__PRECISION_ERROR]: `The precision implied by amount and price is invalid`, [LVR_ROUTER_MARKET_ERROR__PRICE_LEVEL_MISMATCH]: `The supplied price level does not match the order`, [LVR_ROUTER_MARKET_ERROR__UNAUTHORIZED_CONFIG_AUTHORITY]: `Config authority is required for this action`, [LVR_ROUTER_MARKET_ERROR__UNAUTHORIZED_INITIALIZER]: `Only the upgrade authority can initialize config`, [LVR_ROUTER_MARKET_ERROR__UNAUTHORIZED_MARKET_OPERATOR]: `Market operator is not authorized` };
 }
 
-export function getGoldClobMarketErrorMessage(code: GoldClobMarketError): string {
+export function getLvrMarketErrorMessage(code: LvrMarketError): string {
   if (true) {
-    return (goldClobMarketErrorMessages as Record<GoldClobMarketError, string>)[code];
+    return (lvrMarketErrorMessages as Record<LvrMarketError, string>)[code];
   }
 
   return 'Error message not available in production bundles.';
 }
 
-export function isGoldClobMarketError<TProgramErrorCode extends GoldClobMarketError>(
+export function isLvrMarketError<TProgramErrorCode extends LvrMarketError>(
     error: unknown,
     transactionMessage: { instructions: Record<number, { programAddress: Address }> },
     code?: TProgramErrorCode,
 ): error is SolanaError<typeof SOLANA_ERROR__INSTRUCTION_ERROR__CUSTOM> & Readonly<{ context: Readonly<{ code: TProgramErrorCode }> }> {
-  return isProgramError<TProgramErrorCode>(error, transactionMessage, GOLD_CLOB_MARKET_PROGRAM_ADDRESS, code);
+  return isProgramError<TProgramErrorCode>(error, transactionMessage, LVR_ROUTER_MARKET_PROGRAM_ADDRESS, code);
 }

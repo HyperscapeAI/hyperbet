@@ -17,7 +17,7 @@ import dotenv from "dotenv";
 
 import { resolveBettingSolanaDeployment } from "../../deployments";
 import fightOracleIdl from "../../../hyperbet-solana/anchor/target/idl/fight_oracle.json" assert { type: "json" };
-import goldClobMarketIdl from "../../../hyperbet-solana/anchor/target/idl/gold_clob_market.json" assert { type: "json" };
+import lvrMarketIdl from "../../../hyperbet-solana/anchor/target/idl/lvr_amm.json" assert { type: "json" };
 import goldPerpsMarketIdl from "../../../hyperbet-solana/anchor/target/idl/gold_perps_market.json" assert { type: "json" };
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -162,10 +162,10 @@ export const FIGHT_ORACLE_PROGRAM_ID = resolveConfiguredProgramId(
   fightOracleIdl,
   solanaDeployment.fightOracleProgramId,
 );
-export const GOLD_CLOB_MARKET_PROGRAM_ID = resolveConfiguredProgramId(
-  process.env.GOLD_CLOB_MARKET_PROGRAM_ID,
-  goldClobMarketIdl,
-  solanaDeployment.goldClobMarketProgramId,
+export const LVR_AMM_PROGRAM_ID = resolveConfiguredProgramId(
+  process.env.LVR_AMM_PROGRAM_ID,
+  lvrMarketIdl,
+  solanaDeployment.lvrMarketProgramId,
 );
 export const GOLD_PERPS_MARKET_PROGRAM_ID = resolveConfiguredProgramId(
   process.env.GOLD_PERPS_MARKET_PROGRAM_ID,
@@ -182,9 +182,9 @@ const FIGHT_ORACLE_IDL = ensureIdlAddress(
   fightOracleIdl,
   FIGHT_ORACLE_PROGRAM_ID,
 );
-const GOLD_CLOB_MARKET_IDL = ensureIdlAddress(
-  goldClobMarketIdl,
-  GOLD_CLOB_MARKET_PROGRAM_ID,
+const LVR_ROUTER_MARKET_IDL = ensureIdlAddress(
+  lvrMarketIdl,
+  LVR_AMM_PROGRAM_ID,
 );
 const GOLD_PERPS_MARKET_IDL = ensureIdlAddress(
   goldPerpsMarketIdl,
@@ -195,7 +195,7 @@ export function createPrograms(signer: Keypair): {
   connection: Connection;
   provider: AnchorProvider;
   fightOracle: Program<any>;
-  goldClobMarket: Program<any>;
+  lvrMarket: Program<any>;
   goldPerpsMarket: Program<any>;
   /** @deprecated Binary market removed. Returns null. */
   goldBinaryMarket: null;
@@ -210,14 +210,14 @@ export function createPrograms(signer: Keypair): {
   });
 
   const fightOracle = new Program(FIGHT_ORACLE_IDL, provider);
-  const goldClobMarket = new Program(GOLD_CLOB_MARKET_IDL, provider);
+  const lvrMarket = new Program(LVR_ROUTER_MARKET_IDL, provider);
   const goldPerpsMarket = new Program(GOLD_PERPS_MARKET_IDL, provider);
 
   return {
     connection,
     provider,
     fightOracle,
-    goldClobMarket,
+    lvrMarket,
     goldPerpsMarket,
     goldBinaryMarket: null,
   };

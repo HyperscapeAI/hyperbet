@@ -22,8 +22,8 @@ import dotenv from "dotenv";
 import { resolveBettingSolanaDeployment } from "../../deployments";
 import fightOracleIdl from "./idl/fight_oracle.json";
 import type { FightOracle } from "./idl/fight_oracle";
-import goldClobMarketIdl from "./idl/gold_clob_market.json";
-import type { GoldClobMarket } from "./idl/gold_clob_market";
+import lvrMarketIdl from "./idl/lvr_amm.json";
+import type { LvrAmm } from "./idl/lvr_amm";
 import goldPerpsMarketIdl from "./idl/gold_perps_market.json";
 import type { GoldPerpsMarket } from "./idl/gold_perps_market";
 
@@ -177,10 +177,10 @@ export const FIGHT_ORACLE_PROGRAM_ID = resolveConfiguredProgramId(
   fightOracleIdl,
   solanaDeployment.fightOracleProgramId,
 );
-export const GOLD_CLOB_MARKET_PROGRAM_ID = resolveConfiguredProgramId(
-  process.env.GOLD_CLOB_MARKET_PROGRAM_ID,
-  goldClobMarketIdl,
-  solanaDeployment.goldClobMarketProgramId,
+export const LVR_AMM_PROGRAM_ID = resolveConfiguredProgramId(
+  process.env.LVR_AMM_PROGRAM_ID,
+  lvrMarketIdl,
+  solanaDeployment.lvrMarketProgramId,
 );
 export const GOLD_PERPS_MARKET_PROGRAM_ID = resolveConfiguredProgramId(
   process.env.GOLD_PERPS_MARKET_PROGRAM_ID,
@@ -197,10 +197,10 @@ const FIGHT_ORACLE_IDL = ensureIdlAddress(
   fightOracleIdl,
   FIGHT_ORACLE_PROGRAM_ID,
  ) as FightOracle;
-const GOLD_CLOB_MARKET_IDL = ensureIdlAddress(
-  goldClobMarketIdl,
-  GOLD_CLOB_MARKET_PROGRAM_ID,
- ) as GoldClobMarket;
+const LVR_ROUTER_MARKET_IDL = ensureIdlAddress(
+  lvrMarketIdl,
+  LVR_AMM_PROGRAM_ID,
+ ) as LvrAmm;
 const GOLD_PERPS_MARKET_IDL = ensureIdlAddress(
   goldPerpsMarketIdl,
   GOLD_PERPS_MARKET_PROGRAM_ID,
@@ -210,7 +210,7 @@ export type KeeperPrograms = {
   connection: Connection;
   provider: AnchorProvider;
   fightOracle: Program<FightOracle>;
-  goldClobMarket: Program<GoldClobMarket>;
+  lvrMarket: Program<LvrAmm>;
   goldPerpsMarket: Program<GoldPerpsMarket>;
   /** @deprecated Binary market removed. Returns null. */
   goldBinaryMarket: null;
@@ -230,10 +230,10 @@ export function createPrograms(signer: Keypair): KeeperPrograms {
     FIGHT_ORACLE_IDL,
     provider,
   ) as Program<FightOracle>;
-  const goldClobMarket = new Program(
-    GOLD_CLOB_MARKET_IDL,
+  const lvrMarket = new Program(
+    LVR_ROUTER_MARKET_IDL,
     provider,
-  ) as Program<GoldClobMarket>;
+  ) as Program<LvrAmm>;
   const goldPerpsMarket = new Program(
     GOLD_PERPS_MARKET_IDL,
     provider,
@@ -243,7 +243,7 @@ export function createPrograms(signer: Keypair): KeeperPrograms {
     connection,
     provider,
     fightOracle,
-    goldClobMarket,
+    lvrMarket,
     goldPerpsMarket,
     goldBinaryMarket: null,
   };
@@ -261,6 +261,10 @@ export function findOracleConfigPda(
 export const DUEL_WINNER_MARKET_KIND = 1;
 export const SIDE_BID = 1;
 export const SIDE_ASK = 2;
+
+export function deriveLvrAmmBetId(duelKey: Uint8Array): bigint {
+  return BigInt(`0x${Buffer.from(duelKey).slice(0, 8).reverse().toString('hex')}`);
+}
 
 export function duelKeyHexToBytes(duelKeyHex: string): Uint8Array {
   const normalized = duelKeyHex.trim().toLowerCase();
@@ -280,13 +284,15 @@ export function findDuelStatePda(
   )[0];
 }
 
-export function findMarketPda(
+export function findBetPda(
   marketProgramId: PublicKey,
-  duelStatePda: PublicKey,
-  marketKind = DUEL_WINNER_MARKET_KIND,
+  betId: bigint | number,
+  creator: PublicKey,
 ): PublicKey {
+  const betIdBytes = Buffer.alloc(8);
+  betIdBytes.writeBigUInt64LE(BigInt(betId));
   return PublicKey.findProgramAddressSync(
-    [Buffer.from("market"), duelStatePda.toBuffer(), Uint8Array.of(marketKind)],
+    [Buffer.from("bet"), betIdBytes, creator.toBuffer()],
     marketProgramId,
   )[0];
 }
@@ -324,12 +330,7 @@ export function findOrderPda(
   marketPda: PublicKey,
   orderId: bigint,
 ): PublicKey {
-  const orderIdBytes = Buffer.alloc(8);
-  orderIdBytes.writeBigUInt64LE(orderId);
-  return PublicKey.findProgramAddressSync(
-    [Buffer.from("order"), marketPda.toBuffer(), orderIdBytes],
-    marketProgramId,
-  )[0];
+  return marketPda;
 }
 
 export function findPriceLevelPda(
@@ -338,17 +339,7 @@ export function findPriceLevelPda(
   side: number,
   price: number,
 ): PublicKey {
-  const priceBytes = Buffer.alloc(2);
-  priceBytes.writeUInt16LE(price);
-  return PublicKey.findProgramAddressSync(
-    [
-      Buffer.from("level"),
-      marketPda.toBuffer(),
-      Uint8Array.of(side),
-      priceBytes,
-    ],
-    marketProgramId,
-  )[0];
+  return marketPda;
 }
 
 export function enumIs(value: unknown, variant: string): boolean {

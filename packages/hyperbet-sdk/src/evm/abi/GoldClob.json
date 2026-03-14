@@ -1,7 +1,7 @@
 {
   "_format": "hh-sol-artifact-1",
-  "contractName": "GoldClob",
-  "sourceName": "contracts/GoldClob.sol",
+  "contractName": "LvrRouter",
+  "sourceName": "contracts/LvrRouter.sol",
   "abi": [
     {
       "inputs": [
@@ -286,13 +286,13 @@
         },
         {
           "indexed": false,
-          "internalType": "enum GoldClob.MarketStatus",
+          "internalType": "enum LvrRouter.MarketStatus",
           "name": "status",
           "type": "uint8"
         },
         {
           "indexed": false,
-          "internalType": "enum GoldClob.Side",
+          "internalType": "enum LvrRouter.Side",
           "name": "winner",
           "type": "uint8"
         }
@@ -671,12 +671,12 @@
               "type": "bytes32"
             },
             {
-              "internalType": "enum GoldClob.MarketStatus",
+              "internalType": "enum LvrRouter.MarketStatus",
               "name": "status",
               "type": "uint8"
             },
             {
-              "internalType": "enum GoldClob.Side",
+              "internalType": "enum LvrRouter.Side",
               "name": "winner",
               "type": "uint8"
             },
@@ -706,7 +706,7 @@
               "type": "uint128"
             }
           ],
-          "internalType": "struct GoldClob.Market",
+          "internalType": "struct LvrRouter.Market",
           "name": "",
           "type": "tuple"
         }
@@ -1125,7 +1125,7 @@
       "name": "syncMarketFromOracle",
       "outputs": [
         {
-          "internalType": "enum GoldClob.MarketStatus",
+          "internalType": "enum LvrRouter.MarketStatus",
           "name": "",
           "type": "uint8"
         }

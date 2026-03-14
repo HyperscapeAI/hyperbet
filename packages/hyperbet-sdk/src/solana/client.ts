@@ -4,7 +4,7 @@ import bs58 from "bs58";
 import { CreateOrderParams, CancelOrderParams, ClaimParams, OrderSide, SIDE_BID, SIDE_ASK, MARKET_KIND_DUEL_WINNER } from "../types";
 import BN from "bn.js";
 
-import goldClobMarketIdl from "./idl/gold_clob_market.json" assert { type: "json" };
+import lvrMarketIdl from "./idl/lvr_amm.json" assert { type: "json" };
 import fightOracleIdl from "./idl/fight_oracle.json" assert { type: "json" };
 
 export function duelKeyHexToBytes(duelKeyHex: string): Uint8Array {
@@ -42,7 +42,7 @@ export class HyperbetSolanaClient {
       preflightCommitment: "confirmed",
     });
 
-    this.clob = new Program(goldClobMarketIdl as any, this.provider);
+    this.clob = new Program(lvrMarketIdl as any, this.provider);
     this.oracle = new Program(fightOracleIdl as any, this.provider);
   }
 

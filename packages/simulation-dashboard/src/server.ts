@@ -829,7 +829,7 @@ async function deployContracts(): Promise<void> {
     let clobArtifact;
     try {
         oracleArtifact = loadArtifact(CONTRACTS_DIR, "DuelOutcomeOracle");
-        clobArtifact = loadArtifact(CONTRACTS_DIR, "GoldClob");
+        clobArtifact = loadArtifact(CONTRACTS_DIR, "LvrRouter");
     } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         console.log(
@@ -846,7 +846,7 @@ async function deployContracts(): Promise<void> {
     )) as unknown as Contract;
     await oracle.waitForDeployment();
 
-    console.log("[deploy] Deploying GoldClob...");
+    console.log("[deploy] Deploying LvrRouter...");
     const clobFactory = new ContractFactory(clobArtifact.abi as any, clobArtifact.bytecode, admin);
     clob = (await clobFactory.deploy(
         await admin.getAddress(),

@@ -5,8 +5,8 @@ import {
   FIGHT_ORACLE_PROGRAM_ADDRESS,
 } from "../generated/fight-oracle/programs";
 import {
-  GOLD_CLOB_MARKET_PROGRAM_ADDRESS,
-} from "../generated/gold-clob-market/programs";
+  LVR_AMM_PROGRAM_ADDRESS,
+} from "../generated/lvr-amm-market/programs";
 import {
   GOLD_PERPS_MARKET_PROGRAM_ADDRESS,
 } from "../generated/gold-perps-market/programs";
@@ -21,9 +21,9 @@ export const fightOracleProgramAddress = configuredAddress(
   FIGHT_ORACLE_PROGRAM_ADDRESS,
 );
 
-export const goldClobMarketProgramAddress = configuredAddress(
-  CONFIG.goldClobMarketProgramId,
-  GOLD_CLOB_MARKET_PROGRAM_ADDRESS,
+export const lvrMarketProgramAddress = configuredAddress(
+  CONFIG.lvrMarketProgramId,
+  LVR_AMM_PROGRAM_ADDRESS,
 );
 
 export const goldPerpsMarketProgramAddress = configuredAddress(
@@ -35,8 +35,8 @@ export const FIGHT_ORACLE_PROGRAM_ID = new PublicKey(
   fightOracleProgramAddress,
 );
 
-export const GOLD_CLOB_MARKET_PROGRAM_ID = new PublicKey(
-  goldClobMarketProgramAddress,
+export const LVR_AMM_PROGRAM_ID = new PublicKey(
+  lvrMarketProgramAddress,
 );
 
 export const GOLD_PERPS_MARKET_PROGRAM_ID = new PublicKey(

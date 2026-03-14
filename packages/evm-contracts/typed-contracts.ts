@@ -12,7 +12,7 @@ type PayableOverrides = {
   value?: BigNumberish;
 };
 
-export type GoldClobMatch = {
+export type LvrRouterMatch = {
   exists: boolean;
   duelKey: string;
   status: bigint;
@@ -24,14 +24,14 @@ export type GoldClobMatch = {
   totalBShares: bigint;
 };
 
-export type GoldClobPosition = {
+export type LvrRouterPosition = {
   aShares: bigint;
   bShares: bigint;
   aStake: bigint;
   bStake: bigint;
 };
 
-export type GoldClobOrder = {
+export type LvrRouterOrder = {
   id: bigint;
   side: bigint;
   price: bigint;
@@ -55,7 +55,7 @@ interface TypedContract<Self extends BaseContract> extends BaseContract {
   getAddress(): Promise<string>;
 }
 
-export interface GoldClobContract extends TypedContract<GoldClobContract> {
+export interface LvrRouterContract extends TypedContract<LvrRouterContract> {
   createMarketForDuel(
     duelKey: BytesLike,
     marketKind: BigNumberish,
@@ -81,9 +81,9 @@ export interface GoldClobContract extends TypedContract<GoldClobContract> {
     marketKind: BigNumberish,
     orderId: BigNumberish,
   ): Promise<ContractTransactionResponse>;
-  getMarket(duelKey: BytesLike, marketKind: BigNumberish): Promise<GoldClobMatch>;
-  positions(marketKey: BytesLike, trader: string): Promise<GoldClobPosition>;
-  orders(marketKey: BytesLike, orderId: BigNumberish): Promise<GoldClobOrder>;
+  getMarket(duelKey: BytesLike, marketKind: BigNumberish): Promise<LvrRouterMatch>;
+  positions(marketKey: BytesLike, trader: string): Promise<LvrRouterPosition>;
+  orders(marketKey: BytesLike, orderId: BigNumberish): Promise<LvrRouterOrder>;
   getPriceLevel(
     duelKey: BytesLike,
     marketKind: BigNumberish,
@@ -192,24 +192,24 @@ export interface AgentPerpEngineNativeContract extends TypedContract<AgentPerpEn
   positions(agentId: BytesLike, trader: string): Promise<PerpPosition>;
 }
 
-export async function deployGoldClob(
+export async function deployLvrRouter(
   admin: string,
   marketOperator: string,
   oracle: string,
   treasury: string,
   marketMaker: string,
   runner?: Signer,
-): Promise<GoldClobContract> {
+): Promise<LvrRouterContract> {
   const factory = runner
-    ? await ethers.getContractFactory("GoldClob", runner)
-    : await ethers.getContractFactory("GoldClob");
+    ? await ethers.getContractFactory("LvrRouter", runner)
+    : await ethers.getContractFactory("LvrRouter");
   return (await factory.deploy(
     admin,
     marketOperator,
     oracle,
     treasury,
     marketMaker,
-  )) as unknown as GoldClobContract;
+  )) as unknown as LvrRouterContract;
 }
 
 export async function deployDuelOutcomeOracle(

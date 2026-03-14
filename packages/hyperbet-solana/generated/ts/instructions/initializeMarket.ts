@@ -7,14 +7,14 @@
  */
 
 import { combineCodec, fixDecoderSize, fixEncoderSize, getAddressEncoder, getArrayDecoder, getArrayEncoder, getBytesDecoder, getBytesEncoder, getProgramDerivedAddress, getStructDecoder, getStructEncoder, getU8Decoder, getU8Encoder, transformEncoder, type IAccountMeta, type IAccountSignerMeta, type Address, type FixedSizeCodec, type FixedSizeDecoder, type FixedSizeEncoder, type IInstruction, type IInstructionWithAccounts, type IInstructionWithData, type ReadonlyAccount, type ReadonlyUint8Array, type TransactionSigner, type WritableAccount, type WritableSignerAccount } from '@solana/kit';
-import { GOLD_CLOB_MARKET_PROGRAM_ADDRESS } from '../programs/index.js';
+import { LVR_ROUTER_MARKET_PROGRAM_ADDRESS } from '../programs/index.js';
 import { expectAddress, getAccountMetaFactory, type ResolvedAccount } from '../shared/index.js';
 
 export const INITIALIZE_MARKET_DISCRIMINATOR: ReadonlyUint8Array = new Uint8Array([35, 35, 189, 193, 155, 48, 170, 203]);
 
 export function getInitializeMarketDiscriminatorBytes(): ReadonlyUint8Array { return fixEncoderSize(getBytesEncoder(), 8).encode(INITIALIZE_MARKET_DISCRIMINATOR); }
 
-export type InitializeMarketInstruction<TProgram extends string = typeof GOLD_CLOB_MARKET_PROGRAM_ADDRESS, TAccountOperator extends string | IAccountMeta<string> = string, TAccountConfig extends string | IAccountMeta<string> = string, TAccountDuelState extends string | IAccountMeta<string> = string, TAccountMarketState extends string | IAccountMeta<string> = string, TAccountVault extends string | IAccountMeta<string> = string, TAccountSystemProgram extends string | IAccountMeta<string> = "11111111111111111111111111111111", TRemainingAccounts extends readonly IAccountMeta<string>[] = []> =
+export type InitializeMarketInstruction<TProgram extends string = typeof LVR_ROUTER_MARKET_PROGRAM_ADDRESS, TAccountOperator extends string | IAccountMeta<string> = string, TAccountConfig extends string | IAccountMeta<string> = string, TAccountDuelState extends string | IAccountMeta<string> = string, TAccountMarketState extends string | IAccountMeta<string> = string, TAccountVault extends string | IAccountMeta<string> = string, TAccountSystemProgram extends string | IAccountMeta<string> = "11111111111111111111111111111111", TRemainingAccounts extends readonly IAccountMeta<string>[] = []> =
 IInstruction<TProgram> & IInstructionWithData<ReadonlyUint8Array> & IInstructionWithAccounts<[TAccountOperator extends string ? WritableSignerAccount<TAccountOperator> & IAccountSignerMeta<TAccountOperator> : TAccountOperator, TAccountConfig extends string ? ReadonlyAccount<TAccountConfig> : TAccountConfig, TAccountDuelState extends string ? ReadonlyAccount<TAccountDuelState> : TAccountDuelState, TAccountMarketState extends string ? WritableAccount<TAccountMarketState> : TAccountMarketState, TAccountVault extends string ? WritableAccount<TAccountVault> : TAccountVault, TAccountSystemProgram extends string ? ReadonlyAccount<TAccountSystemProgram> : TAccountSystemProgram, ...TRemainingAccounts]>;
 
 export type InitializeMarketInstructionData = { discriminator: ReadonlyUint8Array; duelKey: Array<number>; marketKind: number;  };
@@ -44,9 +44,9 @@ duelKey: InitializeMarketInstructionDataArgs["duelKey"];
 marketKind: InitializeMarketInstructionDataArgs["marketKind"];
 }
 
-export async function getInitializeMarketInstructionAsync<TAccountOperator extends string, TAccountConfig extends string, TAccountDuelState extends string, TAccountMarketState extends string, TAccountVault extends string, TAccountSystemProgram extends string, TProgramAddress extends Address = typeof GOLD_CLOB_MARKET_PROGRAM_ADDRESS>(input: InitializeMarketAsyncInput<TAccountOperator, TAccountConfig, TAccountDuelState, TAccountMarketState, TAccountVault, TAccountSystemProgram>, config?: { programAddress?: TProgramAddress } ): Promise<InitializeMarketInstruction<TProgramAddress, TAccountOperator, TAccountConfig, TAccountDuelState, TAccountMarketState, TAccountVault, TAccountSystemProgram>> {
+export async function getInitializeMarketInstructionAsync<TAccountOperator extends string, TAccountConfig extends string, TAccountDuelState extends string, TAccountMarketState extends string, TAccountVault extends string, TAccountSystemProgram extends string, TProgramAddress extends Address = typeof LVR_ROUTER_MARKET_PROGRAM_ADDRESS>(input: InitializeMarketAsyncInput<TAccountOperator, TAccountConfig, TAccountDuelState, TAccountMarketState, TAccountVault, TAccountSystemProgram>, config?: { programAddress?: TProgramAddress } ): Promise<InitializeMarketInstruction<TProgramAddress, TAccountOperator, TAccountConfig, TAccountDuelState, TAccountMarketState, TAccountVault, TAccountSystemProgram>> {
   // Program address.
-const programAddress = config?.programAddress ?? GOLD_CLOB_MARKET_PROGRAM_ADDRESS;
+const programAddress = config?.programAddress ?? LVR_ROUTER_MARKET_PROGRAM_ADDRESS;
 
  // Original accounts.
 const originalAccounts = { operator: { value: input.operator ?? null, isWritable: true }, config: { value: input.config ?? null, isWritable: false }, duelState: { value: input.duelState ?? null, isWritable: false }, marketState: { value: input.marketState ?? null, isWritable: true }, vault: { value: input.vault ?? null, isWritable: true }, systemProgram: { value: input.systemProgram ?? null, isWritable: false } }
@@ -83,9 +83,9 @@ duelKey: InitializeMarketInstructionDataArgs["duelKey"];
 marketKind: InitializeMarketInstructionDataArgs["marketKind"];
 }
 
-export function getInitializeMarketInstruction<TAccountOperator extends string, TAccountConfig extends string, TAccountDuelState extends string, TAccountMarketState extends string, TAccountVault extends string, TAccountSystemProgram extends string, TProgramAddress extends Address = typeof GOLD_CLOB_MARKET_PROGRAM_ADDRESS>(input: InitializeMarketInput<TAccountOperator, TAccountConfig, TAccountDuelState, TAccountMarketState, TAccountVault, TAccountSystemProgram>, config?: { programAddress?: TProgramAddress } ): InitializeMarketInstruction<TProgramAddress, TAccountOperator, TAccountConfig, TAccountDuelState, TAccountMarketState, TAccountVault, TAccountSystemProgram> {
+export function getInitializeMarketInstruction<TAccountOperator extends string, TAccountConfig extends string, TAccountDuelState extends string, TAccountMarketState extends string, TAccountVault extends string, TAccountSystemProgram extends string, TProgramAddress extends Address = typeof LVR_ROUTER_MARKET_PROGRAM_ADDRESS>(input: InitializeMarketInput<TAccountOperator, TAccountConfig, TAccountDuelState, TAccountMarketState, TAccountVault, TAccountSystemProgram>, config?: { programAddress?: TProgramAddress } ): InitializeMarketInstruction<TProgramAddress, TAccountOperator, TAccountConfig, TAccountDuelState, TAccountMarketState, TAccountVault, TAccountSystemProgram> {
   // Program address.
-const programAddress = config?.programAddress ?? GOLD_CLOB_MARKET_PROGRAM_ADDRESS;
+const programAddress = config?.programAddress ?? LVR_ROUTER_MARKET_PROGRAM_ADDRESS;
 
  // Original accounts.
 const originalAccounts = { operator: { value: input.operator ?? null, isWritable: true }, config: { value: input.config ?? null, isWritable: false }, duelState: { value: input.duelState ?? null, isWritable: false }, marketState: { value: input.marketState ?? null, isWritable: true }, vault: { value: input.vault ?? null, isWritable: true }, systemProgram: { value: input.systemProgram ?? null, isWritable: false } }
@@ -105,7 +105,7 @@ const getAccountMeta = getAccountMetaFactory(programAddress, 'programId');
 return Object.freeze({ accounts: [getAccountMeta(accounts.operator), getAccountMeta(accounts.config), getAccountMeta(accounts.duelState), getAccountMeta(accounts.marketState), getAccountMeta(accounts.vault), getAccountMeta(accounts.systemProgram)], data: getInitializeMarketInstructionDataEncoder().encode(args as InitializeMarketInstructionDataArgs), programAddress } as InitializeMarketInstruction<TProgramAddress, TAccountOperator, TAccountConfig, TAccountDuelState, TAccountMarketState, TAccountVault, TAccountSystemProgram>);
 }
 
-export type ParsedInitializeMarketInstruction<TProgram extends string = typeof GOLD_CLOB_MARKET_PROGRAM_ADDRESS, TAccountMetas extends readonly IAccountMeta[] = readonly IAccountMeta[]> = { programAddress: Address<TProgram>;
+export type ParsedInitializeMarketInstruction<TProgram extends string = typeof LVR_ROUTER_MARKET_PROGRAM_ADDRESS, TAccountMetas extends readonly IAccountMeta[] = readonly IAccountMeta[]> = { programAddress: Address<TProgram>;
 accounts: {
 operator: TAccountMetas[0];
 config: TAccountMetas[1];

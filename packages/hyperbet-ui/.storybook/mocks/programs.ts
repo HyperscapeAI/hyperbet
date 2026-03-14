@@ -127,7 +127,7 @@ function createProgramFacade() {
 
 export function createReadonlyPrograms() {
   return {
-    goldClobMarket: createProgramFacade(),
+    lvrMarket: createProgramFacade(),
     fightOracle: {
       programId: ORACLE_PROGRAM_ID,
       account: {

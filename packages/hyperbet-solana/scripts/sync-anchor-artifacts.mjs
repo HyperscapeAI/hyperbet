@@ -11,7 +11,7 @@ const keeperIdlDir = path.join(rootDir, "keeper", "src", "idl");
 
 const programNames = [
   "fight_oracle",
-  "gold_clob_market",
+  "lvr_amm",
   "gold_perps_market",
 ];
 

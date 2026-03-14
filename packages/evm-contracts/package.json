@@ -8,7 +8,7 @@
     "compile": "hardhat compile",
     "test": "bun run test:hardhat",
     "test:hardhat": "hardhat test",
-    "test:foundry:fast": "forge test --match-path 'test/GoldClobSettlement.t.sol'",
+    "test:foundry:fast": "forge test --match-path 'test/LvrRouterSettlement.t.sol'",
     "test:anvil": "bash scripts/run-anvil-contract-suite.sh",
     "test:fuzz": "forge test --match-path 'test/fuzz/**/*.t.sol'",
     "test:foundry": "forge test --match-path 'test/**/*.t.sol' --no-match-path 'test/fuzz/**'",

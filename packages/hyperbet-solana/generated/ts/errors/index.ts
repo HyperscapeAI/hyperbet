@@ -7,5 +7,5 @@
  */
 
 export * from './fightOracle.js';
-export * from './goldClobMarket.js';
+export * from './lvrMarket.js';
 export * from './goldPerpsMarket.js';

@@ -1,16 +1,16 @@
 import type { Meta, StoryObj } from "@storybook/react";
-import { SolanaClobPanel } from "../src/components/SolanaClobPanel";
+import { SolanaAmmPanel } from "../src/components/SolanaAmmPanel";
 import { StorySurface } from "./storySupport";
 
 const meta = {
-  title: "Components/SolanaClobPanel",
-  component: SolanaClobPanel,
+  title: "Components/SolanaAmmPanel",
+  component: SolanaAmmPanel,
   parameters: {
     chain: "solana",
   },
   render: (args) => (
     <StorySurface width={1180}>
-      <SolanaClobPanel {...args} />
+      <SolanaAmmPanel {...args} />
     </StorySurface>
   ),
   args: {
@@ -18,7 +18,7 @@ const meta = {
     agent2Name: "JadePhoenix",
     compact: false,
   },
-} satisfies Meta<typeof SolanaClobPanel>;
+} satisfies Meta<typeof SolanaAmmPanel>;
 
 export default meta;
 

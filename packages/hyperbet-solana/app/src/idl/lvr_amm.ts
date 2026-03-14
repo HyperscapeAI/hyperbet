@@ -5,7 +5,7 @@
  * IDL can be found at `target/idl/lvr_amm.json`.
  */
 export type LvrAmm = {
-  "address": "7vViZ2VExDSVKX9r4NMUAjrhUz7Et3SyFr2UbvtNQ1Ra",
+  "address": "Af4LMYfaBtcFFM6dBjwLYH6QJLMqEwneQ8VHfn2z7NY5",
   "metadata": {
     "name": "lvrAmm",
     "version": "0.1.0",
@@ -298,7 +298,8 @@ export type LvrAmm = {
           }
         },
         {
-          "name": "tokenProgram"
+          "name": "tokenProgram",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
         },
         {
           "name": "systemProgram",
@@ -428,7 +429,8 @@ export type LvrAmm = {
           "address": "11111111111111111111111111111111"
         },
         {
-          "name": "tokenProgram"
+          "name": "tokenProgram",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
         }
       ],
       "args": [
@@ -871,7 +873,8 @@ export type LvrAmm = {
           }
         },
         {
-          "name": "tokenProgram"
+          "name": "tokenProgram",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
         },
         {
           "name": "systemProgram",

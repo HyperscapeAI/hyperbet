@@ -4,7 +4,7 @@ use std::mem::size_of;
 use crate::{error::PredictionMarketError, state::bet::Bet};
 use crate::math;
 
-use anchor_spl::token_interface::{Mint, TokenInterface};
+use anchor_spl::token::{Mint, Token};
 
 pub fn create_bet(
     ctx: Context<CreateBet>,
@@ -64,7 +64,7 @@ pub struct CreateBet<'info> {
         mint::decimals = 9,
         mint::authority = mint_yes.key(),
     )]
-    pub mint_yes: InterfaceAccount<'info, Mint>,
+    pub mint_yes: Account<'info, Mint>,
 
     #[account(
         init,
@@ -74,8 +74,8 @@ pub struct CreateBet<'info> {
         mint::decimals = 9,
         mint::authority = mint_no.key(),
     )]
-    pub mint_no: InterfaceAccount<'info, Mint>,
+    pub mint_no: Account<'info, Mint>,
 
     pub system_program: Program<'info, System>,
-    pub token_program: Interface<'info, TokenInterface>,
+    pub token_program: Program<'info, Token>,
 }

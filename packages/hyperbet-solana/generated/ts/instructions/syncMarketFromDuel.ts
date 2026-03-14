@@ -7,14 +7,14 @@
  */
 
 import { combineCodec, fixDecoderSize, fixEncoderSize, getBytesDecoder, getBytesEncoder, getStructDecoder, getStructEncoder, transformEncoder, type IAccountMeta, type Address, type FixedSizeCodec, type FixedSizeDecoder, type FixedSizeEncoder, type IInstruction, type IInstructionWithAccounts, type IInstructionWithData, type ReadonlyAccount, type ReadonlyUint8Array, type WritableAccount } from '@solana/kit';
-import { GOLD_CLOB_MARKET_PROGRAM_ADDRESS } from '../programs/index.js';
+import { LVR_ROUTER_MARKET_PROGRAM_ADDRESS } from '../programs/index.js';
 import { getAccountMetaFactory, type ResolvedAccount } from '../shared/index.js';
 
 export const SYNC_MARKET_FROM_DUEL_DISCRIMINATOR: ReadonlyUint8Array = new Uint8Array([235, 180, 137, 53, 242, 12, 85, 213]);
 
 export function getSyncMarketFromDuelDiscriminatorBytes(): ReadonlyUint8Array { return fixEncoderSize(getBytesEncoder(), 8).encode(SYNC_MARKET_FROM_DUEL_DISCRIMINATOR); }
 
-export type SyncMarketFromDuelInstruction<TProgram extends string = typeof GOLD_CLOB_MARKET_PROGRAM_ADDRESS, TAccountMarketState extends string | IAccountMeta<string> = string, TAccountDuelState extends string | IAccountMeta<string> = string, TRemainingAccounts extends readonly IAccountMeta<string>[] = []> =
+export type SyncMarketFromDuelInstruction<TProgram extends string = typeof LVR_ROUTER_MARKET_PROGRAM_ADDRESS, TAccountMarketState extends string | IAccountMeta<string> = string, TAccountDuelState extends string | IAccountMeta<string> = string, TRemainingAccounts extends readonly IAccountMeta<string>[] = []> =
 IInstruction<TProgram> & IInstructionWithData<ReadonlyUint8Array> & IInstructionWithAccounts<[TAccountMarketState extends string ? WritableAccount<TAccountMarketState> : TAccountMarketState, TAccountDuelState extends string ? ReadonlyAccount<TAccountDuelState> : TAccountDuelState, ...TRemainingAccounts]>;
 
 export type SyncMarketFromDuelInstructionData = { discriminator: ReadonlyUint8Array;  };
@@ -38,9 +38,9 @@ export type SyncMarketFromDuelInput<TAccountMarketState extends string = string,
 duelState: Address<TAccountDuelState>;
 }
 
-export function getSyncMarketFromDuelInstruction<TAccountMarketState extends string, TAccountDuelState extends string, TProgramAddress extends Address = typeof GOLD_CLOB_MARKET_PROGRAM_ADDRESS>(input: SyncMarketFromDuelInput<TAccountMarketState, TAccountDuelState>, config?: { programAddress?: TProgramAddress } ): SyncMarketFromDuelInstruction<TProgramAddress, TAccountMarketState, TAccountDuelState> {
+export function getSyncMarketFromDuelInstruction<TAccountMarketState extends string, TAccountDuelState extends string, TProgramAddress extends Address = typeof LVR_ROUTER_MARKET_PROGRAM_ADDRESS>(input: SyncMarketFromDuelInput<TAccountMarketState, TAccountDuelState>, config?: { programAddress?: TProgramAddress } ): SyncMarketFromDuelInstruction<TProgramAddress, TAccountMarketState, TAccountDuelState> {
   // Program address.
-const programAddress = config?.programAddress ?? GOLD_CLOB_MARKET_PROGRAM_ADDRESS;
+const programAddress = config?.programAddress ?? LVR_ROUTER_MARKET_PROGRAM_ADDRESS;
 
  // Original accounts.
 const originalAccounts = { marketState: { value: input.marketState ?? null, isWritable: true }, duelState: { value: input.duelState ?? null, isWritable: false } }
@@ -53,7 +53,7 @@ const getAccountMeta = getAccountMetaFactory(programAddress, 'programId');
 return Object.freeze({ accounts: [getAccountMeta(accounts.marketState), getAccountMeta(accounts.duelState)], data: getSyncMarketFromDuelInstructionDataEncoder().encode({}), programAddress } as SyncMarketFromDuelInstruction<TProgramAddress, TAccountMarketState, TAccountDuelState>);
 }
 
-export type ParsedSyncMarketFromDuelInstruction<TProgram extends string = typeof GOLD_CLOB_MARKET_PROGRAM_ADDRESS, TAccountMetas extends readonly IAccountMeta[] = readonly IAccountMeta[]> = { programAddress: Address<TProgram>;
+export type ParsedSyncMarketFromDuelInstruction<TProgram extends string = typeof LVR_ROUTER_MARKET_PROGRAM_ADDRESS, TAccountMetas extends readonly IAccountMeta[] = readonly IAccountMeta[]> = { programAddress: Address<TProgram>;
 accounts: {
 marketState: TAccountMetas[0];
 duelState: TAccountMetas[1];

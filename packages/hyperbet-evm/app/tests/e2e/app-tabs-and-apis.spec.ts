@@ -17,7 +17,7 @@ type E2eState = {
   currentDuelKeyHex?: string;
   clobMatchState?: string;
   evmMatchId?: number;
-  evmGoldClobAddress?: string;
+  evmLvrRouterAddress?: string;
 };
 
 type StreamingStateResponse = {
@@ -317,7 +317,7 @@ test.describe("app tabs and api coverage", () => {
     expect(solanaMarket?.marketRef).toBe(state.clobMatchState || null);
     expect(bscMarket).toBeTruthy();
     expect(bscMarket?.contractAddress).toBe(
-      state.evmGoldClobAddress || null,
+      state.evmLvrRouterAddress || null,
     );
     expect(
       bscMarket?.marketRef == null ||

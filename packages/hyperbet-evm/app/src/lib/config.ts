@@ -162,7 +162,7 @@ function buildSolanaProgramConfig(
 ): Pick<
   EnvConfig,
   | "fightOracleProgramId"
-  | "goldClobMarketProgramId"
+  | "lvrMarketProgramId"
   | "goldPerpsMarketProgramId"
   | "goldMint"
   | "usdcMint"
@@ -170,7 +170,7 @@ function buildSolanaProgramConfig(
   const deployment = resolveBettingSolanaDeployment(environment);
   return {
     fightOracleProgramId: deployment.fightOracleProgramId,
-    goldClobMarketProgramId: deployment.goldClobMarketProgramId,
+    lvrMarketProgramId: deployment.lvrMarketProgramId,
     goldPerpsMarketProgramId: deployment.goldPerpsMarketProgramId,
     goldMint: deployment.goldMint,
     usdcMint: deployment.usdcMint,
@@ -183,15 +183,15 @@ function buildEvmConfig(
   EnvConfig,
   | "bscRpcUrl"
   | "bscChainId"
-  | "bscGoldClobAddress"
+  | "bscLvrRouterAddress"
   | "bscGoldTokenAddress"
   | "baseRpcUrl"
   | "baseChainId"
-  | "baseGoldClobAddress"
+  | "baseLvrRouterAddress"
   | "baseGoldTokenAddress"
   | "avaxRpcUrl"
   | "avaxChainId"
-  | "avaxGoldClobAddress"
+  | "avaxLvrRouterAddress"
   | "avaxGoldTokenAddress"
 > {
   const defaults = resolveBettingEvmDefaults(
@@ -200,15 +200,15 @@ function buildEvmConfig(
   return {
     bscRpcUrl: defaultRpcUrlForEvmNetwork(defaults.bsc.networkKey),
     bscChainId: defaults.bsc.chainId,
-    bscGoldClobAddress: defaults.bsc.goldClobAddress,
+    bscLvrRouterAddress: defaults.bsc.lvrRouterAddress,
     bscGoldTokenAddress: defaults.bsc.goldTokenAddress,
     baseRpcUrl: defaultRpcUrlForEvmNetwork(defaults.base.networkKey),
     baseChainId: defaults.base.chainId,
-    baseGoldClobAddress: defaults.base.goldClobAddress,
+    baseLvrRouterAddress: defaults.base.lvrRouterAddress,
     baseGoldTokenAddress: defaults.base.goldTokenAddress,
     avaxRpcUrl: defaultAvaxRpcUrlForEnvironment(environment),
     avaxChainId: defaultAvaxChainIdForEnvironment(environment),
-    avaxGoldClobAddress: "",
+    avaxLvrRouterAddress: "",
     avaxGoldTokenAddress: "",
   };
 }
@@ -218,7 +218,7 @@ interface EnvConfig {
   rpcUrl: string;
   wsUrl?: string;
   fightOracleProgramId: string;
-  goldClobMarketProgramId: string;
+  lvrMarketProgramId: string;
   goldPerpsMarketProgramId: string;
   goldMint: string;
   usdcMint?: string;
@@ -246,15 +246,15 @@ interface EnvConfig {
   // EVM
   bscRpcUrl: string;
   bscChainId: number;
-  bscGoldClobAddress: string;
+  bscLvrRouterAddress: string;
   bscGoldTokenAddress: string;
   baseRpcUrl: string;
   baseChainId: number;
-  baseGoldClobAddress: string;
+  baseLvrRouterAddress: string;
   baseGoldTokenAddress: string;
   avaxRpcUrl: string;
   avaxChainId: number;
-  avaxGoldClobAddress: string;
+  avaxLvrRouterAddress: string;
   avaxGoldTokenAddress: string;
 
   walletConnectProjectId: string;
@@ -410,9 +410,9 @@ export const CONFIG: EnvConfig = {
   fightOracleProgramId:
     readEnvString("VITE_FIGHT_ORACLE_PROGRAM_ID") ??
     baseEnvConfig.fightOracleProgramId,
-  goldClobMarketProgramId:
-    readEnvString("VITE_GOLD_CLOB_MARKET_PROGRAM_ID") ??
-    baseEnvConfig.goldClobMarketProgramId,
+  lvrMarketProgramId:
+    readEnvString("VITE_LVR_MARKET_PROGRAM_ID") ??
+    baseEnvConfig.lvrMarketProgramId,
   goldPerpsMarketProgramId:
     readEnvString("VITE_GOLD_PERPS_MARKET_PROGRAM_ID") ??
     baseEnvConfig.goldPerpsMarketProgramId,
@@ -476,25 +476,25 @@ export const CONFIG: EnvConfig = {
     readEnvString("VITE_JUPITER_BASE_URL") ?? baseEnvConfig.jupiterBaseUrl,
   bscRpcUrl: readEnvString("VITE_BSC_RPC_URL") ?? baseEnvConfig.bscRpcUrl,
   bscChainId: readEnvNumber("VITE_BSC_CHAIN_ID", baseEnvConfig.bscChainId),
-  bscGoldClobAddress:
-    readEnvString("VITE_BSC_GOLD_CLOB_ADDRESS") ??
-    baseEnvConfig.bscGoldClobAddress,
+  bscLvrRouterAddress:
+    readEnvString("VITE_BSC_LVR_ROUTER_ADDRESS") ??
+    baseEnvConfig.bscLvrRouterAddress,
   bscGoldTokenAddress:
     readEnvString("VITE_BSC_GOLD_TOKEN_ADDRESS") ??
     baseEnvConfig.bscGoldTokenAddress,
   baseRpcUrl: readEnvString("VITE_BASE_RPC_URL") ?? baseEnvConfig.baseRpcUrl,
   baseChainId: readEnvNumber("VITE_BASE_CHAIN_ID", baseEnvConfig.baseChainId),
-  baseGoldClobAddress:
-    readEnvString("VITE_BASE_GOLD_CLOB_ADDRESS") ??
-    baseEnvConfig.baseGoldClobAddress,
+  baseLvrRouterAddress:
+    readEnvString("VITE_BASE_LVR_ROUTER_ADDRESS") ??
+    baseEnvConfig.baseLvrRouterAddress,
   baseGoldTokenAddress:
     readEnvString("VITE_BASE_GOLD_TOKEN_ADDRESS") ??
     baseEnvConfig.baseGoldTokenAddress,
   avaxRpcUrl: readEnvString("VITE_AVAX_RPC_URL") ?? baseEnvConfig.avaxRpcUrl,
   avaxChainId: readEnvNumber("VITE_AVAX_CHAIN_ID", baseEnvConfig.avaxChainId),
-  avaxGoldClobAddress:
-    readEnvString("VITE_AVAX_GOLD_CLOB_ADDRESS") ??
-    baseEnvConfig.avaxGoldClobAddress,
+  avaxLvrRouterAddress:
+    readEnvString("VITE_AVAX_LVR_ROUTER_ADDRESS") ??
+    baseEnvConfig.avaxLvrRouterAddress,
   avaxGoldTokenAddress:
     readEnvString("VITE_AVAX_GOLD_TOKEN_ADDRESS") ??
     baseEnvConfig.avaxGoldTokenAddress,
@@ -646,12 +646,12 @@ export function getEvmRpcUrl(chain: "bsc" | "base"): string {
 
 export const BSC_RPC_URL: string = getEvmRpcUrl("bsc");
 export const BSC_CHAIN_ID: number = CONFIG.bscChainId;
-export const BSC_GOLD_CLOB_ADDRESS: string = CONFIG.bscGoldClobAddress;
+export const BSC_LVR_ROUTER_ADDRESS: string = CONFIG.bscLvrRouterAddress;
 export const BSC_GOLD_TOKEN_ADDRESS: string = CONFIG.bscGoldTokenAddress;
 
 export const BASE_RPC_URL: string = getEvmRpcUrl("base");
 export const BASE_CHAIN_ID: number = CONFIG.baseChainId;
-export const BASE_GOLD_CLOB_ADDRESS: string = CONFIG.baseGoldClobAddress;
+export const BASE_LVR_ROUTER_ADDRESS: string = CONFIG.baseLvrRouterAddress;
 export const BASE_GOLD_TOKEN_ADDRESS: string = CONFIG.baseGoldTokenAddress;
 
 export const AVAX_RPC_URL: string =
@@ -659,5 +659,5 @@ export const AVAX_RPC_URL: string =
     ? `${GAME_API_URL}/api/proxy/evm/rpc?chain=${encodeURIComponent("avax")}`
     : CONFIG.avaxRpcUrl;
 export const AVAX_CHAIN_ID: number = CONFIG.avaxChainId;
-export const AVAX_GOLD_CLOB_ADDRESS: string = CONFIG.avaxGoldClobAddress;
+export const AVAX_LVR_ROUTER_ADDRESS: string = CONFIG.avaxLvrRouterAddress;
 export const AVAX_GOLD_TOKEN_ADDRESS: string = CONFIG.avaxGoldTokenAddress;

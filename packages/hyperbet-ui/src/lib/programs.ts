@@ -6,7 +6,7 @@ import {
 import { WalletContextState } from "@solana/wallet-adapter-react";
 
 import fightOracleIdl from "../idl/fight_oracle.json";
-import goldClobMarketIdl from "../idl/gold_clob_market.json";
+import lvrMarketIdl from "../idl/lvr_amm.json";
 import { CONFIG } from "./config";
 
 function extractProgramAddressFromIdl(idlJson: unknown): string | null {
@@ -42,14 +42,23 @@ function resolveConfiguredProgramId(
   return resolveProgramId(idlJson, fallback);
 }
 
-function ensureIdlAddress(idlJson: unknown, programId: PublicKey): Idl {
-  const idlWithMaybeAddress = idlJson as Idl & { address?: string };
-  return {
+function ensureIdlAddress(idlJsonIn: unknown, programId: PublicKey): Idl {
+  const unwrapped = (idlJsonIn && typeof idlJsonIn === "object" && "default" in idlJsonIn)
+    ? (idlJsonIn as any).default
+    : idlJsonIn;
+  const idlWithMaybeAddress = unwrapped as Idl & { address?: string, metadata?: any, name?: string };
+  const base = {
     ...idlWithMaybeAddress,
-    // Anchor Program uses `idl.address` directly, so env/deployment overrides
-    // must replace any baked-in generated address.
     address: programId.toBase58(),
-  } as Idl;
+  };
+  
+  if (base.name === "lvr_amm" || (base.metadata && base.metadata.name === "lvr_amm")) {
+    base.metadata = {
+      ...(base.metadata || {}),
+      address: programId.toBase58(),
+    };
+  }
+  return base as Idl;
 }
 
 export const FIGHT_ORACLE_PROGRAM_ID = resolveConfiguredProgramId(
@@ -57,9 +66,9 @@ export const FIGHT_ORACLE_PROGRAM_ID = resolveConfiguredProgramId(
   fightOracleIdl,
   "",
 );
-export const GOLD_CLOB_MARKET_PROGRAM_ID = resolveConfiguredProgramId(
-  CONFIG.goldClobMarketProgramId,
-  goldClobMarketIdl,
+export const LVR_AMM_PROGRAM_ID = resolveConfiguredProgramId(
+  CONFIG.lvrMarketProgramId,
+  lvrMarketIdl,
   "",
 );
 
@@ -67,15 +76,15 @@ const FIGHT_ORACLE_IDL = ensureIdlAddress(
   fightOracleIdl,
   FIGHT_ORACLE_PROGRAM_ID,
 );
-const GOLD_CLOB_MARKET_IDL = ensureIdlAddress(
-  goldClobMarketIdl,
-  GOLD_CLOB_MARKET_PROGRAM_ID,
+const LVR_ROUTER_MARKET_IDL = ensureIdlAddress(
+  lvrMarketIdl,
+  LVR_AMM_PROGRAM_ID,
 );
 
 export type ProgramsBundle = {
   provider: AnchorProvider;
   fightOracle: Program<any>;
-  goldClobMarket: Program<any>;
+  lvrMarket: Program<any>;
 };
 
 export type SigningWalletLike = {
@@ -122,9 +131,9 @@ export function createPrograms(
   });
 
   const fightOracle = new Program(FIGHT_ORACLE_IDL, provider);
-  const goldClobMarket = new Program(GOLD_CLOB_MARKET_IDL, provider);
+  const lvrMarket = new Program(LVR_ROUTER_MARKET_IDL, provider);
 
-  return { provider, fightOracle, goldClobMarket };
+  return { provider, fightOracle, lvrMarket };
 }
 
 export function createReadonlyPrograms(connection: Connection): ProgramsBundle {
@@ -134,9 +143,9 @@ export function createReadonlyPrograms(connection: Connection): ProgramsBundle {
   });
 
   const fightOracle = new Program(FIGHT_ORACLE_IDL, provider);
-  const goldClobMarket = new Program(GOLD_CLOB_MARKET_IDL, provider);
+  const lvrMarket = new Program(LVR_ROUTER_MARKET_IDL, provider);
 
-  return { provider, fightOracle, goldClobMarket };
+  return { provider, fightOracle, lvrMarket };
 }
 
 export function toBnAmount(amount: bigint): BN {
@@ -159,4 +168,25 @@ export function duelStatusBettingOpenEnum(): {
 
 export function duelStatusLockedEnum(): { locked: Record<string, never> } {
   return { locked: {} };
+}
+
+export function findBetPda(programId: PublicKey, betId: BN, creator: PublicKey): PublicKey {
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from("bet"), betId.toArrayLike(Buffer, "le", 8), creator.toBuffer()],
+    programId
+  )[0];
+}
+
+export function findMintYesPda(programId: PublicKey, betId: BN, creator: PublicKey): PublicKey {
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from("mint_yes"), betId.toArrayLike(Buffer, "le", 8), creator.toBuffer()],
+    programId
+  )[0];
+}
+
+export function findMintNoPda(programId: PublicKey, betId: BN, creator: PublicKey): PublicKey {
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from("mint_no"), betId.toArrayLike(Buffer, "le", 8), creator.toBuffer()],
+    programId
+  )[0];
 }

@@ -2,16 +2,16 @@ import { expect } from "chai";
 import type { EventLog, LogDescription } from "ethers";
 import { ethers } from "hardhat";
 
-import { deployDuelOutcomeOracle, deployGoldClob } from "../typed-contracts";
+import { deployDuelOutcomeOracle, deployLvrRouter } from "../typed-contracts";
 
-describe("GoldClob Precision DoS", () => {
+describe("LvrRouter Precision DoS", () => {
   it("should process perfectly valid mixed-quantity matching without precision revert", async () => {
     const [admin, maker, taker] = await ethers.getSigners();
 
     const oracle = await deployDuelOutcomeOracle(admin.address, admin.address, admin);
     await oracle.waitForDeployment();
 
-    const clob = await deployGoldClob(
+    const clob = await deployLvrRouter(
       admin.address,
       admin.address,
       await oracle.getAddress(),

@@ -2,12 +2,12 @@
  * Program IDL in camelCase format in order to be used in JS/TS.
  *
  * Note that this is only a type helper and is not the actual IDL. The original
- * IDL can be found at `target/idl/gold_clob_market.json`.
+ * IDL can be found at `target/idl/lvr_amm.json`.
  */
-export type GoldClobMarket = {
+export type LvrAmm = {
   "address": "ARVJNJp49VZnkB8QBYZAAFJmufvtVSPhnuuenwwSLwpi",
   "metadata": {
-    "name": "goldClobMarket",
+    "name": "lvrAmm",
     "version": "0.1.0",
     "spec": "0.1.0",
     "description": "Created with Anchor"

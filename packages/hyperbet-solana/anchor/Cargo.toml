@@ -1,7 +1,7 @@
 [workspace]
 members = [
   "programs/fight_oracle",
-  "programs/gold_clob_market",
+  
   "programs/gold_perps_market",
   "programs/lvr_amm",
 ]

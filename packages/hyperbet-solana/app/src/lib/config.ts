@@ -130,7 +130,7 @@ function buildSolanaProgramConfig(
 ): Pick<
   EnvConfig,
   | "fightOracleProgramId"
-  | "goldClobMarketProgramId"
+  | "lvrMarketProgramId"
   | "goldPerpsMarketProgramId"
   | "goldMint"
   | "usdcMint"
@@ -138,7 +138,7 @@ function buildSolanaProgramConfig(
   const deployment = resolveBettingSolanaDeployment(environment);
   return {
     fightOracleProgramId: deployment.fightOracleProgramId,
-    goldClobMarketProgramId: deployment.goldClobMarketProgramId,
+    lvrMarketProgramId: deployment.lvrMarketProgramId,
     goldPerpsMarketProgramId: deployment.goldPerpsMarketProgramId,
     goldMint: deployment.goldMint,
     usdcMint: deployment.usdcMint,
@@ -150,7 +150,7 @@ export interface EnvConfig {
   rpcUrl: string;
   wsUrl?: string;
   fightOracleProgramId: string;
-  goldClobMarketProgramId: string;
+  lvrMarketProgramId: string;
   goldPerpsMarketProgramId: string;
   goldMint: string;
   usdcMint?: string;
@@ -316,9 +316,9 @@ export const CONFIG: EnvConfig = {
   fightOracleProgramId:
     readEnvString("VITE_FIGHT_ORACLE_PROGRAM_ID") ??
     baseEnvConfig.fightOracleProgramId,
-  goldClobMarketProgramId:
-    readEnvString("VITE_GOLD_CLOB_MARKET_PROGRAM_ID") ??
-    baseEnvConfig.goldClobMarketProgramId,
+  lvrMarketProgramId:
+    readEnvString("VITE_LVR_MARKET_PROGRAM_ID") ??
+    baseEnvConfig.lvrMarketProgramId,
   goldPerpsMarketProgramId:
     readEnvString("VITE_GOLD_PERPS_MARKET_PROGRAM_ID") ??
     baseEnvConfig.goldPerpsMarketProgramId,

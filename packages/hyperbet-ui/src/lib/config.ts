@@ -144,7 +144,7 @@ function asDeploymentEnvironment(
 type EvmChainEnvConfig = {
   chainId: number;
   rpcUrl: string;
-  goldClobAddress: string;
+  lvrRouterAddress: string;
   goldTokenAddress: string;
   networkKey: BettingEvmNetwork;
   deployment: BettingEvmDeployment;
@@ -155,7 +155,7 @@ function buildSolanaProgramConfig(
 ): Pick<
   EnvConfig,
   | "fightOracleProgramId"
-  | "goldClobMarketProgramId"
+  | "lvrMarketProgramId"
   | "goldPerpsMarketProgramId"
   | "goldMint"
   | "usdcMint"
@@ -163,7 +163,7 @@ function buildSolanaProgramConfig(
   const deployment = resolveBettingSolanaDeployment(environment);
   return {
     fightOracleProgramId: deployment.fightOracleProgramId,
-    goldClobMarketProgramId: deployment.goldClobMarketProgramId,
+    lvrMarketProgramId: deployment.lvrMarketProgramId,
     goldPerpsMarketProgramId: deployment.goldPerpsMarketProgramId,
     goldMint: deployment.goldMint,
     usdcMint: deployment.usdcMint,
@@ -177,15 +177,15 @@ function buildEvmConfig(
   | "evmChains"
   | "bscRpcUrl"
   | "bscChainId"
-  | "bscGoldClobAddress"
+  | "bscLvrRouterAddress"
   | "bscGoldTokenAddress"
   | "baseRpcUrl"
   | "baseChainId"
-  | "baseGoldClobAddress"
+  | "baseLvrRouterAddress"
   | "baseGoldTokenAddress"
   | "avaxRpcUrl"
   | "avaxChainId"
-  | "avaxGoldClobAddress"
+  | "avaxLvrRouterAddress"
   | "avaxGoldTokenAddress"
 > {
   const defaults = resolveBettingEvmDefaults(
@@ -201,7 +201,7 @@ function buildEvmConfig(
       bsc: {
         chainId: evmChains.bsc.chainId,
         rpcUrl: evmChains.bsc.rpcUrl,
-        goldClobAddress: evmChains.bsc.goldClobAddress,
+        lvrRouterAddress: evmChains.bsc.lvrRouterAddress,
         goldTokenAddress: evmChains.bsc.goldTokenAddress,
         networkKey: defaults.bsc.networkKey,
         deployment: evmChains.bsc.deployment,
@@ -209,7 +209,7 @@ function buildEvmConfig(
       base: {
         chainId: evmChains.base.chainId,
         rpcUrl: evmChains.base.rpcUrl,
-        goldClobAddress: evmChains.base.goldClobAddress,
+        lvrRouterAddress: evmChains.base.lvrRouterAddress,
         goldTokenAddress: evmChains.base.goldTokenAddress,
         networkKey: defaults.base.networkKey,
         deployment: evmChains.base.deployment,
@@ -217,7 +217,7 @@ function buildEvmConfig(
       avax: {
         chainId: evmChains.avax.chainId,
         rpcUrl: evmChains.avax.rpcUrl,
-        goldClobAddress: evmChains.avax.goldClobAddress,
+        lvrRouterAddress: evmChains.avax.lvrRouterAddress,
         goldTokenAddress: evmChains.avax.goldTokenAddress,
         networkKey: defaults.avax.networkKey,
         deployment: evmChains.avax.deployment,
@@ -225,15 +225,15 @@ function buildEvmConfig(
     },
     bscRpcUrl: evmChains.bsc.rpcUrl,
     bscChainId: evmChains.bsc.chainId,
-    bscGoldClobAddress: evmChains.bsc.goldClobAddress,
+    bscLvrRouterAddress: evmChains.bsc.lvrRouterAddress,
     bscGoldTokenAddress: evmChains.bsc.goldTokenAddress,
     baseRpcUrl: evmChains.base.rpcUrl,
     baseChainId: evmChains.base.chainId,
-    baseGoldClobAddress: evmChains.base.goldClobAddress,
+    baseLvrRouterAddress: evmChains.base.lvrRouterAddress,
     baseGoldTokenAddress: evmChains.base.goldTokenAddress,
     avaxRpcUrl: evmChains.avax.rpcUrl,
     avaxChainId: evmChains.avax.chainId,
-    avaxGoldClobAddress: evmChains.avax.goldClobAddress,
+    avaxLvrRouterAddress: evmChains.avax.lvrRouterAddress,
     avaxGoldTokenAddress: evmChains.avax.goldTokenAddress,
   };
 }
@@ -243,7 +243,7 @@ export interface EnvConfig {
   rpcUrl: string;
   wsUrl?: string;
   fightOracleProgramId: string;
-  goldClobMarketProgramId: string;
+  lvrMarketProgramId: string;
   goldPerpsMarketProgramId: string;
   goldMint: string;
   usdcMint?: string;
@@ -272,15 +272,15 @@ export interface EnvConfig {
   evmChains: Partial<Record<BettingEvmChain, EvmChainEnvConfig>>;
   bscRpcUrl: string;
   bscChainId: number;
-  bscGoldClobAddress: string;
+  bscLvrRouterAddress: string;
   bscGoldTokenAddress: string;
   baseRpcUrl: string;
   baseChainId: number;
-  baseGoldClobAddress: string;
+  baseLvrRouterAddress: string;
   baseGoldTokenAddress: string;
   avaxRpcUrl: string;
   avaxChainId: number;
-  avaxGoldClobAddress: string;
+  avaxLvrRouterAddress: string;
   avaxGoldTokenAddress: string;
 
   walletConnectProjectId: string;
@@ -444,9 +444,9 @@ const resolvedEvmChains = BETTING_EVM_CHAIN_ORDER.reduce<
     ),
     rpcUrl:
       readEnvString(`VITE_${envPrefix}_RPC_URL`) ?? baseChainConfig.rpcUrl,
-    goldClobAddress:
-      readEnvString(`VITE_${envPrefix}_GOLD_CLOB_ADDRESS`) ??
-      baseChainConfig.goldClobAddress,
+    lvrRouterAddress:
+      readEnvString(`VITE_${envPrefix}_LVR_ROUTER_ADDRESS`) ??
+      baseChainConfig.lvrRouterAddress,
     goldTokenAddress:
       readEnvString(`VITE_${envPrefix}_GOLD_TOKEN_ADDRESS`) ??
       baseChainConfig.goldTokenAddress,
@@ -466,9 +466,9 @@ export const CONFIG: EnvConfig = {
   fightOracleProgramId:
     readEnvString("VITE_FIGHT_ORACLE_PROGRAM_ID") ??
     baseEnvConfig.fightOracleProgramId,
-  goldClobMarketProgramId:
-    readEnvString("VITE_GOLD_CLOB_MARKET_PROGRAM_ID") ??
-    baseEnvConfig.goldClobMarketProgramId,
+  lvrMarketProgramId:
+    readEnvString("VITE_LVR_MARKET_PROGRAM_ID") ??
+    baseEnvConfig.lvrMarketProgramId,
   goldPerpsMarketProgramId:
     readEnvString("VITE_GOLD_PERPS_MARKET_PROGRAM_ID") ??
     baseEnvConfig.goldPerpsMarketProgramId,
@@ -533,15 +533,15 @@ export const CONFIG: EnvConfig = {
   evmChains: resolvedEvmChains,
   bscRpcUrl: resolvedEvmChains.bsc.rpcUrl,
   bscChainId: resolvedEvmChains.bsc.chainId,
-  bscGoldClobAddress: resolvedEvmChains.bsc.goldClobAddress,
+  bscLvrRouterAddress: resolvedEvmChains.bsc.lvrRouterAddress,
   bscGoldTokenAddress: resolvedEvmChains.bsc.goldTokenAddress,
   baseRpcUrl: resolvedEvmChains.base.rpcUrl,
   baseChainId: resolvedEvmChains.base.chainId,
-  baseGoldClobAddress: resolvedEvmChains.base.goldClobAddress,
+  baseLvrRouterAddress: resolvedEvmChains.base.lvrRouterAddress,
   baseGoldTokenAddress: resolvedEvmChains.base.goldTokenAddress,
   avaxRpcUrl: resolvedEvmChains.avax.rpcUrl,
   avaxChainId: resolvedEvmChains.avax.chainId,
-  avaxGoldClobAddress: resolvedEvmChains.avax.goldClobAddress,
+  avaxLvrRouterAddress: resolvedEvmChains.avax.lvrRouterAddress,
   avaxGoldTokenAddress: resolvedEvmChains.avax.goldTokenAddress,
   walletConnectProjectId:
     readEnvString("VITE_WALLETCONNECT_PROJECT_ID") ??
@@ -712,15 +712,15 @@ export function getEvmRpcUrl(chain: BettingEvmChain): string {
 
 export const BSC_RPC_URL: string = getEvmRpcUrl("bsc");
 export const BSC_CHAIN_ID: number = CONFIG.bscChainId;
-export const BSC_GOLD_CLOB_ADDRESS: string = CONFIG.bscGoldClobAddress;
+export const BSC_LVR_ROUTER_ADDRESS: string = CONFIG.bscLvrRouterAddress;
 export const BSC_GOLD_TOKEN_ADDRESS: string = CONFIG.bscGoldTokenAddress;
 
 export const BASE_RPC_URL: string = getEvmRpcUrl("base");
 export const BASE_CHAIN_ID: number = CONFIG.baseChainId;
-export const BASE_GOLD_CLOB_ADDRESS: string = CONFIG.baseGoldClobAddress;
+export const BASE_LVR_ROUTER_ADDRESS: string = CONFIG.baseLvrRouterAddress;
 export const BASE_GOLD_TOKEN_ADDRESS: string = CONFIG.baseGoldTokenAddress;
 
 export const AVAX_RPC_URL: string = getEvmRpcUrl("avax");
 export const AVAX_CHAIN_ID: number = CONFIG.avaxChainId;
-export const AVAX_GOLD_CLOB_ADDRESS: string = CONFIG.avaxGoldClobAddress;
+export const AVAX_LVR_ROUTER_ADDRESS: string = CONFIG.avaxLvrRouterAddress;
 export const AVAX_GOLD_TOKEN_ADDRESS: string = CONFIG.avaxGoldTokenAddress;

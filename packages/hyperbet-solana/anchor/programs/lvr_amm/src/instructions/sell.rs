@@ -3,7 +3,7 @@ use crate::{error::PredictionMarketError, state::bet::Bet};
 use anchor_lang::prelude::*;
 
 use anchor_spl::associated_token::AssociatedToken;
-use anchor_spl::token_interface::{self, Burn, Mint, MintTo, TokenAccount, TokenInterface};
+use anchor_spl::token::{self, Burn, Mint, MintTo, TokenAccount, Token};
 
 // / Sell shares of a bet, 0 for yes, 1 for no
 pub fn sell_instruction(ctx: Context<Sell>, bet_id: u64, outcome: u8, amount_in: u64) -> Result<()> {
@@ -70,7 +70,7 @@ pub fn sell_instruction(ctx: Context<Sell>, bet_id: u64, outcome: u8, amount_in:
     };
     let cpi_program = ctx.accounts.token_program.to_account_info();
     let cpi_context_burn = CpiContext::new(cpi_program.clone(), cpi_accounts_burn);
-    token_interface::burn(cpi_context_burn, amount_in)?;
+    token::burn(cpi_context_burn, amount_in)?;
 
     // mint the received tokens
     let (yes_no, bump) = if outcome == 1 {
@@ -101,7 +101,7 @@ pub fn sell_instruction(ctx: Context<Sell>, bet_id: u64, outcome: u8, amount_in:
         authority: receive_mint,
     };
     let cpi_context_mint = CpiContext::new(cpi_program, cpi_accounts_mint).with_signer(signer_seeds);
-    token_interface::mint_to(cpi_context_mint, amount_out)?;
+    token::mint_to(cpi_context_mint, amount_out)?;
 
     Ok(())
 }
@@ -125,7 +125,7 @@ pub struct Sell<'info> {
         bump,
         mint::authority = mint_yes
     )]
-    pub mint_yes: Box<InterfaceAccount<'info, Mint>>,
+    pub mint_yes: Box<Account<'info, Mint>>,
 
     #[account(
         mut,
@@ -133,7 +133,7 @@ pub struct Sell<'info> {
         bump,
         mint::authority = mint_no
     )]
-    pub mint_no: Box<InterfaceAccount<'info, Mint>>,
+    pub mint_no: Box<Account<'info, Mint>>,
 
     #[account(
         init_if_needed,
@@ -141,7 +141,7 @@ pub struct Sell<'info> {
         associated_token::mint = mint_yes,
         associated_token::authority = signer,
     )]
-    pub destination_yes: InterfaceAccount<'info, TokenAccount>,
+    pub destination_yes: Account<'info, TokenAccount>,
 
     #[account(
         init_if_needed,
@@ -149,9 +149,9 @@ pub struct Sell<'info> {
         associated_token::mint = mint_no,
         associated_token::authority = signer,
     )]
-    pub destination_no: InterfaceAccount<'info, TokenAccount>,
+    pub destination_no: Account<'info, TokenAccount>,
 
-    pub token_program: Interface<'info, TokenInterface>,
+    pub token_program: Program<'info, Token>,
     pub system_program: Program<'info, System>,
     pub associated_token_program: Program<'info, AssociatedToken>,
 }

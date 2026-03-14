@@ -1,5 +1,5 @@
 {
-  "address": "6tpRysBFd1yXRipYEYwAw9jxEoVHk15kVXfkDGFLMqcD",
+  "address": "B5mRCRDJk9BrnH7regMWW5mpTQ8QG1CcCGSnDxMt8hmo",
   "metadata": {
     "name": "fight_oracle",
     "version": "0.1.0",
@@ -133,7 +133,7 @@
         },
         {
           "name": "program",
-          "address": "6tpRysBFd1yXRipYEYwAw9jxEoVHk15kVXfkDGFLMqcD"
+          "address": "B5mRCRDJk9BrnH7regMWW5mpTQ8QG1CcCGSnDxMt8hmo"
         },
         {
           "name": "program_data"

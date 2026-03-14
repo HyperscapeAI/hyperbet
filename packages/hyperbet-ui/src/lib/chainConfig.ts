@@ -14,7 +14,7 @@ export type EvmChainConfig = {
   name: string;
   shortName: string;
   rpcUrl: string;
-  goldClobAddress: string;
+  lvrRouterAddress: string;
   nativeCurrency: { name: string; symbol: string; decimals: number };
   blockExplorer: string;
   wagmiChain: Chain;
@@ -96,7 +96,7 @@ function getRuntimeChainConfig(chainKey: BettingEvmChain): EvmChainConfig | null
     name,
     shortName,
     rpcUrl: getEvmRpcUrl(chainKey),
-    goldClobAddress: runtime.goldClobAddress,
+    lvrRouterAddress: runtime.lvrRouterAddress,
     nativeCurrency: runtime.deployment.nativeCurrency,
     blockExplorer,
     wagmiChain: createCustomChain({
@@ -113,7 +113,7 @@ function getRuntimeChainConfig(chainKey: BettingEvmChain): EvmChainConfig | null
 }
 
 function hasConfiguredContracts(config: EvmChainConfig | null): config is EvmChainConfig {
-  return Boolean(config?.goldClobAddress.trim().length);
+  return Boolean(config?.lvrRouterAddress.trim().length);
 }
 
 function allRuntimeEvmChains(): EvmChainConfig[] {

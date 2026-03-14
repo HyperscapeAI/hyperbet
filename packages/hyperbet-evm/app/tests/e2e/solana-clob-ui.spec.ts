@@ -377,7 +377,7 @@ test("runs non-debug Solana CLOB UI E2E and validates txs", async ({
     await betAmountInput.fill(state.placeBetAmount ?? "1");
   }
 
-  const priceInput = page.getByTestId("solana-clob-price-input");
+  const priceInput = page.getByTestId("solana-amm-price-input");
   if (await priceInput.isVisible().catch(() => false)) {
     await priceInput.fill("500");
   }

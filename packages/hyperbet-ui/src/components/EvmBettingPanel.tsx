@@ -570,7 +570,7 @@ export function EvmBettingPanel({
       }
 
       const duelKey = toDuelKeyHex(duelKeyHex);
-      const contractAddr = chainConfig.goldClobAddress as Address;
+      const contractAddr = chainConfig.lvrRouterAddress as Address;
 
       const market = await getMarketMeta(
         publicClient,
@@ -610,8 +610,7 @@ export function EvmBettingPanel({
         const [userPosition, balance] = await Promise.all([
           getPosition(
             publicClient,
-            contractAddr,
-            market.marketKey,
+            market.marketAddress,
             effectiveAddress,
           ),
           getNativeBalance(publicClient, effectiveAddress),
@@ -802,7 +801,8 @@ export function EvmBettingPanel({
       setStatus(copy.placingOrder);
       const tx = await placeOrder(
         effectiveWalletClient,
-        chainConfig.goldClobAddress as Address,
+        chainConfig.lvrRouterAddress as Address,
+        marketMeta!.marketAddress,
         duelKey,
         MARKET_KIND_DUEL_WINNER,
         orderSide,
@@ -874,10 +874,13 @@ export function EvmBettingPanel({
       setStatus(copy.claimingSettlement);
       const tx = await claimWinnings(
         effectiveWalletClient,
-        chainConfig.goldClobAddress as Address,
+        chainConfig.lvrRouterAddress as Address,
+        marketMeta!.marketAddress,
         duelKey,
         MARKET_KIND_DUEL_WINNER,
         effectiveAddress,
+        position?.aShares ?? 0n,
+        position?.bShares ?? 0n,
       );
       setLastClaimTx(tx);
       await publicClient?.waitForTransactionReceipt({ hash: tx });

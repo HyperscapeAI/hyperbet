@@ -22,7 +22,7 @@
     "typecheck": "bunx tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
     "verify:chains": "tsx src/verify-chains.ts",
-    "verify:chains:env": "SOLANA_VERIFY_RPC_URL=$SOLANA_RPC_URL SOLANA_VERIFY_PROGRAM_ID=${GOLD_CLOB_MARKET_PROGRAM_ID:-$SOLANA_ARENA_MARKET_PROGRAM_ID} tsx src/verify-chains.ts",
+    "verify:chains:env": "SOLANA_VERIFY_RPC_URL=$SOLANA_RPC_URL SOLANA_VERIFY_PROGRAM_ID=${LVR_ROUTER_MARKET_PROGRAM_ID:-$SOLANA_ARENA_MARKET_PROGRAM_ID} tsx src/verify-chains.ts",
     "verify:forks": "tsx src/fork-harness.ts"
   },
   "dependencies": {

@@ -450,7 +450,7 @@ async function main(): Promise<void> {
     provider,
   ) as Program<any>;
   const clobProgram = new anchor.Program(
-    loadProgramIdl(workspaceDir, "gold_clob_market"),
+    loadProgramIdl(workspaceDir, "lvr_amm"),
     provider,
   ) as Program<any>;
 

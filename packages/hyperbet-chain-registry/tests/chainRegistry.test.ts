@@ -60,7 +60,7 @@ describe("chain registry", () => {
     expect(getMissingBettingEvmCanonicalFields(BETTING_DEPLOYMENTS.evm.avax))
       .toEqual([
         "duelOracleAddress",
-        "goldClobAddress",
+        "lvrRouterAddress",
         "adminAddress",
         "marketOperatorAddress",
         "treasuryAddress",
@@ -72,7 +72,7 @@ describe("chain registry", () => {
     const mainnetReady = {
       ...BETTING_DEPLOYMENTS.evm.avax,
       duelOracleAddress: "0x1111111111111111111111111111111111111111",
-      goldClobAddress: "0x2222222222222222222222222222222222222222",
+      lvrRouterAddress: "0x2222222222222222222222222222222222222222",
       adminAddress: "0x3333333333333333333333333333333333333333",
       marketOperatorAddress: "0x4444444444444444444444444444444444444444",
       treasuryAddress: "0x5555555555555555555555555555555555555555",
@@ -81,7 +81,7 @@ describe("chain registry", () => {
     const fujiReady = {
       ...BETTING_DEPLOYMENTS.evm.avaxFuji,
       duelOracleAddress: "0x1111111111111111111111111111111111111111",
-      goldClobAddress: "0x2222222222222222222222222222222222222222",
+      lvrRouterAddress: "0x2222222222222222222222222222222222222222",
       adminAddress: "0x3333333333333333333333333333333333333333",
       marketOperatorAddress: "0x4444444444444444444444444444444444444444",
       treasuryAddress: "0x5555555555555555555555555555555555555555",
@@ -101,7 +101,7 @@ describe("chain registry", () => {
     expect(getMissingBettingEvmCanonicalFields(BETTING_DEPLOYMENTS.evm.avaxFuji))
       .toEqual([
         "duelOracleAddress",
-        "goldClobAddress",
+        "lvrRouterAddress",
         "adminAddress",
         "marketOperatorAddress",
         "treasuryAddress",
@@ -113,14 +113,14 @@ describe("chain registry", () => {
     const runtime = resolveBettingEvmRuntimeEnv("avax", "testnet", {
       EVM_AVAX_RPC_URL: "https://override.example/rpc",
       AVAX_DUEL_ORACLE_ADDRESS: "0x1111111111111111111111111111111111111111",
-      AVAX_GOLD_CLOB_ADDRESS: "0x2222222222222222222222222222222222222222",
+      AVAX_LVR_ROUTER_ADDRESS: "0x2222222222222222222222222222222222222222",
       AVAX_FUJI_RPC: "https://ignored.example/fuji",
     });
     expect(runtime.rpcUrl).toBe("https://override.example/rpc");
     expect(runtime.duelOracleAddress).toBe(
       "0x1111111111111111111111111111111111111111",
     );
-    expect(runtime.goldClobAddress).toBe(
+    expect(runtime.lvrRouterAddress).toBe(
       "0x2222222222222222222222222222222222222222",
     );
   });

@@ -32,7 +32,7 @@ import { usePredictionMarketLifecycle } from "@hyperbet/ui/lib/predictionMarkets
 import { useAppConnection, useAppWallet, useAppWalletModal } from "./lib/appWallet";
 import { StreamPlayer } from "@hyperbet/ui/components/StreamPlayer";
 import { PointsDisplay } from "@hyperbet/ui/components/PointsDisplay";
-import type { SolanaClobMarketSnapshot } from "@hyperbet/ui/components/SolanaClobPanel";
+import type { SolanaClobMarketSnapshot } from "@hyperbet/ui/components/SolanaAmmPanel";
 import { getDuelStateDecoder } from "./generated/fight-oracle/accounts";
 import {
   FightOracleAccount,
@@ -40,8 +40,8 @@ import {
   FIGHT_ORACLE_PROGRAM_ADDRESS,
 } from "./generated/fight-oracle/programs";
 import {
-  GOLD_CLOB_MARKET_PROGRAM_ADDRESS,
-} from "./generated/gold-clob-market/programs";
+  LVR_AMM_PROGRAM_ADDRESS,
+} from "./generated/lvr-amm-market/programs";
 import { FIGHT_ORACLE_PROGRAM_ID } from "./lib/programIds";
 import { useStreamingState } from "./spectator/useStreamingState";
 import { useDuelContext } from "@hyperbet/ui/spectator/useDuelContext";
@@ -590,9 +590,9 @@ function goldDisplay(amount: unknown): string {
   const raw = asNumber(amount, 0);
   return (raw / 10 ** GOLD_DECIMALS).toFixed(6);
 }
-const SolanaClobPanel = lazy(() =>
-  import("./components/SolanaClobPanel").then((module) => ({
-    default: module.SolanaClobPanel,
+const SolanaAmmPanel = lazy(() =>
+  import("./components/SolanaAmmPanel").then((module) => ({
+    default: module.SolanaAmmPanel,
   })),
 );
 const ModelsMarketView = lazy(() =>
@@ -669,7 +669,7 @@ export function App() {
       oracle: false,
       market: false,
     });
-  const [solanaClobSnapshot, setSolanaClobSnapshot] =
+  const [solanaAmmSnapshot, setSolanaClobSnapshot] =
     useState<SolanaClobMarketSnapshot>(EMPTY_SOLANA_CLOB_SNAPSHOT);
   const [_inviteCode, setInviteCode] = useState<string | null>(() =>
     getStoredInviteCode(),
@@ -845,7 +845,7 @@ export function App() {
           ),
           connection.getAccountInfo(
             new PublicKey(
-              CONFIG.goldClobMarketProgramId || GOLD_CLOB_MARKET_PROGRAM_ADDRESS,
+              CONFIG.lvrMarketProgramId || LVR_AMM_PROGRAM_ADDRESS,
             ),
             "confirmed",
           ),
@@ -1020,8 +1020,8 @@ export function App() {
     return () => window.clearTimeout(id);
   }, [inviteShareStatus]);
 
-  const yesPot = asNumber(solanaClobSnapshot.yesPool, 0);
-  const noPot = asNumber(solanaClobSnapshot.noPool, 0);
+  const yesPot = asNumber(solanaAmmSnapshot.yesPool, 0);
+  const noPot = asNumber(solanaAmmSnapshot.noPool, 0);
   const totalPot = yesPot + noPot;
   const yesSharePercent =
     totalPot > 0 ? Math.round((yesPot / totalPot) * 100) : 50;
@@ -1030,10 +1030,10 @@ export function App() {
   const effNoPot = noPot;
   const effYesPercent = yesSharePercent;
   const effNoPercent = noSharePercent;
-  const effChartData = solanaClobSnapshot.chartData;
-  const effBids = solanaClobSnapshot.bids;
-  const effAsks = solanaClobSnapshot.asks;
-  const effRecentTrades = solanaClobSnapshot.recentTrades;
+  const effChartData = solanaAmmSnapshot.chartData;
+  const effBids = solanaAmmSnapshot.bids;
+  const effAsks = solanaAmmSnapshot.asks;
+  const effRecentTrades = solanaAmmSnapshot.recentTrades;
   const liveAgent1Name =
     liveCycle?.agent1?.name?.trim() && liveCycle.agent1.name.trim().length > 0
       ? liveCycle.agent1.name.trim()
@@ -1129,7 +1129,7 @@ export function App() {
   })();
 
   const marketStatusText = _getMarketStatusLabel(
-    lifecycleMarket?.lifecycleStatus ?? solanaClobSnapshot.marketStatus,
+    lifecycleMarket?.lifecycleStatus ?? solanaAmmSnapshot.marketStatus,
     copy,
   );
   const countdownText = formatCountdown(
@@ -1388,7 +1388,7 @@ export function App() {
           </div>
           <div data-testid="e2e-active-chain">solana</div>
           <div data-testid="current-match-id">
-            Current match: {solanaClobSnapshot.matchLabel}
+            Current match: {solanaAmmSnapshot.matchLabel}
           </div>
           <div data-testid="market-status">Market: {marketStatusText}</div>
           <div data-testid="pool-totals">
@@ -2178,7 +2178,7 @@ export function App() {
                       />
                     }
                   >
-                    <SolanaClobPanel
+                    <SolanaAmmPanel
                       agent1Name={effAgent1Name}
                       agent2Name={effAgent2Name}
                       compact={!isE2eMode}

@@ -1,4 +1,4 @@
-export const GOLD_CLOB_ABI = [
+export const LVR_ROUTER_ABI = [
   {
     inputs: [
       { internalType: "address", name: "admin", type: "address" },
@@ -83,7 +83,7 @@ export const GOLD_CLOB_ABI = [
           { internalType: "uint128", name: "totalAShares", type: "uint128" },
           { internalType: "uint128", name: "totalBShares", type: "uint128" },
         ],
-        internalType: "struct GoldClob.Market",
+        internalType: "struct LvrRouter.Market",
         name: "",
         type: "tuple",
       },

@@ -6,7 +6,7 @@ use anchor_lang::system_program;
 use std::cmp;
 use std::str::FromStr;
 
-declare_id!("HbXhqEFevpkfYdZCN6YmJGRmQmj9vsBun2ZHjeeaLRik");
+declare_id!("EoZdHN8U3qWQje48ToxB1SLWjucsFGqcWaRUJQYX3eoT");
 
 const FUNDING_RATE_PRECISION: i128 = 1_000_000_000;
 const BPS_DENOMINATOR: u64 = 10_000;

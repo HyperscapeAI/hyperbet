@@ -8,7 +8,7 @@ import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
 import "./DuelOutcomeOracle.sol";
 
-contract GoldClob is AccessControl, ReentrancyGuard {
+contract LvrRouter is AccessControl, ReentrancyGuard {
     using Address for address payable;
 
     bytes32 public constant MARKET_OPERATOR_ROLE = keccak256("MARKET_OPERATOR_ROLE");

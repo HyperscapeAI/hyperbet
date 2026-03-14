@@ -20,8 +20,8 @@ describe("betting deployment manifest", () => {
     expect(testnet.fightOracleProgramId).toBe(
       BETTING_DEPLOYMENTS.solana.testnet.fightOracleProgramId,
     );
-    expect(testnet.goldClobMarketProgramId).toBe(
-      BETTING_DEPLOYMENTS.solana.testnet.goldClobMarketProgramId,
+    expect(testnet.lvrMarketProgramId).toBe(
+      BETTING_DEPLOYMENTS.solana.testnet.lvrMarketProgramId,
     );
     expect(testnet.goldPerpsMarketProgramId).toBe(
       BETTING_DEPLOYMENTS.solana.testnet.goldPerpsMarketProgramId,

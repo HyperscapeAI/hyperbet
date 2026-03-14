@@ -38,7 +38,7 @@ export interface ChainFeatureFlags {
 export interface BettingSolanaDeployment {
   cluster: BettingSolanaCluster;
   fightOracleProgramId: string;
-  goldClobMarketProgramId: string;
+  lvrMarketProgramId: string;
   goldPerpsMarketProgramId: string;
   goldMint: string;
   usdcMint: string;
@@ -52,7 +52,7 @@ export interface BettingEvmDeployment {
   targetKind: BettingTargetKind;
   rpcEnvVar: string;
   duelOracleAddress: string;
-  goldClobAddress: string;
+  lvrRouterAddress: string;
   adminAddress: string;
   marketOperatorAddress: string;
   treasuryAddress: string;
@@ -71,7 +71,7 @@ export interface BettingDeploymentManifest {
 
 export const BETTING_EVM_CANONICAL_ADDRESS_FIELDS = [
   "duelOracleAddress",
-  "goldClobAddress",
+  "lvrRouterAddress",
   "adminAddress",
   "marketOperatorAddress",
   "treasuryAddress",
@@ -85,7 +85,7 @@ export interface EvmChainRuntimeConfig {
   chainKey: BettingEvmChain;
   chainId: number;
   rpcUrl: string;
-  goldClobAddress: string;
+  lvrRouterAddress: string;
   goldTokenAddress: string;
   deployment: BettingEvmDeployment;
 }
@@ -95,7 +95,7 @@ export interface ResolvedBettingEvmRuntimeEnv {
   deployment: BettingEvmDeployment;
   rpcUrl: string;
   duelOracleAddress: string;
-  goldClobAddress: string;
+  lvrRouterAddress: string;
 }
 
 export interface ExternalBetRecordPayload {
@@ -163,7 +163,7 @@ const SOLANA_DEPLOYMENTS: Record<BettingSolanaCluster, BettingSolanaDeployment> 
     localnet: {
       cluster: "localnet",
       fightOracleProgramId: "6tpRysBFd1yXRipYEYwAw9jxEoVHk15kVXfkDGFLMqcD",
-      goldClobMarketProgramId: "ARVJNJp49VZnkB8QBYZAAFJmufvtVSPhnuuenwwSLwpi",
+      lvrMarketProgramId: "ARVJNJp49VZnkB8QBYZAAFJmufvtVSPhnuuenwwSLwpi",
       goldPerpsMarketProgramId: "HbXhqEFevpkfYdZCN6YmJGRmQmj9vsBun2ZHjeeaLRik",
       goldMint: "DK9nBUMfdu4XprPRWeh8f6KnQiGWD8Z4xz3yzs9gpump",
       usdcMint: "",
@@ -171,7 +171,7 @@ const SOLANA_DEPLOYMENTS: Record<BettingSolanaCluster, BettingSolanaDeployment> 
     devnet: {
       cluster: "devnet",
       fightOracleProgramId: "6tpRysBFd1yXRipYEYwAw9jxEoVHk15kVXfkDGFLMqcD",
-      goldClobMarketProgramId: "ARVJNJp49VZnkB8QBYZAAFJmufvtVSPhnuuenwwSLwpi",
+      lvrMarketProgramId: "ARVJNJp49VZnkB8QBYZAAFJmufvtVSPhnuuenwwSLwpi",
       goldPerpsMarketProgramId: "HbXhqEFevpkfYdZCN6YmJGRmQmj9vsBun2ZHjeeaLRik",
       goldMint: "DK9nBUMfdu4XprPRWeh8f6KnQiGWD8Z4xz3yzs9gpump",
       usdcMint: "",
@@ -179,7 +179,7 @@ const SOLANA_DEPLOYMENTS: Record<BettingSolanaCluster, BettingSolanaDeployment> 
     testnet: {
       cluster: "testnet",
       fightOracleProgramId: "6tpRysBFd1yXRipYEYwAw9jxEoVHk15kVXfkDGFLMqcD",
-      goldClobMarketProgramId: "ARVJNJp49VZnkB8QBYZAAFJmufvtVSPhnuuenwwSLwpi",
+      lvrMarketProgramId: "ARVJNJp49VZnkB8QBYZAAFJmufvtVSPhnuuenwwSLwpi",
       goldPerpsMarketProgramId: "HbXhqEFevpkfYdZCN6YmJGRmQmj9vsBun2ZHjeeaLRik",
       goldMint: "",
       usdcMint: "",
@@ -187,7 +187,7 @@ const SOLANA_DEPLOYMENTS: Record<BettingSolanaCluster, BettingSolanaDeployment> 
     "mainnet-beta": {
       cluster: "mainnet-beta",
       fightOracleProgramId: "6tpRysBFd1yXRipYEYwAw9jxEoVHk15kVXfkDGFLMqcD",
-      goldClobMarketProgramId: "ARVJNJp49VZnkB8QBYZAAFJmufvtVSPhnuuenwwSLwpi",
+      lvrMarketProgramId: "ARVJNJp49VZnkB8QBYZAAFJmufvtVSPhnuuenwwSLwpi",
       goldPerpsMarketProgramId: "HbXhqEFevpkfYdZCN6YmJGRmQmj9vsBun2ZHjeeaLRik",
       goldMint: "DK9nBUMfdu4XprPRWeh8f6KnQiGWD8Z4xz3yzs9gpump",
       usdcMint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
@@ -203,7 +203,7 @@ const EVM_DEPLOYMENTS: Record<BettingEvmNetwork, BettingEvmDeployment> = {
     targetKind: "testnet",
     rpcEnvVar: "BSC_TESTNET_RPC",
     duelOracleAddress: "",
-    goldClobAddress: "",
+    lvrRouterAddress: "",
     adminAddress: "",
     marketOperatorAddress: "",
     treasuryAddress: "",
@@ -222,7 +222,7 @@ const EVM_DEPLOYMENTS: Record<BettingEvmNetwork, BettingEvmDeployment> = {
     targetKind: "mainnet",
     rpcEnvVar: "BSC_MAINNET_RPC",
     duelOracleAddress: "0x8F582bc1D34Ca6dA12ac46B7c7Fdec02f2465961",
-    goldClobAddress: "0x443C09B1E7bb7bA3392b02500772B185654A6F33",
+    lvrRouterAddress: "0x443C09B1E7bb7bA3392b02500772B185654A6F33",
     adminAddress: "0x7908b93DF1A91A5e1B83a4538107Db3c9131eED8",
     marketOperatorAddress: "0x7908b93DF1A91A5e1B83a4538107Db3c9131eED8",
     treasuryAddress: "0x0262dC245f38d614d508D8BD680c69E3B6D26F4c",
@@ -241,7 +241,7 @@ const EVM_DEPLOYMENTS: Record<BettingEvmNetwork, BettingEvmDeployment> = {
     targetKind: "testnet",
     rpcEnvVar: "BASE_SEPOLIA_RPC",
     duelOracleAddress: "",
-    goldClobAddress: "",
+    lvrRouterAddress: "",
     adminAddress: "",
     marketOperatorAddress: "",
     treasuryAddress: "",
@@ -260,7 +260,7 @@ const EVM_DEPLOYMENTS: Record<BettingEvmNetwork, BettingEvmDeployment> = {
     targetKind: "mainnet",
     rpcEnvVar: "BASE_MAINNET_RPC",
     duelOracleAddress: "0x63BF7f48A2795832C2b5f78172A1C6BE655F3a72",
-    goldClobAddress: "0xb8c66D6895Bafd1B0027F2c0865865043064437C",
+    lvrRouterAddress: "0xb8c66D6895Bafd1B0027F2c0865865043064437C",
     adminAddress: "0x7908b93DF1A91A5e1B83a4538107Db3c9131eED8",
     marketOperatorAddress: "0x7908b93DF1A91A5e1B83a4538107Db3c9131eED8",
     treasuryAddress: "0x0262dC245f38d614d508D8BD680c69E3B6D26F4c",
@@ -279,7 +279,7 @@ const EVM_DEPLOYMENTS: Record<BettingEvmNetwork, BettingEvmDeployment> = {
     targetKind: "testnet",
     rpcEnvVar: "AVAX_FUJI_RPC",
     duelOracleAddress: "",
-    goldClobAddress: "",
+    lvrRouterAddress: "",
     adminAddress: "",
     marketOperatorAddress: "",
     treasuryAddress: "",
@@ -298,7 +298,7 @@ const EVM_DEPLOYMENTS: Record<BettingEvmNetwork, BettingEvmDeployment> = {
     targetKind: "mainnet",
     rpcEnvVar: "AVAX_MAINNET_RPC",
     duelOracleAddress: "",
-    goldClobAddress: "",
+    lvrRouterAddress: "",
     adminAddress: "",
     marketOperatorAddress: "",
     treasuryAddress: "",
@@ -414,7 +414,7 @@ export function getEvmRuntimeConfig(
   chainKey: BettingEvmChain,
   environment: BettingAppEnvironment,
   overrides: Partial<
-    Pick<EvmChainRuntimeConfig, "chainId" | "rpcUrl" | "goldClobAddress" | "goldTokenAddress">
+    Pick<EvmChainRuntimeConfig, "chainId" | "rpcUrl" | "lvrRouterAddress" | "goldTokenAddress">
   > = {},
 ): EvmChainRuntimeConfig {
   const deployment = resolveBettingEvmDeploymentForChain(chainKey, environment);
@@ -422,7 +422,7 @@ export function getEvmRuntimeConfig(
     chainKey,
     chainId: overrides.chainId ?? deployment.chainId,
     rpcUrl: overrides.rpcUrl ?? defaultRpcUrlForEvmNetwork(deployment.networkKey),
-    goldClobAddress: overrides.goldClobAddress ?? deployment.goldClobAddress,
+    lvrRouterAddress: overrides.lvrRouterAddress ?? deployment.lvrRouterAddress,
     goldTokenAddress: overrides.goldTokenAddress ?? deployment.goldTokenAddress,
     deployment,
   };
@@ -460,11 +460,11 @@ export function resolveBettingEvmRuntimeEnv(
         `ORACLE_CONTRACT_ADDRESS_${chainUpper}`,
         `${chainUpper}_DUEL_ORACLE_ADDRESS`,
       ]) ?? deployment.duelOracleAddress,
-    goldClobAddress:
+    lvrRouterAddress:
       firstNonEmptyEnvValue(env, [
         `CLOB_CONTRACT_ADDRESS_${chainUpper}`,
-        `${chainUpper}_GOLD_CLOB_ADDRESS`,
-      ]) ?? deployment.goldClobAddress,
+        `${chainUpper}_LVR_ROUTER_ADDRESS`,
+      ]) ?? deployment.lvrRouterAddress,
   };
 }
 

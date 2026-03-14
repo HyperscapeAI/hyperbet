@@ -14,7 +14,7 @@ dotenv.config();
 
 const DEFAULT_SOLANA_PROGRAM_ID =
   process.env.SOLANA_VERIFY_PROGRAM_ID ||
-  process.env.GOLD_CLOB_MARKET_PROGRAM_ID ||
+  process.env.LVR_AMM_PROGRAM_ID ||
   process.env.SOLANA_ARENA_MARKET_PROGRAM_ID ||
   "ARVJNJp49VZnkB8QBYZAAFJmufvtVSPhnuuenwwSLwpi";
 const DEFAULT_SOLANA_RPC_URL =
@@ -188,10 +188,10 @@ function resolveStagingEvmCheck(
   const addressValidation = validateConfiguredAddress(
     firstNonEmptyValue(
       process.env[`CLOB_CONTRACT_ADDRESS_${chainUpper}_STAGING`],
-      process.env[`${chainUpper}_STAGING_GOLD_CLOB_ADDRESS`],
+      process.env[`${chainUpper}_STAGING_LVR_ROUTER_ADDRESS`],
       "",
     ) ?? "",
-    "goldClobAddress",
+    "lvrRouterAddress",
   );
   if ("details" in addressValidation) {
     return {
@@ -244,8 +244,8 @@ async function run() {
 
     const runtime = resolveBettingEvmRuntimeEnv(chain, "mainnet-beta", process.env);
     const addressValidation = validateConfiguredAddress(
-      runtime.goldClobAddress,
-      "goldClobAddress",
+      runtime.lvrRouterAddress,
+      "lvrRouterAddress",
     );
     if ("details" in addressValidation) {
       return Promise.resolve({

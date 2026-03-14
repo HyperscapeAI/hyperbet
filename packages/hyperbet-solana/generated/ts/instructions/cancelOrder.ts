@@ -7,14 +7,14 @@
  */
 
 import { combineCodec, fixDecoderSize, fixEncoderSize, getAddressEncoder, getBytesDecoder, getBytesEncoder, getProgramDerivedAddress, getStructDecoder, getStructEncoder, getU16Decoder, getU16Encoder, getU64Decoder, getU64Encoder, getU8Decoder, getU8Encoder, transformEncoder, type IAccountMeta, type IAccountSignerMeta, type Address, type FixedSizeCodec, type FixedSizeDecoder, type FixedSizeEncoder, type IInstruction, type IInstructionWithAccounts, type IInstructionWithData, type ReadonlyAccount, type ReadonlyUint8Array, type TransactionSigner, type WritableAccount, type WritableSignerAccount } from '@solana/kit';
-import { GOLD_CLOB_MARKET_PROGRAM_ADDRESS } from '../programs/index.js';
+import { LVR_ROUTER_MARKET_PROGRAM_ADDRESS } from '../programs/index.js';
 import { expectAddress, expectSome, getAccountMetaFactory, type ResolvedAccount } from '../shared/index.js';
 
 export const CANCEL_ORDER_DISCRIMINATOR: ReadonlyUint8Array = new Uint8Array([95, 129, 237, 240, 8, 49, 223, 132]);
 
 export function getCancelOrderDiscriminatorBytes(): ReadonlyUint8Array { return fixEncoderSize(getBytesEncoder(), 8).encode(CANCEL_ORDER_DISCRIMINATOR); }
 
-export type CancelOrderInstruction<TProgram extends string = typeof GOLD_CLOB_MARKET_PROGRAM_ADDRESS, TAccountMarketState extends string | IAccountMeta<string> = string, TAccountDuelState extends string | IAccountMeta<string> = string, TAccountOrder extends string | IAccountMeta<string> = string, TAccountPriceLevel extends string | IAccountMeta<string> = string, TAccountVault extends string | IAccountMeta<string> = string, TAccountUser extends string | IAccountMeta<string> = string, TAccountSystemProgram extends string | IAccountMeta<string> = "11111111111111111111111111111111", TRemainingAccounts extends readonly IAccountMeta<string>[] = []> =
+export type CancelOrderInstruction<TProgram extends string = typeof LVR_ROUTER_MARKET_PROGRAM_ADDRESS, TAccountMarketState extends string | IAccountMeta<string> = string, TAccountDuelState extends string | IAccountMeta<string> = string, TAccountOrder extends string | IAccountMeta<string> = string, TAccountPriceLevel extends string | IAccountMeta<string> = string, TAccountVault extends string | IAccountMeta<string> = string, TAccountUser extends string | IAccountMeta<string> = string, TAccountSystemProgram extends string | IAccountMeta<string> = "11111111111111111111111111111111", TRemainingAccounts extends readonly IAccountMeta<string>[] = []> =
 IInstruction<TProgram> & IInstructionWithData<ReadonlyUint8Array> & IInstructionWithAccounts<[TAccountMarketState extends string ? WritableAccount<TAccountMarketState> : TAccountMarketState, TAccountDuelState extends string ? ReadonlyAccount<TAccountDuelState> : TAccountDuelState, TAccountOrder extends string ? WritableAccount<TAccountOrder> : TAccountOrder, TAccountPriceLevel extends string ? WritableAccount<TAccountPriceLevel> : TAccountPriceLevel, TAccountVault extends string ? WritableAccount<TAccountVault> : TAccountVault, TAccountUser extends string ? WritableSignerAccount<TAccountUser> & IAccountSignerMeta<TAccountUser> : TAccountUser, TAccountSystemProgram extends string ? ReadonlyAccount<TAccountSystemProgram> : TAccountSystemProgram, ...TRemainingAccounts]>;
 
 export type CancelOrderInstructionData = { discriminator: ReadonlyUint8Array; orderId: bigint; side: number; price: number;  };
@@ -46,9 +46,9 @@ side: CancelOrderInstructionDataArgs["side"];
 price: CancelOrderInstructionDataArgs["price"];
 }
 
-export async function getCancelOrderInstructionAsync<TAccountMarketState extends string, TAccountDuelState extends string, TAccountOrder extends string, TAccountPriceLevel extends string, TAccountVault extends string, TAccountUser extends string, TAccountSystemProgram extends string, TProgramAddress extends Address = typeof GOLD_CLOB_MARKET_PROGRAM_ADDRESS>(input: CancelOrderAsyncInput<TAccountMarketState, TAccountDuelState, TAccountOrder, TAccountPriceLevel, TAccountVault, TAccountUser, TAccountSystemProgram>, config?: { programAddress?: TProgramAddress } ): Promise<CancelOrderInstruction<TProgramAddress, TAccountMarketState, TAccountDuelState, TAccountOrder, TAccountPriceLevel, TAccountVault, TAccountUser, TAccountSystemProgram>> {
+export async function getCancelOrderInstructionAsync<TAccountMarketState extends string, TAccountDuelState extends string, TAccountOrder extends string, TAccountPriceLevel extends string, TAccountVault extends string, TAccountUser extends string, TAccountSystemProgram extends string, TProgramAddress extends Address = typeof LVR_ROUTER_MARKET_PROGRAM_ADDRESS>(input: CancelOrderAsyncInput<TAccountMarketState, TAccountDuelState, TAccountOrder, TAccountPriceLevel, TAccountVault, TAccountUser, TAccountSystemProgram>, config?: { programAddress?: TProgramAddress } ): Promise<CancelOrderInstruction<TProgramAddress, TAccountMarketState, TAccountDuelState, TAccountOrder, TAccountPriceLevel, TAccountVault, TAccountUser, TAccountSystemProgram>> {
   // Program address.
-const programAddress = config?.programAddress ?? GOLD_CLOB_MARKET_PROGRAM_ADDRESS;
+const programAddress = config?.programAddress ?? LVR_ROUTER_MARKET_PROGRAM_ADDRESS;
 
  // Original accounts.
 const originalAccounts = { marketState: { value: input.marketState ?? null, isWritable: true }, duelState: { value: input.duelState ?? null, isWritable: false }, order: { value: input.order ?? null, isWritable: true }, priceLevel: { value: input.priceLevel ?? null, isWritable: true }, vault: { value: input.vault ?? null, isWritable: true }, user: { value: input.user ?? null, isWritable: true }, systemProgram: { value: input.systemProgram ?? null, isWritable: false } }
@@ -87,9 +87,9 @@ side: CancelOrderInstructionDataArgs["side"];
 price: CancelOrderInstructionDataArgs["price"];
 }
 
-export function getCancelOrderInstruction<TAccountMarketState extends string, TAccountDuelState extends string, TAccountOrder extends string, TAccountPriceLevel extends string, TAccountVault extends string, TAccountUser extends string, TAccountSystemProgram extends string, TProgramAddress extends Address = typeof GOLD_CLOB_MARKET_PROGRAM_ADDRESS>(input: CancelOrderInput<TAccountMarketState, TAccountDuelState, TAccountOrder, TAccountPriceLevel, TAccountVault, TAccountUser, TAccountSystemProgram>, config?: { programAddress?: TProgramAddress } ): CancelOrderInstruction<TProgramAddress, TAccountMarketState, TAccountDuelState, TAccountOrder, TAccountPriceLevel, TAccountVault, TAccountUser, TAccountSystemProgram> {
+export function getCancelOrderInstruction<TAccountMarketState extends string, TAccountDuelState extends string, TAccountOrder extends string, TAccountPriceLevel extends string, TAccountVault extends string, TAccountUser extends string, TAccountSystemProgram extends string, TProgramAddress extends Address = typeof LVR_ROUTER_MARKET_PROGRAM_ADDRESS>(input: CancelOrderInput<TAccountMarketState, TAccountDuelState, TAccountOrder, TAccountPriceLevel, TAccountVault, TAccountUser, TAccountSystemProgram>, config?: { programAddress?: TProgramAddress } ): CancelOrderInstruction<TProgramAddress, TAccountMarketState, TAccountDuelState, TAccountOrder, TAccountPriceLevel, TAccountVault, TAccountUser, TAccountSystemProgram> {
   // Program address.
-const programAddress = config?.programAddress ?? GOLD_CLOB_MARKET_PROGRAM_ADDRESS;
+const programAddress = config?.programAddress ?? LVR_ROUTER_MARKET_PROGRAM_ADDRESS;
 
  // Original accounts.
 const originalAccounts = { marketState: { value: input.marketState ?? null, isWritable: true }, duelState: { value: input.duelState ?? null, isWritable: false }, order: { value: input.order ?? null, isWritable: true }, priceLevel: { value: input.priceLevel ?? null, isWritable: true }, vault: { value: input.vault ?? null, isWritable: true }, user: { value: input.user ?? null, isWritable: true }, systemProgram: { value: input.systemProgram ?? null, isWritable: false } }
@@ -109,7 +109,7 @@ const getAccountMeta = getAccountMetaFactory(programAddress, 'programId');
 return Object.freeze({ accounts: [getAccountMeta(accounts.marketState), getAccountMeta(accounts.duelState), getAccountMeta(accounts.order), getAccountMeta(accounts.priceLevel), getAccountMeta(accounts.vault), getAccountMeta(accounts.user), getAccountMeta(accounts.systemProgram)], data: getCancelOrderInstructionDataEncoder().encode(args as CancelOrderInstructionDataArgs), programAddress } as CancelOrderInstruction<TProgramAddress, TAccountMarketState, TAccountDuelState, TAccountOrder, TAccountPriceLevel, TAccountVault, TAccountUser, TAccountSystemProgram>);
 }
 
-export type ParsedCancelOrderInstruction<TProgram extends string = typeof GOLD_CLOB_MARKET_PROGRAM_ADDRESS, TAccountMetas extends readonly IAccountMeta[] = readonly IAccountMeta[]> = { programAddress: Address<TProgram>;
+export type ParsedCancelOrderInstruction<TProgram extends string = typeof LVR_ROUTER_MARKET_PROGRAM_ADDRESS, TAccountMetas extends readonly IAccountMeta[] = readonly IAccountMeta[]> = { programAddress: Address<TProgram>;
 accounts: {
 marketState: TAccountMetas[0];
 duelState: TAccountMetas[1];

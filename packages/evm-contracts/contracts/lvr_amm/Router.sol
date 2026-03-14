@@ -37,7 +37,7 @@ contract Router is IMarketBuyCallback, IMarketSellCallback, IMarketRedeemCallbac
     mapping(bytes32 marketId => MarketInfo info) public markets;
     address[] public allMarkets; // Array for enumeration
     bytes32[] public allMarketIds; // Corresponding market IDs
-    IERC20 public mUSD; // Collateral Token
+    IERC20 public immutable mUSD; // Collateral Token
     
     constructor(address _mUSD){
         mUSD = IERC20(_mUSD);

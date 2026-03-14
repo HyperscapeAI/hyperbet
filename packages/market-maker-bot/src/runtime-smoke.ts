@@ -188,7 +188,7 @@ async function main() {
     "DuelOutcomeOracle.sol/DuelOutcomeOracle.json",
   );
   const clobArtifact = await loadArtifact<ClobArtifact>(
-    "GoldClob.sol/GoldClob.json",
+    "LvrRouter.sol/LvrRouter.json",
   );
 
   const provider = new ethers.JsonRpcProvider(rpcUrl);

@@ -11,14 +11,14 @@ import {
 } from "../deployments";
 
 type Target = "testnet" | "mainnet";
-type ProgramKey = "fightOracle" | "goldClobMarket" | "goldPerpsMarket";
+type ProgramKey = "fightOracle" | "lvrMarket" | "goldPerpsMarket";
 
 interface SolanaProgramCheck {
   key: ProgramKey;
-  binaryName: "fight_oracle" | "gold_clob_market" | "gold_perps_market";
+  binaryName: "fight_oracle" | "lvr_amm" | "gold_perps_market";
   manifestField:
     | "fightOracleProgramId"
-    | "goldClobMarketProgramId"
+    | "lvrMarketProgramId"
     | "goldPerpsMarketProgramId";
 }
 
@@ -29,9 +29,9 @@ const PROGRAMS: SolanaProgramCheck[] = [
     manifestField: "fightOracleProgramId",
   },
   {
-    key: "goldClobMarket",
-    binaryName: "gold_clob_market",
-    manifestField: "goldClobMarketProgramId",
+    key: "lvrMarket",
+    binaryName: "lvr_amm",
+    manifestField: "lvrMarketProgramId",
   },
   {
     key: "goldPerpsMarket",
@@ -244,7 +244,7 @@ async function main(): Promise<void> {
       : `${deployment.label} deploy RPC env ${deployment.rpcEnvVar} is missing; using Hardhat fallback ${fallbackRpc}`;
     appendStatus(rpcAvailable, rpcMessage, failures, warnings, !rpcConfigured);
 
-    const hasClobAddress = deployment.goldClobAddress.trim().length > 0;
+    const hasClobAddress = deployment.lvrRouterAddress.trim().length > 0;
     const hasOracleAddress = deployment.duelOracleAddress.trim().length > 0;
     appendStatus(
       hasOracleAddress,
@@ -255,7 +255,7 @@ async function main(): Promise<void> {
     );
     appendStatus(
       hasClobAddress,
-      `${deployment.label} GoldClob address is ${hasClobAddress ? "present" : "pending"} in deployment manifest`,
+      `${deployment.label} LvrRouter address is ${hasClobAddress ? "present" : "pending"} in deployment manifest`,
       failures,
       warnings,
       true,

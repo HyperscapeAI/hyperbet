@@ -2,7 +2,7 @@ import { PublicKey } from "@solana/web3.js";
 import { findProgramAddressSync } from "./programAddress";
 
 export function findClobConfigPda(programId: PublicKey): PublicKey {
-  return findProgramAddressSync([Buffer.from("config")], programId)[0];
+  return findProgramAddressSync([Buffer.from("admin_state")], programId)[0];
 }
 
 export function findClobVaultPda(

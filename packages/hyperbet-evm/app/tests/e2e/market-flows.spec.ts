@@ -23,7 +23,7 @@ import {
 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 
-import { GOLD_CLOB_ABI } from "../../src/lib/goldClobAbi";
+import { LVR_ROUTER_ABI } from "../../src/lib/lvrRouterAbi";
 
 type E2eState = {
   solanaRpcUrl?: string;
@@ -34,7 +34,7 @@ type E2eState = {
   evmRpcUrl?: string;
   evmChainId?: number;
   evmHeadlessAddress?: string;
-  evmGoldClobAddress?: string;
+  evmLvrRouterAddress?: string;
   evmMatchId?: number;
   evmDuelKeyHex?: string;
   evmMarketKey?: string;
@@ -142,10 +142,10 @@ const duelOutcomeOracleArtifact = readFirstExistingJson(
     ),
   ],
 ) as { abi: readonly unknown[] };
-const goldClobArtifact = readFirstExistingJson(
+const lvrRouterArtifact = readFirstExistingJson(
   [
-    path.join(evmArtifactsDir, "GoldClob.sol", "GoldClob.json"),
-    path.join(evmFoundryOutDir, "GoldClob.sol", "GoldClob.json"),
+    path.join(evmArtifactsDir, "LvrRouter.sol", "LvrRouter.json"),
+    path.join(evmFoundryOutDir, "LvrRouter.sol", "LvrRouter.json"),
   ],
 ) as { abi: readonly unknown[] };
 const perpsCoder = new BorshAccountsCoder(goldPerpsIdl);
@@ -339,7 +339,7 @@ async function createFreshEvmOpenMarket(
 
   const createMarketTx = await adminWalletClient.writeContract({
     address: contractAddress,
-    abi: goldClobArtifact.abi,
+    abi: lvrRouterArtifact.abi,
     functionName: "createMarketForDuel",
     args: [duelKey, MARKET_KIND_DUEL_WINNER],
   });
@@ -351,7 +351,7 @@ async function createFreshEvmOpenMarket(
   const seedFee = seedCost / 100n;
   const seedOrderTx = await adminWalletClient.writeContract({
     address: contractAddress,
-    abi: GOLD_CLOB_ABI,
+    abi: LVR_ROUTER_ABI,
     functionName: "placeOrder",
     args: [duelKey, MARKET_KIND_DUEL_WINNER, SELL_SIDE, seedPrice, seedAmount],
     value: seedCost + seedFee + seedFee,
@@ -360,7 +360,7 @@ async function createFreshEvmOpenMarket(
 
   const marketKey = (await publicClient.readContract({
     address: contractAddress,
-    abi: GOLD_CLOB_ABI,
+    abi: LVR_ROUTER_ABI,
     functionName: "marketKey",
     args: [duelKey, MARKET_KIND_DUEL_WINNER],
   })) as Hash;
@@ -458,7 +458,7 @@ function buildMockEvmPredictionMarketsResponse(
         lifecycleStatus,
         winner,
         betCloseTime: Date.now(),
-        contractAddress: state.evmGoldClobAddress ?? null,
+        contractAddress: state.evmLvrRouterAddress ?? null,
         programId: null,
         txRef: null,
         syncedAt: Date.now(),
@@ -907,7 +907,7 @@ async function readEvmPosition(
 ): Promise<[bigint, bigint, bigint, bigint]> {
   return (await publicClient.readContract({
     address: contractAddress,
-    abi: GOLD_CLOB_ABI,
+    abi: LVR_ROUTER_ABI,
     functionName: "positions",
     args: [marketKey, userAddress],
   })) as [bigint, bigint, bigint, bigint];
@@ -1005,7 +1005,7 @@ test.describe("market flows", () => {
     await ensureWalletConnected(page);
 
     await clobPanel.getByTestId("prediction-amount-input").fill("1");
-    const solanaPriceInput = clobPanel.getByTestId("solana-clob-price-input");
+    const solanaPriceInput = clobPanel.getByTestId("solana-amm-price-input");
     if (await solanaPriceInput.isVisible().catch(() => false)) {
       await solanaPriceInput.fill("600");
     }
@@ -1081,7 +1081,7 @@ test.describe("market flows", () => {
     const rpcUrl = state.evmRpcUrl || "http://127.0.0.1:8545";
     const chainId = Number(state.evmChainId || 97);
     const userAddress = state.evmHeadlessAddress as Address;
-    const contractAddress = state.evmGoldClobAddress as Address;
+    const contractAddress = state.evmLvrRouterAddress as Address;
     const marketKey = normalizeHex32(state.evmMarketKey, "evmMarketKey");
     let lifecycleStatus = "OPEN";
     let lifecycleWinner = "NONE";
@@ -1185,7 +1185,7 @@ test.describe("market flows", () => {
     const rpcUrl = state.evmRpcUrl || "http://127.0.0.1:8545";
     const chainId = Number(state.evmChainId || 97);
     const userAddress = state.evmHeadlessAddress as Address;
-    const contractAddress = state.evmGoldClobAddress as Address;
+    const contractAddress = state.evmLvrRouterAddress as Address;
     const marketKey = normalizeHex32(state.evmMarketKey, "evmMarketKey");
     const duelKey = normalizeHex32(state.evmDuelKeyHex, "evmDuelKeyHex");
     const oracleAddress = state.evmOracleAddress as Address;
@@ -1319,7 +1319,7 @@ test.describe("market flows", () => {
     await waitForEvmReceipt(publicClient, reportResultTx);
     const resolveTx = await adminWalletClient.writeContract({
       address: contractAddress,
-      abi: GOLD_CLOB_ABI,
+      abi: LVR_ROUTER_ABI,
       functionName: "syncMarketFromOracle",
       args: [duelKey, MARKET_KIND_DUEL_WINNER],
     });
@@ -1377,7 +1377,7 @@ test.describe("market flows", () => {
         console.log("[e2e][evm] auto-claim not observed, claiming manually");
         const manualClaimTx = await adminWalletClient.writeContract({
           address: contractAddress,
-          abi: GOLD_CLOB_ABI,
+          abi: LVR_ROUTER_ABI,
           functionName: "claim",
           args: [duelKey, MARKET_KIND_DUEL_WINNER],
         });
@@ -1404,7 +1404,7 @@ test.describe("market flows", () => {
     const rpcUrl = state.evmRpcUrl || "http://127.0.0.1:8545";
     const chainId = Number(state.evmChainId || 97);
     const userAddress = state.evmHeadlessAddress as Address;
-    const contractAddress = state.evmGoldClobAddress as Address;
+    const contractAddress = state.evmLvrRouterAddress as Address;
     const oracleAddress = state.evmOracleAddress as Address;
     const adminPrivateKey = state.evmAdminPrivateKey as `0x${string}`;
     const publicClient = createPublicClient({
@@ -1551,7 +1551,7 @@ test.describe("market flows", () => {
     await waitForEvmReceipt(publicClient, reportResultTx);
     const resolveTx = await adminWalletClient.writeContract({
       address: contractAddress,
-      abi: GOLD_CLOB_ABI,
+      abi: LVR_ROUTER_ABI,
       functionName: "syncMarketFromOracle",
       args: [duelKey, MARKET_KIND_DUEL_WINNER],
     });
@@ -1622,7 +1622,7 @@ test.describe("market flows", () => {
     const rpcUrl = state.evmRpcUrl || "http://127.0.0.1:8545";
     const chainId = Number(state.evmChainId || 97);
     const userAddress = state.evmHeadlessAddress as Address;
-    const contractAddress = state.evmGoldClobAddress as Address;
+    const contractAddress = state.evmLvrRouterAddress as Address;
     const oracleAddress = state.evmOracleAddress as Address;
     const adminPrivateKey = state.evmAdminPrivateKey as `0x${string}`;
     const publicClient = createPublicClient({
@@ -1719,7 +1719,7 @@ test.describe("market flows", () => {
     await waitForEvmReceipt(publicClient, cancelTx);
     const cancelSyncTx = await adminWalletClient.writeContract({
       address: contractAddress,
-      abi: GOLD_CLOB_ABI,
+      abi: LVR_ROUTER_ABI,
       functionName: "syncMarketFromOracle",
       args: [duelKey, MARKET_KIND_DUEL_WINNER],
     });

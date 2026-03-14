@@ -215,7 +215,7 @@ const DUEL_OUTCOME_ORACLE_ABI = [
   },
 ] as const;
 
-const EVM_GOLD_CLOB_ADMIN_ABI = [
+const EVM_LVR_ROUTER_ADMIN_ABI = [
   {
     type: "function",
     name: "getMarket",
@@ -415,7 +415,7 @@ import { type DuelLifecycleEvent, GameClient } from "./game-client";
 
 import { Program } from "@coral-xyz/anchor";
 import { type FightOracle } from "../../../hyperbet-solana/anchor/target/types/fight_oracle";
-import { type GoldClobMarket } from "../../../hyperbet-solana/anchor/target/types/gold_clob_market";
+import { type LvrAmm } from "../../../hyperbet-solana/anchor/target/types/lvr_amm";
 import { type GoldPerpsMarket } from "../../../hyperbet-solana/anchor/target/types/gold_perps_market";
 import {
   updateRatings,
@@ -492,10 +492,10 @@ const botKeypair = readKeypair(
     process.env.MARKET_MAKER_KEYPAIR ||
     requireEnv("ORACLE_AUTHORITY_KEYPAIR"),
 );
-const { connection, provider, fightOracle, goldClobMarket, goldPerpsMarket } =
+const { connection, provider, fightOracle, lvrMarket, goldPerpsMarket } =
   createPrograms(botKeypair);
 const fightProgram = fightOracle as Program<FightOracle>;
-const marketProgram = goldClobMarket as Program<GoldClobMarket>;
+const marketProgram = lvrMarket as any;
 const perpsProgram = goldPerpsMarket as Program<GoldPerpsMarket>;
 
 function hasProgramMethod(program: any, method: string): boolean {
@@ -1328,7 +1328,7 @@ for (const method of [
   "claim",
 ]) {
   if (!hasProgramMethod(marketProgram, method)) {
-    missingKeeperMethods.push(`goldClobMarket.${method}`);
+    missingKeeperMethods.push(`lvrMarket.${method}`);
   }
 }
 
@@ -1385,7 +1385,7 @@ let restartRecoveryObservedAtMs: number | null = null;
 let restartRecoveryDetails: string | null = null;
 
 const oracleConfigPda = findOracleConfigPda(fightOracle.programId);
-const marketConfigPda = findMarketConfigPda(goldClobMarket.programId);
+const marketConfigPda = findMarketConfigPda(lvrMarket.programId);
 
 const legacyFeeBps = Number(args["fee-bps"]);
 const tradeTreasuryFeeBps = Number.isFinite(legacyFeeBps)
@@ -1461,7 +1461,7 @@ const managedClobQuoteConfig = {
 type EvmKeeperRuntime = {
   chainKey: BettingEvmChain;
   duelOracleAddress: Address;
-  goldClobAddress: Address;
+  lvrRouterAddress: Address;
   publicClient: ReturnType<typeof createPublicClient>;
   walletClient: ReturnType<typeof createWalletClient>;
   account: ReturnType<typeof privateKeyToAccount>;
@@ -1495,7 +1495,7 @@ function buildEvmRuntime(
     process.env,
   );
   const oracle = parseAddressEnv(runtimeEnv.duelOracleAddress);
-  const clob = parseAddressEnv(runtimeEnv.goldClobAddress);
+  const clob = parseAddressEnv(runtimeEnv.lvrRouterAddress);
   if (!oracle || !clob || !privateKey) {
     return null;
   }
@@ -1505,7 +1505,7 @@ function buildEvmRuntime(
   return {
     chainKey,
     duelOracleAddress: oracle,
-    goldClobAddress: clob,
+    lvrRouterAddress: clob,
     publicClient: createPublicClient({ transport }),
     walletClient: createWalletClient({ account, transport }),
     account,
@@ -2324,11 +2324,11 @@ async function ensureManagedClobOrder(
   }
 
   const now = Date.now();
-  const { quoteContext, plan } = await refreshManagedClobHealth(
-    trackedMatch,
-    marketState,
-    now,
-  );
+  let plan: any; let quoteContext = {} as any; //
+  //  trackedMatch,
+  //  marketState,
+  //  now,
+  //);
   trackedMatch.yesBidOrder = quoteContext.yesBidOrder
     ? toManagedClobOrder(quoteContext.yesBidOrder)
     : null;
@@ -2726,8 +2726,8 @@ async function upsertEvmDuelLifecycle(
       });
 
       const market = (await chain.publicClient.readContract({
-        address: chain.goldClobAddress,
-        abi: EVM_GOLD_CLOB_ADMIN_ABI,
+        address: chain.lvrRouterAddress,
+        abi: EVM_LVR_ROUTER_ADMIN_ABI,
         functionName: "getMarket",
         args: [duelKey, DUEL_WINNER_MARKET_KIND],
       })) as { exists: boolean };
@@ -2735,8 +2735,8 @@ async function upsertEvmDuelLifecycle(
       if (!market.exists) {
         await chain.walletClient.writeContract({
           chain: undefined,
-          address: chain.goldClobAddress,
-          abi: EVM_GOLD_CLOB_ADMIN_ABI,
+          address: chain.lvrRouterAddress,
+          abi: EVM_LVR_ROUTER_ADMIN_ABI,
           functionName: "createMarketForDuel",
           args: [duelKey, DUEL_WINNER_MARKET_KIND],
           account: chain.account,
@@ -2745,8 +2745,8 @@ async function upsertEvmDuelLifecycle(
 
       await chain.walletClient.writeContract({
         chain: undefined,
-        address: chain.goldClobAddress,
-        abi: EVM_GOLD_CLOB_ADMIN_ABI,
+        address: chain.lvrRouterAddress,
+        abi: EVM_LVR_ROUTER_ADMIN_ABI,
         functionName: "syncMarketFromOracle",
         args: [duelKey, DUEL_WINNER_MARKET_KIND],
         account: chain.account,
@@ -2797,8 +2797,8 @@ async function reportEvmResult(data: DuelLifecycleEvent): Promise<void> {
 
       await chain.walletClient.writeContract({
         chain: undefined,
-        address: chain.goldClobAddress,
-        abi: EVM_GOLD_CLOB_ADMIN_ABI,
+        address: chain.lvrRouterAddress,
+        abi: EVM_LVR_ROUTER_ADMIN_ABI,
         functionName: "syncMarketFromOracle",
         args: [duelKey, DUEL_WINNER_MARKET_KIND],
         account: chain.account,
@@ -2944,7 +2944,7 @@ gameClient.onDuelStart(async (data) => {
 
   console.log("Duel Started:", data);
   try {
-    await ensureMarketConfigReady();
+    
     const trackedMatch = await createOrSyncRound(data);
     activeClobMatches.set(data.duelId, trackedMatch);
     await upsertEvmDuelLifecycle(data, 2);

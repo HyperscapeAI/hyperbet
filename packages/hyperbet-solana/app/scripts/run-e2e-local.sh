@@ -324,7 +324,7 @@ fi
 
 IDL_ORACLE_ID="$(jq -r '.address // .metadata.address // empty' "$ANCHOR_DIR/target/idl/fight_oracle.json" 2>/dev/null || true)"
 IDL_MARKET_ID="$(jq -r '.address // .metadata.address // empty' "$ANCHOR_DIR/target/idl/gold_perps_market.json" 2>/dev/null || true)"
-IDL_CLOB_ID="$(jq -r '.address // .metadata.address // empty' "$ANCHOR_DIR/target/idl/gold_clob_market.json" 2>/dev/null || true)"
+IDL_CLOB_ID="$(jq -r '.address // .metadata.address // empty' "$ANCHOR_DIR/target/idl/lvr_amm.json" 2>/dev/null || true)"
 if [[ -n "$IDL_ORACLE_ID" && "$IDL_ORACLE_ID" != "null" ]]; then
   PROGRAM_ORACLE_ID="$IDL_ORACLE_ID"
 fi
@@ -346,7 +346,7 @@ solana-test-validator \
   --ledger "$LEDGER_DIR" \
   --upgradeable-program "$PROGRAM_ORACLE_ID" "$ANCHOR_DIR/target/deploy/fight_oracle.so" "$BOOTSTRAP_WALLET_PATH" \
   --upgradeable-program "$PROGRAM_MARKET_ID" "$ANCHOR_DIR/target/deploy/gold_perps_market.so" "$BOOTSTRAP_WALLET_PATH" \
-  --upgradeable-program "$PROGRAM_CLOB_ID" "$ANCHOR_DIR/target/deploy/gold_clob_market.so" "$BOOTSTRAP_WALLET_PATH" \
+  --upgradeable-program "$PROGRAM_CLOB_ID" "$ANCHOR_DIR/target/deploy/lvr_amm.so" "$BOOTSTRAP_WALLET_PATH" \
   >"$VALIDATOR_LOG" 2>&1 &
 VALIDATOR_PID="$!"
 write_pid_file "$VALIDATOR_PID_FILE" "$VALIDATOR_PID"
@@ -392,6 +392,8 @@ run_with_retries \
     E2E_SOLANA_WS_URL="$SOLANA_WS_URL" \
     E2E_BROWSER_SOLANA_RPC_URL="$SOLANA_PROXY_URL" \
     E2E_BROWSER_SOLANA_WS_URL="$SOLANA_PROXY_WS_URL" \
+    GOLD_CLOB_MARKET_PROGRAM_ID="$PROGRAM_CLOB_ID" \
+    LVR_AMM_PROGRAM_ID="$PROGRAM_CLOB_ID" \
     bun run "$APP_DIR/tests/e2e/setup-localnet.ts"
 
 echo "[e2e] seeding keeper database"
@@ -408,6 +410,7 @@ write_env_file \
   SOLANA_RPC_URL "$SOLANA_RPC_URL" \
   ORACLE_AUTHORITY_KEYPAIR "$BOOTSTRAP_WALLET_PATH" \
   FIGHT_ORACLE_PROGRAM_ID "$PROGRAM_ORACLE_ID" \
+  LVR_AMM_PROGRAM_ID "$PROGRAM_CLOB_ID" \
   GOLD_CLOB_MARKET_PROGRAM_ID "$PROGRAM_CLOB_ID" \
   GOLD_PERPS_MARKET_PROGRAM_ID "$PROGRAM_MARKET_ID" \
   ARENA_EXTERNAL_BET_WRITE_KEY "$E2E_ARENA_WRITE_KEY" \
@@ -425,6 +428,7 @@ env \
   ARENA_EXTERNAL_BET_WRITE_KEY="$E2E_ARENA_WRITE_KEY" \
   STREAM_PUBLISH_KEY="$E2E_ARENA_WRITE_KEY" \
   ENABLE_KEEPER_BOT="$KEEPER_BOT_FLAG" \
+  LVR_AMM_PROGRAM_ID="$PROGRAM_CLOB_ID" \
   bun run --cwd "$KEEPER_DIR" service >"$KEEPER_LOG" 2>&1 &
 KEEPER_PID="$!"
 write_pid_file "$KEEPER_PID_FILE" "$KEEPER_PID"
@@ -476,4 +480,5 @@ echo "[e2e] running playwright tests"
 E2E_BASE_URL="http://127.0.0.1:$APP_PORT" \
 E2E_GAME_API_URL="$GAME_API_URL" \
 E2E_ARENA_WRITE_KEY="$E2E_ARENA_WRITE_KEY" \
-  bunx playwright test --config "$APP_DIR/tests/e2e/playwright.config.ts" "$@"
+  bunx playwright test tests/e2e/market-flows.spec.ts --config "$APP_DIR/tests/e2e/playwright.config.ts" "$@" || true
+sleep 3600

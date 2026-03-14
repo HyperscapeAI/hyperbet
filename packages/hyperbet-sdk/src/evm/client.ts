@@ -1,7 +1,7 @@
 import { ethers, Contract, JsonRpcProvider, Wallet } from "ethers";
 import { CreateOrderParams, CancelOrderParams, ClaimParams, OrderSide, SIDE_BID, SIDE_ASK, MARKET_KIND_DUEL_WINNER } from "../types";
 
-import goldClobAbi from "./abi/GoldClob.json";
+import lvrRouterAbi from "./abi/LvrRouter.json";
 import oracleAbi from "./abi/DuelOutcomeOracle.json";
 
 export class HyperbetEVMClient {
@@ -18,7 +18,7 @@ export class HyperbetEVMClient {
   ) {
     this.provider = new JsonRpcProvider(rpcUrl);
     this.wallet = new Wallet(privateKey, this.provider);
-    this.clob = new Contract(clobAddress, goldClobAbi.abi, this.wallet);
+    this.clob = new Contract(clobAddress, lvrRouterAbi.abi, this.wallet);
     this.oracle = new Contract(oracleAddress, oracleAbi.abi, this.wallet);
   }
 

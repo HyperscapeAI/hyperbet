@@ -453,7 +453,7 @@ describe("CrossChainMarketMaker", () => {
     );
     process.env.SOLANA_RPC_URL = "http://localhost:8899";
     process.env.FIGHT_ORACLE_PROGRAM_ID = TEST_FIGHT_ORACLE_ID;
-    process.env.GOLD_CLOB_MARKET_PROGRAM_ID = TEST_SOLANA_PROGRAM_ID;
+    process.env.LVR_AMM_PROGRAM_ID = TEST_SOLANA_PROGRAM_ID;
     process.env.CANCEL_STALE_AGE_MS = "12000";
 
     globalThis.fetch = vi.fn(async (url: string | URL | Request) => {

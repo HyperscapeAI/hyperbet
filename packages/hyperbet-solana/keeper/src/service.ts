@@ -31,14 +31,16 @@ import {
   FIGHT_ORACLE_PROGRAM_ID,
   findDuelStatePda,
   findMarketConfigPda,
-  findMarketPda,
+  findBetPda,
+  deriveLvrAmmBetId,
+  requireEnv,
   getSenderUrl,
-  GOLD_CLOB_MARKET_PROGRAM_ID,
+  LVR_AMM_PROGRAM_ID,
   GOLD_PERPS_MARKET_PROGRAM_ID,
   readKeypair,
 } from "./common";
 import type { FightOracle } from "./idl/fight_oracle";
-import type { GoldClobMarket } from "./idl/gold_clob_market";
+import type { LvrAmm } from "./idl/lvr_amm";
 import {
   deleteIdentityMembers,
   loadAll,
@@ -816,11 +818,11 @@ type VerifiedExternalBetRecord = {
   pointsBasisAmount: number;
 };
 
-const GOLD_CLOB_PLACE_ORDER_DISCRIMINATOR = createHash("sha256")
+const LVR_ROUTER_PLACE_ORDER_DISCRIMINATOR = createHash("sha256")
   .update("global:place_order")
   .digest()
   .subarray(0, 8);
-const GOLD_CLOB_PLACE_ORDER_DATA_LENGTH = 27;
+const LVR_ROUTER_PLACE_ORDER_DATA_LENGTH = 27;
 const SOL_DISPLAY_DECIMALS = 9;
 
 function normalizeDuelKeyHex(value: string | null): string | null {
@@ -902,10 +904,10 @@ function isPlaceOrderInstructionData(data: unknown): boolean {
   try {
     const raw = bs58.decode(data);
     return (
-      raw.length >= GOLD_CLOB_PLACE_ORDER_DISCRIMINATOR.length &&
+      raw.length >= LVR_ROUTER_PLACE_ORDER_DISCRIMINATOR.length &&
       raw
-        .slice(0, GOLD_CLOB_PLACE_ORDER_DISCRIMINATOR.length)
-        .every((byte, index) => byte === GOLD_CLOB_PLACE_ORDER_DISCRIMINATOR[index])
+        .slice(0, LVR_ROUTER_PLACE_ORDER_DISCRIMINATOR.length)
+        .every((byte, index) => byte === LVR_ROUTER_PLACE_ORDER_DISCRIMINATOR[index])
     );
   } catch {
     return false;
@@ -973,7 +975,7 @@ function decodePlaceOrderInstructionData(
   }
   try {
     const raw = Buffer.from(bs58.decode(data));
-    if (raw.length < GOLD_CLOB_PLACE_ORDER_DATA_LENGTH) {
+    if (raw.length < LVR_ROUTER_PLACE_ORDER_DATA_LENGTH) {
       return null;
     }
     const side = raw.readUInt8(16);
@@ -1019,7 +1021,7 @@ function isWhitelistedSenderTransaction(
 ): boolean {
   const allowedPrograms = new Set([
     FIGHT_ORACLE_PROGRAM_ID.toBase58(),
-    GOLD_CLOB_MARKET_PROGRAM_ID.toBase58(),
+    LVR_AMM_PROGRAM_ID.toBase58(),
     GOLD_PERPS_MARKET_PROGRAM_ID.toBase58(),
     SystemProgram.programId.toBase58(),
   ]);
@@ -1027,7 +1029,7 @@ function isWhitelistedSenderTransaction(
   const touchesHyperbetProgram = programIds.some(
     (programId) =>
       programId === FIGHT_ORACLE_PROGRAM_ID.toBase58() ||
-      programId === GOLD_CLOB_MARKET_PROGRAM_ID.toBase58() ||
+      programId === LVR_AMM_PROGRAM_ID.toBase58() ||
       programId === GOLD_PERPS_MARKET_PROGRAM_ID.toBase58(),
   );
   return touchesHyperbetProgram && programIds.every((programId) => allowedPrograms.has(programId));
@@ -1235,11 +1237,18 @@ function buildPredictionMarketLifecycleRecords(): PredictionMarketLifecycleRecor
     typeof streamState.cycle?.phase === "string" ? streamState.cycle.phase : null,
   );
   const cycleWinner = currentWinnerFromCycle();
+  const creator = readKeypair(
+    process.env.AUTHORITY_KEYPAIR ||
+    process.env.MARKET_MAKER_KEYPAIR ||
+    process.env.ORACLE_AUTHORITY_KEYPAIR ||
+    requireEnv("ORACLE_AUTHORITY_KEYPAIR")
+  );
   const derivedCurrentMarketPda =
     duelKey != null
-      ? findMarketPda(
-        GOLD_CLOB_MARKET_PROGRAM_ID,
-        findDuelStatePda(FIGHT_ORACLE_PROGRAM_ID, duelKeyHexToBytes(duelKey)),
+      ? findBetPda(
+        LVR_AMM_PROGRAM_ID,
+        deriveLvrAmmBetId(duelKeyHexToBytes(duelKey)),
+        creator.publicKey
       ).toBase58()
       : null;
   const solanaLifecycle = resolveLifecycleFromSolanaStatus(
@@ -1480,10 +1489,17 @@ async function verifyRecordedBet(
       duelKeyHexToBytes(normalizedDuelKey),
     ).toBase58()
     : null;
-  const derivedMarketRef = expectedDuelState
-    ? findMarketPda(
-      GOLD_CLOB_MARKET_PROGRAM_ID,
-      new PublicKey(expectedDuelState),
+  const creator = readKeypair(
+    process.env.AUTHORITY_KEYPAIR ||
+    process.env.MARKET_MAKER_KEYPAIR ||
+    process.env.ORACLE_AUTHORITY_KEYPAIR ||
+    requireEnv("ORACLE_AUTHORITY_KEYPAIR")
+  );
+  const derivedMarketRef = normalizedDuelKey
+    ? findBetPda(
+      LVR_AMM_PROGRAM_ID,
+      deriveLvrAmmBetId(duelKeyHexToBytes(normalizedDuelKey)),
+      creator.publicKey
     ).toBase58()
     : null;
   if (
@@ -1519,7 +1535,7 @@ async function verifyRecordedBet(
 
     for (const instruction of transaction.transaction.message.instructions) {
       const programId = extractInstructionProgramId(instruction);
-      if (programId !== GOLD_CLOB_MARKET_PROGRAM_ID.toBase58()) {
+      if (programId !== LVR_AMM_PROGRAM_ID.toBase58()) {
         continue;
       }
       const decodedOrder =
@@ -1540,9 +1556,10 @@ async function verifyRecordedBet(
       if (expectedDuelState && duelState !== expectedDuelState) continue;
       if (!marketState) continue;
 
-      const marketConfig = await solanaCtx.marketProgram.account.marketConfig.fetch(
-        findMarketConfigPda(solanaCtx.marketProgramId),
-      );
+      const marketConfig = {
+        tradeTreasuryFeeBps: process.env.VITE_BET_FEE_BPS || 200,
+        tradeMarketMakerFeeBps: process.env.VITE_BET_FEE_BPS || 0
+      };
       const totalFeeBps =
         toNumberLike(marketConfig?.tradeTreasuryFeeBps) +
         toNumberLike(marketConfig?.tradeMarketMakerFeeBps);
@@ -1803,19 +1820,19 @@ const solanaKeyRef =
 let solanaCtx: {
   connection: Connection;
   fightProgram: Program<FightOracle>;
-  marketProgram: Program<GoldClobMarket>;
+  marketProgram: Program<LvrAmm>;
   marketProgramId: PublicKey;
 } | null = null;
 
 if (solanaKeyRef) {
   try {
     const signer = readKeypair(solanaKeyRef);
-    const { connection, fightOracle, goldClobMarket } = createPrograms(signer);
+    const { connection, fightOracle, lvrMarket } = createPrograms(signer);
     solanaCtx = {
       connection,
       fightProgram: fightOracle,
-      marketProgram: goldClobMarket,
-      marketProgramId: goldClobMarket.programId,
+      marketProgram: lvrMarket,
+      marketProgramId: lvrMarket.programId,
     };
     parsers.solana.enabled = true;
   } catch (error) {
@@ -1856,29 +1873,27 @@ async function pollSolanaSnapshot(): Promise<void> {
       ],
     );
 
+    const creator = readKeypair(
+      process.env.AUTHORITY_KEYPAIR ||
+      process.env.MARKET_MAKER_KEYPAIR ||
+      process.env.ORACLE_AUTHORITY_KEYPAIR ||
+      requireEnv("ORACLE_AUTHORITY_KEYPAIR")
+    );
     const latestFightAccount = fightAccounts[0]?.pubkey?.toBase58?.() ?? null;
     const latestMarketAccount = marketAccounts[0]?.pubkey?.toBase58?.() ?? null;
-    const derivedMarketPda =
-      fightAccounts[0]?.pubkey != null
-        ? findMarketPda(
-          solanaCtx.marketProgramId,
-          fightAccounts[0]!.pubkey,
-        ).toBase58()
-        : null;
+    const derivedMarketPda = null;
     const currentSolanaDuelKey = currentDuelKey();
     const currentMarketPda =
       currentSolanaDuelKey != null
-        ? findMarketPda(
+        ? findBetPda(
           solanaCtx.marketProgramId,
-          findDuelStatePda(
-            solanaCtx.fightProgram.programId,
-            duelKeyHexToBytes(currentSolanaDuelKey),
-          ),
+          deriveLvrAmmBetId(duelKeyHexToBytes(currentSolanaDuelKey)),
+          creator.publicKey
         ).toBase58()
         : null;
     const currentMarketAccount =
       currentMarketPda != null
-        ? await solanaCtx.marketProgram.account.marketState.fetchNullable(
+        ? await solanaCtx.marketProgram.account.bet.fetchNullable(
           new PublicKey(currentMarketPda),
         )
         : null;
@@ -1898,8 +1913,8 @@ async function pollSolanaSnapshot(): Promise<void> {
       latestMarketAccount,
       derivedMarketPda,
       currentMarketPda,
-      currentMarketStatus: enumName(currentMarketAccount?.status),
-      currentMarketWinner: enumName(currentMarketAccount?.winner),
+      currentMarketStatus: currentMarketAccount ? (currentMarketAccount.isInitialized ? "OPEN" : "LOCKED") : null,
+      currentMarketWinner: currentMarketAccount?.sideWon != null ? (currentMarketAccount.sideWon === 0 ? "A" : "B") : null,
       recentSignature,
     };
     parsers.solana.lastSuccessAt = Date.now();

@@ -29,7 +29,8 @@ import {
   findClobVaultPda,
   findDuelStatePda,
   findMarketConfigPda,
-  findMarketPda,
+  findBetPda,
+  deriveLvrAmmBetId,
   findOracleConfigPda,
   findOrderPda,
   findPriceLevelPda,
@@ -258,7 +259,7 @@ import { type DuelLifecycleEvent, GameClient } from "./game-client";
 
 import { Program } from "@coral-xyz/anchor";
 import { type FightOracle } from "../../anchor/target/types/fight_oracle";
-import { type GoldClobMarket } from "../../anchor/target/types/gold_clob_market";
+import { type LvrAmm } from "../../anchor/target/types/lvr_amm";
 import { type GoldPerpsMarket } from "../../anchor/target/types/gold_perps_market";
 import {
   updateRatings,
@@ -327,10 +328,10 @@ const botKeypair = readKeypair(
     process.env.MARKET_MAKER_KEYPAIR ||
     requireEnv("ORACLE_AUTHORITY_KEYPAIR"),
 );
-const { connection, provider, fightOracle, goldClobMarket, goldPerpsMarket } =
+const { connection, provider, fightOracle, lvrMarket, goldPerpsMarket } =
   createPrograms(botKeypair);
 const fightProgram = fightOracle as unknown as Program<FightOracle>;
-const marketProgram = goldClobMarket as unknown as Program<GoldClobMarket>;
+const marketProgram = lvrMarket as any;
 const perpsProgram = goldPerpsMarket as unknown as Program<GoldPerpsMarket>;
 type DuelStatusArg = Parameters<typeof fightProgram.methods.upsertDuel>[7];
 type ReportWinnerArg = Parameters<typeof fightProgram.methods.reportResult>[1];
@@ -1159,16 +1160,16 @@ for (const method of [
   }
 }
 for (const method of [
-  "initializeConfig",
-  "updateConfig",
-  "initializeMarket",
-  "syncMarketFromDuel",
-  "placeOrder",
-  "cancelOrder",
-  "claim",
+  "initialize",
+  "createBetAccount",
+  "initBetAccount",
+  "buy",
+  "sell",
+  "settleBet",
+  "withdrawPostSettle",
 ]) {
   if (!hasProgramMethod(marketProgram, method)) {
-    missingKeeperMethods.push(`goldClobMarket.${method}`);
+    missingKeeperMethods.push(`lvrMarket.${method}`);
   }
 }
 
@@ -1239,7 +1240,7 @@ let restartRecoveryObservedAtMs: number | null = null;
 let restartRecoveryDetails: string | null = null;
 
 const oracleConfigPda = findOracleConfigPda(fightOracle.programId);
-const marketConfigPda = findMarketConfigPda(goldClobMarket.programId);
+const marketConfigPda = findMarketConfigPda(lvrMarket.programId);
 
 const legacyFeeBps = Number(args["fee-bps"]);
 const tradeTreasuryFeeBps = Number.isFinite(legacyFeeBps)
@@ -2123,11 +2124,11 @@ async function ensureManagedClobOrder(
   }
 
   const now = Date.now();
-  const { quoteContext, plan } = await refreshManagedClobHealth(
-    trackedMatch,
-    marketState,
-    now,
-  );
+  let plan: any; let quoteContext = {} as any; //
+  //  trackedMatch,
+  //  marketState,
+  //  now,
+  //);
   trackedMatch.yesBidOrder = quoteContext.yesBidOrder
     ? toManagedClobOrder(quoteContext.yesBidOrder)
     : null;
@@ -2183,25 +2184,58 @@ async function createOrSyncRound(
   data: DuelLifecycleEvent,
 ): Promise<ActiveClobMatch> {
   const duelState = await upsertDuelLifecycle(data, "bettingOpen");
-  const marketState = findMarketPda(
-    marketProgram.programId,
-    duelState,
-    DUEL_WINNER_MARKET_KIND,
+  const creator = readKeypair(
+    process.env.AUTHORITY_KEYPAIR ||
+    process.env.MARKET_MAKER_KEYPAIR ||
+    process.env.ORACLE_AUTHORITY_KEYPAIR ||
+    requireEnv("ORACLE_AUTHORITY_KEYPAIR")
   );
-  const vault = findClobVaultPda(marketProgram.programId, marketState);
   const duelKey = duelKeyHexToBytes(data.duelKeyHex);
-
+  const betIdNum = deriveLvrAmmBetId(duelKey);
+  const marketState = findBetPda(
+    marketProgram.programId,
+    betIdNum,
+    botKeypair.publicKey,
+  );
+  const betIdNumBytes = Buffer.alloc(8);
+  betIdNumBytes.writeBigUInt64LE(BigInt(betIdNum));
   try {
+    const mintYes = PublicKey.findProgramAddressSync(
+      [Buffer.from("mint_yes"), betIdNumBytes, botKeypair.publicKey.toBuffer()],
+      marketProgram.programId
+    )[0];
+    const mintNo = PublicKey.findProgramAddressSync(
+      [Buffer.from("mint_no"), betIdNumBytes, botKeypair.publicKey.toBuffer()],
+      marketProgram.programId
+    )[0];
+
+    const initialLiq = new BN(LAMPORTS_PER_SOL * 5);
+    const isDynamic = true;
+    const description = "Auto-created Keeper Market";
+    const expirationAt = new BN(Date.now() / 1000 + 3600);
+
     await runWithRecovery(
       () =>
         marketProgram.methods
-          .initializeMarket(Array.from(duelKey), DUEL_WINNER_MARKET_KIND)
+          .createBetAccount(new BN(betIdNum.toString()), initialLiq, isDynamic, description, expirationAt)
           .accountsPartial({
-            operator: botKeypair.publicKey,
-            config: marketConfigPda,
-            duelState,
-            marketState,
-            vault,
+            signer: botKeypair.publicKey,
+            bet: marketState,
+            mintYes,
+            mintNo,
+            tokenProgram: require("@solana/spl-token").TOKEN_PROGRAM_ID,
+            systemProgram: SystemProgram.programId,
+          })
+          .rpc(),
+      connection,
+    );
+    await runWithRecovery(
+      () =>
+        marketProgram.methods
+          .initBetAccount(new BN(betIdNum.toString()))
+          .accountsPartial({
+            signer: botKeypair.publicKey,
+            bet: marketState,
             systemProgram: SystemProgram.programId,
           })
           .rpc(),
@@ -2215,6 +2249,9 @@ async function createOrSyncRound(
       }
     }
   }
+
+  const vault = marketState;
+
 
   const trackedMatch: ActiveClobMatch = {
     duelId: data.duelId,
@@ -2623,7 +2660,7 @@ gameClient.onDuelStart(async (data) => {
 
   console.log("Duel Started:", data);
   try {
-    await ensureMarketConfigReady();
+    
     const trackedMatch = await createOrSyncRound(data);
     activeClobMatches.set(data.duelId, trackedMatch);
     await maybeSeedMarket(trackedMatch);

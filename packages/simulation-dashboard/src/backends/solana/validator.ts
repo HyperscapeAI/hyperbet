@@ -19,7 +19,7 @@ export type ResolvedSolanaRuntimeAssets = {
     walletPath: string;
     mintAuthority: string;
     fightOracle: ProgramArtifact;
-    goldClobMarket: ProgramArtifact;
+    lvrMarket: ProgramArtifact;
 };
 
 export type SolanaValidatorHandle = {
@@ -90,7 +90,7 @@ function resolveProgramId(idlPath: string): string {
 
 function resolveProgramArtifact(
     anchorDir: string,
-    name: "fight_oracle" | "gold_clob_market",
+    name: "fight_oracle" | "lvr_amm",
 ): ProgramArtifact {
     const idlPath = join(anchorDir, "target", "idl", `${name}.json`);
     const soPath = join(anchorDir, "target", "deploy", `${name}.so`);
@@ -123,7 +123,7 @@ export function resolveSolanaRuntimeAssets(): ResolvedSolanaRuntimeAssets {
         walletPath,
         mintAuthority: readKeypairPublicKey(walletPath),
         fightOracle: resolveProgramArtifact(anchorDir, "fight_oracle"),
-        goldClobMarket: resolveProgramArtifact(anchorDir, "gold_clob_market"),
+        lvrMarket: resolveProgramArtifact(anchorDir, "lvr_amm"),
     };
 }
 
@@ -247,8 +247,8 @@ export async function startSolanaValidator(): Promise<SolanaValidatorHandle> {
         assets.fightOracle.soPath,
         assets.walletPath,
         "--upgradeable-program",
-        assets.goldClobMarket.programId,
-        assets.goldClobMarket.soPath,
+        assets.lvrMarket.programId,
+        assets.lvrMarket.soPath,
         assets.walletPath,
     ];
 
@@ -299,7 +299,7 @@ export async function startSolanaValidator(): Promise<SolanaValidatorHandle> {
     try {
         await waitForRpcReady(rpcUrl);
         await waitForProgram(rpcUrl, assets.fightOracle.programId);
-        await waitForProgram(rpcUrl, assets.goldClobMarket.programId);
+        await waitForProgram(rpcUrl, assets.lvrMarket.programId);
         return {
             rpcUrl,
             wsUrl,

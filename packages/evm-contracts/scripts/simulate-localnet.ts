@@ -1,6 +1,6 @@
 import { ethers } from "hardhat";
 
-import { deployDuelOutcomeOracle, deployGoldClob } from "../typed-contracts";
+import { deployDuelOutcomeOracle, deployLvrRouter } from "../typed-contracts";
 
 const MARKET_KIND_DUEL_WINNER = 0;
 const DUEL_STATUS_BETTING_OPEN = 2;
@@ -29,7 +29,7 @@ async function main() {
   const oracle = await deployDuelOutcomeOracle(admin.address, reporter.address, admin);
   await oracle.waitForDeployment();
 
-  const clob = await deployGoldClob(
+  const clob = await deployLvrRouter(
     admin.address,
     operator.address,
     await oracle.getAddress(),

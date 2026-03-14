@@ -12,7 +12,7 @@ import {
 } from "@solana/web3.js";
 
 import { FightOracle } from "../target/types/fight_oracle";
-import { GoldClobMarket } from "../target/types/gold_clob_market";
+import { LvrAmm } from "../target/types/lvr_amm";
 import { confirmSignatureByPolling } from "./test-anchor";
 
 const BPF_LOADER_UPGRADEABLE_PROGRAM_ID = new PublicKey(
@@ -240,7 +240,7 @@ export async function ensureOracleReady(
 }
 
 export async function ensureClobConfig(
-  program: Program<GoldClobMarket>,
+  program: Program<LvrAmm>,
   authority: Keypair,
   options?: {
     marketOperator?: PublicKey;
@@ -418,7 +418,7 @@ export async function reportDuelResult(
 }
 
 export async function initializeCanonicalMarket(
-  program: Program<GoldClobMarket>,
+  program: Program<LvrAmm>,
   operator: Keypair,
   duelState: PublicKey,
   duelKey: readonly number[],
@@ -449,7 +449,7 @@ export async function initializeCanonicalMarket(
 }
 
 export async function ensureVaultRentExempt(
-  program: Program<GoldClobMarket>,
+  program: Program<LvrAmm>,
   funder: Keypair,
   vault: PublicKey,
 ): Promise<void> {
@@ -473,7 +473,7 @@ export async function ensureVaultRentExempt(
 }
 
 export async function syncMarketFromDuel(
-  program: Program<GoldClobMarket>,
+  program: Program<LvrAmm>,
   marketState: PublicKey,
   duelState: PublicKey,
 ): Promise<void> {
@@ -487,7 +487,7 @@ export async function syncMarketFromDuel(
 }
 
 export async function placeClobOrder(
-  program: Program<GoldClobMarket>,
+  program: Program<LvrAmm>,
   args: {
     marketState: PublicKey;
     duelState: PublicKey;
@@ -550,7 +550,7 @@ export async function placeClobOrder(
 }
 
 export async function cancelClobOrder(
-  program: Program<GoldClobMarket>,
+  program: Program<LvrAmm>,
   args: {
     marketState: PublicKey;
     duelState: PublicKey;
@@ -596,7 +596,7 @@ export async function cancelClobOrder(
 }
 
 export async function claimClobWinnings(
-  program: Program<GoldClobMarket>,
+  program: Program<LvrAmm>,
   args: {
     marketState: PublicKey;
     duelState: PublicKey;
@@ -632,7 +632,7 @@ export async function claimClobWinnings(
 
 export async function createOpenMarketFixture(
   fightProgram: Program<FightOracle>,
-  clobProgram: Program<GoldClobMarket>,
+  clobProgram: Program<LvrAmm>,
   authority: Keypair,
   options?: {
     duelKey?: readonly number[];

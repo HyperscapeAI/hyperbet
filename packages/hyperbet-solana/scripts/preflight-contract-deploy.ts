@@ -10,14 +10,14 @@ import {
 } from "../deployments";
 
 type Target = "testnet" | "mainnet";
-type ProgramKey = "fightOracle" | "goldClobMarket" | "goldPerpsMarket";
+type ProgramKey = "fightOracle" | "lvrMarket" | "goldPerpsMarket";
 
 interface SolanaProgramCheck {
   key: ProgramKey;
-  binaryName: "fight_oracle" | "gold_clob_market" | "gold_perps_market";
+  binaryName: "fight_oracle" | "lvr_amm" | "gold_perps_market";
   manifestField:
     | "fightOracleProgramId"
-    | "goldClobMarketProgramId"
+    | "lvrMarketProgramId"
     | "goldPerpsMarketProgramId";
 }
 
@@ -28,9 +28,9 @@ const PROGRAMS: SolanaProgramCheck[] = [
     manifestField: "fightOracleProgramId",
   },
   {
-    key: "goldClobMarket",
-    binaryName: "gold_clob_market",
-    manifestField: "goldClobMarketProgramId",
+    key: "lvrMarket",
+    binaryName: "lvr_amm",
+    manifestField: "lvrMarketProgramId",
   },
   {
     key: "goldPerpsMarket",

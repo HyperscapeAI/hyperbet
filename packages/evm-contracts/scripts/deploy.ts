@@ -57,7 +57,7 @@ function resolveManifestPaths(): string[] {
 function updateBettingManifest(
   networkName: string,
   duelOracleAddress: string,
-  goldClobAddress: string,
+  lvrRouterAddress: string,
   adminAddress: string,
   marketOperatorAddress: string,
   treasuryAddress: string,
@@ -83,7 +83,7 @@ function updateBettingManifest(
         string,
         {
           duelOracleAddress?: string;
-          goldClobAddress?: string;
+          lvrRouterAddress?: string;
           adminAddress?: string;
           marketOperatorAddress?: string;
           treasuryAddress?: string;
@@ -103,7 +103,7 @@ function updateBettingManifest(
     manifest.evm[manifestKey] = {
       ...manifest.evm[manifestKey],
       duelOracleAddress,
-      goldClobAddress,
+      lvrRouterAddress,
       adminAddress,
       marketOperatorAddress,
       treasuryAddress,
@@ -180,9 +180,9 @@ async function main() {
   const duelOracle = await DuelOutcomeOracle.deploy(adminAddress, reporterAddress);
   await duelOracle.waitForDeployment();
 
-  console.log("Deploying GoldClob...");
-  const GoldClob = await ethers.getContractFactory("GoldClob");
-  const clob = await GoldClob.deploy(
+  console.log("Deploying LvrRouter...");
+  const LvrRouter = await ethers.getContractFactory("LvrRouter");
+  const clob = await LvrRouter.deploy(
     adminAddress,
     marketOperator,
     await duelOracle.getAddress(),
@@ -192,7 +192,7 @@ async function main() {
   await clob.waitForDeployment();
 
   console.log("DuelOutcomeOracle deployed to:", await duelOracle.getAddress());
-  console.log("GoldClob deployed to:", await clob.getAddress());
+  console.log("LvrRouter deployed to:", await clob.getAddress());
   console.log("Configuration:");
   console.log("- Admin:", adminAddress);
   console.log("- Market Operator:", marketOperator);
@@ -211,7 +211,7 @@ async function main() {
     chainId,
     deployer: deployer.address,
     duelOracleAddress,
-    goldClobAddress: clobAddress,
+    lvrRouterAddress: clobAddress,
     adminAddress,
     marketOperatorAddress: marketOperator,
     reporterAddress,

@@ -57,8 +57,8 @@ type AccountNamespaceFetcher = {
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const anchorIdlDir = path.resolve(__dirname, "../../../anchor/target/idl");
-const goldClobIdl = JSON.parse(
-  fs.readFileSync(path.join(anchorIdlDir, "gold_clob_market.json"), "utf8"),
+const lvrRouterIdl = JSON.parse(
+  fs.readFileSync(path.join(anchorIdlDir, "lvr_amm.json"), "utf8"),
 ) as Idl;
 
 async function loadState(): Promise<E2eState> {
@@ -118,7 +118,7 @@ async function seedAskLiquidity(
     commitment: "confirmed",
     preflightCommitment: "confirmed",
   });
-  const clobProgram = new Program(goldClobIdl, provider);
+  const clobProgram = new Program(lvrRouterIdl, provider);
   const marketState = new PublicKey(state.clobMarketState || "");
   const clobAccounts = clobProgram.account as Record<
     string,
@@ -188,7 +188,7 @@ async function loadMarketBalances(
     commitment: "confirmed",
     preflightCommitment: "confirmed",
   });
-  const clobProgram = new Program(goldClobIdl, provider);
+  const clobProgram = new Program(lvrRouterIdl, provider);
   const marketState = new PublicKey(state.clobMarketState || "");
   const balances = await clobProgram.account.userBalance.all();
   return balances
@@ -212,7 +212,7 @@ function createReadonlyClobProgram(
     commitment: "confirmed",
     preflightCommitment: "confirmed",
   });
-  return new Program(goldClobIdl, provider);
+  return new Program(lvrRouterIdl, provider);
 }
 
 async function gotoApp(page: Page): Promise<void> {

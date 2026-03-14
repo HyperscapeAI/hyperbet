@@ -19,8 +19,8 @@ describe("betting deployment manifest", () => {
     expect(testnet.fightOracleProgramId).toBe(
       BETTING_DEPLOYMENTS.solana.testnet.fightOracleProgramId,
     );
-    expect(testnet.goldClobMarketProgramId).toBe(
-      BETTING_DEPLOYMENTS.solana.testnet.goldClobMarketProgramId,
+    expect(testnet.lvrMarketProgramId).toBe(
+      BETTING_DEPLOYMENTS.solana.testnet.lvrMarketProgramId,
     );
     expect(testnet.goldPerpsMarketProgramId).toBe(
       BETTING_DEPLOYMENTS.solana.testnet.goldPerpsMarketProgramId,
@@ -30,7 +30,7 @@ describe("betting deployment manifest", () => {
   test("requires non-empty Solana program ids for every cluster", () => {
     for (const deployment of Object.values(BETTING_DEPLOYMENTS.solana)) {
       expect(deployment.fightOracleProgramId.length).toBeGreaterThan(0);
-      expect(deployment.goldClobMarketProgramId.length).toBeGreaterThan(0);
+      expect(deployment.lvrMarketProgramId.length).toBeGreaterThan(0);
       expect(deployment.goldPerpsMarketProgramId.length).toBeGreaterThan(0);
     }
   });

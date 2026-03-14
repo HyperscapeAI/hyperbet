@@ -3,9 +3,9 @@ import { ethers } from "hardhat";
 
 import {
   deployDuelOutcomeOracle,
-  deployGoldClob,
+  deployLvrRouter,
   type DuelOutcomeOracleContract,
-  type GoldClobContract,
+  type LvrRouterContract,
 } from "../typed-contracts";
 
 const MARKET_KIND_DUEL_WINNER = 0;
@@ -50,7 +50,7 @@ async function deployFixture() {
   );
   await oracle.waitForDeployment();
 
-  const clob = await deployGoldClob(
+  const clob = await deployLvrRouter(
     admin.address,
     operator.address,
     await oracle.getAddress(),
@@ -94,7 +94,7 @@ async function upsertOpenDuel(
   return now;
 }
 
-describe("GoldClob", function () {
+describe("LvrRouter", function () {
   it("creates one canonical market per duel and syncs from the duel oracle", async function () {
     const { clob, oracle, operator, reporter } = await deployFixture();
     const duel = duelKey("duel-1");

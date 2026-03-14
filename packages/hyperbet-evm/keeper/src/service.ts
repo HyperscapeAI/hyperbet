@@ -40,7 +40,7 @@ import {
   findMarketConfigPda,
   findMarketPda,
   FIGHT_ORACLE_PROGRAM_ID,
-  GOLD_CLOB_MARKET_PROGRAM_ID,
+  LVR_AMM_PROGRAM_ID,
   readKeypair,
 } from "./common";
 import {
@@ -297,7 +297,7 @@ const WRITE_RATE_LIMIT_BURST = readPositiveEnvInteger(
 );
 const DISABLE_RATE_LIMIT = readEnvBoolean("DISABLE_RATE_LIMIT", false);
 
-const GOLD_CLOB_READ_ABI = [
+const LVR_ROUTER_READ_ABI = [
   {
     type: "function",
     name: "marketKey",
@@ -450,7 +450,7 @@ const bscRpcUrl = (
   ""
 ).trim();
 const bscContractAddress = (
-  process.env.BSC_GOLD_CLOB_ADDRESS ||
+  process.env.BSC_LVR_ROUTER_ADDRESS ||
   process.env.CLOB_CONTRACT_ADDRESS_BSC ||
   ""
 ).trim();
@@ -461,7 +461,7 @@ const baseRpcUrl = (
 ).trim();
 const avaxRpcUrl = (process.env.AVAX_RPC_URL || "").trim();
 const baseContractAddress = (
-  process.env.BASE_GOLD_CLOB_ADDRESS ||
+  process.env.BASE_LVR_ROUTER_ADDRESS ||
   process.env.CLOB_CONTRACT_ADDRESS_BASE ||
   ""
 ).trim();
@@ -969,18 +969,18 @@ type VerifiedExternalBetRecord = {
   pointsBasisAmount: number;
 };
 
-const GOLD_CLOB_PLACE_ORDER_DISCRIMINATOR = createHash("sha256")
+const LVR_ROUTER_PLACE_ORDER_DISCRIMINATOR = createHash("sha256")
   .update("global:place_order")
   .digest()
   .subarray(0, 8);
-const GOLD_CLOB_EVM_PLACE_ORDER_ABI = parseAbi([
+const LVR_ROUTER_EVM_PLACE_ORDER_ABI = parseAbi([
   "function placeOrder(bytes32 duelKey, uint8 marketKind, uint8 side, uint16 price, uint128 amount)",
 ]);
-const GOLD_CLOB_EVM_ORDER_PLACED_EVENT = parseAbiItem(
+const LVR_ROUTER_EVM_ORDER_PLACED_EVENT = parseAbiItem(
   "event OrderPlaced(bytes32 indexed marketKey, uint64 indexed orderId, address indexed maker, uint8 side, uint16 price, uint128 amount)",
 );
-const GOLD_CLOB_EVM_DUEL_WINNER_MARKET_KIND = 0n;
-const GOLD_CLOB_PLACE_ORDER_DATA_LENGTH = 27;
+const LVR_ROUTER_EVM_DUEL_WINNER_MARKET_KIND = 0n;
+const LVR_ROUTER_PLACE_ORDER_DATA_LENGTH = 27;
 const SOL_DISPLAY_DECIMALS = 9;
 const EVM_DISPLAY_DECIMALS = 18;
 const EVM_MAX_PRICE = 1000n;
@@ -1086,13 +1086,13 @@ function decodePlaceOrderInstructionData(
   if (typeof data !== "string") return null;
   try {
     const raw = Buffer.from(bs58.decode(data));
-    if (raw.length !== GOLD_CLOB_PLACE_ORDER_DATA_LENGTH) {
+    if (raw.length !== LVR_ROUTER_PLACE_ORDER_DATA_LENGTH) {
       return null;
     }
     if (
       !raw
-        .subarray(0, GOLD_CLOB_PLACE_ORDER_DISCRIMINATOR.length)
-        .equals(GOLD_CLOB_PLACE_ORDER_DISCRIMINATOR)
+        .subarray(0, LVR_ROUTER_PLACE_ORDER_DISCRIMINATOR.length)
+        .equals(LVR_ROUTER_PLACE_ORDER_DISCRIMINATOR)
     ) {
       return null;
     }
@@ -1519,7 +1519,7 @@ function buildPredictionMarketLifecycleRecords(
     const solanaMarketPda =
       duelKey != null
         ? findMarketPda(
-          GOLD_CLOB_MARKET_PROGRAM_ID,
+          LVR_AMM_PROGRAM_ID,
           findDuelStatePda(FIGHT_ORACLE_PROGRAM_ID, duelKeyHexToBytes(duelKey)),
         ).toBase58()
         : null;
@@ -1802,7 +1802,7 @@ async function verifySolanaRecordedBet(
     : null;
   const derivedMarketRef = expectedDuelState
     ? findMarketPda(
-      GOLD_CLOB_MARKET_PROGRAM_ID,
+      LVR_AMM_PROGRAM_ID,
       new PublicKey(expectedDuelState),
     ).toBase58()
     : null;
@@ -1839,7 +1839,7 @@ async function verifySolanaRecordedBet(
 
     for (const instruction of transaction.transaction.message.instructions) {
       const programId = extractInstructionProgramId(instruction);
-      if (programId !== GOLD_CLOB_MARKET_PROGRAM_ID.toBase58()) {
+      if (programId !== LVR_AMM_PROGRAM_ID.toBase58()) {
         continue;
       }
       const decodedOrder =
@@ -1925,7 +1925,7 @@ async function verifyEvmRecordedBet(
       client.getTransaction({ hash: txSignature as `0x${string}` }),
       client.readContract({
         address: contractAddress as Address,
-        abi: GOLD_CLOB_READ_ABI,
+        abi: LVR_ROUTER_READ_ABI,
         functionName: "feeBps",
       }),
     ]);
@@ -1938,7 +1938,7 @@ async function verifyEvmRecordedBet(
     }
 
     const decodedCall = decodeFunctionData({
-      abi: GOLD_CLOB_EVM_PLACE_ORDER_ABI,
+      abi: LVR_ROUTER_EVM_PLACE_ORDER_ABI,
       data: tx.input,
     });
     if (decodedCall.functionName !== "placeOrder") {
@@ -1946,7 +1946,7 @@ async function verifyEvmRecordedBet(
     }
     const duelKeyArg = normalizeHex32((decodedCall.args?.[0] as string | undefined) ?? null);
     const marketKindArg = BigInt((decodedCall.args?.[1] as bigint | number | undefined) ?? 255);
-    if (!duelKeyArg || marketKindArg !== GOLD_CLOB_EVM_DUEL_WINNER_MARKET_KIND) {
+    if (!duelKeyArg || marketKindArg !== LVR_ROUTER_EVM_DUEL_WINNER_MARKET_KIND) {
       return null;
     }
     if (normalizedDuelKey && duelKeyArg !== normalizedDuelKey) {
@@ -1981,7 +1981,7 @@ async function verifyEvmRecordedBet(
       if (log.address.toLowerCase() !== contractAddress.toLowerCase()) continue;
       try {
         const decodedLog = decodeEventLog({
-          abi: [GOLD_CLOB_EVM_ORDER_PLACED_EVENT],
+          abi: [LVR_ROUTER_EVM_ORDER_PLACED_EVENT],
           data: log.data,
           topics: log.topics,
         });
@@ -2271,12 +2271,12 @@ let solanaCtx: {
 if (solanaKeyRef) {
   try {
     const signer = readKeypair(solanaKeyRef);
-    const { connection, fightOracle, goldClobMarket } = createPrograms(signer);
+    const { connection, fightOracle, lvrMarket } = createPrograms(signer);
     solanaCtx = {
       connection,
       fightProgram: fightOracle,
-      marketProgram: goldClobMarket,
-      marketProgramId: goldClobMarket.programId,
+      marketProgram: lvrMarket,
+      marketProgramId: lvrMarket.programId,
     };
     parsers.solana.enabled = true;
   } catch (error) {
@@ -2399,13 +2399,13 @@ async function pollEvmSnapshot(
     const normalizedDuelKey = `0x${duelKey}` as `0x${string}`;
     const marketKey = (await client.readContract({
       address: contractAddress as Address,
-      abi: GOLD_CLOB_READ_ABI,
+      abi: LVR_ROUTER_READ_ABI,
       functionName: "marketKey",
       args: [normalizedDuelKey, 0],
     })) as `0x${string}`;
     const market = (await client.readContract({
       address: contractAddress as Address,
-      abi: GOLD_CLOB_READ_ABI,
+      abi: LVR_ROUTER_READ_ABI,
       functionName: "getMarket",
       args: [normalizedDuelKey, 0],
     })) as any;

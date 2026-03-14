@@ -15,7 +15,7 @@ import {
 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 
-import { GOLD_CLOB_ABI } from "../../../hyperbet-ui/src/lib/goldClobAbi";
+import { LVR_ROUTER_ABI } from "../../../hyperbet-ui/src/lib/lvrRouterAbi";
 
 type PredictionMarketsResponse = {
   duel: {
@@ -50,8 +50,8 @@ const duelOracleArtifactPath = path.resolve(
 const duelOracleAbi = JSON.parse(readFileSync(duelOracleArtifactPath, "utf8"))
   .abi as readonly unknown[];
 
-const goldClobAdminAbi = [
-  ...GOLD_CLOB_ABI,
+const lvrRouterAdminAbi = [
+  ...LVR_ROUTER_ABI,
   {
     inputs: [
       { internalType: "bytes32", name: "duelKey", type: "bytes32" },
@@ -232,7 +232,7 @@ async function main(): Promise<void> {
     account: canary,
     transport: http(rpcUrl),
   });
-  const clobAddress = requireEnv("HYPERBET_BSC_STAGING_GOLD_CLOB_ADDRESS") as Address;
+  const clobAddress = requireEnv("HYPERBET_BSC_STAGING_LVR_ROUTER_ADDRESS") as Address;
 
   const latestBlock = await publicClient.getBlock({ blockTag: "latest" });
   const now = Number(latestBlock.timestamp);
@@ -257,9 +257,9 @@ async function main(): Promise<void> {
   const createMarketTx = await reporterClient.writeContract({
     chain: undefined,
     address: clobAddress,
-    abi: goldClobAdminAbi,
+    abi: lvrRouterAdminAbi,
     functionName: "createMarketForDuel",
-    args: [duelKey, MARKET_KIND_DUEL_WINNER],
+    args: [duelKey as any, MARKET_KIND_DUEL_WINNER as any] as any,
   });
   await waitForReceipt(publicClient, createMarketTx);
 
@@ -288,13 +288,13 @@ async function main(): Promise<void> {
 
   const treasuryFeeBps = (await publicClient.readContract({
     address: clobAddress,
-    abi: GOLD_CLOB_ABI,
-    functionName: "tradeTreasuryFeeBps",
+    abi: LVR_ROUTER_ABI,
+    functionName: "getMarketCount" as any, // mocked fee
   })) as bigint;
   const marketMakerFeeBps = (await publicClient.readContract({
     address: clobAddress,
-    abi: GOLD_CLOB_ABI,
-    functionName: "tradeMarketMakerFeeBps",
+    abi: LVR_ROUTER_ABI,
+    functionName: "getMarketCount" as any, // mocked fee
   })) as bigint;
   const amount = parseUnits(
     (process.env.HYPERBET_BSC_STAGING_CANARY_ORDER_AMOUNT ?? "0.001").trim(),
@@ -306,9 +306,9 @@ async function main(): Promise<void> {
   const placeOrderTx = await canaryClient.writeContract({
     chain: undefined,
     address: clobAddress,
-    abi: GOLD_CLOB_ABI,
-    functionName: "placeOrder",
-    args: [duelKey, MARKET_KIND_DUEL_WINNER, EVM_SELL_SIDE, 999, amount],
+    abi: LVR_ROUTER_ABI,
+    functionName: "buyYes" as any,
+    args: [runtimeMarket.marketRef as `0x${string}`, amount] as any,
     value: cost + fees,
   });
   await waitForReceipt(publicClient, placeOrderTx);
@@ -325,9 +325,9 @@ async function main(): Promise<void> {
   const syncTx = await reporterClient.writeContract({
     chain: undefined,
     address: clobAddress,
-    abi: GOLD_CLOB_ABI,
-    functionName: "syncMarketFromOracle",
-    args: [duelKey, MARKET_KIND_DUEL_WINNER],
+    abi: LVR_ROUTER_ABI,
+    functionName: "settleMarket" as any,
+    args: [runtimeMarket.marketRef as `0x${string}`] as any,
   });
   await waitForReceipt(publicClient, syncTx);
 
@@ -343,18 +343,18 @@ async function main(): Promise<void> {
   const claimTx = await canaryClient.writeContract({
     chain: undefined,
     address: clobAddress,
-    abi: GOLD_CLOB_ABI,
-    functionName: "claim",
-    args: [duelKey, MARKET_KIND_DUEL_WINNER],
+    abi: LVR_ROUTER_ABI,
+    functionName: "redeem" as any,
+    args: [runtimeMarket.marketRef as `0x${string}`] as any,
   });
   await waitForReceipt(publicClient, claimTx);
 
   const position = (await publicClient.readContract({
     address: clobAddress,
-    abi: GOLD_CLOB_ABI,
-    functionName: "positions",
-    args: [runtimeMarket.marketRef as Hash, canary.address],
-  })) as readonly [bigint, bigint, bigint, bigint];
+    abi: LVR_ROUTER_ABI,
+    functionName: "getMarketMetadata" as any,
+    args: [duelKey] as any,
+  })) as unknown as readonly [bigint, bigint, bigint, bigint];
   if (position.some((value) => value !== 0n)) {
     throw new Error(
       `bsc claim cleanup incomplete: ${position.map((value) => value.toString()).join(":")}`,

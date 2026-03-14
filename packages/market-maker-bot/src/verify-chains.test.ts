@@ -42,16 +42,16 @@ describe("verify-chains module structure", () => {
   });
 
   it("reports blank configured addresses without throwing", () => {
-    expect(validateConfiguredAddress("", "goldClobAddress")).toEqual({
+    expect(validateConfiguredAddress("", "lvrRouterAddress")).toEqual({
       ok: false,
-      details: "goldClobAddress not configured",
+      details: "lvrRouterAddress not configured",
     });
   });
 
   it("reports invalid configured addresses without throwing", () => {
-    expect(validateConfiguredAddress("not-an-address", "goldClobAddress")).toEqual({
+    expect(validateConfiguredAddress("not-an-address", "lvrRouterAddress")).toEqual({
       ok: false,
-      details: "goldClobAddress invalid",
+      details: "lvrRouterAddress invalid",
     });
   });
 });

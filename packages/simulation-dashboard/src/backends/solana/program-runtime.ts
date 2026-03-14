@@ -284,7 +284,7 @@ export class SolanaProgramRuntime {
             readFileSync(validator.assets.fightOracle.idlPath, "utf8"),
         ) as anchor.Idl;
         const clobIdl = JSON.parse(
-            readFileSync(validator.assets.goldClobMarket.idlPath, "utf8"),
+            readFileSync(validator.assets.lvrMarket.idlPath, "utf8"),
         ) as anchor.Idl;
 
         const fightProgram = new anchor.Program(

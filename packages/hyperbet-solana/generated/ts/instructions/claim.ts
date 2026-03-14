@@ -7,14 +7,14 @@
  */
 
 import { combineCodec, fixDecoderSize, fixEncoderSize, getAddressEncoder, getBytesDecoder, getBytesEncoder, getProgramDerivedAddress, getStructDecoder, getStructEncoder, transformEncoder, type IAccountMeta, type IAccountSignerMeta, type Address, type FixedSizeCodec, type FixedSizeDecoder, type FixedSizeEncoder, type IInstruction, type IInstructionWithAccounts, type IInstructionWithData, type ReadonlyAccount, type ReadonlyUint8Array, type TransactionSigner, type WritableAccount, type WritableSignerAccount } from '@solana/kit';
-import { GOLD_CLOB_MARKET_PROGRAM_ADDRESS } from '../programs/index.js';
+import { LVR_ROUTER_MARKET_PROGRAM_ADDRESS } from '../programs/index.js';
 import { expectAddress, getAccountMetaFactory, type ResolvedAccount } from '../shared/index.js';
 
 export const CLAIM_DISCRIMINATOR: ReadonlyUint8Array = new Uint8Array([62, 198, 214, 193, 213, 159, 108, 210]);
 
 export function getClaimDiscriminatorBytes(): ReadonlyUint8Array { return fixEncoderSize(getBytesEncoder(), 8).encode(CLAIM_DISCRIMINATOR); }
 
-export type ClaimInstruction<TProgram extends string = typeof GOLD_CLOB_MARKET_PROGRAM_ADDRESS, TAccountMarketState extends string | IAccountMeta<string> = string, TAccountDuelState extends string | IAccountMeta<string> = string, TAccountUserBalance extends string | IAccountMeta<string> = string, TAccountConfig extends string | IAccountMeta<string> = string, TAccountMarketMaker extends string | IAccountMeta<string> = string, TAccountVault extends string | IAccountMeta<string> = string, TAccountUser extends string | IAccountMeta<string> = string, TAccountSystemProgram extends string | IAccountMeta<string> = "11111111111111111111111111111111", TRemainingAccounts extends readonly IAccountMeta<string>[] = []> =
+export type ClaimInstruction<TProgram extends string = typeof LVR_ROUTER_MARKET_PROGRAM_ADDRESS, TAccountMarketState extends string | IAccountMeta<string> = string, TAccountDuelState extends string | IAccountMeta<string> = string, TAccountUserBalance extends string | IAccountMeta<string> = string, TAccountConfig extends string | IAccountMeta<string> = string, TAccountMarketMaker extends string | IAccountMeta<string> = string, TAccountVault extends string | IAccountMeta<string> = string, TAccountUser extends string | IAccountMeta<string> = string, TAccountSystemProgram extends string | IAccountMeta<string> = "11111111111111111111111111111111", TRemainingAccounts extends readonly IAccountMeta<string>[] = []> =
 IInstruction<TProgram> & IInstructionWithData<ReadonlyUint8Array> & IInstructionWithAccounts<[TAccountMarketState extends string ? WritableAccount<TAccountMarketState> : TAccountMarketState, TAccountDuelState extends string ? ReadonlyAccount<TAccountDuelState> : TAccountDuelState, TAccountUserBalance extends string ? WritableAccount<TAccountUserBalance> : TAccountUserBalance, TAccountConfig extends string ? ReadonlyAccount<TAccountConfig> : TAccountConfig, TAccountMarketMaker extends string ? WritableAccount<TAccountMarketMaker> : TAccountMarketMaker, TAccountVault extends string ? WritableAccount<TAccountVault> : TAccountVault, TAccountUser extends string ? WritableSignerAccount<TAccountUser> & IAccountSignerMeta<TAccountUser> : TAccountUser, TAccountSystemProgram extends string ? ReadonlyAccount<TAccountSystemProgram> : TAccountSystemProgram, ...TRemainingAccounts]>;
 
 export type ClaimInstructionData = { discriminator: ReadonlyUint8Array;  };
@@ -44,9 +44,9 @@ user: TransactionSigner<TAccountUser>;
 systemProgram?: Address<TAccountSystemProgram>;
 }
 
-export async function getClaimInstructionAsync<TAccountMarketState extends string, TAccountDuelState extends string, TAccountUserBalance extends string, TAccountConfig extends string, TAccountMarketMaker extends string, TAccountVault extends string, TAccountUser extends string, TAccountSystemProgram extends string, TProgramAddress extends Address = typeof GOLD_CLOB_MARKET_PROGRAM_ADDRESS>(input: ClaimAsyncInput<TAccountMarketState, TAccountDuelState, TAccountUserBalance, TAccountConfig, TAccountMarketMaker, TAccountVault, TAccountUser, TAccountSystemProgram>, config?: { programAddress?: TProgramAddress } ): Promise<ClaimInstruction<TProgramAddress, TAccountMarketState, TAccountDuelState, TAccountUserBalance, TAccountConfig, TAccountMarketMaker, TAccountVault, TAccountUser, TAccountSystemProgram>> {
+export async function getClaimInstructionAsync<TAccountMarketState extends string, TAccountDuelState extends string, TAccountUserBalance extends string, TAccountConfig extends string, TAccountMarketMaker extends string, TAccountVault extends string, TAccountUser extends string, TAccountSystemProgram extends string, TProgramAddress extends Address = typeof LVR_ROUTER_MARKET_PROGRAM_ADDRESS>(input: ClaimAsyncInput<TAccountMarketState, TAccountDuelState, TAccountUserBalance, TAccountConfig, TAccountMarketMaker, TAccountVault, TAccountUser, TAccountSystemProgram>, config?: { programAddress?: TProgramAddress } ): Promise<ClaimInstruction<TProgramAddress, TAccountMarketState, TAccountDuelState, TAccountUserBalance, TAccountConfig, TAccountMarketMaker, TAccountVault, TAccountUser, TAccountSystemProgram>> {
   // Program address.
-const programAddress = config?.programAddress ?? GOLD_CLOB_MARKET_PROGRAM_ADDRESS;
+const programAddress = config?.programAddress ?? LVR_ROUTER_MARKET_PROGRAM_ADDRESS;
 
  // Original accounts.
 const originalAccounts = { marketState: { value: input.marketState ?? null, isWritable: true }, duelState: { value: input.duelState ?? null, isWritable: false }, userBalance: { value: input.userBalance ?? null, isWritable: true }, config: { value: input.config ?? null, isWritable: false }, marketMaker: { value: input.marketMaker ?? null, isWritable: true }, vault: { value: input.vault ?? null, isWritable: true }, user: { value: input.user ?? null, isWritable: true }, systemProgram: { value: input.systemProgram ?? null, isWritable: false } }
@@ -82,9 +82,9 @@ user: TransactionSigner<TAccountUser>;
 systemProgram?: Address<TAccountSystemProgram>;
 }
 
-export function getClaimInstruction<TAccountMarketState extends string, TAccountDuelState extends string, TAccountUserBalance extends string, TAccountConfig extends string, TAccountMarketMaker extends string, TAccountVault extends string, TAccountUser extends string, TAccountSystemProgram extends string, TProgramAddress extends Address = typeof GOLD_CLOB_MARKET_PROGRAM_ADDRESS>(input: ClaimInput<TAccountMarketState, TAccountDuelState, TAccountUserBalance, TAccountConfig, TAccountMarketMaker, TAccountVault, TAccountUser, TAccountSystemProgram>, config?: { programAddress?: TProgramAddress } ): ClaimInstruction<TProgramAddress, TAccountMarketState, TAccountDuelState, TAccountUserBalance, TAccountConfig, TAccountMarketMaker, TAccountVault, TAccountUser, TAccountSystemProgram> {
+export function getClaimInstruction<TAccountMarketState extends string, TAccountDuelState extends string, TAccountUserBalance extends string, TAccountConfig extends string, TAccountMarketMaker extends string, TAccountVault extends string, TAccountUser extends string, TAccountSystemProgram extends string, TProgramAddress extends Address = typeof LVR_ROUTER_MARKET_PROGRAM_ADDRESS>(input: ClaimInput<TAccountMarketState, TAccountDuelState, TAccountUserBalance, TAccountConfig, TAccountMarketMaker, TAccountVault, TAccountUser, TAccountSystemProgram>, config?: { programAddress?: TProgramAddress } ): ClaimInstruction<TProgramAddress, TAccountMarketState, TAccountDuelState, TAccountUserBalance, TAccountConfig, TAccountMarketMaker, TAccountVault, TAccountUser, TAccountSystemProgram> {
   // Program address.
-const programAddress = config?.programAddress ?? GOLD_CLOB_MARKET_PROGRAM_ADDRESS;
+const programAddress = config?.programAddress ?? LVR_ROUTER_MARKET_PROGRAM_ADDRESS;
 
  // Original accounts.
 const originalAccounts = { marketState: { value: input.marketState ?? null, isWritable: true }, duelState: { value: input.duelState ?? null, isWritable: false }, userBalance: { value: input.userBalance ?? null, isWritable: true }, config: { value: input.config ?? null, isWritable: false }, marketMaker: { value: input.marketMaker ?? null, isWritable: true }, vault: { value: input.vault ?? null, isWritable: true }, user: { value: input.user ?? null, isWritable: true }, systemProgram: { value: input.systemProgram ?? null, isWritable: false } }
@@ -100,7 +100,7 @@ const getAccountMeta = getAccountMetaFactory(programAddress, 'programId');
 return Object.freeze({ accounts: [getAccountMeta(accounts.marketState), getAccountMeta(accounts.duelState), getAccountMeta(accounts.userBalance), getAccountMeta(accounts.config), getAccountMeta(accounts.marketMaker), getAccountMeta(accounts.vault), getAccountMeta(accounts.user), getAccountMeta(accounts.systemProgram)], data: getClaimInstructionDataEncoder().encode({}), programAddress } as ClaimInstruction<TProgramAddress, TAccountMarketState, TAccountDuelState, TAccountUserBalance, TAccountConfig, TAccountMarketMaker, TAccountVault, TAccountUser, TAccountSystemProgram>);
 }
 
-export type ParsedClaimInstruction<TProgram extends string = typeof GOLD_CLOB_MARKET_PROGRAM_ADDRESS, TAccountMetas extends readonly IAccountMeta[] = readonly IAccountMeta[]> = { programAddress: Address<TProgram>;
+export type ParsedClaimInstruction<TProgram extends string = typeof LVR_ROUTER_MARKET_PROGRAM_ADDRESS, TAccountMetas extends readonly IAccountMeta[] = readonly IAccountMeta[]> = { programAddress: Address<TProgram>;
 accounts: {
 marketState: TAccountMetas[0];
 duelState: TAccountMetas[1];

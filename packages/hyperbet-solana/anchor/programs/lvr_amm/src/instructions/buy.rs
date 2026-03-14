@@ -7,7 +7,7 @@ use crate::state::bet::Bet;
 use crate::math;
 
 use anchor_spl::associated_token::AssociatedToken;
-use anchor_spl::token_interface::{self, Mint, MintTo, TokenAccount, TokenInterface};
+use anchor_spl::token::{self, Mint, MintTo, TokenAccount, Token};
 
 pub fn buy_instruction(ctx: Context<Buy>, bet_id: u64, outcome: u8, amount_in: u64) -> Result<()> {
     require!(
@@ -114,7 +114,7 @@ pub fn buy_instruction(ctx: Context<Buy>, bet_id: u64, outcome: u8, amount_in: u
 
     let cpi_program = ctx.accounts.token_program.to_account_info();
     let cpi_context = CpiContext::new(cpi_program, cpi_accounts).with_signer(signer_seeds);
-    token_interface::mint_to(cpi_context, amount_in + amount_out)?;
+    token::mint_to(cpi_context, amount_in + amount_out)?;
 
     Ok(())
 }
@@ -130,7 +130,7 @@ pub struct Buy<'info> {
         seeds = [b"bet", bet_id.to_le_bytes().as_ref(), bet.creator.as_ref()],
         bump,
     )]
-    pub bet: Account<'info, Bet>,
+    pub bet: Box<Account<'info, Bet>>,
 
     #[account(
         mut,
@@ -138,7 +138,7 @@ pub struct Buy<'info> {
         bump,
         mint::authority = mint_yes
     )]
-    pub mint_yes: Box<InterfaceAccount<'info, Mint>>,
+    pub mint_yes: Box<Account<'info, Mint>>,
 
     #[account(
         mut,
@@ -146,25 +146,23 @@ pub struct Buy<'info> {
         bump,
         mint::authority = mint_no
     )]
-    pub mint_no: Box<InterfaceAccount<'info, Mint>>,
+    pub mint_no: Box<Account<'info, Mint>>,
 
     #[account(
-        init_if_needed,
-        payer = signer,
+        mut,
         associated_token::mint = mint_yes,
         associated_token::authority = signer,
     )]
-    pub destination_yes: InterfaceAccount<'info, TokenAccount>,
+    pub destination_yes: Box<Account<'info, TokenAccount>>,
 
     #[account(
-        init_if_needed,
-        payer = signer,
+        mut,
         associated_token::mint = mint_no,
         associated_token::authority = signer,
     )]
-    pub destination_no: InterfaceAccount<'info, TokenAccount>,
+    pub destination_no: Box<Account<'info, TokenAccount>>,
 
-    pub token_program: Interface<'info, TokenInterface>,
+    pub token_program: Program<'info, Token>,
     pub system_program: Program<'info, System>,
     pub associated_token_program: Program<'info, AssociatedToken>,
 }

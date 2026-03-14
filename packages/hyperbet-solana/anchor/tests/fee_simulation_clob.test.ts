@@ -25,14 +25,14 @@ import {
 } from "./clob-test-helpers";
 import { configureAnchorTests } from "./test-anchor";
 import { FightOracle } from "../target/types/fight_oracle";
-import { GoldClobMarket } from "../target/types/gold_clob_market";
+import { LvrAmm } from "../target/types/lvr_amm";
 
 describe("fee_simulation (stress test)", () => {
   const provider = configureAnchorTests();
   anchor.setProvider(provider);
 
   const fightProgram = anchor.workspace.FightOracle as Program<FightOracle>;
-  const clobProgram = anchor.workspace.GoldClobMarket as Program<GoldClobMarket>;
+  const clobProgram = anchor.workspace.LvrAmm as Program<LvrAmm>;
   const authority = (provider.wallet as anchor.Wallet & { payer: Keypair }).payer;
 
   it("simulates intensive CLOB order flow and mathematically guarantees perfect fee extraction", async () => {

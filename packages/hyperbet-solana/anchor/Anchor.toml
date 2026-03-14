@@ -11,9 +11,9 @@ gold_clob_market = "ARVJNJp49VZnkB8QBYZAAFJmufvtVSPhnuuenwwSLwpi"
 gold_perps_market = "HbXhqEFevpkfYdZCN6YmJGRmQmj9vsBun2ZHjeeaLRik"
 
 [programs.localnet]
-fight_oracle = "6tpRysBFd1yXRipYEYwAw9jxEoVHk15kVXfkDGFLMqcD"
+fight_oracle = "B5mRCRDJk9BrnH7regMWW5mpTQ8QG1CcCGSnDxMt8hmo"
 gold_clob_market = "ARVJNJp49VZnkB8QBYZAAFJmufvtVSPhnuuenwwSLwpi"
-gold_perps_market = "HbXhqEFevpkfYdZCN6YmJGRmQmj9vsBun2ZHjeeaLRik"
+gold_perps_market = "EoZdHN8U3qWQje48ToxB1SLWjucsFGqcWaRUJQYX3eoT"
 
 [programs.mainnet]
 fight_oracle = "6tpRysBFd1yXRipYEYwAw9jxEoVHk15kVXfkDGFLMqcD"
@@ -23,12 +23,7 @@ gold_perps_market = "HbXhqEFevpkfYdZCN6YmJGRmQmj9vsBun2ZHjeeaLRik"
 [registry]
 url = "https://api.apr.dev"
 
-[test]
-startup_wait = 60000
-
 [provider]
-# Use localnet for testing (anchor test spins up a local validator)
-# For devnet/mainnet deployments, use: anchor deploy --provider.cluster devnet
 cluster = "localnet"
 wallet = "~/.config/solana/hyperscape-keys/deployer.json"
 
@@ -38,3 +33,8 @@ types = "../app/src/idl"
 
 [scripts]
 test = "./node_modules/.bin/ts-mocha -p ./tsconfig.json -t 1000000 tests/**/*.ts"
+
+[test]
+startup_wait = 60000
+shutdown_wait = 2000
+upgradeable = false

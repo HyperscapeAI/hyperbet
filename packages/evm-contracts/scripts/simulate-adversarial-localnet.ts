@@ -11,7 +11,7 @@ import {
 
 import type {
   DuelOutcomeOracleContract,
-  GoldClobContract,
+  LvrRouterContract,
 } from "../typed-contracts";
 
 type Artifact = {
@@ -39,7 +39,7 @@ type Fixture = {
   arbBot: JsonRpcSigner;
   attacker: JsonRpcSigner;
   oracle: DuelOutcomeOracleContract;
-  clob: GoldClobContract;
+  clob: LvrRouterContract;
 };
 
 const MARKET_KIND_DUEL_WINNER = 0;
@@ -99,7 +99,7 @@ async function deployFixture(
   const attacker = retailBot;
 
   const oracleArtifact = loadArtifact(projectDir, "DuelOutcomeOracle");
-  const clobArtifact = loadArtifact(projectDir, "GoldClob");
+  const clobArtifact = loadArtifact(projectDir, "LvrRouter");
 
   const oracleFactory = new ContractFactory(
     oracleArtifact.abi,
@@ -123,7 +123,7 @@ async function deployFixture(
     await oracle.getAddress(),
     await treasury.getAddress(),
     await marketMaker.getAddress(),
-  )) as GoldClobContract;
+  )) as LvrRouterContract;
   await clob.waitForDeployment();
 
   return {

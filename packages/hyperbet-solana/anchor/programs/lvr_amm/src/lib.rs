@@ -8,7 +8,7 @@ use anchor_lang::prelude::*;
 
 use instructions::*;
 
-declare_id!("7vViZ2VExDSVKX9r4NMUAjrhUz7Et3SyFr2UbvtNQ1Ra");
+declare_id!("Af4LMYfaBtcFFM6dBjwLYH6QJLMqEwneQ8VHfn2z7NY5");
 
 
 

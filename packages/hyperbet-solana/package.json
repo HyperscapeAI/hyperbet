@@ -10,7 +10,7 @@
     "anchor:test": "bun run --cwd anchor test",
     "deploy:preflight:mainnet": "bun run scripts/preflight-contract-deploy.ts --target mainnet",
     "deploy:preflight:testnet": "bun run scripts/preflight-contract-deploy.ts --target testnet",
-    "codegen:clients": "bunx coda generate -c ./coda/fight-oracle.config.mjs && bunx coda generate -c ./coda/gold-clob-market.config.mjs && bunx coda generate -c ./coda/gold-perps-market.config.mjs",
+    "codegen:clients": "bunx coda generate -c ./coda/fight-oracle.config.mjs && bunx coda generate -c ./coda/lvr-amm-market.config.mjs && bunx coda generate -c ./coda/gold-perps-market.config.mjs",
     "sync:anchor-artifacts": "node scripts/sync-anchor-artifacts.mjs",
     "dev": "bun run --cwd app dev --mode devnet",
     "dev:local": "bash app/scripts/run-local-demo.sh",

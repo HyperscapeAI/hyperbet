@@ -24,7 +24,7 @@ import {
 } from "./clob-test-helpers";
 import { configureAnchorTests } from "./test-anchor";
 import { FightOracle } from "../target/types/fight_oracle";
-import { GoldClobMarket } from "../target/types/gold_clob_market";
+import { LvrAmm } from "../target/types/lvr_amm";
 
 describe("hyperbet-solana", () => {
   const provider = configureAnchorTests();
@@ -32,7 +32,7 @@ describe("hyperbet-solana", () => {
 
   const fightProgram = anchor.workspace.FightOracle as Program<FightOracle>;
   const clobProgram = anchor.workspace
-    .GoldClobMarket as Program<GoldClobMarket>;
+    .LvrAmm as Program<LvrAmm>;
   const authority = (provider.wallet as anchor.Wallet & { payer: Keypair })
     .payer;
 

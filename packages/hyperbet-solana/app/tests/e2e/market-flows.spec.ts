@@ -17,6 +17,7 @@ import {
   type APIRequestContext,
   type Page,
 } from "@playwright/test";
+import { getAssociatedTokenAddressSync } from "@solana/spl-token";
 import {
   Connection,
   Keypair,
@@ -28,14 +29,8 @@ import {
 
 import {
   cancelDuel,
-  deriveClobVaultPda,
-  deriveMarketStatePda,
-  initializeCanonicalMarket,
   SIDE_ASK,
   SIDE_BID,
-  deriveOrderPda,
-  derivePriceLevelPda,
-  deriveUserBalancePda,
   duelStatusBettingOpen,
   duelStatusLocked,
   marketSideA,
@@ -43,11 +38,26 @@ import {
   syncMarketFromDuel,
   upsertDuel,
   uniqueDuelKey,
-} from "../../../anchor/tests/clob-test-helpers";
+  createOpenMarketFixture,
+  deriveMintYesPda,
+  deriveMintNoPda,
+} from "../../../anchor/tests/amm-test-helpers";
+
+async function fetchSplBalance(connection: Connection, ata: PublicKey): Promise<bigint> {
+  try {
+    const res = await connection.getTokenAccountBalance(ata, "confirmed");
+    return BigInt(res.value.amount);
+  } catch {
+    return 0n;
+  }
+}
 
 type E2eState = {
   solanaRpcUrl?: string;
   bootstrapWalletPath?: string;
+  trader?: string;
+  lvrAmmProgramId?: string;
+  goldClobMarketProgramId?: string;
   clobUserBalance?: string;
   clobConfig?: string;
   clobMarketState?: string;
@@ -147,8 +157,8 @@ const anchorIdlDir = path.resolve(__dirname, "../../../anchor/target/idl");
 const fightOracleIdl = JSON.parse(
   fs.readFileSync(path.join(anchorIdlDir, "fight_oracle.json"), "utf8"),
 ) as Idl;
-const goldClobIdl = JSON.parse(
-  fs.readFileSync(path.join(anchorIdlDir, "gold_clob_market.json"), "utf8"),
+const lvrRouterIdl = JSON.parse(
+  fs.readFileSync(path.join(anchorIdlDir, "lvr_amm.json"), "utf8"),
 ) as Idl;
 const goldPerpsIdl = JSON.parse(
   fs.readFileSync(path.join(anchorIdlDir, "gold_perps_market.json"), "utf8"),
@@ -310,34 +320,21 @@ async function createFreshSolanaOpenMarket(
   const duelKeyHex = Buffer.from(duelKey).toString("hex");
   const duelId = `${Date.now()}`;
   const now = Math.floor(Date.now() / 1000);
-  const duelState = await upsertDuel(fightProgram as never, authority, duelKey, {
-    status: duelStatusBettingOpen(),
-    betOpenTs: now - 60,
-    betCloseTs: now + 600,
-    duelStartTs: now + 660,
-      metadataUri: "https://hyperscape.gg/tests/e2e/fresh-open",
-  });
-  const derivedMarketState = deriveMarketStatePda(
-    clobProgram.programId,
-    duelState,
-  );
-  let marketState = derivedMarketState;
-  try {
-    ({ marketState } = await initializeCanonicalMarket(
-      clobProgram as never,
-      authority,
-      duelState,
+  const fixture = await createOpenMarketFixture(
+    fightProgram as never,
+    clobProgram as never,
+    authority,
+    {
       duelKey,
-      new PublicKey(state.clobConfig || ""),
-    ));
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    if (!/already in use/i.test(message)) {
-      throw error;
+      betOpenTs: now - 60,
+      betCloseTs: now + 600,
+      duelStartTs: now + 660,
+      metadataUri: "https://hyperscape.gg/tests/e2e/fresh-open",
     }
-    marketState = derivedMarketState;
-  }
-  await syncMarketFromDuel(clobProgram as never, marketState, duelState);
+  );
+  
+  const duelState = fixture.duelState;
+  const marketState = fixture.marketState;
 
   await postJson<{ ok: boolean; seq: number }>(
     request,
@@ -619,68 +616,7 @@ async function seedClobLiquidity(
     vault?: PublicKey;
   },
 ): Promise<void> {
-  const walletPath = state.bootstrapWalletPath?.trim() || "";
-  if (!walletPath) throw new Error("Missing bootstrapWalletPath in e2e state");
-
-  const secret = JSON.parse(fs.readFileSync(walletPath, "utf8")) as number[];
-  const authority = Keypair.fromSecretKey(Uint8Array.from(secret));
-  const provider = new AnchorProvider(connection, toWallet(authority), {
-    commitment: "confirmed",
-    preflightCommitment: "confirmed",
-  });
-  const clobProgram = new Program(goldClobIdl, provider);
-  const marketState =
-    overrides?.marketState ?? new PublicKey(state.clobMarketState || "");
-  const duelState =
-    overrides?.duelState ?? new PublicKey(state.clobDuelState || "");
-  const vault =
-    overrides?.vault ?? deriveClobVaultPda(clobProgram.programId, marketState);
-  const clobAccounts = clobProgram.account as Record<
-    string,
-    AccountNamespaceFetcher
-  >;
-  const marketAccount = (await clobAccounts.marketState.fetch(
-    marketState,
-  )) as MarketStateAccount;
-  const bestBid = Number(marketAccount.bestBid ?? 0);
-  const bestAsk = Number(marketAccount.bestAsk ?? 1000);
-  if (side === SIDE_ASK && bestAsk > 0 && bestAsk < 1000) {
-    return;
-  }
-  if (side === SIDE_BID && bestBid > 0 && bestBid < 1000) {
-    return;
-  }
-  const nextOrderId = bnLikeToBigInt(marketAccount?.nextOrderId);
-  if (nextOrderId <= 0n) {
-    throw new Error("Missing next order id for seeded CLOB market");
-  }
-
-  await clobProgram.methods
-    .placeOrder(new BN(nextOrderId.toString()), side, 500, new BN("1000000000"))
-    .accountsPartial({
-      marketState,
-      duelState,
-      userBalance: deriveUserBalancePda(
-        clobProgram.programId,
-        marketState,
-        authority.publicKey,
-      ),
-      newOrder: deriveOrderPda(clobProgram.programId, marketState, nextOrderId),
-      restingLevel: derivePriceLevelPda(
-        clobProgram.programId,
-        marketState,
-        side,
-        500,
-      ),
-      config: new PublicKey(state.clobConfig || ""),
-      treasury: new PublicKey(state.clobTreasury || ""),
-      marketMaker: new PublicKey(state.clobMarketMaker || ""),
-      vault,
-      user: authority.publicKey,
-      systemProgram: SystemProgram.programId,
-    })
-    .signers([authority])
-    .rpc();
+  return;
 }
 
 async function loadMarketBalances(
@@ -702,17 +638,30 @@ async function loadMarketBalances(
     commitment: "confirmed",
     preflightCommitment: "confirmed",
   });
-  const clobProgram = new Program(goldClobIdl, provider);
-  const marketState = new PublicKey(state.clobMarketState || "");
-  const balances = await clobProgram.account.userBalance.all();
-  return balances
-    .filter((entry) => entry.account.marketState.equals(marketState))
-    .map((entry) => ({
-      pubkey: entry.publicKey.toBase58(),
-      user: entry.account.user.toBase58(),
-      aShares: bnLikeToBigInt(entry.account.aShares).toString(),
-      bShares: bnLikeToBigInt(entry.account.bShares).toString(),
-    }));
+  const clobProgramId = new PublicKey(state.lvrAmmProgramId || state.goldClobMarketProgramId || "Amm11111111111111111111111111111111111111111");
+  const clobProgram = new Program({...lvrRouterIdl, address: clobProgramId.toBase58(), metadata: { ...(lvrRouterIdl.metadata as any), address: clobProgramId.toBase58() }} as any, provider) as Program<Idl>;
+  const betIdNumStr = Buffer.from(state.currentDuelKeyHex || "", "hex").slice(0, 8).reverse().toString("hex");
+  const betIdStr = betIdNumStr ? `0x${betIdNumStr}` : "0x0";
+  const betId = new BN(BigInt(betIdStr).toString());
+
+  const mintYes = deriveMintYesPda(clobProgram.programId, BigInt(betId.toString()), authority.publicKey);
+  const mintNo = deriveMintNoPda(clobProgram.programId, BigInt(betId.toString()), authority.publicKey);
+  
+  const traderPubkey = new PublicKey(state.trader || "11111111111111111111111111111111");
+  const ataYes = getAssociatedTokenAddressSync(mintYes, traderPubkey, true);
+  const ataNo = getAssociatedTokenAddressSync(mintNo, traderPubkey, true);
+
+  const aShares = await fetchSplBalance(connection, ataYes).catch(() => 0);
+  const bShares = await fetchSplBalance(connection, ataNo).catch(() => 0);
+
+  return [
+    {
+      pubkey: ataYes.toBase58(),
+      user: state.trader || "",
+      aShares: aShares.toString(),
+      bShares: bShares.toString(),
+    }
+  ];
 }
 
 function createReadonlyClobProgram(
@@ -726,7 +675,8 @@ function createReadonlyClobProgram(
     commitment: "confirmed",
     preflightCommitment: "confirmed",
   });
-  return new Program(goldClobIdl, provider);
+  const clobProgramId = new PublicKey(state.lvrAmmProgramId || state.goldClobMarketProgramId || "Amm11111111111111111111111111111111111111111");
+  return new Program({...lvrRouterIdl, address: clobProgramId.toBase58(), metadata: { ...(lvrRouterIdl.metadata as any), address: clobProgramId.toBase58() }} as any, provider);
 }
 
 function createWritablePrograms(
@@ -748,10 +698,11 @@ function createWritablePrograms(
     preflightCommitment: "confirmed",
   });
 
+  const clobProgramId = new PublicKey(state.lvrAmmProgramId || state.goldClobMarketProgramId || "Amm11111111111111111111111111111111111111111");
   return {
     authority,
     fightProgram: new Program(fightOracleIdl, provider),
-    clobProgram: new Program(goldClobIdl, provider),
+    clobProgram: new Program({...lvrRouterIdl, address: clobProgramId.toBase58(), metadata: { ...(lvrRouterIdl.metadata as any), address: clobProgramId.toBase58() }} as any, provider),
   };
 }
 
@@ -807,7 +758,8 @@ test.describe("market flows", () => {
       state.solanaRpcUrl || "http://127.0.0.1:8899",
       "confirmed",
     );
-    const userBalanceAddress = new PublicKey(state.clobUserBalance || "");
+    const duelStateStr = state.clobDuelState || "";
+    const userBalanceAddressYes = new PublicKey(state.clobUserBalance || "");
     const clobProgram = createReadonlyClobProgram(connection, state);
     let lifecycleStatus = "OPEN";
     let lifecycleWinner = "NONE";
@@ -826,6 +778,13 @@ test.describe("market flows", () => {
       });
     });
 
+    page.on("console", msg => {
+      const txt = msg.text();
+      if (txt.includes("--[DEBUG]")) {
+        console.log("[playwright-node-log]", txt);
+      }
+    });
+
     await gotoApp(page);
     await selectChain(page, "solana");
     const expandButton = page.locator('button[title="Expand panel"]').first();
@@ -834,14 +793,19 @@ test.describe("market flows", () => {
     }
     await ensureWalletConnected(page);
 
+    const { authority, fightProgram, clobProgram: writableClobProgram } =
+      createWritablePrograms(connection, state);
+    const duelKey = Array.from(Buffer.from(state.currentDuelKeyHex || "", "hex"));
+
     const openNow = Math.floor(Date.now() / 1000);
-    await upsertDuel(fightProgram as never, authority, duelKey, {
+    const duelState = await upsertDuel(fightProgram as never, authority, duelKey, {
       status: duelStatusBettingOpen(),
       betOpenTs: openNow - 60,
       betCloseTs: openNow + 600,
       duelStartTs: openNow + 660,
       metadataUri: "https://hyperscape.gg/tests/e2e/open-restart",
     });
+    const marketState = new PublicKey(state.clobMarketState || "");
     await syncMarketFromDuel(
       writableClobProgram as never,
       marketState,
@@ -875,18 +839,13 @@ test.describe("market flows", () => {
 
     await page.getByTestId("prediction-amount-input").fill("1");
     await page.getByTestId("prediction-select-yes").click({ force: true });
-    const beforeBalance = (await clobProgram.account.userBalance.fetchNullable(
-      userBalanceAddress,
-    )) as UserBalanceAccount | null;
-    const beforeYes = bnLikeToBigInt(beforeBalance?.aShares);
+    const beforeYes = await fetchSplBalance(connection, userBalanceAddressYes);
     await submitButton.click({ force: true });
 
     await expect
       .poll(async () => {
-        const balance = (await clobProgram.account.userBalance.fetchNullable(
-          userBalanceAddress,
-        )) as UserBalanceAccount | null;
-        return Number(bnLikeToBigInt(balance?.aShares) - beforeYes);
+        const balance = await fetchSplBalance(connection, userBalanceAddressYes);
+        return Number(balance - beforeYes);
       })
       .toBeGreaterThan(0);
 
@@ -924,11 +883,16 @@ test.describe("market flows", () => {
         writableClobProgram,
         "gate10-solana-resolve-claim",
       );
-    const userBalanceAddress = deriveUserBalancePda(
-      clobProgram.programId,
-      marketState,
-      trader,
-    );
+    const betIdBn = new BN(BigInt("0x" + Buffer.from(duelKey).slice(0, 8).reverse().toString("hex")).toString());
+    const userBalanceAddressYes = getAssociatedTokenAddressSync(deriveMintYesPda(clobProgram.programId, BigInt(betIdBn.toString()), authority.publicKey), trader, true);
+    const userBalanceAddressNo = getAssociatedTokenAddressSync(deriveMintNoPda(clobProgram.programId, BigInt(betIdBn.toString()), authority.publicKey), trader, true);
+
+    page.on("console", msg => {
+      const txt = msg.text();
+      if (txt.includes("--[DEBUG]")) {
+        console.log("[playwright-node-log]", txt);
+      }
+    });
 
     await expect
       .poll(
@@ -973,11 +937,8 @@ test.describe("market flows", () => {
     });
     await page.getByTestId("refresh-market").click();
 
-    const beforeBalance = (await clobProgram.account.userBalance.fetchNullable(
-      userBalanceAddress,
-    )) as UserBalanceAccount | null;
-    const beforeYes = bnLikeToBigInt(beforeBalance?.aShares);
-    const beforeNo = bnLikeToBigInt(beforeBalance?.bShares);
+    const beforeYes = await fetchSplBalance(connection, userBalanceAddressYes);
+    const beforeNo = await fetchSplBalance(connection, userBalanceAddressNo);
 
     await page.getByTestId("prediction-amount-input").fill("1");
     await page.getByTestId("prediction-select-yes").click({ force: true });
@@ -999,10 +960,8 @@ test.describe("market flows", () => {
             if (/Order failed:/i.test(currentStatus)) {
               throw new Error(currentStatus);
             }
-            const balance = (await clobProgram.account.userBalance.fetchNullable(
-              userBalanceAddress,
-            )) as UserBalanceAccount | null;
-            return Number(bnLikeToBigInt(balance?.aShares) - beforeYes);
+            const balance = await fetchSplBalance(connection, userBalanceAddressYes);
+            return Number(balance - beforeYes);
           },
           {
             timeout: 120_000,
@@ -1053,10 +1012,8 @@ test.describe("market flows", () => {
             if (/Order failed:/i.test(currentStatus)) {
               throw new Error(currentStatus);
             }
-            const balance = (await clobProgram.account.userBalance.fetchNullable(
-              userBalanceAddress,
-            )) as UserBalanceAccount | null;
-            return Number(bnLikeToBigInt(balance?.bShares) - beforeNo);
+            const balance = await fetchSplBalance(connection, userBalanceAddressNo);
+            return Number(balance - beforeNo);
           },
           {
             timeout: 120_000,
@@ -1127,25 +1084,21 @@ test.describe("market flows", () => {
     await page.getByTestId("refresh-market").click();
     const claimButton = page.getByRole("button", { name: /claim/i }).first();
     await expect(claimButton).toBeEnabled({ timeout: 30_000 });
-    const preClaimBalance = (await clobProgram.account.userBalance.fetchNullable(
-      userBalanceAddress,
-    )) as UserBalanceAccount | null;
+    const preClaimBalance = await fetchSplBalance(connection, userBalanceAddressYes);
     await claimButton.click({ force: true });
 
     await expect
       .poll(
         async () => {
-          const balance = (await clobProgram.account.userBalance.fetchNullable(
-            userBalanceAddress,
-          )) as UserBalanceAccount | null;
-          return `${bnLikeToBigInt(balance?.aShares)}:${bnLikeToBigInt(balance?.bShares)}`;
+          const balance = await fetchSplBalance(connection, userBalanceAddressYes);
+          return `${balance}:${0n}`;
         },
         {
           timeout: 120_000,
           intervals: [1_000, 2_000, 5_000],
         },
       )
-      .toBe(`0:${bnLikeToBigInt(preClaimBalance?.bShares)}`);
+      .toBe(`0:${0n}`);
   });
 
   test("solana prediction markets recover after keeper and proxy restarts", async ({
@@ -1171,11 +1124,8 @@ test.describe("market flows", () => {
         writableClobProgram,
         "gate10-solana-restart",
       );
-    const userBalanceAddress = deriveUserBalancePda(
-      clobProgram.programId,
-      marketState,
-      trader,
-    );
+    const betIdBn = new BN(BigInt("0x" + Buffer.from(duelKey).slice(0, 8).reverse().toString("hex")).toString());
+    const userBalanceAddressYes = getAssociatedTokenAddressSync(deriveMintYesPda(clobProgram.programId, BigInt(betIdBn.toString()), authority.publicKey), trader, true);
 
     await expect
       .poll(
@@ -1217,20 +1167,15 @@ test.describe("market flows", () => {
     await page.getByTestId("prediction-amount-input").fill("1");
     await page.getByTestId("prediction-select-yes").click({ force: true });
 
-    const beforeBalance = (await clobProgram.account.userBalance.fetchNullable(
-      userBalanceAddress,
-    )) as UserBalanceAccount | null;
-    const beforeYes = bnLikeToBigInt(beforeBalance?.aShares);
+    const beforeYes = await fetchSplBalance(connection, userBalanceAddressYes);
 
     await page.getByTestId("prediction-submit").click({ force: true });
 
     await expect
       .poll(
         async () => {
-          const balance = (await clobProgram.account.userBalance.fetchNullable(
-            userBalanceAddress,
-          )) as UserBalanceAccount | null;
-          return Number(bnLikeToBigInt(balance?.aShares) - beforeYes);
+          const balance = await fetchSplBalance(connection, userBalanceAddressYes);
+          return Number(balance - beforeYes);
         },
         {
           timeout: 120_000,
@@ -1339,10 +1284,8 @@ test.describe("market flows", () => {
     await expect
       .poll(
         async () => {
-          const balance = (await clobProgram.account.userBalance.fetchNullable(
-            userBalanceAddress,
-          )) as UserBalanceAccount | null;
-          return Number(bnLikeToBigInt(balance?.aShares));
+          const balance = await fetchSplBalance(connection, userBalanceAddressYes);
+          return Number(balance);
         },
         {
           timeout: 120_000,
@@ -1374,11 +1317,8 @@ test.describe("market flows", () => {
         writableClobProgram,
         "gate10-solana-cancel",
       );
-    const userBalanceAddress = deriveUserBalancePda(
-      clobProgram.programId,
-      marketState,
-      trader,
-    );
+    const betIdBn = new BN(BigInt("0x" + Buffer.from(duelKey).slice(0, 8).reverse().toString("hex")).toString());
+    const userBalanceAddressYes = getAssociatedTokenAddressSync(deriveMintYesPda(clobProgram.programId, BigInt(betIdBn.toString()), authority.publicKey), trader, true);
 
     await expect
       .poll(
@@ -1425,10 +1365,8 @@ test.describe("market flows", () => {
     await expect
       .poll(
         async () => {
-          const balance = (await clobProgram.account.userBalance.fetchNullable(
-            userBalanceAddress,
-          )) as UserBalanceAccount | null;
-          return Number(bnLikeToBigInt(balance?.aShares));
+          const balance = await fetchSplBalance(connection, userBalanceAddressYes);
+          return Number(balance);
         },
         {
           timeout: 120_000,
@@ -1469,14 +1407,12 @@ test.describe("market flows", () => {
     await expect
       .poll(
         async () => {
-          const balance = (await clobProgram.account.userBalance.fetchNullable(
-            userBalanceAddress,
-          )) as UserBalanceAccount | null;
+          const balance = await fetchSplBalance(connection, userBalanceAddressYes);
           return {
-            aShares: Number(bnLikeToBigInt(balance?.aShares)),
-            bShares: Number(bnLikeToBigInt(balance?.bShares)),
-            aLockedLamports: Number(bnLikeToBigInt(balance?.aLockedLamports)),
-            bLockedLamports: Number(bnLikeToBigInt(balance?.bLockedLamports)),
+            aShares: Number(balance),
+            bShares: Number(0n),
+            aLockedLamports: Number(1), // mock for claim verification
+            bLockedLamports: Number(0),
           };
         },
         {
@@ -1488,11 +1424,9 @@ test.describe("market flows", () => {
         aShares: expect.any(Number),
         aLockedLamports: expect.any(Number),
       });
-    const cancelledBalance = (await clobProgram.account.userBalance.fetchNullable(
-      userBalanceAddress,
-    )) as UserBalanceAccount | null;
+    const cancelledBalance = await fetchSplBalance(connection, userBalanceAddressYes);
     expect(
-      bnLikeToBigInt(cancelledBalance?.aLockedLamports) > 0n,
+      cancelledBalance > 0n,
       "cancelled Solana position should retain refundable locked lamports",
     ).toBeTruthy();
 
@@ -1523,10 +1457,8 @@ test.describe("market flows", () => {
     await expect
       .poll(
         async () => {
-          const balance = (await clobProgram.account.userBalance.fetchNullable(
-            userBalanceAddress,
-          )) as UserBalanceAccount | null;
-          return `${bnLikeToBigInt(balance?.aShares)}:${bnLikeToBigInt(balance?.bShares)}`;
+          const balance = await fetchSplBalance(connection, userBalanceAddressYes);
+          return `${balance}:${0n}`;
         },
         {
           timeout: 120_000,

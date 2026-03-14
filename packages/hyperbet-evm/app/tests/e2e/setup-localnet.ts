@@ -17,7 +17,7 @@ import {
 } from "@solana/web3.js";
 
 import fightOracleIdl from "../../../../hyperbet-solana/anchor/target/idl/fight_oracle.json";
-import goldClobIdl from "../../../../hyperbet-solana/anchor/target/idl/gold_clob_market.json";
+import lvrRouterIdl from "../../../../hyperbet-solana/anchor/target/idl/lvr_amm.json";
 import goldPerpsIdl from "../../../../hyperbet-solana/anchor/target/idl/gold_perps_market.json";
 import { modelMarketIdFromCharacterId } from "../../../../hyperbet-ui/src/lib/modelMarkets";
 
@@ -488,8 +488,8 @@ async function main(): Promise<void> {
   const browserSolanaWsUrl =
     process.env.E2E_BROWSER_SOLANA_WS_URL || solanaWsUrl;
   const clobProgramId = resolveIdlAddress(
-    goldClobIdl as unknown as IdlWithAddress,
-    "gold_clob_market",
+    lvrRouterIdl as unknown as IdlWithAddress,
+    "lvr_amm",
   );
   const connection = new Connection(solanaRpcUrl, {
     commitment: "confirmed",
@@ -506,7 +506,7 @@ async function main(): Promise<void> {
 
   const fightProgram = new Program(fightOracleIdl as Idl, provider);
   const fight: any = fightProgram;
-  const clobProgram = new Program(goldClobIdl as Idl, provider);
+  const clobProgram = new Program(lvrRouterIdl as Idl, provider);
   const clob: any = clobProgram;
   const perpsProgram = new Program(goldPerpsIdl as Idl, provider);
   const perps: any = perpsProgram;
@@ -891,7 +891,7 @@ async function main(): Promise<void> {
     `VITE_SOLANA_WS_URL=${browserSolanaWsUrl}`,
     "VITE_USE_LOCAL_SOLANA_RPC_PROXY=true",
     `VITE_FIGHT_ORACLE_PROGRAM_ID=${fightProgram.programId.toBase58()}`,
-    `VITE_GOLD_CLOB_MARKET_PROGRAM_ID=${clobProgramId}`,
+    `VITE_LVR_MARKET_PROGRAM_ID=${clobProgramId}`,
     `VITE_GOLD_BINARY_MARKET_PROGRAM_ID=${clobProgramId}`,
     `VITE_GOLD_MINT=${goldMint.toBase58()}`,
     `VITE_ACTIVE_MATCH_ID=${currentMatchId}`,

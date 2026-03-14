@@ -15,7 +15,7 @@ import { mnemonicToAccount, privateKeyToAccount } from "viem/accounts";
 
 import mockErc20Artifact from "../../../../evm-contracts/out/MockERC20.sol/MockERC20.json";
 import duelOutcomeOracleArtifact from "../../../../evm-contracts/out/DuelOutcomeOracle.sol/DuelOutcomeOracle.json";
-import goldClobArtifact from "../../../../evm-contracts/out/GoldClob.sol/GoldClob.json";
+import lvrRouterArtifact from "../../../../evm-contracts/out/LvrRouter.sol/LvrRouter.json";
 
 type E2eState = Record<string, unknown> & {
   currentDuelKeyHex?: string;
@@ -23,7 +23,7 @@ type E2eState = Record<string, unknown> & {
   evmChainId?: number;
   evmHeadlessAddress?: string;
   evmGoldTokenAddress?: string;
-  evmGoldClobAddress?: string;
+  evmLvrRouterAddress?: string;
   evmMatchId?: number;
   evmDuelKeyHex?: string;
   evmMarketKey?: string;
@@ -247,8 +247,8 @@ async function main(): Promise<void> {
   }
 
   const clobDeployTx = await walletClient.deployContract({
-    abi: goldClobArtifact.abi,
-    bytecode: resolveArtifactBytecode(goldClobArtifact as EvmArtifact),
+    abi: lvrRouterArtifact.abi,
+    bytecode: resolveArtifactBytecode(lvrRouterArtifact as EvmArtifact),
     args: [
       adminAccount.address,
       adminAccount.address,
@@ -261,9 +261,9 @@ async function main(): Promise<void> {
   const clobDeployReceipt = await publicClient.waitForTransactionReceipt({
     hash: clobDeployTx,
   });
-  const goldClobAddress = clobDeployReceipt.contractAddress;
-  if (!goldClobAddress) {
-    throw new Error("GoldClob deployment did not return contract address");
+  const lvrRouterAddress = clobDeployReceipt.contractAddress;
+  if (!lvrRouterAddress) {
+    throw new Error("LvrRouter deployment did not return contract address");
   }
 
   const mintTx = await walletClient.writeContract({
@@ -296,8 +296,8 @@ async function main(): Promise<void> {
   await publicClient.waitForTransactionReceipt({ hash: upsertDuelTx });
 
   const createMarketTx = await walletClient.writeContract({
-    address: goldClobAddress as Address,
-    abi: goldClobArtifact.abi,
+    address: lvrRouterAddress as Address,
+    abi: lvrRouterArtifact.abi,
     functionName: "createMarketForDuel",
     args: [duelKey, MARKET_KIND_DUEL_WINNER],
     account: adminAccount,
@@ -306,15 +306,15 @@ async function main(): Promise<void> {
   await publicClient.waitForTransactionReceipt({ hash: createMarketTx });
 
   const marketKey = (await publicClient.readContract({
-    address: goldClobAddress as Address,
-    abi: goldClobArtifact.abi,
+    address: lvrRouterAddress as Address,
+    abi: lvrRouterArtifact.abi,
     functionName: "marketKey",
     args: [duelKey, MARKET_KIND_DUEL_WINNER],
   })) as `0x${string}`;
 
   const seedNoOrderTx = await makerWalletClient.writeContract({
-    address: goldClobAddress as Address,
-    abi: goldClobArtifact.abi,
+    address: lvrRouterAddress as Address,
+    abi: lvrRouterArtifact.abi,
     functionName: "placeOrder",
     args: [
       duelKey,
@@ -336,8 +336,8 @@ async function main(): Promise<void> {
   await publicClient.waitForTransactionReceipt({ hash: seedNoOrderTx });
 
   const seedYesOrderTx = await makerWalletClient.writeContract({
-    address: goldClobAddress as Address,
-    abi: goldClobArtifact.abi,
+    address: lvrRouterAddress as Address,
+    abi: lvrRouterArtifact.abi,
     functionName: "placeOrder",
     args: [
       duelKey,
@@ -361,7 +361,7 @@ async function main(): Promise<void> {
   const env = await readEnv(envPath);
   env.VITE_BSC_RPC_URL = rpcUrl;
   env.VITE_BSC_CHAIN_ID = String(chainId);
-  env.VITE_BSC_GOLD_CLOB_ADDRESS = goldClobAddress;
+  env.VITE_BSC_LVR_ROUTER_ADDRESS = lvrRouterAddress;
   env.VITE_BSC_GOLD_TOKEN_ADDRESS = goldTokenAddress;
   env.VITE_EVM_PRIVATE_KEY = adminPrivateKey;
   env.VITE_HEADLESS_EVM_PRIVATE_KEY = adminPrivateKey;
@@ -378,7 +378,7 @@ async function main(): Promise<void> {
     evmChainId: chainId,
     evmHeadlessAddress: adminAccount.address,
     evmGoldTokenAddress: goldTokenAddress,
-    evmGoldClobAddress: goldClobAddress,
+    evmLvrRouterAddress: lvrRouterAddress,
     evmMatchId: 1,
     evmDuelKeyHex: duelKey,
     evmMarketKey: marketKey,
@@ -398,7 +398,7 @@ async function main(): Promise<void> {
         chainId,
         evmHeadlessAddress: adminAccount.address,
         evmGoldTokenAddress: goldTokenAddress,
-        evmGoldClobAddress: goldClobAddress,
+        evmLvrRouterAddress: lvrRouterAddress,
         evmDuelKeyHex: duelKey,
         evmMarketKey: marketKey,
         evmOracleAddress: oracleAddress,

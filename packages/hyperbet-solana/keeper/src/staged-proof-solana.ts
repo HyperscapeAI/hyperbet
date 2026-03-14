@@ -186,7 +186,7 @@ async function main(): Promise<void> {
     const authorityPrograms = createPrograms(authority);
     const traderPrograms = createPrograms(trader);
     const fightOracle = authorityPrograms.fightOracle;
-    const clobProgram = traderPrograms.goldClobMarket;
+    const clobProgram = traderPrograms.lvrMarket;
     const duelState = findDuelStatePda(FIGHT_ORACLE_PROGRAM_ID, duelKey);
     const oracleConfig = findOracleConfigPda(FIGHT_ORACLE_PROGRAM_ID);
 
@@ -279,7 +279,7 @@ async function main(): Promise<void> {
       .signers([authority])
       .rpc();
 
-    const syncTx = await traderPrograms.goldClobMarket.methods
+    const syncTx = await traderPrograms.lvrMarket.methods
       .syncMarketFromDuel()
       .accountsPartial({
         marketState,
@@ -296,7 +296,7 @@ async function main(): Promise<void> {
       (payload) => findCanonicalMarket(payload)?.lifecycleStatus === "CANCELLED",
     );
 
-    const claimTx = await traderPrograms.goldClobMarket.methods
+    const claimTx = await traderPrograms.lvrMarket.methods
       .claim()
       .accountsPartial({
         marketState,
@@ -312,7 +312,7 @@ async function main(): Promise<void> {
       .rpc();
 
     const balanceAfter =
-      await traderPrograms.goldClobMarket.account.userBalance.fetchNullable(userBalance);
+      await traderPrograms.lvrMarket.account.userBalance.fetchNullable(userBalance);
     const aShares = BigInt(balanceAfter?.aShares?.toString?.() ?? "0");
     const bShares = BigInt(balanceAfter?.bShares?.toString?.() ?? "0");
     if (aShares !== 0n || bShares !== 0n) {

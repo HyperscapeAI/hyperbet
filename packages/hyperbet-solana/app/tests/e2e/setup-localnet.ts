@@ -16,13 +16,14 @@ import {
 } from "@solana/web3.js";
 
 import fightOracleIdl from "../../../anchor/target/idl/fight_oracle.json";
-import goldClobIdl from "../../../anchor/target/idl/gold_clob_market.json";
+import lvrRouterIdl from "../../../anchor/target/idl/lvr_amm.json";
 import goldPerpsIdl from "../../../anchor/target/idl/gold_perps_market.json";
 import {
   createOpenMarketFixture,
-  deriveUserBalancePda,
+  deriveMintYesPda,
   uniqueDuelKey,
-} from "../../../anchor/tests/clob-test-helpers";
+} from "../../../anchor/tests/amm-test-helpers";
+import { getAssociatedTokenAddressSync } from "@solana/spl-token";
 import { modelMarketIdFromCharacterId } from "../../../../hyperbet-ui/src/lib/modelMarkets";
 
 type SignableTx = Transaction | VersionedTransaction;
@@ -318,8 +319,8 @@ async function main(): Promise<void> {
   const browserSolanaWsUrl =
     process.env.E2E_BROWSER_SOLANA_WS_URL || solanaWsUrl;
   const clobProgramId = resolveIdlAddress(
-    goldClobIdl as unknown as IdlWithAddress,
-    "gold_clob_market",
+    lvrRouterIdl as unknown as IdlWithAddress,
+    "lvr_amm",
   );
   const connection = new Connection(solanaRpcUrl, {
     commitment: "confirmed",
@@ -336,7 +337,7 @@ async function main(): Promise<void> {
   attachReliableSendAndConfirm(provider, connection);
 
   const fightProgram = new Program(fightOracleIdl as Idl, provider);
-  const clobProgram = new Program(goldClobIdl as Idl, provider);
+  const clobProgram = new Program(lvrRouterIdl as Idl, provider);
   const perpsProgram = new Program(goldPerpsIdl as Idl, provider);
 
   await ensureBalance(connection, authority.publicKey, 30 * LAMPORTS_PER_SOL);
@@ -456,11 +457,9 @@ async function main(): Promise<void> {
     })
     .rpc();
 
-  const clobUserBalancePda = deriveUserBalancePda(
-    clobProgram.programId,
-    currentMarket.marketState,
-    trader.publicKey,
-  );
+  const betIdNum = BigInt(`0x${Buffer.from(currentMarket.duelKey).slice(0, 8).reverse().toString('hex')}`);
+  const mintYesPda = deriveMintYesPda(clobProgram.programId, betIdNum, authority.publicKey);
+  const clobUserBalancePda = getAssociatedTokenAddressSync(mintYesPda, trader.publicKey, true);
 
   const oracleRecordedAt = Date.now();
 
@@ -470,7 +469,7 @@ async function main(): Promise<void> {
     `VITE_SOLANA_WS_URL=${browserSolanaWsUrl}`,
     "VITE_USE_LOCAL_SOLANA_RPC_PROXY=true",
     `VITE_FIGHT_ORACLE_PROGRAM_ID=${fightProgram.programId.toBase58()}`,
-    `VITE_GOLD_CLOB_MARKET_PROGRAM_ID=${clobProgramId}`,
+    `VITE_LVR_MARKET_PROGRAM_ID=${clobProgramId}`,
     `VITE_GOLD_BINARY_MARKET_PROGRAM_ID=${clobProgramId}`,
     `VITE_GOLD_MINT=${goldMint.toBase58()}`,
     `VITE_ACTIVE_MATCH_ID=${currentMatchId}`,
@@ -515,6 +514,8 @@ async function main(): Promise<void> {
         authority: authority.publicKey.toBase58(),
         bootstrapWalletPath: bootstrapAuthority.keypairPath,
         solanaTraderPublicKey: trader.publicKey.toBase58(),
+        lvrAmmProgramId: clobProgramId,
+        goldClobMarketProgramId: clobProgramId,
         goldMint: goldMint.toBase58(),
         currentMatchId,
         currentDuelId: String(currentMatchId),

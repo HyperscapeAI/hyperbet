@@ -32,7 +32,7 @@ import bs58 from "bs58";
 import dotenv from "dotenv";
 import { ethers } from "ethers";
 
-import goldClobMarketIdl from "./idl/gold_clob_market.json" with { type: "json" };
+import lvrMarketIdl from "./idl/lvr_amm.json" with { type: "json" };
 import {
   duelKeyHexToBytes,
   findClobVaultPda,
@@ -52,7 +52,7 @@ const SELL_SIDE = 2;
 const MAX_PRICE = 1000;
 const SHARE_UNIT_SIZE = 1_000n;
 
-const GOLD_CLOB_ABI = [
+const LVR_ROUTER_ABI = [
   "function marketKey(bytes32 duelKey, uint8 marketKind) view returns (bytes32)",
   "function getMarket(bytes32 duelKey, uint8 marketKind) view returns (bool exists, bytes32 duelKeyRef, uint8 status, uint8 winner, uint64 nextOrderId, uint16 bestBid, uint16 bestAsk, uint128 totalAShares, uint128 totalBShares)",
   "function positions(bytes32 marketKey, address user) view returns (uint128 aShares, uint128 bShares, uint128 aStake, uint128 bStake)",
@@ -103,7 +103,7 @@ type EvmRuntime = {
   clob: ethers.Contract;
   enabled: boolean;
   rpcUrl: string;
-  goldClobAddress: string;
+  lvrRouterAddress: string;
 };
 
 type SignableTx = Transaction | VersionedTransaction;
@@ -697,9 +697,9 @@ export class CrossChainMarketMaker {
         deployment.fightOracleProgramId,
     );
     const marketProgramId = new PublicKey(
-      (process.env.GOLD_CLOB_MARKET_PROGRAM_ID || "").trim() ||
+      (process.env.LVR_AMM_PROGRAM_ID || "").trim() ||
         (process.env.SOLANA_ARENA_MARKET_PROGRAM_ID || "").trim() ||
-        deployment.goldClobMarketProgramId,
+        deployment.lvrMarketProgramId,
     );
 
     try {
@@ -718,7 +718,7 @@ export class CrossChainMarketMaker {
         },
       );
       const marketProgram = new Program(
-        ensureIdlAddress(goldClobMarketIdl, marketProgramId),
+        ensureIdlAddress(lvrMarketIdl, marketProgramId),
         provider,
       ) as Program<any>;
       return {
@@ -762,23 +762,23 @@ export class CrossChainMarketMaker {
         walletAddress: baseWallet.address,
         clob: new ethers.Contract(
           ethers.ZeroAddress,
-          GOLD_CLOB_ABI,
+          LVR_ROUTER_ABI,
           new ethers.JsonRpcProvider("http://127.0.0.1:0"),
         ),
         enabled: false,
         rpcUrl: "",
-        goldClobAddress: "",
+        lvrRouterAddress: "",
       };
     }
 
     const provider = new ethers.JsonRpcProvider(runtimeEnv.rpcUrl);
     const baseWallet = new ethers.Wallet(privateKey, provider);
-    const goldClobAddressRaw = runtimeEnv.goldClobAddress;
-    const goldClobAddress =
-      goldClobAddressRaw.trim().length > 0 ? normalizeAddress(goldClobAddressRaw) : "";
+    const lvrRouterAddressRaw = runtimeEnv.lvrRouterAddress;
+    const lvrRouterAddress =
+      lvrRouterAddressRaw.trim().length > 0 ? normalizeAddress(lvrRouterAddressRaw) : "";
     const clob = new ethers.Contract(
-      goldClobAddress || ethers.ZeroAddress,
-      GOLD_CLOB_ABI,
+      lvrRouterAddress || ethers.ZeroAddress,
+      LVR_ROUTER_ABI,
       baseWallet,
     );
     return {
@@ -787,9 +787,9 @@ export class CrossChainMarketMaker {
       wallet: baseWallet,
       walletAddress: baseWallet.address,
       clob,
-      enabled: enabled && goldClobAddress.length > 0,
+      enabled: enabled && lvrRouterAddress.length > 0,
       rpcUrl: runtimeEnv.rpcUrl,
-      goldClobAddress,
+      lvrRouterAddress,
     };
   }
 
@@ -976,13 +976,13 @@ export class CrossChainMarketMaker {
         try {
           const [network, code, nativeBalance] = await Promise.all([
             runtime.provider.getNetwork(),
-            runtime.provider.getCode(runtime.goldClobAddress),
+            runtime.provider.getCode(runtime.lvrRouterAddress),
             runtime.provider.getBalance(runtime.walletAddress),
           ]);
           if (code === "0x") {
             runtime.enabled = false;
             console.warn(
-              `[${runtime.chainKey.toUpperCase()}] Disabled: no contract at ${runtime.goldClobAddress}`,
+              `[${runtime.chainKey.toUpperCase()}] Disabled: no contract at ${runtime.lvrRouterAddress}`,
             );
             return;
           }
@@ -995,7 +995,7 @@ export class CrossChainMarketMaker {
           }
           await runtime.clob.feeBps();
           console.log(
-            `[${runtime.chainKey.toUpperCase()}] Ready on chain ${network.chainId.toString()} with ${runtime.goldClobAddress}`,
+            `[${runtime.chainKey.toUpperCase()}] Ready on chain ${network.chainId.toString()} with ${runtime.lvrRouterAddress}`,
           );
         } catch (error) {
           runtime.enabled = false;
@@ -1235,7 +1235,7 @@ export class CrossChainMarketMaker {
   }
 
   private extractOrderId(logs: readonly unknown[], marketKey: string): number | null {
-    const iface = new ethers.Interface(GOLD_CLOB_ABI);
+    const iface = new ethers.Interface(LVR_ROUTER_ABI);
     for (const log of logs as Array<{ topics: string[]; data: string }>) {
       try {
         const parsed = iface.parseLog(log);
@@ -2066,7 +2066,7 @@ export class CrossChainMarketMaker {
       solanaDisableReason: this.solanaDisableReason,
       solanaWalletPublicKey: runtime?.wallet.publicKey.toBase58() ?? null,
       solanaFightOracleProgramId: runtime?.fightOracleProgramId.toBase58() ?? null,
-      solanaGoldClobProgramId: runtime?.marketProgramId.toBase58() ?? null,
+      solanaLvrRouterProgramId: runtime?.marketProgramId.toBase58() ?? null,
       solanaProgramId: runtime?.marketProgramId.toBase58() ?? null,
       solanaMarketConfigPda: runtime?.marketConfigPda.toBase58() ?? null,
       solanaRpcUrl: runtime?.rpcUrl ?? null,

@@ -4,7 +4,6 @@ import {
   custom,
   encodeFunctionData,
   http,
-  parseAbiItem,
   toHex,
   type Address,
   type Hash,
@@ -14,7 +13,8 @@ import {
 } from "viem";
 
 import type { EvmChainConfig } from "./chainConfig";
-import { GOLD_CLOB_ABI } from "./goldClobAbi";
+import { LVR_ROUTER_ABI } from "./lvrRouterAbi";
+import { LVR_MARKET_ABI } from "./lvrMarketAbi";
 
 type BrowserEthereumWindow = Window &
   typeof globalThis & {
@@ -24,9 +24,10 @@ type BrowserEthereumWindow = Window &
 export type MarketStatus =
   | "NULL"
   | "OPEN"
-  | "LOCKED"
+  | "PENDING"
+  | "DISPUTED"
   | "RESOLVED"
-  | "CANCELLED";
+  | "CANCELLED" | "LOCKED";
 export type Side = "NONE" | "A" | "B";
 
 export type MarketMeta = {
@@ -41,6 +42,7 @@ export type MarketMeta = {
   totalAShares: bigint;
   totalBShares: bigint;
   marketKey: Hex;
+  marketAddress: Address;
 };
 
 export type Position = {
@@ -48,18 +50,6 @@ export type Position = {
   bShares: bigint;
   aStake: bigint;
   bStake: bigint;
-};
-
-export type OrderInfo = {
-  id: bigint;
-  side: number;
-  price: number;
-  maker: Address;
-  amount: bigint;
-  filled: bigint;
-  prevOrderId: bigint;
-  nextOrderId: bigint;
-  active: boolean;
 };
 
 export type ContractWriteClient = {
@@ -73,20 +63,20 @@ export const SIDE_ENUM = {
   B: 2,
   BUY: 1,
   SELL: 2,
+  YES: 1,
+  NO: 0,
 } as const;
 
 const MARKET_STATUS_MAP: Record<number, MarketStatus> = {
-  0: "NULL",
-  1: "OPEN",
-  2: "LOCKED",
+  0: "OPEN",
+  1: "PENDING",
+  2: "DISPUTED",
   3: "RESOLVED",
-  4: "CANCELLED",
 };
 
 const SIDE_MAP: Record<number, Side> = {
-  0: "NONE",
-  1: "A",
-  2: "B",
+  0: "A",
+  1: "B",
 };
 
 export function toDuelKeyHex(duelKeyHex: string): Hex {
@@ -166,181 +156,130 @@ export function createUnlockedRpcWalletClient(
   };
 }
 
-export async function marketKeyForDuel(
-  client: PublicClient,
-  contractAddress: Address,
-  duelKey: Hex,
-  marketKind: number,
-): Promise<Hex> {
-  return client.readContract({
-    address: contractAddress,
-    abi: GOLD_CLOB_ABI,
-    functionName: "marketKey",
-    args: [duelKey, marketKind],
-  }) as Promise<Hex>;
-}
-
 export async function getMarketMeta(
   client: PublicClient,
-  contractAddress: Address,
+  routerAddress: Address,
   duelKey: Hex,
   marketKind: number,
 ): Promise<MarketMeta> {
-  const [resolvedMarketKey, rawResult] = await Promise.all([
-    marketKeyForDuel(client, contractAddress, duelKey, marketKind),
-    client.readContract({
-      address: contractAddress,
-      abi: GOLD_CLOB_ABI,
-      functionName: "getMarket",
-      args: [duelKey, marketKind],
-    }),
-  ]);
+  const marketKey = duelKey; // For this simplified migration
+  try {
+    const rawResult = await client.readContract({
+      address: routerAddress,
+      abi: LVR_ROUTER_ABI,
+      functionName: "getMarketMetadata",
+      args: [marketKey],
+    }) as [Address, bigint, string, string, string];
 
-  const result = rawResult as {
-    exists: boolean;
-    duelKey: Hex;
-    status: number;
-    winner: number;
-    nextOrderId: bigint;
-    bestBid: number;
-    bestAsk: number;
-    totalAShares: bigint;
-    totalBShares: bigint;
-  };
+    const marketAddress = rawResult[0];
+    
+    // Fallback if not found
+    if (!marketAddress || marketAddress === "0x0000000000000000000000000000000000000000") {
+      throw new Error("Market not found");
+    }
 
-  return {
-    exists: result.exists,
-    duelKey: result.duelKey,
-    marketKind,
-    status: MARKET_STATUS_MAP[Number(result.status)] ?? "NULL",
-    winner: SIDE_MAP[Number(result.winner)] ?? "NONE",
-    nextOrderId: result.nextOrderId,
-    bestBid: Number(result.bestBid),
-    bestAsk: Number(result.bestAsk),
-    totalAShares: result.totalAShares,
-    totalBShares: result.totalBShares,
-    marketKey: resolvedMarketKey,
-  };
+    const details = await client.readContract({
+      address: marketAddress,
+      abi: LVR_MARKET_ABI,
+      functionName: "getMarketDetails",
+    }) as [number, bigint, bigint, bigint, bigint, bigint, bigint, bigint];
+
+    const statusObj = MARKET_STATUS_MAP[details[0]] ?? "NULL";
+    const winnerObj = SIDE_MAP[Number(details[2])] ?? "NONE";
+    const totalAShares = details[4];
+    const totalBShares = details[5];
+    const priceYes = Number(details[6]) / 1e18;
+    const priceNo = Number(details[7]) / 1e18;
+
+    return {
+      exists: true,
+      duelKey,
+      marketKind,
+      status: statusObj,
+      winner: winnerObj,
+      nextOrderId: 0n,
+      bestBid: Math.floor(priceYes * 1000),
+      bestAsk: Math.ceil((1 - priceNo) * 1000), // AMM implied
+      totalAShares,
+      totalBShares,
+      marketKey,
+      marketAddress,
+    };
+  } catch (e) {
+    return {
+      exists: false,
+      duelKey,
+      marketKind,
+      status: "NULL",
+      winner: "NONE",
+      nextOrderId: 0n,
+      bestBid: 500,
+      bestAsk: 500,
+      totalAShares: 0n,
+      totalBShares: 0n,
+      marketKey,
+      marketAddress: "0x0000000000000000000000000000000000000000",
+    };
+  }
 }
 
 export async function getPosition(
   client: PublicClient,
-  contractAddress: Address,
-  marketKey: Hex,
+  marketAddress: Address,
   userAddress: Address,
 ): Promise<Position> {
-  const result = (await client.readContract({
-    address: contractAddress,
-    abi: GOLD_CLOB_ABI,
-    functionName: "positions",
-    args: [marketKey, userAddress],
-  })) as [bigint, bigint, bigint, bigint];
-
-  return {
-    aShares: result[0],
-    bShares: result[1],
-    aStake: result[2],
-    bStake: result[3],
-  };
-}
-
-export async function getOrder(
-  client: PublicClient,
-  contractAddress: Address,
-  marketKey: Hex,
-  orderId: bigint,
-): Promise<OrderInfo> {
-  const result = (await client.readContract({
-    address: contractAddress,
-    abi: GOLD_CLOB_ABI,
-    functionName: "orders",
-    args: [marketKey, orderId],
-  })) as [
-    bigint,
-    number,
-    number,
-    Address,
-    bigint,
-    bigint,
-    bigint,
-    bigint,
-    boolean,
-  ];
-
-  return {
-    id: result[0],
-    side: Number(result[1]),
-    price: Number(result[2]),
-    maker: result[3],
-    amount: result[4],
-    filled: result[5],
-    prevOrderId: result[6],
-    nextOrderId: result[7],
-    active: result[8],
-  };
-}
-
-export async function getOrderBook(
-  client: PublicClient,
-  contractAddress: Address,
-  duelKey: Hex,
-  marketKind: number,
-  market: MarketMeta,
-) {
-  const bids: Array<{ price: number; amount: bigint; total: bigint }> = [];
-  const asks: Array<{ price: number; amount: bigint; total: bigint }> = [];
-
-  let runningBid = 0n;
-  for (let price = market.bestBid; price > 0 && bids.length < 10; price -= 1) {
-    const level = (await client.readContract({
-      address: contractAddress,
-      abi: GOLD_CLOB_ABI,
-      functionName: "getPriceLevel",
-      args: [duelKey, marketKind, SIDE_ENUM.BUY, price],
-    })) as [bigint, bigint, bigint];
-    if (level[2] <= 0n) continue;
-    runningBid += level[2];
-    bids.push({ price: price / 1000, amount: level[2], total: runningBid });
+  if (marketAddress === "0x0000000000000000000000000000000000000000") {
+    return { aShares: 0n, bShares: 0n, aStake: 0n, bStake: 0n };
   }
+  
+  try {
+    const yesToken = await client.readContract({
+      address: marketAddress,
+      abi: LVR_MARKET_ABI,
+      functionName: "getToken",
+      args: [true],
+    }) as Address;
+    
+    const noToken = await client.readContract({
+      address: marketAddress,
+      abi: LVR_MARKET_ABI,
+      functionName: "getToken",
+      args: [false],
+    }) as Address;
 
-  let runningAsk = 0n;
-  for (
-    let price = market.bestAsk;
-    price < 1000 && asks.length < 10;
-    price += 1
-  ) {
-    const level = (await client.readContract({
-      address: contractAddress,
-      abi: GOLD_CLOB_ABI,
-      functionName: "getPriceLevel",
-      args: [duelKey, marketKind, SIDE_ENUM.SELL, price],
-    })) as [bigint, bigint, bigint];
-    if (level[2] <= 0n) continue;
-    runningAsk += level[2];
-    asks.push({ price: price / 1000, amount: level[2], total: runningAsk });
+    // Use ERC20 ABI to get balance
+    const aShares = await client.readContract({
+      address: yesToken,
+      abi: [{"inputs":[{"internalType":"address","name":"account","type":"address"}],"name":"balanceOf","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"}],
+      functionName: "balanceOf",
+      args: [userAddress],
+    }) as bigint;
+
+    const bShares = await client.readContract({
+      address: noToken,
+      abi: [{"inputs":[{"internalType":"address","name":"account","type":"address"}],"name":"balanceOf","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"}],
+      functionName: "balanceOf",
+      args: [userAddress],
+    }) as bigint;
+
+    return {
+      aShares,
+      bShares,
+      aStake: aShares,
+      bStake: bShares,
+    };
+  } catch (err) {
+    return { aShares: 0n, bShares: 0n, aStake: 0n, bStake: 0n };
   }
-
-  return { bids, asks };
 }
 
-export async function getFeeBps(
-  client: PublicClient,
-  contractAddress: Address,
-): Promise<number> {
-  const [treasuryFee, marketMakerFee] = (await Promise.all([
-    client.readContract({
-      address: contractAddress,
-      abi: GOLD_CLOB_ABI,
-      functionName: "tradeTreasuryFeeBps",
-    }),
-    client.readContract({
-      address: contractAddress,
-      abi: GOLD_CLOB_ABI,
-      functionName: "tradeMarketMakerFeeBps",
-    }),
-  ])) as [bigint, bigint];
+export async function getOrderBook(...args: any[]): Promise<{ bids: {price: number, amount: bigint, total: bigint}[], asks: {price: number, amount: bigint, total: bigint}[] }> {
+  // LvrAmm does not use orderbooks
+  return { bids: [], asks: [] };
+}
 
-  return Number(treasuryFee + marketMakerFee);
+export async function getFeeBps(...args: any[]): Promise<number> {
+  return 0; // Handled directly in AMM math now
 }
 
 export async function getNativeBalance(
@@ -350,142 +289,60 @@ export async function getNativeBalance(
   return client.getBalance({ address: userAddress });
 }
 
-export async function getRecentTrades(
-  client: PublicClient,
-  contractAddress: Address,
-  marketKey: Hex,
-  blocksToSearch = 100n,
-): Promise<
-  {
-    time: number;
-    price: number;
-    amount: bigint;
-    side: "YES" | "NO";
-    id: string;
-  }[]
-> {
-  const currentBlock = await client.getBlockNumber();
-  const fromBlock =
-    currentBlock > blocksToSearch ? currentBlock - blocksToSearch : 0n;
-
-  const logs = await client.getLogs({
-    address: contractAddress,
-    event: parseAbiItem(
-      "event OrderMatched(bytes32 indexed marketKey, uint64 makerOrderId, uint64 takerOrderId, uint256 matchedAmount, uint16 price)",
-    ),
-    args: { marketKey },
-    fromBlock,
-    toBlock: "latest",
-  });
-
-  const blockCache = new Map<bigint, number>();
-  const trades = await Promise.all(
-    logs.map(async (log) => {
-      let time = Date.now();
-      if (log.blockNumber) {
-        if (!blockCache.has(log.blockNumber)) {
-          const block = await client.getBlock({ blockNumber: log.blockNumber });
-          blockCache.set(log.blockNumber, Number(block.timestamp) * 1000);
-        }
-        time = blockCache.get(log.blockNumber)!;
-      }
-
-      return {
-        id: `${log.transactionHash}-${log.logIndex}`,
-        time,
-        price: Number(log.args.price!) / 1000,
-        amount: log.args.matchedAmount!,
-        side: (Number(log.args.price!) >= 500 ? "YES" : "NO") as "YES" | "NO",
-      };
-    }),
-  );
-
-  return trades.reverse();
-}
-
-export async function getRecentOrders(
-  client: PublicClient,
-  contractAddress: Address,
-  marketKey: Hex,
-  blocksToSearch = 100n,
-) {
-  const currentBlock = await client.getBlockNumber();
-  const fromBlock =
-    currentBlock > blocksToSearch ? currentBlock - blocksToSearch : 0n;
-
-  const logs = await client.getLogs({
-    address: contractAddress,
-    event: parseAbiItem(
-      "event OrderPlaced(bytes32 indexed marketKey, uint64 indexed orderId, address indexed maker, uint8 side, uint16 price, uint256 amount)",
-    ),
-    args: { marketKey },
-    fromBlock,
-    toBlock: "latest",
-  });
-
-  return logs
-    .map((log) => ({
-      orderId: log.args.orderId!,
-      maker: log.args.maker!,
-      price: Number(log.args.price!) / 1000,
-      amount: log.args.amount!,
-      side: Number(log.args.side!),
-    }))
-    .reverse();
+export async function getRecentTrades(...args: any[]): Promise<{id: string, side: "YES"|"NO", amount: bigint, price: number, time: number}[]> {
+  // AMM does not have CLOB trades array locally mapped like this unless indexed
+  return [];
 }
 
 export async function placeOrder(
   walletClient: ContractWriteClient,
-  contractAddress: Address,
+  routerAddress: Address,
+  marketAddress: Address,
   duelKey: Hex,
   marketKind: number,
   side: number,
   price: number,
   amount: bigint,
   account: Address,
-  value: bigint,
+  value: bigint, // Value is passed if needed, else transfer token
 ): Promise<Hash> {
+  const isBuyYes = side === SIDE_ENUM.BUY || side === SIDE_ENUM.A;
+  
+  if (value > 0n) {
+    throw new Error("LvrAMM does not support native value transfers right now, requires collateral ERC20 approval");
+  }
+
+  // Use the specific buy methods on the Router
   return walletClient.writeContract({
-    address: contractAddress,
-    abi: GOLD_CLOB_ABI,
-    functionName: "placeOrder",
-    args: [duelKey, marketKind, side, price, amount],
+    address: routerAddress,
+    abi: LVR_ROUTER_ABI,
+    functionName: isBuyYes ? "buyYes" : "buyNo",
+    args: [marketAddress, amount],
     account,
     chain: walletClient.chain,
-    value,
+    // The caller must approve the ERC20 token first!
   });
 }
 
-export async function cancelOrder(
-  walletClient: ContractWriteClient,
-  contractAddress: Address,
-  duelKey: Hex,
-  marketKind: number,
-  orderId: bigint,
-  account: Address,
-): Promise<Hash> {
-  return walletClient.writeContract({
-    address: contractAddress,
-    abi: GOLD_CLOB_ABI,
-    functionName: "cancelOrder",
-    args: [duelKey, marketKind, orderId],
-    account,
-    chain: walletClient.chain,
-  });
+export async function cancelOrder(): Promise<Hash> {
+  throw new Error("Cannot cancel orders on an AMM");
 }
 
 export async function claimWinnings(
   walletClient: ContractWriteClient,
-  contractAddress: Address,
+  routerAddress: Address,
+  marketAddress: Address,
   duelKey: Hex,
   marketKind: number,
   account: Address,
+  amountYes: bigint,
+  amountNo: bigint,
 ): Promise<Hash> {
   return walletClient.writeContract({
-    address: contractAddress,
-    abi: GOLD_CLOB_ABI,
-    functionName: "claim",
-    args: [duelKey, marketKind],
+    address: routerAddress,
+    abi: LVR_ROUTER_ABI,
+    functionName: "redeem",
+    args: [marketAddress, amountYes, amountNo],
     account,
     chain: walletClient.chain,
   });
@@ -500,9 +357,9 @@ export async function syncMarketFromOracle(
 ): Promise<Hash> {
   return walletClient.writeContract({
     address: contractAddress,
-    abi: GOLD_CLOB_ABI,
-    functionName: "syncMarketFromOracle",
-    args: [duelKey, marketKind],
+    abi: LVR_ROUTER_ABI,
+    functionName: "settleMarket",
+    args: [duelKey],
     account,
     chain: walletClient.chain,
   });
