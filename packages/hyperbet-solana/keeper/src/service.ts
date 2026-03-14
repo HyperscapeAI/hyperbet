@@ -35,6 +35,7 @@ import {
   deriveLvrAmmBetId,
   requireEnv,
   getSenderUrl,
+  getPredictionMarketCreatorKeypairRef,
   LVR_AMM_PROGRAM_ID,
   GOLD_PERPS_MARKET_PROGRAM_ID,
   readKeypair,
@@ -1237,14 +1238,10 @@ function buildPredictionMarketLifecycleRecords(): PredictionMarketLifecycleRecor
     typeof streamState.cycle?.phase === "string" ? streamState.cycle.phase : null,
   );
   const cycleWinner = currentWinnerFromCycle();
-  const creator = readKeypair(
-    process.env.AUTHORITY_KEYPAIR ||
-    process.env.MARKET_MAKER_KEYPAIR ||
-    process.env.ORACLE_AUTHORITY_KEYPAIR ||
-    requireEnv("ORACLE_AUTHORITY_KEYPAIR")
-  );
+  const creatorKeyRef = getPredictionMarketCreatorKeypairRef();
+  const creator = creatorKeyRef ? readKeypair(creatorKeyRef) : null;
   const derivedCurrentMarketPda =
-    duelKey != null
+    duelKey != null && creator
       ? findBetPda(
         LVR_AMM_PROGRAM_ID,
         deriveLvrAmmBetId(duelKeyHexToBytes(duelKey)),
@@ -1489,13 +1486,9 @@ async function verifyRecordedBet(
       duelKeyHexToBytes(normalizedDuelKey),
     ).toBase58()
     : null;
-  const creator = readKeypair(
-    process.env.AUTHORITY_KEYPAIR ||
-    process.env.MARKET_MAKER_KEYPAIR ||
-    process.env.ORACLE_AUTHORITY_KEYPAIR ||
-    requireEnv("ORACLE_AUTHORITY_KEYPAIR")
-  );
-  const derivedMarketRef = normalizedDuelKey
+  const creatorKeyRef = getPredictionMarketCreatorKeypairRef();
+  const creator = creatorKeyRef ? readKeypair(creatorKeyRef) : null;
+  const derivedMarketRef = normalizedDuelKey && creator
     ? findBetPda(
       LVR_AMM_PROGRAM_ID,
       deriveLvrAmmBetId(duelKeyHexToBytes(normalizedDuelKey)),
@@ -1873,18 +1866,14 @@ async function pollSolanaSnapshot(): Promise<void> {
       ],
     );
 
-    const creator = readKeypair(
-      process.env.AUTHORITY_KEYPAIR ||
-      process.env.MARKET_MAKER_KEYPAIR ||
-      process.env.ORACLE_AUTHORITY_KEYPAIR ||
-      requireEnv("ORACLE_AUTHORITY_KEYPAIR")
-    );
+    const creatorKeyRef = getPredictionMarketCreatorKeypairRef();
+    const creator = creatorKeyRef ? readKeypair(creatorKeyRef) : null;
     const latestFightAccount = fightAccounts[0]?.pubkey?.toBase58?.() ?? null;
     const latestMarketAccount = marketAccounts[0]?.pubkey?.toBase58?.() ?? null;
     const derivedMarketPda = null;
     const currentSolanaDuelKey = currentDuelKey();
     const currentMarketPda =
-      currentSolanaDuelKey != null
+      currentSolanaDuelKey != null && creator
         ? findBetPda(
           solanaCtx.marketProgramId,
           deriveLvrAmmBetId(duelKeyHexToBytes(currentSolanaDuelKey)),

@@ -141,6 +141,23 @@ export function requireEnv(name: string): string {
   return value;
 }
 
+export function getPredictionMarketCreatorKeypairRef(): string | null {
+  const candidates = [
+    process.env.AUTHORITY_KEYPAIR,
+    process.env.MARKET_MAKER_KEYPAIR,
+    process.env.ORACLE_AUTHORITY_KEYPAIR,
+  ];
+
+  for (const candidate of candidates) {
+    const trimmed = candidate?.trim();
+    if (trimmed) {
+      return trimmed;
+    }
+  }
+
+  return null;
+}
+
 function resolveProgramId(idlJson: unknown, fallback: string): PublicKey {
   const idl = idlJson as { address?: string; metadata?: { address?: string } };
   const fromAddress = typeof idl.address === "string" ? idl.address.trim() : "";

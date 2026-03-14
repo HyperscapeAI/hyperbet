@@ -99,6 +99,7 @@ jobs:
       - name: Run keeper tests
         run: |
           bun test \
+            packages/hyperbet-solana/keeper/src/common.test.ts \
             packages/hyperbet-solana/keeper/src/walletKeys.test.ts \
             packages/hyperbet-solana/keeper/src/modelMarkets.test.ts \
             packages/hyperbet-solana/keeper/src/db.test.ts \

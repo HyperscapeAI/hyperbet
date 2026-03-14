@@ -19,6 +19,20 @@ function runStep(label, args, options = {}) {
   }
 }
 
+function keeperTestFiles(pkg) {
+  const files = [
+    `packages/${pkg}/keeper/src/walletKeys.test.ts`,
+    `packages/${pkg}/keeper/src/modelMarkets.test.ts`,
+    `packages/${pkg}/keeper/src/db.test.ts`,
+    `packages/${pkg}/keeper/src/perpsMath.test.ts`,
+  ];
+  const optionalCommonTest = `packages/${pkg}/keeper/src/common.test.ts`;
+  if (existsSync(path.join(repoRoot, optionalCommonTest))) {
+    files.unshift(optionalCommonTest);
+  }
+  return files;
+}
+
 const chains = ["hyperbet-solana", "hyperbet-evm", "hyperbet-evm"];
 const mmChains = ["solana", "bsc", "avax"];
 
@@ -55,13 +69,7 @@ for (const pkg of chains) {
     console.log(`\n=== ${pkg} app unit tests ===\nNo app unit tests found, skipping`);
   }
 
-  runStep(`${pkg} keeper tests`, [
-    "test",
-    `packages/${pkg}/keeper/src/walletKeys.test.ts`,
-    `packages/${pkg}/keeper/src/modelMarkets.test.ts`,
-    `packages/${pkg}/keeper/src/db.test.ts`,
-    `packages/${pkg}/keeper/src/perpsMath.test.ts`,
-  ]);
+  runStep(`${pkg} keeper tests`, ["test", ...keeperTestFiles(pkg)]);
 }
 
 runStep("market-maker frozen install", [

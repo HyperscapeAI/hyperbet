@@ -201,11 +201,18 @@ jobs:
 
       - name: Run keeper unit tests
         run: |
-          bun test \
-            ${{ matrix.package_dir }}/keeper/src/walletKeys.test.ts \
-            ${{ matrix.package_dir }}/keeper/src/modelMarkets.test.ts \
-            ${{ matrix.package_dir }}/keeper/src/db.test.ts \
-            ${{ matrix.package_dir }}/keeper/src/perpsMath.test.ts
+          keeper_tests=(
+            "${{ matrix.package_dir }}/keeper/src/walletKeys.test.ts"
+            "${{ matrix.package_dir }}/keeper/src/modelMarkets.test.ts"
+            "${{ matrix.package_dir }}/keeper/src/db.test.ts"
+            "${{ matrix.package_dir }}/keeper/src/perpsMath.test.ts"
+          )
+
+          if [ -f "${{ matrix.package_dir }}/keeper/src/common.test.ts" ]; then
+            keeper_tests=("${{ matrix.package_dir }}/keeper/src/common.test.ts" "${keeper_tests[@]}")
+          fi
+
+          bun test "${keeper_tests[@]}"
 
       - name: Smoke test keeper service
         run: |
