@@ -13,4 +13,6 @@ pub struct Bet {
     pub expiration_at: i64,
     pub created_at: i64,
     pub creator: Pubkey,
+    pub treasury: Pubkey,
+    pub fee_bps: u16,
 }

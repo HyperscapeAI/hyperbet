@@ -57,6 +57,10 @@ export type LvrAmm = {
           }
         },
         {
+          "name": "treasury",
+          "writable": true
+        },
+        {
           "name": "mintYes",
           "writable": true,
           "pda": {
@@ -453,6 +457,14 @@ export type LvrAmm = {
         {
           "name": "expirationAt",
           "type": "i64"
+        },
+        {
+          "name": "feeBps",
+          "type": "u16"
+        },
+        {
+          "name": "treasury",
+          "type": "pubkey"
         }
       ]
     },
@@ -871,6 +883,18 @@ export type LvrAmm = {
               ]
             }
           }
+        },
+        {
+          "name": "treasury",
+          "writable": true
+        },
+        {
+          "name": "treasuryYesAta",
+          "writable": true
+        },
+        {
+          "name": "treasuryNoAta",
+          "writable": true
         },
         {
           "name": "tokenProgram",
@@ -1490,6 +1514,14 @@ export type LvrAmm = {
           {
             "name": "creator",
             "type": "pubkey"
+          },
+          {
+            "name": "treasury",
+            "type": "pubkey"
+          },
+          {
+            "name": "feeBps",
+            "type": "u16"
           }
         ]
       }

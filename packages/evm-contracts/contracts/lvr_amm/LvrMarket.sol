@@ -55,15 +55,17 @@ contract LvrMarket {
     uint256 private liquidity;
 
     bool private liquidityInitialized;
-    bool private immutable isDynamic;
-
     uint256 private immutable deadline;
+    address public immutable i_treasury;
+    uint256 public immutable feeBps;
 
-    constructor(address _router, bool _type, uint256 duration, address _collateral, address admin){
+    constructor(address _router, bool _type, uint256 duration, address _collateral, address admin, address treasury, uint256 _feeBps){
         i_router = _router;
         isDynamic = _type;
         i_collateral = _collateral;
         i_admin = admin;
+        i_treasury = treasury;
+        feeBps = _feeBps;
 
         deadline = block.timestamp + duration;
         state = MarketState.OPEN;
@@ -162,8 +164,11 @@ contract LvrMarket {
     function buy(bool isBuyYes, uint256 amountIn, address buyer) public isRouter {
         require(state == MarketState.OPEN, "Market Not Open");
 
+        uint256 feeAmount = (amountIn * feeBps) / 10000;
+        uint256 amountInAfterFee = amountIn - feeAmount;
+
         // Calculates amount of tokens to give after
-        uint256 amountOut = _swap(!isBuyYes, int256(amountIn));
+        uint256 amountOut = _swap(!isBuyYes, int256(amountInAfterFee));
 
         bytes memory data = abi.encode(i_collateral, buyer);
 
@@ -175,15 +180,19 @@ contract LvrMarket {
 
         require(IERC20(i_collateral).balanceOf(address(this)) >= balanceBefore + amountIn);
 
+        if (feeAmount > 0 && i_treasury != address(0)) {
+            IERC20(i_collateral).transfer(i_treasury, feeAmount);
+        }
+
         // Mints yes and no tokens
-        yesToken.mint(address(this), amountIn);
-        noToken.mint(address(this), amountIn);
+        yesToken.mint(address(this), amountInAfterFee);
+        noToken.mint(address(this), amountInAfterFee);
 
         // returns yes tokens to the user
         if(isBuyYes){
-            IERC20(yesToken).transfer(buyer, amountIn + amountOut);
+            IERC20(yesToken).transfer(buyer, amountInAfterFee + amountOut);
         }else{
-            IERC20(noToken).transfer(buyer, amountIn + amountOut);
+            IERC20(noToken).transfer(buyer, amountInAfterFee + amountOut);
         }
 
         emit MarketBuy(buyer, isBuyYes, amountIn, amountOut);
@@ -194,7 +203,10 @@ contract LvrMarket {
         require(state == MarketState.OPEN, "Market Not Open");
 
         address tokenIn = isSellYes ? address(yesToken) : address(noToken);
-        uint256 amountOut = _swap(isSellYes, int256(amountIn));
+        uint256 feeAmount = (amountIn * feeBps) / 10000;
+        uint256 amountInAfterFee = amountIn - feeAmount;
+
+        uint256 amountOut = _swap(isSellYes, int256(amountInAfterFee));
 
         uint256 tokenBalanceBefore = IERC20(tokenIn).balanceOf(address(this));
 
@@ -202,6 +214,10 @@ contract LvrMarket {
         IMarketSellCallback(msg.sender).marketSellCallback(amountIn, data);
 
         require(IERC20(tokenIn).balanceOf(address(this)) >= tokenBalanceBefore + amountIn);
+
+        if (feeAmount > 0 && i_treasury != address(0)) {
+            IERC20(tokenIn).transfer(i_treasury, feeAmount);
+        }
 
         if(isSellYes){
             IERC20(noToken).transfer(seller, amountOut);

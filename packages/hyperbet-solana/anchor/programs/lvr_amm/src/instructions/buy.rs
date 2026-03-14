@@ -40,12 +40,15 @@ pub fn buy_instruction(ctx: Context<Buy>, bet_id: u64, outcome: u8, amount_in: u
         bet.initial_liq
     };
     
+    let fee_amount = (amount_in as u128 * bet.fee_bps as u128 / 10000) as u64;
+    let net_amount_in = amount_in - fee_amount;
+
     let amount_out = math::get_swap_amount(
         !is_buy_yes, 
         bet.reserves[0], 
         bet.reserves[1], 
         liq, 
-        amount_in
+        net_amount_in
     );
 
     // Update Virtual Reserves
@@ -56,18 +59,36 @@ pub fn buy_instruction(ctx: Context<Buy>, bet_id: u64, outcome: u8, amount_in: u
     if is_buy_yes {
         require!(bet.reserves[0] >= amount_out, PredictionMarketError::MathErr);
         bet.reserves[0] -= amount_out;
-        bet.reserves[1] += amount_in;
+        bet.reserves[1] += net_amount_in;
     } else {
         require!(bet.reserves[1] >= amount_out, PredictionMarketError::MathErr);
         bet.reserves[1] -= amount_out;
-        bet.reserves[0] += amount_in;
+        bet.reserves[0] += net_amount_in;
     }
 
-    // Transfer lamports from signer to bet account as Collateral
+    // Transfer fee to treasury if exists
+    if fee_amount > 0 {
+        let fee_transfer_instruction = transfer(
+            ctx.accounts.signer.key,
+            &ctx.accounts.treasury.key(),
+            fee_amount,
+        );
+        invoke_signed(
+            &fee_transfer_instruction,
+            &[
+                ctx.accounts.signer.to_account_info(),
+                ctx.accounts.treasury.to_account_info(),
+                ctx.accounts.system_program.to_account_info(),
+            ],
+            &[],
+        )?;
+    }
+
+    // Transfer net_amount_in lamports from signer to bet account as Collateral
     let transfer_instruction = transfer(
         ctx.accounts.signer.key,
         &bet.key(),
-        amount_in,
+        net_amount_in,
     );
     invoke_signed(
         &transfer_instruction,
@@ -114,7 +135,7 @@ pub fn buy_instruction(ctx: Context<Buy>, bet_id: u64, outcome: u8, amount_in: u
 
     let cpi_program = ctx.accounts.token_program.to_account_info();
     let cpi_context = CpiContext::new(cpi_program, cpi_accounts).with_signer(signer_seeds);
-    token::mint_to(cpi_context, amount_in + amount_out)?;
+    token::mint_to(cpi_context, net_amount_in + amount_out)?;
 
     Ok(())
 }
@@ -131,6 +152,10 @@ pub struct Buy<'info> {
         bump,
     )]
     pub bet: Box<Account<'info, Bet>>,
+
+    /// CHECK: Validate treasury matches bet state
+    #[account(mut, address = bet.treasury)]
+    pub treasury: UncheckedAccount<'info>,
 
     #[account(
         mut,

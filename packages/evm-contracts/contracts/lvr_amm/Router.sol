@@ -38,11 +38,20 @@ contract Router is IMarketBuyCallback, IMarketSellCallback, IMarketRedeemCallbac
     address[] public allMarkets; // Array for enumeration
     bytes32[] public allMarketIds; // Corresponding market IDs
     IERC20 public immutable mUSD; // Collateral Token
+    address public treasury;     // Protocol Treasury
+    uint256 public feeBps;       // Global Swap Fee Bps
     
-    constructor(address _mUSD){
+    constructor(address _mUSD, address _treasury, uint256 _feeBps){
         mUSD = IERC20(_mUSD);
+        treasury = _treasury;
+        feeBps = _feeBps;
     } 
 
+    function setFeeConfig(address _treasury, uint256 _feeBps) public {
+        // In a real scenario, this would have an onlyOwner/admin modifier
+        treasury = _treasury;
+        feeBps = _feeBps;
+    }
     function create(
         string memory title, 
         string memory description,
@@ -55,7 +64,7 @@ contract Router is IMarketBuyCallback, IMarketSellCallback, IMarketRedeemCallbac
         bytes32 marketId = keccak256(abi.encodePacked(title, msg.sender, block.timestamp));
         require(!markets[marketId].initialized, "Market Already Exists");
 
-        LvrMarket market = new LvrMarket(address(this), isDynamic, duration, address(mUSD), msg.sender);
+        LvrMarket market = new LvrMarket(address(this), isDynamic, duration, address(mUSD), msg.sender, treasury, feeBps);
         
         // Transfer USD token to market contract
         mUSD.transferFrom(msg.sender, address(market), collateralIn);

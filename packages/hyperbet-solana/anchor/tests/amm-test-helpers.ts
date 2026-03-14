@@ -336,6 +336,8 @@ export async function initializeCanonicalMarket(
   duelKey: readonly number[],
   config: PublicKey,
   marketKind = DUEL_WINNER_MARKET_KIND,
+  feeBps = 200, // 2% default
+  treasury = operator.publicKey,
 ): Promise<{ marketState: PublicKey; vault: PublicKey }> {
   const betIdNum = BigInt(`0x${Buffer.from(duelKey).slice(0, 8).reverse().toString('hex')}`);
   const betId = toBn(betIdNum);
@@ -354,7 +356,7 @@ export async function initializeCanonicalMarket(
   const expirationAt = new BN(Date.now() / 1000 + 3600);
 
   await program.methods
-    .createBetAccount(betId, initialLiq, isDynamic, description, expirationAt)
+    .createBetAccount(betId, initialLiq, isDynamic, description, expirationAt, feeBps, treasury)
     .accountsPartial({
       signer: operator.publicKey,
       bet,
@@ -451,6 +453,7 @@ export async function placeClobOrder(
       mintNo,
       destinationYes,
       destinationNo,
+      treasury: args.treasury,
       tokenProgram: TOKEN_PROGRAM_ID,
       systemProgram: SystemProgram.programId,
       associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,

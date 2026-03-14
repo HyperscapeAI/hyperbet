@@ -37,26 +37,29 @@ pub fn sell_instruction(ctx: Context<Sell>, bet_id: u64, outcome: u8, amount_in:
         bet.initial_liq
     };
     
+    let fee_amount = (amount_in as u128 * bet.fee_bps as u128 / 10000) as u64;
+    let net_amount_in = amount_in - fee_amount;
+
     let amount_out = math::get_swap_amount(
         is_sell_yes, 
         bet.reserves[0], 
         bet.reserves[1], 
         liq, 
-        amount_in
+        net_amount_in
     );
 
     // Update Virtual Reserves
     if is_sell_yes {
         require!(bet.reserves[1] >= amount_out, PredictionMarketError::MathErr);
-        bet.reserves[0] += amount_in;
+        bet.reserves[0] += net_amount_in;
         bet.reserves[1] -= amount_out;
     } else {
         require!(bet.reserves[0] >= amount_out, PredictionMarketError::MathErr);
-        bet.reserves[1] += amount_in;
+        bet.reserves[1] += net_amount_in;
         bet.reserves[0] -= amount_out;
     }
 
-    // burn the tokens being sold
+    // Burn the net amount being sold (rest is transferred as fee)
     let (burn_destination, burn_mint) = if outcome == 0 {
         (ctx.accounts.destination_yes.to_account_info(), ctx.accounts.mint_yes.to_account_info())
     } else {
@@ -65,12 +68,29 @@ pub fn sell_instruction(ctx: Context<Sell>, bet_id: u64, outcome: u8, amount_in:
 
     let cpi_accounts_burn = Burn {
         mint: burn_mint.clone(),
-        from: burn_destination,
+        from: burn_destination.clone(),
         authority: ctx.accounts.signer.to_account_info()
     };
     let cpi_program = ctx.accounts.token_program.to_account_info();
     let cpi_context_burn = CpiContext::new(cpi_program.clone(), cpi_accounts_burn);
-    token::burn(cpi_context_burn, amount_in)?;
+    token::burn(cpi_context_burn, net_amount_in)?;
+
+    // Transfer fee to treasury ATA
+    if fee_amount > 0 {
+        let treasury_ata = if outcome == 0 {
+            ctx.accounts.treasury_yes_ata.to_account_info()
+        } else {
+            ctx.accounts.treasury_no_ata.to_account_info()
+        };
+
+        let cpi_accounts_transfer = token::Transfer {
+            from: burn_destination,
+            to: treasury_ata,
+            authority: ctx.accounts.signer.to_account_info(),
+        };
+        let cpi_context_transfer = CpiContext::new(cpi_program.clone(), cpi_accounts_transfer);
+        token::transfer(cpi_context_transfer, fee_amount)?;
+    }
 
     // mint the received tokens
     let (yes_no, bump) = if outcome == 1 {
@@ -117,7 +137,7 @@ pub struct Sell<'info> {
         seeds = [b"bet", bet_id.to_le_bytes().as_ref(), bet.creator.as_ref()],
         bump,
     )]
-    pub bet: Account<'info, Bet>,
+    pub bet: Box<Account<'info, Bet>>,
 
     #[account(
         mut,
@@ -141,7 +161,7 @@ pub struct Sell<'info> {
         associated_token::mint = mint_yes,
         associated_token::authority = signer,
     )]
-    pub destination_yes: Account<'info, TokenAccount>,
+    pub destination_yes: Box<Account<'info, TokenAccount>>,
 
     #[account(
         init_if_needed,
@@ -149,7 +169,19 @@ pub struct Sell<'info> {
         associated_token::mint = mint_no,
         associated_token::authority = signer,
     )]
-    pub destination_no: Account<'info, TokenAccount>,
+    pub destination_no: Box<Account<'info, TokenAccount>>,
+
+    /// CHECK: Validate treasury matched bet state
+    #[account(mut, address = bet.treasury)]
+    pub treasury: UncheckedAccount<'info>,
+
+    /// CHECK: Manual validation in instruction
+    #[account(mut)]
+    pub treasury_yes_ata: UncheckedAccount<'info>,
+
+    /// CHECK: Manual validation in instruction
+    #[account(mut)]
+    pub treasury_no_ata: UncheckedAccount<'info>,
 
     pub token_program: Program<'info, Token>,
     pub system_program: Program<'info, System>,

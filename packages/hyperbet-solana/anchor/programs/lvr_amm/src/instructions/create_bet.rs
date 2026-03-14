@@ -13,6 +13,8 @@ pub fn create_bet(
     is_dynamic: bool,
     bet_prompt: String,
     expiration: i64,
+    fee_bps: u16,
+    treasury: Pubkey,
 ) -> Result<()> {
     require!(
         initial_liq > 0,
@@ -37,6 +39,8 @@ pub fn create_bet(
     bet.expiration_at = expiration;
     bet.is_initialized = false;
     bet.side_won = None;
+    bet.treasury = treasury;
+    bet.fee_bps = fee_bps;
 
     Ok(())
 }
@@ -50,7 +54,7 @@ pub struct CreateBet<'info> {
     #[account(
         init,
         payer = signer,
-        space = size_of::<Bet>() + 8,
+        space = size_of::<Bet>() + 8 + 128, // Extra buffer for string and safety
         seeds = [b"bet".as_ref(), bet_id.to_le_bytes().as_ref(), signer.key().as_ref()],
         bump
     )]
