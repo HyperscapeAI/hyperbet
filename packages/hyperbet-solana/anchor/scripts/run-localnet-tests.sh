@@ -144,10 +144,16 @@ cd "$ROOT_DIR"
 if [[ "${ANCHOR_MANUAL_TEST_SKIP_BUILD:-0}" != "1" ]]; then
   if command -v anchor >/dev/null 2>&1; then
     echo "[anchor-test] building workspace with anchor"
-    anchor build >"$BUILD_LOG" 2>&1
+    if ! anchor build >"$BUILD_LOG" 2>&1; then
+      cat "$BUILD_LOG" >&2 || true
+      exit 1
+    fi
   else
     echo "[anchor-test] building workspace without anchor"
-    bash "$ROOT_DIR/scripts/build-workspace.sh" >"$BUILD_LOG" 2>&1
+    if ! bash "$ROOT_DIR/scripts/build-workspace.sh" >"$BUILD_LOG" 2>&1; then
+      cat "$BUILD_LOG" >&2 || true
+      exit 1
+    fi
   fi
 fi
 

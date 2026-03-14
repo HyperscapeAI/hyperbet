@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-TOOLS_VERSION="${ANCHOR_SBF_TOOLS_VERSION:-v1.52}"
+TOOLS_VERSION="${ANCHOR_SBF_TOOLS_VERSION:-v1.53}"
 BASE_RUST_LOG="${RUST_LOG:-}"
 ANCHOR_RUST_LOG="${BASE_RUST_LOG:+${BASE_RUST_LOG},}cargo_build_sbf=error"
 export RUST_LOG="${ANCHOR_RUST_LOG}"

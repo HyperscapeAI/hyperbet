@@ -123,6 +123,9 @@ async function runSolanaLocalGate(): Promise<void> {
     {
       env: {
         ANCHOR_WALLET: bootstrapKeypairPath,
+        ANCHOR_TEST_BUILD_LOG: path.join(artifactRoot, "hyperscape-anchor-build.log"),
+        ANCHOR_TEST_LOG: path.join(artifactRoot, "hyperscape-anchor-localnet-test.log"),
+        ANCHOR_TEST_VALIDATOR_LOG: path.join(artifactRoot, "hyperscape-anchor-validator.log"),
         E2E_SOLANA_BOOTSTRAP_KEYPAIR: bootstrapKeypairPath,
         SOLANA_BOOTSTRAP_KEYPAIR: bootstrapKeypairPath,
       },
