@@ -14,6 +14,15 @@ contract Router is IMarketBuyCallback, IMarketSellCallback, IMarketRedeemCallbac
 
     uint256 private constant MAX_FEE_BPS = 10_000;
 
+    error InvalidCollateral();
+    error InvalidTreasury();
+    error InvalidFeeBps();
+    error OnlyOwner();
+    error UnknownMarket();
+    error MarketAlreadyExists();
+    error IndexOutOfBounds();
+    error MarketDoesNotExist();
+
     // Enhanced event with full metadata for frontend indexing
     event MarketCreated(
         bytes32 indexed marketId, 
@@ -49,72 +58,71 @@ contract Router is IMarketBuyCallback, IMarketSellCallback, IMarketRedeemCallbac
     uint256 public feeBps;       // Global Swap Fee Bps
 
     modifier onlyOwner() {
-        require(msg.sender == owner, "Only owner");
+        if (msg.sender != owner) revert OnlyOwner();
         _;
     }
 
     modifier onlyKnownMarket(address market) {
-        require(isKnownMarket[market], "Unknown market");
+        if (!isKnownMarket[market]) revert UnknownMarket();
         _;
     }
 
     modifier onlyKnownMarketSender() {
-        require(isKnownMarket[msg.sender], "Unknown market");
+        if (!isKnownMarket[msg.sender]) revert UnknownMarket();
         _;
     }
 
     constructor(address _mUSD, address _treasury, uint256 _feeBps){
-        require(_mUSD != address(0), "Invalid collateral");
-        require(_treasury != address(0), "Invalid treasury");
-        require(_feeBps <= MAX_FEE_BPS, "Invalid fee bps");
+        if (_mUSD == address(0)) revert InvalidCollateral();
+        if (_treasury == address(0)) revert InvalidTreasury();
+        if (_feeBps > MAX_FEE_BPS) revert InvalidFeeBps();
         mUSD = IERC20(_mUSD);
         owner = msg.sender;
         treasury = _treasury;
         feeBps = _feeBps;
     }
 
-    function setFeeConfig(address _treasury, uint256 _feeBps) public onlyOwner {
-        require(_treasury != address(0), "Invalid treasury");
-        require(_feeBps <= MAX_FEE_BPS, "Invalid fee bps");
+    function setFeeConfig(address _treasury, uint256 _feeBps) external onlyOwner {
+        if (_treasury == address(0)) revert InvalidTreasury();
+        if (_feeBps > MAX_FEE_BPS) revert InvalidFeeBps();
         treasury = _treasury;
         feeBps = _feeBps;
     }
+
     function create(
-        string memory title, 
-        string memory description,
-        string memory resolutionSource,
+        string calldata title, 
+        string calldata description,
+        string calldata resolutionSource,
         bool isDynamic, 
         uint256 duration, 
         uint256 collateralIn
-    ) public {
+    ) external {
         // A new market is deployed
         bytes32 marketId = keccak256(abi.encodePacked(title, msg.sender, block.timestamp));
-        require(!markets[marketId].initialized, "Market Already Exists");
+        MarketInfo storage info = markets[marketId];
+        if (info.initialized) revert MarketAlreadyExists();
 
         LvrMarket market = new LvrMarket(address(this), isDynamic, duration, address(mUSD), msg.sender, treasury, feeBps);
+        address marketAddress = address(market);
         
         // Transfer USD token to market contract
-        mUSD.safeTransferFrom(msg.sender, address(market), collateralIn);
+        mUSD.safeTransferFrom(msg.sender, marketAddress, collateralIn);
         uint256 liquidity = market.initializeLiquidity(collateralIn);
 
-        markets[marketId] = MarketInfo({
-            market: address(market),
-            liquidity: liquidity,
-            initialized: true,
-            metadata: MarketMetadata({
-                title: title,
-                description: description,
-                resolutionSource: resolutionSource
-            })
-        });
+        info.market = marketAddress;
+        info.liquidity = liquidity;
+        info.initialized = true;
+        info.metadata.title = title;
+        info.metadata.description = description;
+        info.metadata.resolutionSource = resolutionSource;
 
-        isKnownMarket[address(market)] = true;
-        allMarkets.push(address(market));
+        isKnownMarket[marketAddress] = true;
+        allMarkets.push(marketAddress);
         allMarketIds.push(marketId);
         
         emit MarketCreated(
             marketId, 
-            address(market), 
+            marketAddress, 
             msg.sender,
             title,
             description,
@@ -130,7 +138,7 @@ contract Router is IMarketBuyCallback, IMarketSellCallback, IMarketRedeemCallbac
     }
 
     function getMarketAtIndex(uint256 index) external view returns (address market, bytes32 marketId) {
-        require(index < allMarkets.length, "Index out of bounds");
+        if (index >= allMarkets.length) revert IndexOutOfBounds();
         return (allMarkets[index], allMarketIds[index]);
     }
 
@@ -142,7 +150,7 @@ contract Router is IMarketBuyCallback, IMarketSellCallback, IMarketRedeemCallbac
         string memory resolutionSource
     ) {
         MarketInfo storage info = markets[marketId];
-        require(info.initialized, "Market does not exist");
+        if (!info.initialized) revert MarketDoesNotExist();
         return (
             info.market,
             info.liquidity,
@@ -156,7 +164,7 @@ contract Router is IMarketBuyCallback, IMarketSellCallback, IMarketRedeemCallbac
         return allMarkets;
     }
 
-    function buyYes(address market, uint256 collateralIn) public onlyKnownMarket(market) {
+    function buyYes(address market, uint256 collateralIn) external onlyKnownMarket(market) {
         // Takes mUSD from user
         // Mints Yes + No token
         // Sells No token to AMM
@@ -165,78 +173,76 @@ contract Router is IMarketBuyCallback, IMarketSellCallback, IMarketRedeemCallbac
         LvrMarket(market).buy(true, collateralIn, msg.sender);
     }
 
-    function buyNo(address market, uint256 collateralIn) public onlyKnownMarket(market) {
+    function buyNo(address market, uint256 collateralIn) external onlyKnownMarket(market) {
         LvrMarket(market).buy(false, collateralIn, msg.sender);
     }
 
-    function sellYes(address market, uint256 tokenIn) public onlyKnownMarket(market) {
+    function sellYes(address market, uint256 tokenIn) external onlyKnownMarket(market) {
         // Takes yesToken from the user
         // Sells Yes token to AMM
         // Sends corresponding No token to User
         LvrMarket(market).sell(true, tokenIn, msg.sender);
     }
 
-    function sellNo(address market, uint256 tokenIn) public onlyKnownMarket(market) {
+    function sellNo(address market, uint256 tokenIn) external onlyKnownMarket(market) {
         LvrMarket(market).sell(false, tokenIn, msg.sender);
     }
 
-    function proposerOutcome(address market, uint256 _outcome) public onlyKnownMarket(market) {
+    function proposerOutcome(address market, uint256 _outcome) external onlyKnownMarket(market) {
         LvrMarket(market).proposeOutcome(_outcome, msg.sender);
     }
 
-    function dispute(address market) public onlyKnownMarket(market) {
+    function dispute(address market) external onlyKnownMarket(market) {
         LvrMarket(market).dispute();
     }
 
-    function settleMarket(address market) public onlyKnownMarket(market) {
+    function settleMarket(address market) external onlyKnownMarket(market) {
         LvrMarket(market).settleMarket();
     }
 
-    function redeem(address market, uint256 amountYes, uint256 amountNo) public onlyKnownMarket(market) {
+    function redeem(address market, uint256 amountYes, uint256 amountNo) external onlyKnownMarket(market) {
         LvrMarket(market).redeemCollateralWithToken(amountYes, amountNo, msg.sender);
     }
 
     // Callbacks
 
-    function marketBuyCallback(uint256 collateralIn, bytes calldata data)
+    function marketBuyCallback(uint256 collateralIn, address buyer)
         external
         override
         onlyKnownMarketSender
     {
-        (address collateral, address buyer) = abi.decode(data, (address, address));
-
         // msg.sender is the Market Contract which calls the callback
-        IERC20(collateral).safeTransferFrom(buyer, msg.sender, collateralIn);
+        mUSD.safeTransferFrom(buyer, msg.sender, collateralIn);
     }
 
-    function marketSellCallback(uint256 tokenIn, bytes calldata data)
+    function marketSellCallback(uint256 tokenIn, address tokenToSell, address seller)
         external
         override
         onlyKnownMarketSender
     {
-        (address tokenToSell, address seller) = abi.decode(data, (address, address));
-
         IERC20(tokenToSell).safeTransferFrom(seller, msg.sender, tokenIn);
     }
 
-    function marketRedeemCallback(uint256 amountYes, uint256 amountNo, bytes calldata data)
+    function marketRedeemCallback(
+        uint256 amountYes,
+        uint256 amountNo,
+        address yesToken,
+        address noToken,
+        address redeemer
+    )
         external
         override
         onlyKnownMarketSender
     {
-        (address yesToken, address noToken, address redeemer) = abi.decode(data, (address, address, address));
-
         IERC20(yesToken).safeTransferFrom(redeemer, msg.sender, amountYes);
         IERC20(noToken).safeTransferFrom(redeemer, msg.sender, amountNo);
     }
 
-    function marketBondCallback(uint256 bond, bytes calldata data)
+    function marketBondCallback(uint256 bond, address proposer)
         external
         override
         onlyKnownMarketSender
     {
-        (address collateral, address proposer) = abi.decode(data, (address, address));
-
-        IERC20(collateral).safeTransferFrom(proposer, msg.sender, bond);
+        mUSD.safeTransferFrom(proposer, msg.sender, bond);
     }
 }

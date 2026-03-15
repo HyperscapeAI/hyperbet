@@ -117,16 +117,19 @@ export const verifySolanaChain = async (params: {
       };
     }
 
-    const [configPda] = PublicKey.findProgramAddressSync(
-      [Buffer.from("config", "utf8")],
+    const [adminStatePda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("admin_state", "utf8")],
       programId,
     );
-    const configInfo = await connection.getAccountInfo(configPda, "confirmed");
+    const adminStateInfo = await connection.getAccountInfo(
+      adminStatePda,
+      "confirmed",
+    );
     const coreVersion = version["solana-core"] ?? "unknown";
     return {
       chain: "solana",
       ok: true,
-      details: `rpc=${params.rpcUrl} program=${programId.toBase58()} configPda=${configInfo ? "present" : "missing"} core=${coreVersion}`,
+      details: `rpc=${params.rpcUrl} program=${programId.toBase58()} adminStatePda=${adminStateInfo ? "present" : "missing"} core=${coreVersion}`,
     };
   } catch (error) {
     return {

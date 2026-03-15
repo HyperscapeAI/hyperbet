@@ -28,10 +28,14 @@ pub fn amm_func(x: f64, y: f64, l: f64) -> f64 {
 pub fn func_derivative(x: f64, y: f64, l: f64) -> f64 {
     let z = (y - x) / l;
     let mut deriv = -gaussian_cdf(z);
-    
+
     // Apply floor to derivative to prevent division by zero in Newton-Raphson
     if fabs(deriv) < MIN_DERIVATIVE {
-        deriv = if deriv < 0.0 { -MIN_DERIVATIVE } else { MIN_DERIVATIVE };
+        deriv = if deriv < 0.0 {
+            -MIN_DERIVATIVE
+        } else {
+            MIN_DERIVATIVE
+        };
     }
     deriv
 }
@@ -58,7 +62,11 @@ pub fn get_new_reserve(x_guess: f64, y: f64, l: f64) -> f64 {
     }
 
     let res = fabs(t);
-    if res < MIN_RESERVE { MIN_RESERVE } else { res }
+    if res < MIN_RESERVE {
+        MIN_RESERVE
+    } else {
+        res
+    }
 }
 
 pub fn get_swap_amount(
@@ -73,8 +81,12 @@ pub fn get_swap_amount(
     let l_float = (initial_liquidity as f64) / 1e9;
     let amt_in = (amount_in as f64) / 1e9;
 
-    if ry < MIN_RESERVE { ry = MIN_RESERVE; }
-    if rn < MIN_RESERVE { rn = MIN_RESERVE; }
+    if ry < MIN_RESERVE {
+        ry = MIN_RESERVE;
+    }
+    if rn < MIN_RESERVE {
+        rn = MIN_RESERVE;
+    }
 
     let amount_out = if yes_to_no {
         fabs(rn - get_new_reserve(rn, ry + amt_in, l_float))
@@ -92,7 +104,7 @@ pub fn calc_price(x: u64, y: u64, l: u64) -> u64 {
 
     let z = (ry - rx) / l_f;
     let price = gaussian_cdf(z);
-    
+
     // Scale price to 1_000_000 basis points for frontends
     (price * 1_000_000.0) as u64
 }

@@ -16,6 +16,24 @@ contract LvrMarket is ReentrancyGuard {
     using SafeERC20 for IERC20;
 
     uint256 private constant MAX_FEE_BPS = 10_000;
+    uint256 private constant PRICE_SCALE = 1e18;
+
+    error InvalidRouter();
+    error InvalidCollateral();
+    error InvalidAdmin();
+    error InvalidTreasury();
+    error InvalidFeeBps();
+    error InvalidCaller();
+    error MarketNotOpen();
+    error MarketNotFinished();
+    error InvalidOutcome();
+    error InvalidProposer();
+    error ChallengeWindowNotOpened();
+    error ChallengeWindowOpen();
+    error InvalidMarketState();
+    error MarketNotResolved();
+    error LiquidityAlreadyInitialized();
+    error MarketExpired();
 
     event MarketInitialized(uint256 liquidity, uint256 collateralIn, uint256 timestamp);
     
@@ -67,11 +85,11 @@ contract LvrMarket is ReentrancyGuard {
     uint256 public immutable feeBps;
 
     constructor(address _router, bool _type, uint256 duration, address _collateral, address admin, address treasury, uint256 _feeBps){
-        require(_router != address(0), "Invalid router");
-        require(_collateral != address(0), "Invalid collateral");
-        require(admin != address(0), "Invalid admin");
-        require(treasury != address(0), "Invalid treasury");
-        require(_feeBps <= MAX_FEE_BPS, "Invalid fee bps");
+        if (_router == address(0)) revert InvalidRouter();
+        if (_collateral == address(0)) revert InvalidCollateral();
+        if (admin == address(0)) revert InvalidAdmin();
+        if (treasury == address(0)) revert InvalidTreasury();
+        if (_feeBps > MAX_FEE_BPS) revert InvalidFeeBps();
         i_router = _router;
         isDynamic = _type;
         i_collateral = _collateral;
@@ -84,32 +102,32 @@ contract LvrMarket is ReentrancyGuard {
     }
 
     modifier isRouter() {
-        require(msg.sender == i_router, "Invalid Caller Address");
+        if (msg.sender != i_router) revert InvalidCaller();
         _;
     }
 
     function proposeOutcome(uint256 _outcome, address _proposer) external isRouter nonReentrant {
-        require(state == MarketState.OPEN, "Market Not Open");
-        require(block.timestamp >= deadline, "Market not finished");
-        require(_outcome == 0 || _outcome == 1, "Invalid outcome");
-        require(_proposer != address(0), "Invalid proposer");
+        if (state != MarketState.OPEN) revert MarketNotOpen();
+        if (block.timestamp < deadline) revert MarketNotFinished();
+        if (_outcome > 1) revert InvalidOutcome();
+        if (_proposer == address(0)) revert InvalidProposer();
         // Make a bond with the proposer to keep as collateral incase of false outcome
-        uint256 balanceBefore = IERC20(i_collateral).balanceOf(address(this));
-        bytes memory data = abi.encode(i_collateral, _proposer);
+        IERC20 collateral = IERC20(i_collateral);
+        uint256 balanceBefore = collateral.balanceOf(address(this));
 
         outcome = _outcome;
         state = MarketState.PENDING;
         resolutionTimestamp = block.timestamp + DISPUTE_WINDOW;
         proposer = _proposer;
 
-        IMarketBondCallback(msg.sender).marketBondCallback(BOND_VALUE, data);
-        require(IERC20(i_collateral).balanceOf(address(this)) >= balanceBefore + BOND_VALUE);
+        IMarketBondCallback(msg.sender).marketBondCallback(BOND_VALUE, _proposer);
+        require(collateral.balanceOf(address(this)) >= balanceBefore + BOND_VALUE);
 
         emit OutcomeProposed(_outcome, _proposer, resolutionTimestamp);
     }
 
     function dispute() external isRouter{
-        require(state == MarketState.PENDING, "Challenge Window Not opened");
+        if (state != MarketState.PENDING) revert ChallengeWindowNotOpened();
         // Break the bond 
         state = MarketState.DISPUTED;
         // set the market outcome through creator/resolver voting/admin
@@ -118,7 +136,8 @@ contract LvrMarket is ReentrancyGuard {
     }
 
     function settleMarket() external isRouter nonReentrant {
-        require(block.timestamp >= resolutionTimestamp, "Challenge Window Open");
+        if (state != MarketState.PENDING) revert InvalidMarketState();
+        if (block.timestamp < resolutionTimestamp) revert ChallengeWindowOpen();
         address payoutRecipient = proposer;
         uint256 resolvedOutcome = outcome;
         state = MarketState.RESOLVED;
@@ -129,10 +148,10 @@ contract LvrMarket is ReentrancyGuard {
     }
 
     function adminResolve(uint256 _outcome) external nonReentrant {
-        require(msg.sender == i_admin, "Only Admin can call this method");
-        require(block.timestamp >= deadline, "Market not finished");
-        require(_outcome == 0 || _outcome == 1, "Invalid outcome");
-        require(state == MarketState.DISPUTED || state == MarketState.OPEN, "Invalid Market State");
+        if (msg.sender != i_admin) revert InvalidCaller();
+        if (block.timestamp < deadline) revert MarketNotFinished();
+        if (_outcome > 1) revert InvalidOutcome();
+        if (state != MarketState.DISPUTED && state != MarketState.OPEN) revert InvalidMarketState();
 
         address payoutRecipient = proposer;
         // If proposer is intialized then return the bond
@@ -150,13 +169,20 @@ contract LvrMarket is ReentrancyGuard {
         isRouter
         nonReentrant
     {
-        require(state == MarketState.RESOLVED, "Market Not Resolved");
+        if (state != MarketState.RESOLVED) revert MarketNotResolved();
 
-        bytes memory data = abi.encode(address(yesToken), address(noToken), redeemer);
-        IMarketRedeemCallback(msg.sender).marketRedeemCallback(amountYesIn, amountNoIn, data);
+        YesToken yes = yesToken;
+        NoToken no = noToken;
+        IMarketRedeemCallback(msg.sender).marketRedeemCallback(
+            amountYesIn,
+            amountNoIn,
+            address(yes),
+            address(no),
+            redeemer
+        );
 
-        if(amountYesIn > 0) yesToken.burn(address(this), amountYesIn);
-        if(amountNoIn > 0) noToken.burn(address(this), amountNoIn);
+        if(amountYesIn > 0) yes.burn(address(this), amountYesIn);
+        if(amountNoIn > 0) no.burn(address(this), amountNoIn);
 
         uint256 payout = 0;
         if(outcome == 1) {
@@ -171,7 +197,7 @@ contract LvrMarket is ReentrancyGuard {
     }
 
     function initializeLiquidity(uint256 collateralIn) external isRouter returns(uint256){
-        require(!liquidityInitialized, "Liquidity already Initialized");
+        if (liquidityInitialized) revert LiquidityAlreadyInitialized();
         yesToken = new YesToken(address(this), collateralIn);
         noToken = new NoToken(address(this), collateralIn);
         liquidity = Math.calcInitialLiquidity(collateralIn);
@@ -181,8 +207,11 @@ contract LvrMarket is ReentrancyGuard {
         return liquidity;
     }
 
-    function buy(bool isBuyYes, uint256 amountIn, address buyer) public isRouter nonReentrant {
-        require(state == MarketState.OPEN, "Market Not Open");
+    function buy(bool isBuyYes, uint256 amountIn, address buyer) external isRouter nonReentrant {
+        if (state != MarketState.OPEN) revert MarketNotOpen();
+        IERC20 collateral = IERC20(i_collateral);
+        YesToken yes = yesToken;
+        NoToken no = noToken;
 
         uint256 feeAmount;
         uint256 amountInAfterFee;
@@ -194,30 +223,28 @@ contract LvrMarket is ReentrancyGuard {
         // Calculates amount of tokens to give after
         uint256 amountOut = _swap(!isBuyYes, int256(amountInAfterFee));
 
-        bytes memory data = abi.encode(i_collateral, buyer);
-
-        uint256 balanceBefore = IERC20(i_collateral).balanceOf(address(this));
+        uint256 balanceBefore = collateral.balanceOf(address(this));
 
         // Call the callback function in the router contract which transfers collateral from user to market
-        IMarketBuyCallback(msg.sender).marketBuyCallback(amountIn, data);
+        IMarketBuyCallback(msg.sender).marketBuyCallback(amountIn, buyer);
         // Collateral is transferred to the Market
 
-        require(IERC20(i_collateral).balanceOf(address(this)) >= balanceBefore + amountIn);
+        require(collateral.balanceOf(address(this)) >= balanceBefore + amountIn);
 
         if (feeAmount > 0) {
-            IERC20(i_collateral).safeTransfer(i_treasury, feeAmount);
+            collateral.safeTransfer(i_treasury, feeAmount);
         }
 
         // Mints yes and no tokens
-        yesToken.mint(address(this), amountInAfterFee);
-        noToken.mint(address(this), amountInAfterFee);
+        yes.mint(address(this), amountInAfterFee);
+        no.mint(address(this), amountInAfterFee);
 
         // returns yes tokens to the user
         unchecked {
             if(isBuyYes){
-                IERC20(address(yesToken)).safeTransfer(buyer, amountInAfterFee + amountOut);
+                IERC20(address(yes)).safeTransfer(buyer, amountInAfterFee + amountOut);
             }else{
-                IERC20(address(noToken)).safeTransfer(buyer, amountInAfterFee + amountOut);
+                IERC20(address(no)).safeTransfer(buyer, amountInAfterFee + amountOut);
             }
         }
 
@@ -225,10 +252,12 @@ contract LvrMarket is ReentrancyGuard {
         _emitPriceSnapshot();
     }
 
-    function sell(bool isSellYes, uint256 amountIn, address seller) public isRouter nonReentrant {
-        require(state == MarketState.OPEN, "Market Not Open");
+    function sell(bool isSellYes, uint256 amountIn, address seller) external isRouter nonReentrant {
+        if (state != MarketState.OPEN) revert MarketNotOpen();
 
-        address tokenIn = isSellYes ? address(yesToken) : address(noToken);
+        YesToken yes = yesToken;
+        NoToken no = noToken;
+        address tokenIn = isSellYes ? address(yes) : address(no);
         uint256 feeAmount;
         uint256 amountInAfterFee;
         unchecked {
@@ -240,8 +269,7 @@ contract LvrMarket is ReentrancyGuard {
 
         uint256 tokenBalanceBefore = IERC20(tokenIn).balanceOf(address(this));
 
-        bytes memory data = abi.encode(tokenIn, seller);
-        IMarketSellCallback(msg.sender).marketSellCallback(amountIn, data);
+        IMarketSellCallback(msg.sender).marketSellCallback(amountIn, tokenIn, seller);
 
         require(IERC20(tokenIn).balanceOf(address(this)) >= tokenBalanceBefore + amountIn);
 
@@ -250,9 +278,9 @@ contract LvrMarket is ReentrancyGuard {
         }
 
         if(isSellYes){
-            IERC20(address(noToken)).safeTransfer(seller, amountOut);
+            IERC20(address(no)).safeTransfer(seller, amountOut);
         }else{
-            IERC20(address(yesToken)).safeTransfer(seller, amountOut);
+            IERC20(address(yes)).safeTransfer(seller, amountOut);
         }
 
         emit MarketSell(seller, isSellYes, amountIn, amountOut);
@@ -260,29 +288,32 @@ contract LvrMarket is ReentrancyGuard {
     }
 
     function _swap(bool yesToNo, int256 amountIn) internal view returns(uint256){
-        require(block.timestamp < deadline, "Market Expired");
+        if (block.timestamp >= deadline) revert MarketExpired();
         uint256 liq = isDynamic ? Math.calcLiquidity(liquidity, deadline, block.timestamp) : liquidity;
 
-        int256 currentReserveYes = int256(IERC20(address(yesToken)).balanceOf(address(this)));
-        int256 currentReserveNo = int256(IERC20(address(noToken)).balanceOf(address(this)));
+        (uint256 reserveYes, uint256 reserveNo) = _getReserves();
+        int256 currentReserveYes = int256(reserveYes);
+        int256 currentReserveNo = int256(reserveNo);
         uint256 amountOut = SwapMath.getSwapAmount(yesToNo, currentReserveYes, currentReserveNo, liq, amountIn);
         return amountOut;
     }
 
-    function getUserBalance(address user) public view returns(uint256) {
+    function getUserBalance(address user) external view returns(uint256) {
         return IERC20(address(yesToken)).balanceOf(user);
     }
 
-    function getToken(bool tokenYes) public view returns(address) {
+    function getToken(bool tokenYes) external view returns(address) {
         return tokenYes ? address(yesToken) : address(noToken);
     }
 
     function getPriceYes() public view returns(uint256) {
-        return Math.calcPrice(yesToken.balanceOf(address(this)), noToken.balanceOf(address(this)), liquidity);
+        (uint256 reserveYes, uint256 reserveNo) = _getReserves();
+        return _getPriceYes(reserveYes, reserveNo);
     }
 
     function getPriceNo() public view returns(uint256) {
-        return 1e18 - getPriceYes(); // Prices sum to 1.0 (1e18 in WAD)
+        (uint256 reserveYes, uint256 reserveNo) = _getReserves();
+        return PRICE_SCALE - _getPriceYes(reserveYes, reserveNo); // Prices sum to 1.0 (1e18 in WAD)
     }
 
     function getMarketDetails() external view returns (
@@ -295,25 +326,38 @@ contract LvrMarket is ReentrancyGuard {
         uint256 priceYes,
         uint256 priceNo
     ) {
+        (uint256 reserveYesValue, uint256 reserveNoValue) = _getReserves();
+        uint256 priceYesValue = _getPriceYes(reserveYesValue, reserveNoValue);
         return (
             state,
             deadline,
             outcome,
             liquidity,
-            yesToken.balanceOf(address(this)),
-            noToken.balanceOf(address(this)),
-            getPriceYes(),
-            getPriceNo()
+            reserveYesValue,
+            reserveNoValue,
+            priceYesValue,
+            PRICE_SCALE - priceYesValue
         );
     }
 
     function _emitPriceSnapshot() internal {
+        (uint256 reserveYes, uint256 reserveNo) = _getReserves();
+        uint256 priceYes = _getPriceYes(reserveYes, reserveNo);
         emit PriceSnapshot(
             block.timestamp,
-            getPriceYes(),
-            getPriceNo(),
-            yesToken.balanceOf(address(this)),
-            noToken.balanceOf(address(this))
+            priceYes,
+            PRICE_SCALE - priceYes,
+            reserveYes,
+            reserveNo
         );
+    }
+
+    function _getPriceYes(uint256 reserveYes, uint256 reserveNo) internal view returns (uint256) {
+        return Math.calcPrice(reserveYes, reserveNo, liquidity);
+    }
+
+    function _getReserves() internal view returns (uint256 reserveYes, uint256 reserveNo) {
+        reserveYes = yesToken.balanceOf(address(this));
+        reserveNo = noToken.balanceOf(address(this));
     }
 }

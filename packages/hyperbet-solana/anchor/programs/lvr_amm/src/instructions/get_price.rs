@@ -1,6 +1,6 @@
 use anchor_lang::prelude::*;
 
-use crate::{error::PredictionMarketError, state::bet::Bet, math};
+use crate::{error::PredictionMarketError, math, state::bet::Bet};
 
 pub fn get_price_instruction(ctx: Context<GetPrice>, outcome: u8) -> Result<u64> {
     require!(
@@ -8,10 +8,10 @@ pub fn get_price_instruction(ctx: Context<GetPrice>, outcome: u8) -> Result<u64>
         PredictionMarketError::OutComeCanOnlyBe01
     );
     let bet = &ctx.accounts.bet;
-    
+
     // Calculates price using Gaussian CDF math from reserves
     let price_yes = math::calc_price(bet.reserves[0], bet.reserves[1], bet.initial_liq);
-    
+
     if outcome == 0 {
         Ok(price_yes)
     } else {
@@ -22,6 +22,5 @@ pub fn get_price_instruction(ctx: Context<GetPrice>, outcome: u8) -> Result<u64>
 
 #[derive(Accounts)]
 pub struct GetPrice<'info> {
-    #[account(mut)]
     pub bet: Account<'info, Bet>,
 }

@@ -482,8 +482,7 @@ export type LvrAmm = {
       ],
       "accounts": [
         {
-          "name": "bet",
-          "writable": true
+          "name": "bet"
         }
       ],
       "args": [
@@ -1381,56 +1380,61 @@ export type LvrAmm = {
     },
     {
       "code": 6003,
+      "name": "betPromptTooLong",
+      "msg": "bet prompt exceeds the configured max length"
+    },
+    {
+      "code": 6004,
       "name": "quantityMustBeGreaterThanZero",
       "msg": "quantity must be greater than zero"
     },
     {
-      "code": 6004,
+      "code": 6005,
       "name": "signerDoesntHaveEnoughTokens",
       "msg": "Signer doesn't have enough tokens"
     },
     {
-      "code": 6005,
+      "code": 6006,
       "name": "notEnoughLamports",
       "msg": "Bet account doesn't have enough lamports"
     },
     {
-      "code": 6006,
+      "code": 6007,
       "name": "notEnoughSharesToReduce",
       "msg": "Bet account doesn't have enough shares"
     },
     {
-      "code": 6007,
+      "code": 6008,
       "name": "adminStateAlreadyInitialized",
       "msg": "Admin state already initialized"
     },
     {
-      "code": 6008,
+      "code": 6009,
       "name": "signerIsNotSettlePubKey",
       "msg": "Signer is not the settle pub key"
     },
     {
-      "code": 6009,
+      "code": 6010,
       "name": "betAlreadySettled",
       "msg": "Bet already settled"
     },
     {
-      "code": 6010,
+      "code": 6011,
       "name": "betNotSettled",
       "msg": "Bet not settled"
     },
     {
-      "code": 6011,
+      "code": 6012,
       "name": "betNotExpired",
       "msg": "Bet not expired"
     },
     {
-      "code": 6012,
+      "code": 6013,
       "name": "mathErr",
       "msg": "Overflow or Underflow"
     },
     {
-      "code": 6013,
+      "code": 6014,
       "name": "invalidTreasuryAta",
       "msg": "Invalid Treasury ATA"
     }

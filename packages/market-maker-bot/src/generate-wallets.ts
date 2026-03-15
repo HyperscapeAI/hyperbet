@@ -52,7 +52,7 @@ async function main() {
       MM_ENABLE_BSC: "true",
       MM_ENABLE_BASE: "true",
       MM_ENABLE_AVAX: "true",
-      MM_ENABLE_SOLANA: "true",
+      MM_ENABLE_SOLANA: "false",
     },
     wallets,
   };

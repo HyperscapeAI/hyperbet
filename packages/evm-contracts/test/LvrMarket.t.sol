@@ -131,7 +131,7 @@ contract LvrMarketTest is Test {
 
     function test_OnlyOwnerCanSetFeeConfig() public {
         vm.prank(user1);
-        vm.expectRevert("Only owner");
+        vm.expectRevert(Router.OnlyOwner.selector);
         router.setFeeConfig(user1, 100);
 
         vm.prank(admin);
@@ -143,18 +143,37 @@ contract LvrMarketTest is Test {
 
     function test_RejectsInvalidFeeConfig() public {
         vm.startPrank(admin);
-        vm.expectRevert("Invalid fee bps");
+        vm.expectRevert(Router.InvalidFeeBps.selector);
         new Router(address(mUSD), treasury, 10_001);
-        vm.expectRevert("Invalid fee bps");
+        vm.expectRevert(Router.InvalidFeeBps.selector);
         router.setFeeConfig(treasury, 10_001);
         vm.stopPrank();
     }
 
     function test_CallbacksRejectUnknownMarkets() public {
-        bytes memory data = abi.encode(address(mUSD), user1);
+        vm.prank(user1);
+        vm.expectRevert(Router.UnknownMarket.selector);
+        router.marketBuyCallback(1 ether, user1);
+    }
+
+    function test_SettleRequiresPendingOutcome() public {
+        vm.startPrank(user1);
+        uint256 collateralIn = 100 * 10**18;
+
+        router.create(
+            "Test Market",
+            "Desc",
+            "Src",
+            true,
+            DURATION,
+            collateralIn
+        );
+
+        (address marketAddr, ) = router.getMarketAtIndex(0);
+        vm.stopPrank();
 
         vm.prank(user1);
-        vm.expectRevert("Unknown market");
-        router.marketBuyCallback(1 ether, data);
+        vm.expectRevert(LvrMarket.InvalidMarketState.selector);
+        router.settleMarket(marketAddr);
     }
 }

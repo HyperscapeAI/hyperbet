@@ -10,8 +10,6 @@ use instructions::*;
 
 declare_id!("Af4LMYfaBtcFFM6dBjwLYH6QJLMqEwneQ8VHfn2z7NY5");
 
-
-
 #[program]
 pub mod lvr_amm {
     use super::*;
@@ -31,7 +29,16 @@ pub mod lvr_amm {
         fee_bps: u16,
         treasury: Pubkey,
     ) -> Result<()> {
-        create_bet(ctx, bet_id, initial_liq, is_dynamic, bet_prompt, expiration_at, fee_bps, treasury)
+        create_bet(
+            ctx,
+            bet_id,
+            initial_liq,
+            is_dynamic,
+            bet_prompt,
+            expiration_at,
+            fee_bps,
+            treasury,
+        )
     }
 
     pub fn init_bet_account(ctx: Context<InitBet>, bet_id: u64) -> Result<()> {

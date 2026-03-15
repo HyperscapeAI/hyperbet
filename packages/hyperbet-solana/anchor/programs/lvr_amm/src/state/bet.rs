@@ -1,11 +1,13 @@
 use anchor_lang::prelude::*;
 
 #[account]
+#[derive(InitSpace)]
 pub struct Bet {
     pub bet_id: u64,
     pub initial_liq: u64, // Initial Liquidity exactly matching EVM model
     pub is_dynamic: bool,
     pub reserves: [u64; 2], // 0 for Yes, 1 for No. These are virtual reserves.
+    #[max_len(128)]
     pub bet_prompt: String,
     pub is_initialized: bool,
     // by default none
@@ -15,4 +17,9 @@ pub struct Bet {
     pub creator: Pubkey,
     pub treasury: Pubkey,
     pub fee_bps: u16,
+}
+
+impl Bet {
+    pub const MAX_PROMPT_LEN: usize = 128;
+    pub const SPACE: usize = 8 + Self::INIT_SPACE;
 }

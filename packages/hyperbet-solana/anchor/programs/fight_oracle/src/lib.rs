@@ -138,8 +138,7 @@ pub mod fight_oracle {
     ) -> Result<()> {
         let duel_state = &mut ctx.accounts.duel_state;
         require!(
-            duel_state.status != DuelStatus::Resolved
-                && duel_state.status != DuelStatus::Cancelled,
+            duel_state.status != DuelStatus::Resolved && duel_state.status != DuelStatus::Cancelled,
             ErrorCode::DuelAlreadyFinalized
         );
         duel_state.status = DuelStatus::Cancelled;

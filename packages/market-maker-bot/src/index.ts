@@ -66,6 +66,12 @@ const LVR_ROUTER_ABI = [
   "event OrderPlaced(bytes32 indexed marketKey, uint64 indexed orderId, address indexed maker, uint8 side, uint16 price, uint256 amount)",
 ] as const;
 
+const IGNORABLE_EVM_CANCEL_ERROR_SELECTORS = new Set([
+  "0xf08c50a1", // OrderInactive()
+  "0x41a26a63", // AlreadyFilled()
+  "0xb331e421", // NotMaker()
+]);
+
 type TrackedOrder = {
   orderId: number;
   chainKey: BettingChainKey;
@@ -137,6 +143,51 @@ type SolanaManagedOrder = {
   remainingUnits: number;
   remainingRawAmount: bigint;
 };
+
+const SOLANA_MM_REQUIRED_ACCOUNTS = [
+  "marketConfig",
+  "marketState",
+  "userBalance",
+  "order",
+] as const;
+const SOLANA_MM_REQUIRED_INSTRUCTIONS = [
+  "syncMarketFromDuel",
+  "placeOrder",
+  "cancelOrder",
+  "claim",
+] as const;
+
+function normalizeIdlSymbolName(value: string): string {
+  return value.replace(/[^a-z0-9]/gi, "").toLowerCase();
+}
+
+function idlSupportsExternalSolanaMarketMaking(idlJson: unknown): boolean {
+  const idlRecord = asRecord(idlJson);
+  const accountNames = new Set(
+    Array.isArray(idlRecord?.accounts)
+      ? idlRecord.accounts
+          .map((entry) => asRecord(entry)?.name)
+          .filter((entry): entry is string => typeof entry === "string")
+          .map(normalizeIdlSymbolName)
+      : [],
+  );
+  const instructionNames = new Set(
+    Array.isArray(idlRecord?.instructions)
+      ? idlRecord.instructions
+          .map((entry) => asRecord(entry)?.name)
+          .filter((entry): entry is string => typeof entry === "string")
+          .map(normalizeIdlSymbolName)
+      : [],
+  );
+  return (
+    SOLANA_MM_REQUIRED_ACCOUNTS.every((name) =>
+      accountNames.has(normalizeIdlSymbolName(name)),
+    ) &&
+    SOLANA_MM_REQUIRED_INSTRUCTIONS.every((name) =>
+      instructionNames.has(normalizeIdlSymbolName(name)),
+    )
+  );
+}
 
 function readEnvBoolean(name: string, fallback: boolean): boolean {
   const raw = process.env[name]?.trim().toLowerCase();
@@ -307,7 +358,7 @@ const SOLANA_HEALTHCHECK_INTERVAL_MS = Math.max(
   1_000,
   readEnvNumber("SOLANA_HEALTHCHECK_INTERVAL_MS", 60_000),
 );
-const MM_ENABLE_SOLANA = readEnvBoolean("MM_ENABLE_SOLANA", true);
+const MM_ENABLE_SOLANA = readEnvBoolean("MM_ENABLE_SOLANA", false);
 const MM_ENABLE_DUEL_SIGNAL = readEnvBoolean(
   "MM_ENABLE_DUEL_SIGNAL",
   !process.env.VITEST,
@@ -557,6 +608,19 @@ function extractSolanaTxSignature(error: unknown): string | null {
   return match?.[1] ?? null;
 }
 
+function isIgnorableEvmCancelError(error: unknown): boolean {
+  const message = String((error as Error)?.message ?? "").toLowerCase();
+  if (
+    message.includes("order inactive") ||
+    message.includes("already filled") ||
+    message.includes("not maker")
+  ) {
+    return true;
+  }
+  const selector = message.match(/0x[0-9a-f]{8}/i)?.[0]?.toLowerCase() ?? null;
+  return selector != null && IGNORABLE_EVM_CANCEL_ERROR_SELECTORS.has(selector);
+}
+
 function isSolanaIgnorableRaceError(error: unknown): boolean {
   const message = (error as Error)?.message ?? "";
   return (
@@ -675,6 +739,14 @@ export class CrossChainMarketMaker {
   private createSolanaRuntime(): SolanaRuntime | null {
     if (!this.solanaEnabled) {
       this.solanaDisableReason = "disabled via MM_ENABLE_SOLANA=false";
+      return null;
+    }
+
+    if (!idlSupportsExternalSolanaMarketMaking(lvrMarketIdl)) {
+      this.solanaEnabled = false;
+      this.solanaDisableReason =
+        "current lvr_amm deployment is AMM-only; external Solana quote-bot execution is unsupported";
+      console.warn(`[SOLANA] Disabled: ${this.solanaDisableReason}`);
       return null;
     }
 
@@ -1277,11 +1349,7 @@ export class CrossChainMarketMaker {
       await tx.wait();
     } catch (error) {
       const message = String((error as Error).message || "");
-      if (
-        !message.includes("order inactive") &&
-        !message.includes("already filled") &&
-        !message.includes("not maker")
-      ) {
+      if (!isIgnorableEvmCancelError(error)) {
         console.warn(
           `[${runtime.chainKey.toUpperCase()}] cancel failed for order ${order.orderId}: ${message}`,
         );

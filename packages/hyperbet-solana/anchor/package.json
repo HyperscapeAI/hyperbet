@@ -13,7 +13,7 @@
     "audit:strict": "ANCHOR_AUDIT_STRICT=1 bash scripts/run-cargo-audit.sh -D warnings",
     "test": "bash scripts/run-localnet-tests.sh tests/black_hat_exploits.ts tests/lvr_amm.test.ts tests/gold_perps_market.ts",
     "test:lvr-amm": "bash scripts/run-localnet-tests.sh tests/lvr_amm.test.ts",
-    "test:anchor-cli": "if command -v anchor >/dev/null 2>&1; then HYPERSCAPE_MAX_ORACLE_STALENESS_SECONDS=1 GOLD_PERPS_TEST_STALE_WAIT_MS=2500 anchor test; else echo 'Anchor CLI not found, skipping tests'; fi",
+    "test:anchor-cli": "if command -v anchor >/dev/null 2>&1; then RUST_LOG=cargo_build_sbf=error anchor test; else echo 'Anchor CLI not found, skipping tests'; fi",
     "simulate:localnet": "node scripts/run-hyperscape-simulation.mjs",
     "simulate:perps-risk": "bun scripts/simulate-gold-perps-risk.ts"
   },

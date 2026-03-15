@@ -33,9 +33,15 @@ pub fn withdraw_post_settle_instruction(
 
     // Burn the tokens
     let (burn_destination, burn_mint) = if outcome == 0 {
-        (ctx.accounts.destination_yes.to_account_info(), ctx.accounts.mint_yes.to_account_info())
+        (
+            ctx.accounts.destination_yes.to_account_info(),
+            ctx.accounts.mint_yes.to_account_info(),
+        )
     } else {
-        (ctx.accounts.destination_no.to_account_info(), ctx.accounts.mint_no.to_account_info())
+        (
+            ctx.accounts.destination_no.to_account_info(),
+            ctx.accounts.mint_no.to_account_info(),
+        )
     };
 
     let cpi_accounts = Burn {

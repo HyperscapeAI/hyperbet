@@ -11,6 +11,9 @@ pub enum PredictionMarketError {
     #[msg("initial liq must be greater than 100000")]
     InvalidInitialLiq,
 
+    #[msg("bet prompt exceeds the configured max length")]
+    BetPromptTooLong,
+
     #[msg("quantity must be greater than zero")]
     QuantityMustBeGreaterThanZero,
 

@@ -1,8 +1,7 @@
 use anchor_lang::prelude::*;
-use std::mem::size_of;
 
-use crate::{error::PredictionMarketError, state::bet::Bet};
 use crate::math;
+use crate::{error::PredictionMarketError, state::bet::Bet};
 
 use anchor_spl::token::{Mint, Token};
 
@@ -17,9 +16,10 @@ pub fn create_bet(
     fee_bps: u16,
     treasury: Pubkey,
 ) -> Result<()> {
+    require!(initial_liq > 0, PredictionMarketError::InvalidInitialLiq);
     require!(
-        initial_liq > 0,
-        PredictionMarketError::InvalidInitialLiq
+        bet_prompt.len() <= Bet::MAX_PROMPT_LEN,
+        PredictionMarketError::BetPromptTooLong
     );
     let bet = &mut ctx.accounts.bet;
 
@@ -27,10 +27,10 @@ pub fn create_bet(
 
     bet.bet_id = bet_id;
     bet.is_dynamic = is_dynamic;
-    
+
     // Calculates L = collateral / pdf(0)
     bet.initial_liq = math::calc_initial_liquidity(initial_liq);
-    
+
     // Set Virtual Reserves of YES and NO to collateral initially
     bet.reserves = [initial_liq, initial_liq];
 
@@ -55,7 +55,7 @@ pub struct CreateBet<'info> {
     #[account(
         init,
         payer = signer,
-        space = size_of::<Bet>() + 8 + 128, // Extra buffer for string and safety
+        space = Bet::SPACE,
         seeds = [b"bet".as_ref(), bet_id.to_le_bytes().as_ref(), signer.key().as_ref()],
         bump
     )]

@@ -1,7 +1,7 @@
 use crate::state::bet::Bet;
 
 use anchor_lang::prelude::*;
-use anchor_lang::solana_program::program::invoke_signed;
+use anchor_lang::solana_program::program::invoke;
 use anchor_lang::solana_program::system_instruction::transfer;
 
 pub fn init_bet(ctx: Context<InitBet>, _bet_id: u64) -> Result<()> {
@@ -12,14 +12,13 @@ pub fn init_bet(ctx: Context<InitBet>, _bet_id: u64) -> Result<()> {
         &bet.key(),
         bet.reserves[0], // which holds collateralIn initially
     );
-    invoke_signed(
+    invoke(
         &transfer_instruction,
         &[
             ctx.accounts.signer.to_account_info(),
             bet.to_account_info(),
             ctx.accounts.system_program.to_account_info(),
         ],
-        &[],
     )?;
 
     bet.is_initialized = true;

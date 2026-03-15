@@ -1,6 +1,6 @@
 # Hyperbet Market Maker Bot
 
-Real quote-lifecycle bot for BSC, Base, AVAX, and Solana. The bot discovers active prediction markets from the lifecycle API and feeds both EVM and Solana execution through the shared `@hyperbet/mm-core` quote planner.
+Real quote-lifecycle bot for BSC, Base, and AVAX. Solana prediction markets now run on the in-protocol `lvr_amm` PM AMM, so this package does not run an external Solana quote loop against that program.
 
 ## Single instance
 
@@ -10,16 +10,7 @@ bun run start
 
 Uses `.env` values in this package. You can provide one shared EVM key via `EVM_PRIVATE_KEY`, or chain-specific keys via `EVM_PRIVATE_KEY_BSC`, `EVM_PRIVATE_KEY_BASE`, and `EVM_PRIVATE_KEY_AVAX`.
 
-Solana execution now requires all of the following:
-
-- `SOLANA_PRIVATE_KEY` for a real funded signer
-- `SOLANA_RPC_URL`
-- `FIGHT_ORACLE_PROGRAM_ID`
-- `GOLD_CLOB_MARKET_PROGRAM_ID`
-
-`SOLANA_ARENA_MARKET_PROGRAM_ID` is still accepted as a deprecated alias for `GOLD_CLOB_MARKET_PROGRAM_ID`.
-
-If the Solana signer, program, or config PDA is unavailable, the bot disables only Solana execution and continues quoting on the enabled EVM chains.
+`MM_ENABLE_SOLANA` defaults to `false`. If it is forced on against the current `lvr_amm` deployment, the bot disables Solana execution with a reason because the AMM does not expose the external resting-order primitives needed by this quote bot.
 
 ## Generate multiple wallet configs
 
@@ -35,7 +26,7 @@ This writes wallet key material to `wallets.generated.json`. Keep that file priv
 bun run start:multi -- --config wallets.generated.json --stagger-ms 1200
 ```
 
-Any wallet with `MM_ENABLE_SOLANA=true` needs a funded `solanaPrivateKey`. Shared Solana env such as `SOLANA_RPC_URL`, `FIGHT_ORACLE_PROGRAM_ID`, and `GOLD_CLOB_MARKET_PROGRAM_ID` can live under `defaults`.
+`solanaPrivateKey` is optional and is mainly useful for `wallets:ui-env` exports. Multi-wallet quote execution is EVM-only unless a separate Solana quote-compatible program is introduced.
 
 Optional:
 
@@ -172,7 +163,8 @@ bun run simulate:adversarial:baseline:update
 ```bash
 bun test
 bunx tsc --noEmit -p tsconfig.json
+bun run smoke:runtime:evm
 bun run smoke:runtime:solana
 ```
 
-`SOLANA_HEALTHCHECK_INTERVAL_MS` controls readiness checks only. Normal Solana quote reconciliation runs on the main market-maker loop.
+`smoke:runtime:solana` delegates to the supported Solana PM AMM local validation suite in `/Users/shawwalters/eliza-workspace/hyperbet/packages/hyperbet-solana`, covering market open, trading, settlement, and claims.

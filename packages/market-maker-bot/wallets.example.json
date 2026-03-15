@@ -3,10 +3,10 @@
     "MM_ENABLE_BSC": "true",
     "MM_ENABLE_BASE": "true",
     "MM_ENABLE_AVAX": "true",
-    "MM_ENABLE_SOLANA": "true",
+    "MM_ENABLE_SOLANA": "false",
     "SOLANA_RPC_URL": "https://api.testnet.solana.com",
     "FIGHT_ORACLE_PROGRAM_ID": "<fight-oracle-program-id>",
-    "LVR_ROUTER_MARKET_PROGRAM_ID": "<gold-clob-program-id>",
+    "LVR_AMM_PROGRAM_ID": "<lvr-amm-program-id>",
     "TARGET_SPREAD_BPS": "200",
     "MAX_INVENTORY_CAP": "500000"
   },

@@ -3,15 +3,23 @@ use crate::{error::PredictionMarketError, state::bet::Bet};
 use anchor_lang::prelude::*;
 
 use anchor_spl::associated_token::AssociatedToken;
-use anchor_spl::token::{self, Burn, Mint, MintTo, TokenAccount, Token};
+use anchor_spl::token::{self, Burn, Mint, MintTo, Token, TokenAccount};
 
 // / Sell shares of a bet, 0 for yes, 1 for no
-pub fn sell_instruction(ctx: Context<Sell>, bet_id: u64, outcome: u8, amount_in: u64) -> Result<()> {
+pub fn sell_instruction(
+    ctx: Context<Sell>,
+    bet_id: u64,
+    outcome: u8,
+    amount_in: u64,
+) -> Result<()> {
     require!(
         outcome == 0 || outcome == 1,
         PredictionMarketError::OutComeCanOnlyBe01
     );
-    require!(amount_in > 0, PredictionMarketError::QuantityMustBeGreaterThanZero);
+    require!(
+        amount_in > 0,
+        PredictionMarketError::QuantityMustBeGreaterThanZero
+    );
 
     let user_share_balance = if outcome == 0 {
         ctx.accounts.destination_yes.amount
@@ -19,10 +27,17 @@ pub fn sell_instruction(ctx: Context<Sell>, bet_id: u64, outcome: u8, amount_in:
         ctx.accounts.destination_no.amount
     };
 
-    require!(user_share_balance >= amount_in, PredictionMarketError::SignerDoesntHaveEnoughTokens);
+    require!(
+        user_share_balance >= amount_in,
+        PredictionMarketError::SignerDoesntHaveEnoughTokens
+    );
 
     let bet = &mut ctx.accounts.bet;
-    require!(bet.side_won.is_none(), PredictionMarketError::BetAlreadySettled);
+    let creator = bet.creator;
+    require!(
+        bet.side_won.is_none(),
+        PredictionMarketError::BetAlreadySettled
+    );
 
     let is_sell_yes = outcome == 0;
     let current_time = Clock::get()?.unix_timestamp;
@@ -31,45 +46,57 @@ pub fn sell_instruction(ctx: Context<Sell>, bet_id: u64, outcome: u8, amount_in:
         return err!(PredictionMarketError::MathErr);
     }
 
-    let liq = if bet.is_dynamic { 
-        math::calc_liquidity(bet.initial_liq, bet.expiration_at, current_time) 
+    let liq = if bet.is_dynamic {
+        math::calc_liquidity(bet.initial_liq, bet.expiration_at, current_time)
     } else {
         bet.initial_liq
     };
-    
+
     let fee_amount = (amount_in as u128 * bet.fee_bps as u128 / 10000) as u64;
     let net_amount_in = amount_in - fee_amount;
 
     let amount_out = math::get_swap_amount(
-        is_sell_yes, 
-        bet.reserves[0], 
-        bet.reserves[1], 
-        liq, 
-        net_amount_in
+        is_sell_yes,
+        bet.reserves[0],
+        bet.reserves[1],
+        liq,
+        net_amount_in,
     );
 
     // Update Virtual Reserves
     if is_sell_yes {
-        require!(bet.reserves[1] >= amount_out, PredictionMarketError::MathErr);
+        require!(
+            bet.reserves[1] >= amount_out,
+            PredictionMarketError::MathErr
+        );
         bet.reserves[0] += net_amount_in;
         bet.reserves[1] -= amount_out;
     } else {
-        require!(bet.reserves[0] >= amount_out, PredictionMarketError::MathErr);
+        require!(
+            bet.reserves[0] >= amount_out,
+            PredictionMarketError::MathErr
+        );
         bet.reserves[1] += net_amount_in;
         bet.reserves[0] -= amount_out;
     }
 
     // Burn the net amount being sold (rest is transferred as fee)
     let (burn_destination, burn_mint) = if outcome == 0 {
-        (ctx.accounts.destination_yes.to_account_info(), ctx.accounts.mint_yes.to_account_info())
+        (
+            ctx.accounts.destination_yes.to_account_info(),
+            ctx.accounts.mint_yes.to_account_info(),
+        )
     } else {
-        (ctx.accounts.destination_no.to_account_info(), ctx.accounts.mint_no.to_account_info())
+        (
+            ctx.accounts.destination_no.to_account_info(),
+            ctx.accounts.mint_no.to_account_info(),
+        )
     };
 
     let cpi_accounts_burn = Burn {
         mint: burn_mint.clone(),
         from: burn_destination.clone(),
-        authority: ctx.accounts.signer.to_account_info()
+        authority: ctx.accounts.signer.to_account_info(),
     };
     let cpi_program = ctx.accounts.token_program.to_account_info();
     let cpi_context_burn = CpiContext::new(cpi_program.clone(), cpi_accounts_burn);
@@ -95,7 +122,11 @@ pub fn sell_instruction(ctx: Context<Sell>, bet_id: u64, outcome: u8, amount_in:
             ctx.accounts.treasury_no_ata.to_account_info()
         };
 
-        require_keys_eq!(treasury_ata.key(), expected_treasury_ata, PredictionMarketError::InvalidTreasuryATA);
+        require_keys_eq!(
+            treasury_ata.key(),
+            expected_treasury_ata,
+            PredictionMarketError::InvalidTreasuryATA
+        );
 
         let cpi_accounts_transfer = token::Transfer {
             from: burn_destination,
@@ -114,27 +145,29 @@ pub fn sell_instruction(ctx: Context<Sell>, bet_id: u64, outcome: u8, amount_in:
         // if sold YES, receive NO
         (b"mint_no".as_ref(), ctx.bumps.mint_no)
     };
-    
+
     let (mint_destination, receive_mint) = if outcome == 1 {
-        (ctx.accounts.destination_yes.to_account_info(), ctx.accounts.mint_yes.to_account_info())
+        (
+            ctx.accounts.destination_yes.to_account_info(),
+            ctx.accounts.mint_yes.to_account_info(),
+        )
     } else {
-        (ctx.accounts.destination_no.to_account_info(), ctx.accounts.mint_no.to_account_info())
+        (
+            ctx.accounts.destination_no.to_account_info(),
+            ctx.accounts.mint_no.to_account_info(),
+        )
     };
 
     let bet_id_bytes = bet_id.to_le_bytes();
-    let signer_seeds: &[&[&[u8]]] = &[&[
-        seeds,
-        &bet_id_bytes,
-        &ctx.accounts.bet.creator.key().to_bytes(),
-        &[bump],
-    ]];
+    let signer_seeds: &[&[&[u8]]] = &[&[seeds, &bet_id_bytes, creator.as_ref(), &[bump]]];
 
     let cpi_accounts_mint = MintTo {
         mint: receive_mint.clone(),
         to: mint_destination,
         authority: receive_mint,
     };
-    let cpi_context_mint = CpiContext::new(cpi_program, cpi_accounts_mint).with_signer(signer_seeds);
+    let cpi_context_mint =
+        CpiContext::new(cpi_program, cpi_accounts_mint).with_signer(signer_seeds);
     token::mint_to(cpi_context_mint, amount_out)?;
 
     Ok(())
@@ -147,7 +180,7 @@ pub struct Sell<'info> {
     pub signer: Signer<'info>,
 
     #[account(
-        mut, 
+        mut,
         seeds = [b"bet", bet_id.to_le_bytes().as_ref(), bet.creator.as_ref()],
         bump,
     )]

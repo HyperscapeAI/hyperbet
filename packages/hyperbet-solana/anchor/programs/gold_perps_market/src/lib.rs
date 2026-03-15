@@ -902,7 +902,8 @@ fn calculate_maintenance_margin(size: i128, maintenance_margin_bps: u16) -> Resu
 }
 
 fn calculate_liquidation_fee(size: i128, liquidation_fee_bps: u16) -> Result<u64> {
-    let fee = size.abs()
+    let fee = size
+        .abs()
         .checked_mul(i128::from(liquidation_fee_bps))
         .ok_or(PerpsError::Overflow)?
         .checked_div(BPS_DENOMINATOR as i128)
@@ -961,10 +962,7 @@ fn require_leverage(margin: u64, size: i128, max_leverage: u64) -> Result<()> {
     let leverage_capacity = margin_i128
         .checked_mul(max_leverage as i128)
         .ok_or(PerpsError::Overflow)?;
-    require!(
-        leverage_capacity >= size.abs(),
-        PerpsError::InvalidLeverage
-    );
+    require!(leverage_capacity >= size.abs(), PerpsError::InvalidLeverage);
     Ok(())
 }
 
@@ -1010,8 +1008,12 @@ fn update_market_open_interest(
     old_size: i128,
     new_size: i128,
 ) -> Result<()> {
-    let (next_long, next_short) =
-        apply_oi_delta(market.total_long_oi, market.total_short_oi, old_size, new_size)?;
+    let (next_long, next_short) = apply_oi_delta(
+        market.total_long_oi,
+        market.total_short_oi,
+        old_size,
+        new_size,
+    )?;
     market.total_long_oi = next_long;
     market.total_short_oi = next_short;
     Ok(())
@@ -1022,7 +1024,12 @@ fn projected_open_interest(
     old_size: i128,
     new_size: i128,
 ) -> Result<(u64, u64)> {
-    apply_oi_delta(market.total_long_oi, market.total_short_oi, old_size, new_size)
+    apply_oi_delta(
+        market.total_long_oi,
+        market.total_short_oi,
+        old_size,
+        new_size,
+    )
 }
 
 fn is_reduce_only_change(old_size: i128, new_size: i128) -> bool {

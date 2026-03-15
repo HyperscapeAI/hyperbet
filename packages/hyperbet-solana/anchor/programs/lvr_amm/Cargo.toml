@@ -28,9 +28,6 @@ libm = "0.2.16"
 
 
 
-[profile.release]
-overflow-checks = true
-
 [lints.rust.unexpected_cfgs]
 level = "warn"
 check-cfg = [

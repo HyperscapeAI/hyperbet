@@ -550,7 +550,7 @@ describe("CrossChainMarketMaker", () => {
     expect(contractInstances.every((instance) => instance.placeOrder.mock.calls.length === 2)).toBe(true);
   });
 
-  it("places bid and ask orders on an open Solana market", async () => {
+  it("disables Solana quote execution against the AMM-only lvr_amm deployment", async () => {
     process.env.MM_ENABLE_BSC = "false";
     process.env.MM_ENABLE_BASE = "false";
     process.env.MM_ENABLE_AVAX = "false";
@@ -559,94 +559,13 @@ describe("CrossChainMarketMaker", () => {
 
     await mm.marketMakeCycle();
 
-    expect(mm.getActiveOrders().filter((order) => order.chainKey === "solana")).toHaveLength(2);
-    expect(solanaState.calls.sync).toBeGreaterThan(0);
-    expect(solanaState.calls.place).toHaveLength(2);
-    expect(mm.getConfig().solanaWalletPublicKey).toBe(TEST_SOLANA_PUBLIC_KEY);
-  });
-
-  it("keeps active Solana quotes inside the refresh window when fair value moves", async () => {
-    process.env.MM_ENABLE_BSC = "false";
-    process.env.MM_ENABLE_BASE = "false";
-    process.env.MM_ENABLE_AVAX = "false";
-    activePredictionChains = ["solana"];
-    const mm = await loadMarketMaker();
-
-    await mm.marketMakeCycle();
-    const initialOrderCount = mm.getActiveOrders().length;
-    const initialPlaceCount = solanaState.calls.place.length;
-
-    agent1Hp = 10;
-    agent2Hp = 95;
-
-    await mm.marketMakeCycle();
-
-    expect(mm.getActiveOrders().filter((order) => order.chainKey === "solana")).toHaveLength(initialOrderCount);
+    expect(mm.getConfig().solanaEnabled).toBe(false);
+    expect(mm.getConfig().solanaDisableReason).toContain("AMM-only");
+    expect(mm.getConfig().solanaWalletPublicKey).toBe(null);
+    expect(mm.getActiveOrders().every((order) => order.chainKey !== "solana")).toBe(true);
+    expect(solanaState.calls.sync).toBe(0);
+    expect(solanaState.calls.place).toHaveLength(0);
     expect(solanaState.calls.cancel).toHaveLength(0);
-    expect(solanaState.calls.place).toHaveLength(initialPlaceCount);
-  });
-
-  it("cancels and replaces stale Solana orders", async () => {
-    process.env.MM_ENABLE_BSC = "false";
-    process.env.MM_ENABLE_BASE = "false";
-    process.env.MM_ENABLE_AVAX = "false";
-    process.env.CANCEL_STALE_AGE_MS = "1000";
-    activePredictionChains = ["solana"];
-    const mm = await loadMarketMaker();
-
-    await mm.marketMakeCycle();
-    expect(solanaState.calls.place).toHaveLength(2);
-
-    for (const order of (mm as any).activeOrders as Array<{ placedAt: number }>) {
-      order.placedAt = 0;
-    }
-    invalidateBotCaches(mm);
-    await mm.marketMakeCycle();
-
-    expect(solanaState.calls.cancel.length).toBeGreaterThan(0);
-    expect(solanaState.calls.place.length).toBeGreaterThan(2);
-    expect(mm.getActiveOrders().filter((order) => order.chainKey === "solana")).toHaveLength(2);
-  });
-
-  it("cancels Solana quotes when the market locks", async () => {
-    process.env.MM_ENABLE_BSC = "false";
-    process.env.MM_ENABLE_BASE = "false";
-    process.env.MM_ENABLE_AVAX = "false";
-    activePredictionChains = ["solana"];
-    const mm = await loadMarketMaker();
-
-    await mm.marketMakeCycle();
-    expect(mm.getActiveOrders().filter((order) => order.chainKey === "solana")).toHaveLength(2);
-
-    solanaLifecycleStatus = "LOCKED";
-    solanaState.marketStatus = "locked";
-    invalidateBotCaches(mm);
-
-    await mm.marketMakeCycle();
-
-    expect(solanaState.calls.cancel.length).toBeGreaterThan(0);
-    expect(mm.getActiveOrders().every((order) => order.chainKey !== "solana")).toBe(true);
-  });
-
-  it("claims resolved Solana inventory with non-zero shares", async () => {
-    process.env.MM_ENABLE_BSC = "false";
-    process.env.MM_ENABLE_BASE = "false";
-    process.env.MM_ENABLE_AVAX = "false";
-    activePredictionChains = ["solana"];
-    const mm = await loadMarketMaker();
-
-    await mm.marketMakeCycle();
-
-    solanaLifecycleStatus = "RESOLVED";
-    solanaState.marketStatus = "resolved";
-    solanaState.userBalance.aShares = 4_000n;
-    invalidateBotCaches(mm);
-
-    await mm.marketMakeCycle();
-
-    expect(solanaState.calls.cancel.length).toBeGreaterThan(0);
-    expect(solanaState.calls.claim).toBe(1);
-    expect(solanaState.userBalance.aShares).toBe(0n);
-    expect(mm.getActiveOrders().every((order) => order.chainKey !== "solana")).toBe(true);
+    expect(solanaState.calls.claim).toBe(0);
   });
 });

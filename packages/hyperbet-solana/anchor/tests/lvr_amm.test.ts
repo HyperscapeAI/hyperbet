@@ -89,12 +89,29 @@ async function settleBet(
 
 describe("lvr_amm", () => {
   const TRADE_AMOUNT_LAMPORTS = BigInt(LAMPORTS_PER_SOL / 10);
+  const TOO_LONG_PROMPT = "x".repeat(129);
   const provider = configureAnchorTests();
   anchor.setProvider(provider);
 
   const fightProgram = anchor.workspace.FightOracle as Program<FightOracle>;
   const ammProgram = anchor.workspace.LvrAmm as Program<LvrAmm>;
   const authority = (provider.wallet as anchor.Wallet & { payer: Keypair }).payer;
+
+  it("rejects overlong market descriptions before allocating the bet account", async () => {
+    try {
+      await createOpenMarketFixture(fightProgram, ammProgram, authority, {
+        duelKey: uniqueDuelKey("amm-description-limit"),
+        description: TOO_LONG_PROMPT,
+      });
+      assert.fail("create bet should reject prompts above the account max length");
+    } catch (error: unknown) {
+      assert.ok(
+        hasProgramError(error, "BetPromptTooLong") ||
+          hasProgramError(error, "bet prompt exceeds the configured max length"),
+        `expected BetPromptTooLong, got ${String(error)}`,
+      );
+    }
+  });
 
   it("routes SOL buy fees and token sell fees to the configured treasury", async () => {
     const treasury = Keypair.generate();
