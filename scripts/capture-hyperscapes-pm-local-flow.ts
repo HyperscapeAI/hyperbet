@@ -8,7 +8,9 @@ const execFileAsync = promisify(execFile);
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(scriptDir, "..");
-const appCwd = process.env.PLAYWRIGHT_APP_CWD || path.join(root, "packages", "hyperbet-evm", "app");
+const appCwd =
+  process.env.PLAYWRIGHT_APP_CWD ||
+  path.join(root, "packages", "hyperbet-evm", "app");
 const outputRoot =
   process.env.CAPTURE_OUTPUT_DIR ||
   path.join(
@@ -25,9 +27,24 @@ const streamStateUrl = requiredEnv("STREAM_STATE_URL");
 const activeMarketsUrl = requiredEnv("ACTIVE_MARKETS_URL");
 
 const pollMs = Number.parseInt(process.env.CAPTURE_POLL_MS || "5000", 10);
-const maxRuntimeMs = Number.parseInt(process.env.CAPTURE_MAX_RUNTIME_MS || "900000", 10);
-const screenshotWaitMs = Number.parseInt(process.env.CAPTURE_SCREENSHOT_WAIT_MS || "1500", 10);
-const screenshotTimeoutMs = Number.parseInt(process.env.CAPTURE_SCREENSHOT_TIMEOUT_MS || "30000", 10);
+const maxRuntimeMs = Number.parseInt(
+  process.env.CAPTURE_MAX_RUNTIME_MS || "900000",
+  10,
+);
+const screenshotWaitMs = Number.parseInt(
+  process.env.CAPTURE_SCREENSHOT_WAIT_MS || "1500",
+  10,
+);
+const screenshotTimeoutMs = Number.parseInt(
+  process.env.CAPTURE_SCREENSHOT_TIMEOUT_MS || "30000",
+  10,
+);
+const hyperscapesReadySelector =
+  process.env.CAPTURE_HYPERSCAPES_READY_SELECTOR ||
+  "body:not(:has(.loading-screen))";
+const hyperbetReadySelector =
+  process.env.CAPTURE_HYPERBET_READY_SELECTOR ||
+  "div[data-testid='current-match-id']:not(:has-text('-'))";
 
 let stopping = false;
 let captureIndex = 0;
@@ -36,7 +53,13 @@ let previousDuelKey = "";
 let previousMarketSignature = "";
 let previousMarketCount = -1;
 
-type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
+type JsonValue =
+  | null
+  | boolean
+  | number
+  | string
+  | JsonValue[]
+  | { [key: string]: JsonValue };
 
 type StreamState = {
   cycle?: {
@@ -89,7 +112,10 @@ function shortId(value: string | undefined): string {
   return value ? value.slice(0, 12) : "unknown";
 }
 
-function currentPhase(streamState: StreamState, activeMarkets: ActiveMarketsResponse): string {
+function currentPhase(
+  streamState: StreamState,
+  activeMarkets: ActiveMarketsResponse,
+): string {
   return (
     streamState.cycle?.phase ||
     streamState.duel?.phase ||
@@ -98,7 +124,10 @@ function currentPhase(streamState: StreamState, activeMarkets: ActiveMarketsResp
   );
 }
 
-function currentDuelKey(streamState: StreamState, activeMarkets: ActiveMarketsResponse): string {
+function currentDuelKey(
+  streamState: StreamState,
+  activeMarkets: ActiveMarketsResponse,
+): string {
   return (
     streamState.cycle?.duelKey ||
     streamState.duel?.duelKey ||
@@ -117,7 +146,9 @@ function buildMarketSignature(activeMarkets: ActiveMarketsResponse): string {
     status: market.lifecycle?.status || "unknown",
   }));
 
-  return JSON.stringify(entries.sort((a, b) => a.marketRef.localeCompare(b.marketRef)));
+  return JSON.stringify(
+    entries.sort((a, b) => a.marketRef.localeCompare(b.marketRef)),
+  );
 }
 
 async function fetchJson<T>(url: string): Promise<T> {
@@ -127,12 +158,18 @@ async function fetchJson<T>(url: string): Promise<T> {
     },
   });
   if (!response.ok) {
-    throw new Error(`request failed for ${url}: ${response.status} ${response.statusText}`);
+    throw new Error(
+      `request failed for ${url}: ${response.status} ${response.statusText}`,
+    );
   }
   return (await response.json()) as T;
 }
 
-async function takeScreenshot(url: string, filePath: string): Promise<void> {
+async function takeScreenshot(
+  url: string,
+  filePath: string,
+  waitForSelector?: string,
+): Promise<void> {
   const args = [
     "playwright",
     "screenshot",
@@ -143,11 +180,20 @@ async function takeScreenshot(url: string, filePath: string): Promise<void> {
     "--full-page",
     "--timeout",
     String(screenshotTimeoutMs),
-    "--wait-for-timeout",
-    String(screenshotWaitMs),
     url,
     filePath,
   ];
+
+  if (waitForSelector) {
+    args.splice(args.length - 2, 0, "--wait-for-selector", waitForSelector);
+  }
+
+  args.splice(
+    args.length - 2,
+    0,
+    "--wait-for-timeout",
+    String(screenshotWaitMs),
+  );
 
   await execFileAsync("bunx", args, {
     cwd: appCwd,
@@ -185,11 +231,23 @@ async function recordEvent(
   };
 
   await writeFile(`${prefix}.json`, JSON.stringify(eventState, null, 2));
-  await takeScreenshot(hyperscapesUiUrl, `${prefix}.hyperscapes.png`).catch((error) => {
-    console.error(`[pm-local:capture] hyperscapes screenshot failed for ${rawLabel}: ${String(error)}`);
+  await takeScreenshot(
+    hyperscapesUiUrl,
+    `${prefix}.hyperscapes.png`,
+    hyperscapesReadySelector,
+  ).catch((error) => {
+    console.error(
+      `[pm-local:capture] hyperscapes screenshot failed for ${rawLabel}: ${String(error)}`,
+    );
   });
-  await takeScreenshot(hyperbetUiUrl, `${prefix}.hyperbet.png`).catch((error) => {
-    console.error(`[pm-local:capture] hyperbet screenshot failed for ${rawLabel}: ${String(error)}`);
+  await takeScreenshot(
+    hyperbetUiUrl,
+    `${prefix}.hyperbet.png`,
+    hyperbetReadySelector,
+  ).catch((error) => {
+    console.error(
+      `[pm-local:capture] hyperbet screenshot failed for ${rawLabel}: ${String(error)}`,
+    );
   });
 
   console.log(`[pm-local:capture] captured ${rawLabel}`);
@@ -220,6 +278,8 @@ async function main(): Promise<void> {
         activeMarketsUrl,
         pollMs,
         maxRuntimeMs,
+        hyperscapesReadySelector,
+        hyperbetReadySelector,
       },
       null,
       2,
@@ -240,7 +300,7 @@ async function main(): Promise<void> {
       const marketCount = (activeMarkets.markets || []).length;
 
       const eventLabels: string[] = [];
-      if (captureIndex === 0) {
+      if (captureIndex === 0 && phase !== "IDLE") {
         eventLabels.push("initial");
       }
       if (duelKey !== previousDuelKey) {
@@ -252,7 +312,10 @@ async function main(): Promise<void> {
       if (marketCount > 0 && previousMarketCount <= 0) {
         eventLabels.push("markets-populated");
       }
-      if (marketSignature !== previousMarketSignature && previousMarketSignature) {
+      if (
+        marketSignature !== previousMarketSignature &&
+        previousMarketSignature
+      ) {
         eventLabels.push(`markets-${marketCount}`);
       }
 
