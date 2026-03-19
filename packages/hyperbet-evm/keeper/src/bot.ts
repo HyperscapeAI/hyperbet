@@ -32,7 +32,7 @@ import { hideBin } from "yargs/helpers";
 import {
   createPrograms,
   duelKeyHexToBytes,
-  DUEL_WINNER_MARKET_KIND,
+  DUEL_WINNER_MARKET_KIND as SOLANA_DUEL_WINNER_MARKET_KIND,
   enumIs,
   findClobVaultPda,
   findDuelStatePda,
@@ -48,6 +48,9 @@ import {
   readKeypair,
   requireEnv,
 } from "./common";
+
+const EVM_DUEL_WINNER_MARKET_KIND = 0;
+const EVM_KEEPER_DEFER_FINALIZE = process.env.EVM_KEEPER_DEFER_FINALIZE === "true";
 
 function asNum(value: unknown, fallback = 0): number {
   if (typeof value === "number") return value;
@@ -222,6 +225,7 @@ const DUEL_OUTCOME_ORACLE_ABI = [
           { name: "seed", type: "uint64" },
           { name: "resultHash", type: "bytes32" },
           { name: "replayHash", type: "bytes32" },
+          { name: "activeProposalId", type: "bytes32" },
           { name: "metadataUri", type: "string" },
         ],
         type: "tuple",
@@ -241,9 +245,11 @@ const EVM_GOLD_CLOB_ADMIN_ABI = [
         components: [
           { name: "exists", type: "bool" },
           { name: "duelKey", type: "bytes32" },
-          { name: "marketKind", type: "uint8" },
           { name: "status", type: "uint8" },
           { name: "winner", type: "uint8" },
+          { name: "tradeTreasuryFeeBpsSnapshot", type: "uint16" },
+          { name: "tradeMarketMakerFeeBpsSnapshot", type: "uint16" },
+          { name: "winningsMarketMakerFeeBpsSnapshot", type: "uint16" },
           { name: "nextOrderId", type: "uint64" },
           { name: "bestBid", type: "uint16" },
           { name: "bestAsk", type: "uint16" },
@@ -272,6 +278,25 @@ const EVM_GOLD_CLOB_ADMIN_ABI = [
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function waitUntilTimestamp(
+  targetTimeMs: number | null | undefined,
+  label: string,
+): Promise<void> {
+  if (typeof targetTimeMs !== "number" || !Number.isFinite(targetTimeMs)) {
+    return;
+  }
+  const delayMs = Math.ceil(targetTimeMs - Date.now());
+  if (delayMs <= 0) {
+    return;
+  }
+  console.log(
+    `[bot] waiting ${Math.ceil(delayMs / 1000)}s for ${label} at ${new Date(
+      targetTimeMs,
+    ).toISOString()}`,
+  );
+  await sleep(delayMs + 250);
 }
 
 function extractTxSignature(error: unknown): string | null {
@@ -1566,6 +1591,9 @@ const canRequestAirdrop =
   botCluster === "testnet" ||
   botCluster === "devnet" ||
   botCluster === "localnet";
+const solanaKeeperWriteEnabled =
+  (process.env.SOLANA_KEEPER_WRITE_ENABLED ?? "true").trim().toLowerCase() !==
+  "false";
 
 async function ensureBotSignerFunding(): Promise<boolean> {
   const now = Date.now();
@@ -2432,7 +2460,7 @@ async function createOrSyncRound(
   const marketState = findMarketPda(
     marketProgram.programId,
     duelState,
-    DUEL_WINNER_MARKET_KIND,
+    SOLANA_DUEL_WINNER_MARKET_KIND,
   );
   const vault = findClobVaultPda(marketProgram.programId, marketState);
   const duelKey = duelKeyHexToBytes(data.duelKeyHex);
@@ -2441,7 +2469,7 @@ async function createOrSyncRound(
     await runWithRecovery(
       () =>
         marketProgram.methods
-          .initializeMarket(Array.from(duelKey), DUEL_WINNER_MARKET_KIND)
+          .initializeMarket(Array.from(duelKey), SOLANA_DUEL_WINNER_MARKET_KIND)
           .accountsPartial({
             operator: botKeypair.publicKey,
             config: marketConfigPda,
@@ -2760,13 +2788,16 @@ async function upsertEvmDuelLifecycle(
     Math.floor((data.betCloseTime ?? data.fightStartTime ?? Date.now() + 1_000) / 1000),
   );
   const duelStartTs = BigInt(
-    Math.floor((data.fightStartTime ?? data.betCloseTime ?? Date.now()) / 1000),
+    Math.max(
+      Number(betCloseTs),
+      Math.floor((data.fightStartTime ?? data.betCloseTime ?? Date.now()) / 1000),
+    ),
   );
   const metadata = buildDuelMetadata(data);
 
-  await Promise.allSettled(
+  const results = await Promise.allSettled(
     evmKeeperChains.map(async (chain) => {
-      await chain.walletClient.writeContract({
+      const upsertHash = await chain.walletClient.writeContract({
         chain: undefined,
         address: chain.duelOracleAddress,
         abi: DUEL_OUTCOME_ORACLE_ABI,
@@ -2783,35 +2814,74 @@ async function upsertEvmDuelLifecycle(
         ],
         account: chain.account,
       });
+      await chain.publicClient.waitForTransactionReceipt({
+        hash: upsertHash,
+        confirmations: 1,
+      });
 
       const market = (await chain.publicClient.readContract({
         address: chain.goldClobAddress,
         abi: EVM_GOLD_CLOB_ADMIN_ABI,
         functionName: "getMarket",
-        args: [duelKey, DUEL_WINNER_MARKET_KIND],
+        args: [duelKey, EVM_DUEL_WINNER_MARKET_KIND],
       })) as { exists: boolean };
 
       if (!market.exists) {
-        await chain.walletClient.writeContract({
+        const createHash = await chain.walletClient.writeContract({
           chain: undefined,
           address: chain.goldClobAddress,
           abi: EVM_GOLD_CLOB_ADMIN_ABI,
           functionName: "createMarketForDuel",
-          args: [duelKey, DUEL_WINNER_MARKET_KIND],
+          args: [duelKey, EVM_DUEL_WINNER_MARKET_KIND],
           account: chain.account,
+        });
+        await chain.publicClient.waitForTransactionReceipt({
+          hash: createHash,
+          confirmations: 1,
         });
       }
 
-      await chain.walletClient.writeContract({
+      const syncHash = await chain.walletClient.writeContract({
         chain: undefined,
         address: chain.goldClobAddress,
         abi: EVM_GOLD_CLOB_ADMIN_ABI,
         functionName: "syncMarketFromOracle",
-        args: [duelKey, DUEL_WINNER_MARKET_KIND],
+        args: [duelKey, EVM_DUEL_WINNER_MARKET_KIND],
         account: chain.account,
+      });
+      await chain.publicClient.waitForTransactionReceipt({
+        hash: syncHash,
+        confirmations: 1,
       });
     }),
   );
+
+  const failures = results
+    .map((result, index) => ({ chain: evmKeeperChains[index], result }))
+    .filter(
+      (
+        entry,
+      ): entry is {
+        chain: EvmKeeperRuntime;
+        result: PromiseRejectedResult;
+      } => entry.result.status === "rejected",
+    );
+  if (failures.length > 0) {
+    failures.forEach(({ chain, result }) => {
+      const message =
+        result.reason instanceof Error
+          ? result.reason.stack ?? result.reason.message
+          : String(result.reason);
+      console.error(
+        `[bot] EVM lifecycle upsert failed on ${chain.chainKey}: ${message}`,
+      );
+    });
+    throw new Error(
+      `failed to upsert EVM market lifecycle on ${failures
+        .map(({ chain }) => chain.chainKey)
+        .join(", ")}`,
+    );
+  }
 }
 
 async function reportEvmResult(data: DuelLifecycleEvent): Promise<void> {
@@ -2830,9 +2900,9 @@ async function reportEvmResult(data: DuelLifecycleEvent): Promise<void> {
   const duelEndTs = BigInt(Math.floor((data.duelEndTime ?? Date.now()) / 1000));
   const metadata = buildDuelMetadata(data);
 
-  await Promise.allSettled(
+  const results = await Promise.allSettled(
     evmKeeperChains.map(async (chain) => {
-      await chain.walletClient.writeContract({
+      const proposeHash = await chain.walletClient.writeContract({
         chain: undefined,
         address: chain.duelOracleAddress,
         abi: DUEL_OUTCOME_ORACLE_ABI,
@@ -2853,8 +2923,32 @@ async function reportEvmResult(data: DuelLifecycleEvent): Promise<void> {
         ],
         account: chain.account,
       });
+      await chain.publicClient.waitForTransactionReceipt({
+        hash: proposeHash,
+        confirmations: 1,
+      });
 
-      await chain.walletClient.writeContract({
+      const syncHash = await chain.walletClient.writeContract({
+        chain: undefined,
+        address: chain.goldClobAddress,
+        abi: EVM_GOLD_CLOB_ADMIN_ABI,
+        functionName: "syncMarketFromOracle",
+        args: [duelKey, EVM_DUEL_WINNER_MARKET_KIND],
+        account: chain.account,
+      });
+      await chain.publicClient.waitForTransactionReceipt({
+        hash: syncHash,
+        confirmations: 1,
+      });
+
+      if (EVM_KEEPER_DEFER_FINALIZE) {
+        console.log(
+          `[bot] EVM finalization deferred on ${chain.chainKey}; result proposal synced and left pending for staged dispute-window finalization.`,
+        );
+        return;
+      }
+
+      const finalizeHash = await chain.walletClient.writeContract({
         chain: undefined,
         address: chain.duelOracleAddress,
         abi: DUEL_OUTCOME_ORACLE_ABI,
@@ -2862,17 +2956,39 @@ async function reportEvmResult(data: DuelLifecycleEvent): Promise<void> {
         args: [duelKey, metadata],
         account: chain.account,
       });
-
-      await chain.walletClient.writeContract({
-        chain: undefined,
-        address: chain.goldClobAddress,
-        abi: EVM_GOLD_CLOB_ADMIN_ABI,
-        functionName: "syncMarketFromOracle",
-        args: [duelKey, DUEL_WINNER_MARKET_KIND],
-        account: chain.account,
+      await chain.publicClient.waitForTransactionReceipt({
+        hash: finalizeHash,
+        confirmations: 1,
       });
     }),
   );
+
+  const failures = results
+    .map((result, index) => ({ chain: evmKeeperChains[index], result }))
+    .filter(
+      (
+        entry,
+      ): entry is {
+        chain: EvmKeeperRuntime;
+        result: PromiseRejectedResult;
+      } => entry.result.status === "rejected",
+    );
+  if (failures.length > 0) {
+    failures.forEach(({ chain, result }) => {
+      const message =
+        result.reason instanceof Error
+          ? result.reason.stack ?? result.reason.message
+          : String(result.reason);
+      console.error(
+        `[bot] EVM result reporting failed on ${chain.chainKey}: ${message}`,
+      );
+    });
+    throw new Error(
+      `failed to report EVM result on ${failures
+        .map(({ chain }) => chain.chainKey)
+        .join(", ")}`,
+    );
+  }
 }
 
 async function reportRoundResult(data: DuelLifecycleEvent): Promise<void> {
@@ -3001,78 +3117,74 @@ const gameClient = new GameClient(args["game-url"]);
 
 gameClient.onDuelStart(async (data) => {
   markStreamEvent();
-  if (!keeperProgramApiReady) {
+  if (solanaKeeperWriteEnabled && !keeperProgramApiReady) {
     warnMissingKeeperMethodsOnce();
     return;
   }
 
-  if (!(await ensureKeeperChainReady())) {
-    console.warn(
-      "[bot] Skipping duel-start market creation because keeper chain is not ready.",
-    );
-    return;
-  }
-
-  if (!(await ensureBotSignerFunding())) {
-    console.warn(
-      "[bot] Skipping duel-start market creation because bot signer funding is below threshold.",
-    );
-    return;
-  }
-
   console.log("Duel Started:", data);
+  if (solanaKeeperWriteEnabled) {
+    if (!(await ensureKeeperChainReady())) {
+      console.warn(
+        "[bot] Skipping duel-start market creation because keeper chain is not ready.",
+      );
+    } else if (!(await ensureBotSignerFunding())) {
+      console.warn(
+        "[bot] Skipping duel-start market creation because bot signer funding is below threshold.",
+      );
+    } else {
+      try {
+        await ensureMarketConfigReady();
+        const trackedMatch = await createOrSyncRound(data);
+        activeClobMatches.set(data.duelId, trackedMatch);
+        await maybeSeedMarket(trackedMatch);
+        console.log(`Created canonical CLOB market for duel ${data.duelId}`);
+      } catch (err) {
+        console.error("Failed to create market for duel:", err);
+      }
+    }
+  }
+
   try {
-    await ensureMarketConfigReady();
-    const trackedMatch = await createOrSyncRound(data);
-    activeClobMatches.set(data.duelId, trackedMatch);
     await upsertEvmDuelLifecycle(data, 2);
-    await maybeSeedMarket(trackedMatch);
-    console.log(`Created canonical CLOB market for duel ${data.duelId}`);
   } catch (err) {
-    console.error("Failed to create market for duel:", err);
+    console.error("Failed to upsert EVM market lifecycle for duel:", err);
   }
   writeBotHealthSnapshot();
 });
 
 gameClient.onBettingLocked(async (data) => {
   markStreamEvent(activeClobMatches.get(data.duelId) ?? null);
-  if (!keeperProgramApiReady) {
+  if (solanaKeeperWriteEnabled && !keeperProgramApiReady) {
     warnMissingKeeperMethodsOnce();
     return;
   }
 
-  if (!(await ensureKeeperChainReady()) || !(await ensureBotSignerFunding())) {
-    return;
+  await waitUntilTimestamp(data.betCloseTime ?? null, "bet close");
+
+  if (solanaKeeperWriteEnabled) {
+    if ((await ensureKeeperChainReady()) && (await ensureBotSignerFunding())) {
+      try {
+        await lockRound(data);
+        console.log(`Locked duel market for ${data.duelId}`);
+      } catch (error) {
+        console.error("Failed to lock market for duel:", error);
+      }
+    }
   }
 
   try {
-    await lockRound(data);
     await upsertEvmDuelLifecycle(data, 3);
-    console.log(`Locked duel market for ${data.duelId}`);
   } catch (error) {
-    console.error("Failed to lock market for duel:", error);
+    console.error("Failed to lock EVM market for duel:", error);
   }
   writeBotHealthSnapshot();
 });
 
 gameClient.onDuelEnd(async (data) => {
   markStreamEvent(activeClobMatches.get(data.duelId) ?? null);
-  if (!keeperProgramApiReady) {
+  if (solanaKeeperWriteEnabled && !keeperProgramApiReady) {
     warnMissingKeeperMethodsOnce();
-    return;
-  }
-
-  if (!(await ensureKeeperChainReady())) {
-    console.warn(
-      "[bot] Skipping duel-end resolution because keeper chain is not ready.",
-    );
-    return;
-  }
-
-  if (!(await ensureBotSignerFunding())) {
-    console.warn(
-      "[bot] Skipping duel-end resolution because bot signer funding is below threshold.",
-    );
     return;
   }
 
@@ -3126,7 +3238,21 @@ gameClient.onDuelEnd(async (data) => {
         trackedModels.length > 0 ? trackedModels : fallbackModels,
       );
     }
-    await reportRoundResult(data);
+
+    if (solanaKeeperWriteEnabled) {
+      if (!(await ensureKeeperChainReady())) {
+        console.warn(
+          "[bot] Skipping duel-end resolution because keeper chain is not ready.",
+        );
+      } else if (!(await ensureBotSignerFunding())) {
+        console.warn(
+          "[bot] Skipping duel-end resolution because bot signer funding is below threshold.",
+        );
+      } else {
+        await reportRoundResult(data);
+      }
+    }
+
     await reportEvmResult(data);
     console.log(`Resolved market for duel ${data.duelId}`);
   } catch (err) {
@@ -3140,6 +3266,10 @@ gameClient.connect();
 
 // Maintenance Loop (Seeding & Cleanup)
 async function runMaintenance(): Promise<void> {
+  if (!solanaKeeperWriteEnabled) {
+    return;
+  }
+
   if (!keeperProgramApiReady) {
     warnMissingKeeperMethodsOnce();
     return;

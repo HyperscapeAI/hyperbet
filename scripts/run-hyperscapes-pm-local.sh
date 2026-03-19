@@ -25,18 +25,52 @@ ENV_FILES=(
   "$ROOT/packages/hyperbet-evm/app/.env.local"
 )
 
+PRESET_ENV_NAMES="$(env | cut -d= -f1)"
+
+env_name_was_preset() {
+  local name="$1"
+  printf '%s\n' "$PRESET_ENV_NAMES" | grep -Fx -- "$name" >/dev/null 2>&1
+}
+
+source_env_file_preserving_invocation_env() {
+  local env_file="$1"
+  local line=""
+  local key=""
+
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    [[ "$line" =~ ^[[:space:]]*# ]] && continue
+    [[ "$line" =~ ^[[:space:]]*$ ]] && continue
+
+    if [[ "$line" =~ ^[[:space:]]*export[[:space:]]+ ]]; then
+      line="${line#export }"
+      line="${line#${line%%[![:space:]]*}}"
+    fi
+
+    key="${line%%=*}"
+    key="${key//[[:space:]]/}"
+
+    if [[ -z "$key" ]]; then
+      continue
+    fi
+
+    if env_name_was_preset "$key"; then
+      continue
+    fi
+
+    eval "export $line"
+  done < "$env_file"
+}
+
 for env_file in "${ENV_FILES[@]}"; do
   if [[ -f "$env_file" ]]; then
-    set -a
-    # shellcheck disable=SC1090
-    source "$env_file"
-    set +a
+    source_env_file_preserving_invocation_env "$env_file"
   fi
 done
 
 GAME_HTTP_URL="${GAME_HTTP_URL:-http://127.0.0.1:5555}"
 GAME_WS_URL="${GAME_WS_URL:-ws://127.0.0.1:5555/ws}"
 GAME_CLIENT_URL="${GAME_CLIENT_URL:-http://127.0.0.1:3333}"
+GAME_PORT="${GAME_PORT:-5555}"
 KEEPER_PORT="${KEEPER_PORT:-8080}"
 APP_PORT="${APP_PORT:-4179}"
 APP_MODE="${APP_MODE:-testnet}"
@@ -53,8 +87,14 @@ HYPERSCAPES_UI_URL="${HYPERSCAPES_UI_URL:-${GAME_CLIENT_URL}/stream.html}"
 HYPERBET_UI_URL="${HYPERBET_UI_URL:-http://127.0.0.1:${APP_PORT}}"
 OPEN_LOCAL_UI="${OPEN_LOCAL_UI:-true}"
 CAPTURE_LOCAL_UI_FLOW="${CAPTURE_LOCAL_UI_FLOW:-true}"
+LOCAL_CORS_ORIGINS="${CORS_ORIGINS:-http://127.0.0.1:3333,http://localhost:3333,http://127.0.0.1:4179,http://localhost:4179}"
+LOCAL_BSC_DUEL_ORACLE_ADDRESS="${LOCAL_BSC_DUEL_ORACLE_ADDRESS:-0xAd13D36b02f0F6C44d508824Ae9D407931D91f91}"
+LOCAL_BSC_GOLD_CLOB_ADDRESS="${LOCAL_BSC_GOLD_CLOB_ADDRESS:-0x067335E0b1F226a8e345a289B3b93Ed5377d636e}"
+LOCAL_AVAX_DUEL_ORACLE_ADDRESS="${LOCAL_AVAX_DUEL_ORACLE_ADDRESS:-0xAd13D36b02f0F6C44d508824Ae9D407931D91f91}"
+LOCAL_AVAX_GOLD_CLOB_ADDRESS="${LOCAL_AVAX_GOLD_CLOB_ADDRESS:-0x067335E0b1F226a8e345a289B3b93Ed5377d636e}"
 WRITER_KEYS_READY="false"
 KEEPER_BOT_DEFAULT="true"
+EVM_KEEPER_DEFER_FINALIZE="${EVM_KEEPER_DEFER_FINALIZE:-true}"
 
 DUEL_PID=""
 KEEPER_PID=""
@@ -159,6 +199,7 @@ echo "[pm-local] starting Hyperscapes duel stack from $HYPERSCAPES_ROOT"
     duel_args+=(--skip-chain-setup)
   fi
   DUEL_WITH_HYPERBET=false \
+    PORT="$GAME_PORT" \
     DUEL_NODE_ENV="$HYPERSCAPES_DUEL_NODE_ENV" \
     JWT_SECRET="$HYPERSCAPES_JWT_SECRET" \
     bun "${duel_args[@]}"
@@ -173,6 +214,12 @@ echo "[pm-local] starting Hyperbet EVM keeper service on :$KEEPER_PORT"
   STREAM_STATE_SOURCE_URL="${GAME_HTTP_URL}/api/streaming/state" \
     PORT="$KEEPER_PORT" \
     GAME_URL="$KEEPER_URL" \
+    CORS_ORIGINS="$LOCAL_CORS_ORIGINS" \
+    EVM_KEEPER_DEFER_FINALIZE="$EVM_KEEPER_DEFER_FINALIZE" \
+    BSC_DUEL_ORACLE_ADDRESS="$LOCAL_BSC_DUEL_ORACLE_ADDRESS" \
+    BSC_GOLD_CLOB_ADDRESS="$LOCAL_BSC_GOLD_CLOB_ADDRESS" \
+    AVAX_DUEL_ORACLE_ADDRESS="$LOCAL_AVAX_DUEL_ORACLE_ADDRESS" \
+    AVAX_GOLD_CLOB_ADDRESS="$LOCAL_AVAX_GOLD_CLOB_ADDRESS" \
     SOLANA_CLUSTER="$SOLANA_CLUSTER" \
     EVM_KEEPER_CHAINS="$EVM_KEEPER_CHAINS" \
     ENABLE_KEEPER_BOT="$ENABLE_KEEPER_BOT" \
@@ -190,6 +237,8 @@ echo "[pm-local] starting Hyperbet EVM app on :$APP_PORT"
     VITE_WS_URL="$GAME_WS_URL" \
     VITE_STREAM_URL="$STREAM_URL" \
     VITE_SOLANA_CLUSTER="$SOLANA_CLUSTER" \
+    VITE_BSC_GOLD_CLOB_ADDRESS="$LOCAL_BSC_GOLD_CLOB_ADDRESS" \
+    VITE_AVAX_GOLD_CLOB_ADDRESS="$LOCAL_AVAX_GOLD_CLOB_ADDRESS" \
     bun run --cwd packages/hyperbet-evm/app dev \
       --mode "$APP_MODE" \
       --host \

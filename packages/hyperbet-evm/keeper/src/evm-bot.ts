@@ -15,7 +15,7 @@ import { privateKeyToAccount } from "viem/accounts";
 
 import { type DuelLifecycleEvent, GameClient } from "./game-client";
 
-const DUEL_WINNER_MARKET_KIND = 1;
+const DUEL_WINNER_MARKET_KIND = 0;
 
 const DUEL_OUTCOME_ORACLE_ABI = [
   {
@@ -69,6 +69,7 @@ const DUEL_OUTCOME_ORACLE_ABI = [
           { name: "seed", type: "uint64" },
           { name: "resultHash", type: "bytes32" },
           { name: "replayHash", type: "bytes32" },
+          { name: "activeProposalId", type: "bytes32" },
           { name: "metadataUri", type: "string" },
         ],
         type: "tuple",
@@ -88,9 +89,11 @@ const EVM_GOLD_CLOB_ADMIN_ABI = [
         components: [
           { name: "exists", type: "bool" },
           { name: "duelKey", type: "bytes32" },
-          { name: "marketKind", type: "uint8" },
           { name: "status", type: "uint8" },
           { name: "winner", type: "uint8" },
+          { name: "tradeTreasuryFeeBpsSnapshot", type: "uint16" },
+          { name: "tradeMarketMakerFeeBpsSnapshot", type: "uint16" },
+          { name: "winningsMarketMakerFeeBpsSnapshot", type: "uint16" },
           { name: "nextOrderId", type: "uint64" },
           { name: "bestBid", type: "uint16" },
           { name: "bestAsk", type: "uint16" },
