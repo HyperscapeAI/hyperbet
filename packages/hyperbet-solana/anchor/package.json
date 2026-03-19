@@ -5,8 +5,11 @@
   "scripts": {
     "build": "bash scripts/build-workspace.sh",
     "deploy:devnet": "bash scripts/deploy-programs.sh devnet",
+    "deploy:pm:devnet": "bash scripts/deploy-programs.sh devnet --pm-only",
     "deploy:testnet": "bash scripts/deploy-programs.sh testnet",
+    "deploy:pm:testnet": "bash scripts/deploy-programs.sh testnet --pm-only",
     "deploy:mainnet": "bash scripts/deploy-programs.sh mainnet-beta",
+    "deploy:pm:mainnet": "bash scripts/deploy-programs.sh mainnet-beta --pm-only",
     "lint:rust": "cargo clippy --workspace --all-targets --all-features -- -D warnings",
     "test:rust": "cargo test --workspace",
     "audit": "bash scripts/run-cargo-audit.sh",

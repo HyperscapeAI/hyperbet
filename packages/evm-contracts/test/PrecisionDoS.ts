@@ -31,7 +31,10 @@ describe("GoldClob Precision DoS", () => {
       admin,
     );
     await clob.waitForDeployment();
-    await clob.setFeeConfig(0, 0, 0);
+    await expect(clob.setFeeConfig(0, 0, 0)).to.be.revertedWithCustomError(
+      clob,
+      "GovernanceSurfaceFrozen",
+    );
 
     const duelKey = ethers.id("duel-123");
     await oracle.upsertDuel(

@@ -6,9 +6,49 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, "..");
 const anchorIdlDir = path.join(rootDir, "anchor", "target", "idl");
 const anchorTypesDir = path.join(rootDir, "anchor", "target", "types");
-const appIdlDir = path.join(rootDir, "app", "src", "idl");
-const keeperIdlDir = path.join(rootDir, "keeper", "src", "idl");
-const sharedUiIdlDir = path.join(rootDir, "..", "hyperbet-ui", "src", "idl");
+const artifactTargets = [
+  {
+    label: "hyperbet-solana app",
+    dir: path.join(rootDir, "app", "src", "idl"),
+    copyTypes: true,
+  },
+  {
+    label: "hyperbet-solana keeper",
+    dir: path.join(rootDir, "keeper", "src", "idl"),
+    copyTypes: true,
+  },
+  {
+    label: "hyperbet-ui",
+    dir: path.join(rootDir, "..", "hyperbet-ui", "src", "idl"),
+    copyTypes: false,
+  },
+  {
+    label: "hyperbet-bsc app",
+    dir: path.join(rootDir, "..", "hyperbet-bsc", "app", "src", "idl"),
+    copyTypes: true,
+  },
+  {
+    label: "hyperbet-bsc keeper",
+    dir: path.join(rootDir, "..", "hyperbet-bsc", "keeper", "src", "idl"),
+    copyTypes: true,
+  },
+  {
+    label: "hyperbet-avax keeper",
+    dir: path.join(rootDir, "..", "hyperbet-avax", "keeper", "src", "idl"),
+    copyTypes: true,
+  },
+  {
+    label: "hyperbet-evm keeper",
+    dir: path.join(rootDir, "..", "hyperbet-evm", "keeper", "src", "idl"),
+    copyTypes: true,
+  },
+  {
+    label: "market-maker-bot",
+    dir: path.join(rootDir, "..", "market-maker-bot", "src", "idl"),
+    copyTypes: false,
+    programs: ["gold_clob_market"],
+  },
+];
 
 const programNames = [
   "fight_oracle",
@@ -22,19 +62,17 @@ for (const programName of programNames) {
     throw new Error(`Missing generated Anchor IDL: ${sourceFile}`);
   }
 
-  cpSync(sourceFile, path.join(appIdlDir, `${programName}.json`));
-  cpSync(sourceFile, path.join(keeperIdlDir, `${programName}.json`));
-  if (existsSync(sharedUiIdlDir)) {
-    cpSync(sourceFile, path.join(sharedUiIdlDir, `${programName}.json`));
-  }
-
   const sourceTypeFile = path.join(anchorTypesDir, `${programName}.ts`);
-  if (existsSync(sourceTypeFile)) {
-    cpSync(sourceTypeFile, path.join(appIdlDir, `${programName}.ts`));
-    cpSync(sourceTypeFile, path.join(keeperIdlDir, `${programName}.ts`));
+  for (const target of artifactTargets) {
+    if (!existsSync(target.dir)) continue;
+    if (target.programs && !target.programs.includes(programName)) continue;
+    cpSync(sourceFile, path.join(target.dir, `${programName}.json`));
+    if (target.copyTypes && existsSync(sourceTypeFile)) {
+      cpSync(sourceTypeFile, path.join(target.dir, `${programName}.ts`));
+    }
   }
 }
 
 console.log(
-  "[sync-anchor-artifacts] copied Anchor IDLs and generated types into app, keeper, and shared UI",
+  "[sync-anchor-artifacts] copied Solana Anchor IDLs and generated types into downstream PM consumers",
 );

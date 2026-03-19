@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import "@openzeppelin/contracts/access/AccessControl.sol";
+import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
 
 contract DuelOutcomeOracle is AccessControl {
     bytes32 public constant REPORTER_ROLE = keccak256("REPORTER_ROLE");
@@ -36,6 +36,10 @@ contract DuelOutcomeOracle is AccessControl {
     error BettingWindowActive();
     error ChallengeWindowExpired();
     error OraclePaused();
+    error GovernanceSurfaceFrozen();
+    error NotChallenged();
+    error ParticipantHashImmutable();
+    error TimingImmutable();
 
     enum DuelStatus {
         NULL,
@@ -83,6 +87,7 @@ contract DuelOutcomeOracle is AccessControl {
         string metadataUri;
     }
 
+    // forge-lint: disable-next-line(screaming-snake-case-immutable)
     uint64 public immutable disputeWindowSeconds;
     bool public oracleActionsPaused;
 
@@ -135,7 +140,7 @@ contract DuelOutcomeOracle is AccessControl {
         if (finalizer == address(0)) revert InvalidFinalizer();
         if (challenger == address(0)) revert InvalidChallenger();
         if (pauser == address(0)) revert InvalidPauser();
-        if (disputeWindowSeconds_ == 0) revert InvalidDisputeWindow();
+        if (disputeWindowSeconds_ < 60) revert InvalidDisputeWindow();
         _grantRole(DEFAULT_ADMIN_ROLE, admin);
         _grantRole(REPORTER_ROLE, reporter);
         _grantRole(FINALIZER_ROLE, finalizer);
@@ -144,31 +149,28 @@ contract DuelOutcomeOracle is AccessControl {
         disputeWindowSeconds = disputeWindowSeconds_;
     }
 
-    function setReporter(address reporter, bool enabled) external onlyRole(DEFAULT_ADMIN_ROLE) {
-        if (reporter == address(0)) revert InvalidReporter();
-        if (enabled) {
-            _grantRole(REPORTER_ROLE, reporter);
-        } else {
-            _revokeRole(REPORTER_ROLE, reporter);
-        }
+    function setReporter(address /* reporter */, bool /* enabled */)
+        external
+        view
+        onlyRole(DEFAULT_ADMIN_ROLE)
+    {
+        revert GovernanceSurfaceFrozen();
     }
 
-    function setFinalizer(address finalizer, bool enabled) external onlyRole(DEFAULT_ADMIN_ROLE) {
-        if (finalizer == address(0)) revert InvalidFinalizer();
-        if (enabled) {
-            _grantRole(FINALIZER_ROLE, finalizer);
-        } else {
-            _revokeRole(FINALIZER_ROLE, finalizer);
-        }
+    function setFinalizer(address /* finalizer */, bool /* enabled */)
+        external
+        view
+        onlyRole(DEFAULT_ADMIN_ROLE)
+    {
+        revert GovernanceSurfaceFrozen();
     }
 
-    function setChallenger(address challenger, bool enabled) external onlyRole(DEFAULT_ADMIN_ROLE) {
-        if (challenger == address(0)) revert InvalidChallenger();
-        if (enabled) {
-            _grantRole(CHALLENGER_ROLE, challenger);
-        } else {
-            _revokeRole(CHALLENGER_ROLE, challenger);
-        }
+    function setChallenger(address /* challenger */, bool /* enabled */)
+        external
+        view
+        onlyRole(DEFAULT_ADMIN_ROLE)
+    {
+        revert GovernanceSurfaceFrozen();
     }
 
     function setPauser(address pauser, bool enabled) external onlyRole(DEFAULT_ADMIN_ROLE) {
@@ -181,6 +183,23 @@ contract DuelOutcomeOracle is AccessControl {
         emit PauserUpdated(pauser, enabled);
     }
 
+    // ── PM20 governance freeze: block inherited AccessControl role mutations ──
+
+    function grantRole(bytes32 role, address account) public override onlyRole(getRoleAdmin(role)) {
+        if (role != PAUSER_ROLE) revert GovernanceSurfaceFrozen();
+        _grantRole(role, account);
+    }
+
+    function revokeRole(bytes32 role, address account) public override onlyRole(getRoleAdmin(role)) {
+        if (role != PAUSER_ROLE) revert GovernanceSurfaceFrozen();
+        _revokeRole(role, account);
+    }
+
+    function renounceRole(bytes32 role, address callerConfirmation) public override {
+        if (role != PAUSER_ROLE) revert GovernanceSurfaceFrozen();
+        super.renounceRole(role, callerConfirmation);
+    }
+
     function setOraclePaused(bool paused) external onlyRole(PAUSER_ROLE) {
         oracleActionsPaused = paused;
         emit OraclePauseUpdated(paused, msg.sender);
@@ -191,6 +210,7 @@ contract DuelOutcomeOracle is AccessControl {
     }
 
     function proposalId(bytes32 duelKey, bytes32 resultHash, bytes32 replayHash) public pure returns (bytes32) {
+        // forge-lint: disable-next-line(asm-keccak256)
         return keccak256(abi.encode(duelKey, resultHash, replayHash));
     }
 
@@ -216,10 +236,19 @@ contract DuelOutcomeOracle is AccessControl {
         ) revert InvalidStatus();
         if (betOpenTs == 0 || betCloseTs <= betOpenTs) revert InvalidBettingWindow();
         if (duelStartTs < betCloseTs) revert InvalidDuelStart();
+        if (status == DuelStatus.LOCKED && block.timestamp < betCloseTs) revert BettingWindowActive();
 
         DuelState storage duel = duels[duelKey];
         _requireSettleable(duel);
         if (uint8(status) < uint8(duel.status)) revert InvalidTransition();
+
+        // FIX-4: Lock participant identity and bet timing once betting opens
+        if (duel.status >= DuelStatus.BETTING_OPEN) {
+            if (participantAHash != duel.participantAHash) revert ParticipantHashImmutable();
+            if (participantBHash != duel.participantBHash) revert ParticipantHashImmutable();
+            if (betOpenTs != duel.betOpenTs) revert TimingImmutable();
+            if (betCloseTs != duel.betCloseTs) revert TimingImmutable();
+        }
 
         duel.duelKey = duelKey;
         duel.participantAHash = participantAHash;
@@ -298,6 +327,47 @@ contract DuelOutcomeOracle is AccessControl {
         duel.status = DuelStatus.CHALLENGED;
         duel.metadataUri = metadataUri;
         emit ResultChallenged(duelKey, id, metadataUri);
+    }
+
+    // FIX-3: Resolution path for challenged duels — allows reporter to submit a new proposal
+    function reproposeResult(
+        bytes32 duelKey,
+        Side winner,
+        uint64 seed,
+        bytes32 replayHash,
+        bytes32 resultHash,
+        uint64 duelEndTs,
+        string calldata metadataUri
+    ) external onlyRole(REPORTER_ROLE) returns (bytes32 id) {
+        if (oracleActionsPaused) revert OraclePaused();
+        DuelState storage duel = duels[duelKey];
+        _requireSettleable(duel);
+        if (duel.status != DuelStatus.CHALLENGED) revert NotChallenged();
+        if (winner != Side.A && winner != Side.B) revert InvalidWinner();
+        if (duelEndTs < duel.betCloseTs) revert InvalidDuelEnd();
+
+        delete proposals[duel.activeProposalId];
+
+        id = proposalId(duelKey, resultHash, replayHash);
+        if (proposals[id].exists) revert ProposalExists();
+
+        proposals[id] = ResultProposal({
+            id: id,
+            resultHash: resultHash,
+            replayHash: replayHash,
+            winner: winner,
+            seed: seed,
+            duelEndTs: duelEndTs,
+            proposedAt: uint64(block.timestamp),
+            challenged: false,
+            exists: true
+        });
+
+        duel.status = DuelStatus.PROPOSED;
+        duel.activeProposalId = id;
+        duel.metadataUri = metadataUri;
+
+        emit ResultProposed(duelKey, id, winner, seed, duelEndTs, resultHash, replayHash, metadataUri);
     }
 
     function finalizeResult(bytes32 duelKey, string calldata metadataUri) external onlyRole(FINALIZER_ROLE) {

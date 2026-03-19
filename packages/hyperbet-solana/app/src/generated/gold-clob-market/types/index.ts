@@ -7,5 +7,12 @@
  */
 
 export * from './duelStatus.js';
+export * from './marketCreated.js';
 export * from './marketSide.js';
 export * from './marketStatus.js';
+export * from './marketSynced.js';
+export * from './orderCancelled.js';
+export * from './orderMatched.js';
+export * from './orderPlaced.js';
+export * from './restingOrderReclaimed.js';
+export * from './selfTradePolicyTriggered.js';

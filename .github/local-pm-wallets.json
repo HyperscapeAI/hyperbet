@@ -1,0 +1,11 @@
+{
+  "evm": {
+    "keeper": "0xd73961209BCeC85C097E2554117963444e1CC1b7",
+    "canary": "0xfD23964571e75519a9FF93217D65AEFF34f4291f",
+    "matcher": "0xBBB097fBAD60b771A4d81fA496AA11ef62F178FE"
+  },
+  "solana": {
+    "keeper": "9RYc8WQhP3VagKa9YnigfK7R7jKDT2U653yoDkcD7MU5",
+    "canary": "AKwDCeyveeqZsJv9ZJS1wv7W6zzPK9PQqYSVP57d7rvT"
+  }
+}

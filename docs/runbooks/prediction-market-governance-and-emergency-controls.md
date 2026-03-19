@@ -32,6 +32,20 @@ prediction-market contracts and the operator actions allowed under that model.
   - canceling an already-resting order
   - claim or refund cleanup
 
+## PM20 Governance Freeze (Setters + Authority)
+
+- `DuelOutcomeOracle` and `GoldClob` keep governance and market-routing fields immutable after bootstrap on this branch:
+  - `setReporter`, `setFinalizer`, `setChallenger`
+  - `setOracle`, `setTreasury`, `setMarketMaker`, `setFeeConfig`
+- Solana `initialize_oracle` and `initialize_config` read and lock to the upgrade
+  authority when authority is unset. `update_oracle_config` and `update_config`
+  require matching authority and do not permit authority reassignment.
+- Emergency controls stay mutable for recovery:
+  - `setPauser`
+  - `setOraclePaused`
+  - `setMarketCreationPaused`
+  - `setOrderPlacementPaused`
+
 ## When To Use Emergency Pause
 
 - oracle compromise or suspicious result publication

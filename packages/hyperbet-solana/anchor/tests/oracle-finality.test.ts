@@ -278,6 +278,15 @@ describe("oracle finality truth (solana)", () => {
     await cancelDuel(fightProgram, authority, market.duelKey);
     await syncMarketFromDuel(clobProgram, market.marketState, market.duelState);
 
+    await claimClobWinnings(clobProgram, {
+      marketState: market.marketState,
+      duelState: market.duelState,
+      config: market.config,
+      marketMaker: market.marketMaker,
+      vault: market.vault,
+      user: taker,
+    });
+
     const vaultAfter = await provider.connection.getBalance(market.vault);
     const takerBalanceAfter = await clobProgram.account.userBalance.fetch(
       takerBid.userBalance,

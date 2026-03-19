@@ -6,19 +6,19 @@ resolution = true
 skip-lint = false
 
 [programs.devnet]
-fight_oracle = "6tpRysBFd1yXRipYEYwAw9jxEoVHk15kVXfkDGFLMqcD"
-gold_clob_market = "ARVJNJp49VZnkB8QBYZAAFJmufvtVSPhnuuenwwSLwpi"
-gold_perps_market = "HbXhqEFevpkfYdZCN6YmJGRmQmj9vsBun2ZHjeeaLRik"
+fight_oracle = "B5mRCRDJk9BrnH7regMWW5mpTQ8QG1CcCGSnDxMt8hmo"
+gold_clob_market = "DYtd7AoyTX2tbmZ8vpC3mxZgqTpyaDei4TFXZukWBJEf"
+gold_perps_market = "EoZdHN8U3qWQje48ToxB1SLWjucsFGqcWaRUJQYX3eoT"
 
 [programs.localnet]
-fight_oracle = "6tpRysBFd1yXRipYEYwAw9jxEoVHk15kVXfkDGFLMqcD"
-gold_clob_market = "ARVJNJp49VZnkB8QBYZAAFJmufvtVSPhnuuenwwSLwpi"
-gold_perps_market = "HbXhqEFevpkfYdZCN6YmJGRmQmj9vsBun2ZHjeeaLRik"
+fight_oracle = "B5mRCRDJk9BrnH7regMWW5mpTQ8QG1CcCGSnDxMt8hmo"
+gold_clob_market = "DYtd7AoyTX2tbmZ8vpC3mxZgqTpyaDei4TFXZukWBJEf"
+gold_perps_market = "EoZdHN8U3qWQje48ToxB1SLWjucsFGqcWaRUJQYX3eoT"
 
 [programs.mainnet]
-fight_oracle = "6tpRysBFd1yXRipYEYwAw9jxEoVHk15kVXfkDGFLMqcD"
-gold_clob_market = "ARVJNJp49VZnkB8QBYZAAFJmufvtVSPhnuuenwwSLwpi"
-gold_perps_market = "HbXhqEFevpkfYdZCN6YmJGRmQmj9vsBun2ZHjeeaLRik"
+fight_oracle = "B5mRCRDJk9BrnH7regMWW5mpTQ8QG1CcCGSnDxMt8hmo"
+gold_clob_market = "DYtd7AoyTX2tbmZ8vpC3mxZgqTpyaDei4TFXZukWBJEf"
+gold_perps_market = "EoZdHN8U3qWQje48ToxB1SLWjucsFGqcWaRUJQYX3eoT"
 
 [registry]
 url = "https://api.apr.dev"

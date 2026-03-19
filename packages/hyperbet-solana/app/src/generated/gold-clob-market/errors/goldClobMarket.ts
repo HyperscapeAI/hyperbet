@@ -13,76 +13,90 @@ import { GOLD_CLOB_MARKET_PROGRAM_ADDRESS } from '../programs/index.js';
 export const GOLD_CLOB_MARKET_ERROR__UNAUTHORIZED_INITIALIZER = 0x1770; // 6000
 /** UnauthorizedConfigAuthority: Config authority is required for this action */
 export const GOLD_CLOB_MARKET_ERROR__UNAUTHORIZED_CONFIG_AUTHORITY = 0x1771; // 6001
+/** ConfigAuthorityImmutable: Config authority is immutable */
+export const GOLD_CLOB_MARKET_ERROR__CONFIG_AUTHORITY_IMMUTABLE = 0x1772; // 6002
 /** UnauthorizedMarketOperator: Market operator is not authorized */
-export const GOLD_CLOB_MARKET_ERROR__UNAUTHORIZED_MARKET_OPERATOR = 0x1772; // 6002
+export const GOLD_CLOB_MARKET_ERROR__UNAUTHORIZED_MARKET_OPERATOR = 0x1773; // 6003
 /** InvalidOperator: Market operator pubkey is invalid */
-export const GOLD_CLOB_MARKET_ERROR__INVALID_OPERATOR = 0x1773; // 6003
+export const GOLD_CLOB_MARKET_ERROR__INVALID_OPERATOR = 0x1774; // 6004
 /** InvalidAuthority: Authority pubkey is invalid */
-export const GOLD_CLOB_MARKET_ERROR__INVALID_AUTHORITY = 0x1774; // 6004
+export const GOLD_CLOB_MARKET_ERROR__INVALID_AUTHORITY = 0x1775; // 6005
 /** InvalidFeeAccount: The provided fee account is invalid */
-export const GOLD_CLOB_MARKET_ERROR__INVALID_FEE_ACCOUNT = 0x1775; // 6005
+export const GOLD_CLOB_MARKET_ERROR__INVALID_FEE_ACCOUNT = 0x1776; // 6006
 /** FeeTooHigh: Fee configuration exceeds 100% */
-export const GOLD_CLOB_MARKET_ERROR__FEE_TOO_HIGH = 0x1776; // 6006
+export const GOLD_CLOB_MARKET_ERROR__FEE_TOO_HIGH = 0x1777; // 6007
 /** InvalidMarketKind: Only duel-winner markets are currently supported */
-export const GOLD_CLOB_MARKET_ERROR__INVALID_MARKET_KIND = 0x1777; // 6007
+export const GOLD_CLOB_MARKET_ERROR__INVALID_MARKET_KIND = 0x1778; // 6008
 /** DuelMismatch: The duel account does not match the market */
-export const GOLD_CLOB_MARKET_ERROR__DUEL_MISMATCH = 0x1778; // 6008
+export const GOLD_CLOB_MARKET_ERROR__DUEL_MISMATCH = 0x1779; // 6009
 /** MarketCreationClosed: Markets can only be created while betting is open or locked */
-export const GOLD_CLOB_MARKET_ERROR__MARKET_CREATION_CLOSED = 0x1779; // 6009
+export const GOLD_CLOB_MARKET_ERROR__MARKET_CREATION_CLOSED = 0x177a; // 6010
 /** MarketNotOpen: Market is not open for new orders */
-export const GOLD_CLOB_MARKET_ERROR__MARKET_NOT_OPEN = 0x177a; // 6010
+export const GOLD_CLOB_MARKET_ERROR__MARKET_NOT_OPEN = 0x177b; // 6011
 /** MarketNotResolved: Market is not resolved */
-export const GOLD_CLOB_MARKET_ERROR__MARKET_NOT_RESOLVED = 0x177b; // 6011
+export const GOLD_CLOB_MARKET_ERROR__MARKET_NOT_RESOLVED = 0x177c; // 6012
 /** MarketAlreadyResolved: Market is already resolved or cancelled */
-export const GOLD_CLOB_MARKET_ERROR__MARKET_ALREADY_RESOLVED = 0x177c; // 6012
+export const GOLD_CLOB_MARKET_ERROR__MARKET_ALREADY_RESOLVED = 0x177d; // 6013
 /** BettingClosed: Betting is closed */
-export const GOLD_CLOB_MARKET_ERROR__BETTING_CLOSED = 0x177d; // 6013
+export const GOLD_CLOB_MARKET_ERROR__BETTING_CLOSED = 0x177e; // 6014
 /** InvalidSide: Side must be bid (1) or ask (2) */
-export const GOLD_CLOB_MARKET_ERROR__INVALID_SIDE = 0x177e; // 6014
+export const GOLD_CLOB_MARKET_ERROR__INVALID_SIDE = 0x177f; // 6015
 /** InvalidOrderBehavior: Order behavior must be GTC (0), IOC (1), or POST_ONLY (2) */
-export const GOLD_CLOB_MARKET_ERROR__INVALID_ORDER_BEHAVIOR = 0x177f; // 6015
+export const GOLD_CLOB_MARKET_ERROR__INVALID_ORDER_BEHAVIOR = 0x1780; // 6016
 /** InvalidPrice: Price must be between 1 and 999 */
-export const GOLD_CLOB_MARKET_ERROR__INVALID_PRICE = 0x1780; // 6016
+export const GOLD_CLOB_MARKET_ERROR__INVALID_PRICE = 0x1781; // 6017
 /** InvalidAmount: Order amount must be greater than zero */
-export const GOLD_CLOB_MARKET_ERROR__INVALID_AMOUNT = 0x1781; // 6017
+export const GOLD_CLOB_MARKET_ERROR__INVALID_AMOUNT = 0x1782; // 6018
 /** InvalidOrderId: Order id does not match the next expected id */
-export const GOLD_CLOB_MARKET_ERROR__INVALID_ORDER_ID = 0x1782; // 6018
+export const GOLD_CLOB_MARKET_ERROR__INVALID_ORDER_ID = 0x1783; // 6019
 /** PostOnlyWouldCross: Post-only orders cannot cross the book */
-export const GOLD_CLOB_MARKET_ERROR__POST_ONLY_WOULD_CROSS = 0x1783; // 6019
+export const GOLD_CLOB_MARKET_ERROR__POST_ONLY_WOULD_CROSS = 0x1784; // 6020
 /** PrecisionError: The precision implied by amount and price is invalid */
-export const GOLD_CLOB_MARKET_ERROR__PRECISION_ERROR = 0x1784; // 6020
+export const GOLD_CLOB_MARKET_ERROR__PRECISION_ERROR = 0x1785; // 6021
 /** CostTooLow: Order cost is too low */
-export const GOLD_CLOB_MARKET_ERROR__COST_TOO_LOW = 0x1785; // 6021
+export const GOLD_CLOB_MARKET_ERROR__COST_TOO_LOW = 0x1786; // 6022
 /** MathOverflow: Math overflow */
-export const GOLD_CLOB_MARKET_ERROR__MATH_OVERFLOW = 0x1786; // 6022
+export const GOLD_CLOB_MARKET_ERROR__MATH_OVERFLOW = 0x1787; // 6023
 /** PriceLevelMismatch: The supplied price level does not match the order */
-export const GOLD_CLOB_MARKET_ERROR__PRICE_LEVEL_MISMATCH = 0x1787; // 6023
+export const GOLD_CLOB_MARKET_ERROR__PRICE_LEVEL_MISMATCH = 0x1788; // 6024
 /** OrderSideMismatch: The supplied order side does not match the stored order */
-export const GOLD_CLOB_MARKET_ERROR__ORDER_SIDE_MISMATCH = 0x1788; // 6024
+export const GOLD_CLOB_MARKET_ERROR__ORDER_SIDE_MISMATCH = 0x1789; // 6025
 /** OrderPriceMismatch: The supplied order price does not match the stored order */
-export const GOLD_CLOB_MARKET_ERROR__ORDER_PRICE_MISMATCH = 0x1789; // 6025
+export const GOLD_CLOB_MARKET_ERROR__ORDER_PRICE_MISMATCH = 0x178a; // 6026
 /** NotOrderMaker: Only the order maker can cancel this order */
-export const GOLD_CLOB_MARKET_ERROR__NOT_ORDER_MAKER = 0x178a; // 6026
+export const GOLD_CLOB_MARKET_ERROR__NOT_ORDER_MAKER = 0x178b; // 6027
 /** MissingMatchAccounts: Required maker match accounts were not supplied */
-export const GOLD_CLOB_MARKET_ERROR__MISSING_MATCH_ACCOUNTS = 0x178b; // 6027
+export const GOLD_CLOB_MARKET_ERROR__MISSING_MATCH_ACCOUNTS = 0x178c; // 6028
 /** MissingTailOrder: Required resting tail order account was not supplied */
-export const GOLD_CLOB_MARKET_ERROR__MISSING_TAIL_ORDER = 0x178c; // 6028
+export const GOLD_CLOB_MARKET_ERROR__MISSING_TAIL_ORDER = 0x178d; // 6029
 /** MissingLinkedOrderAccount: A linked prev/next order account is missing */
-export const GOLD_CLOB_MARKET_ERROR__MISSING_LINKED_ORDER_ACCOUNT = 0x178d; // 6029
+export const GOLD_CLOB_MARKET_ERROR__MISSING_LINKED_ORDER_ACCOUNT = 0x178e; // 6030
 /** InvalidRemainingAccount: Remaining account verification failed */
-export const GOLD_CLOB_MARKET_ERROR__INVALID_REMAINING_ACCOUNT = 0x178e; // 6030
+export const GOLD_CLOB_MARKET_ERROR__INVALID_REMAINING_ACCOUNT = 0x178f; // 6031
 /** OrderNotContinuable: Order does not require continuation */
-export const GOLD_CLOB_MARKET_ERROR__ORDER_NOT_CONTINUABLE = 0x178f; // 6031
+export const GOLD_CLOB_MARKET_ERROR__ORDER_NOT_CONTINUABLE = 0x1790; // 6032
 /** NothingToContinue: No order remainder is left to continue */
-export const GOLD_CLOB_MARKET_ERROR__NOTHING_TO_CONTINUE = 0x1790; // 6032
+export const GOLD_CLOB_MARKET_ERROR__NOTHING_TO_CONTINUE = 0x1791; // 6033
 /** NothingToClaim: Nothing to claim */
-export const GOLD_CLOB_MARKET_ERROR__NOTHING_TO_CLAIM = 0x1791; // 6033
+export const GOLD_CLOB_MARKET_ERROR__NOTHING_TO_CLAIM = 0x1792; // 6034
+/** AlreadyInitialized: Config is already initialized */
+export const GOLD_CLOB_MARKET_ERROR__ALREADY_INITIALIZED = 0x1793; // 6035
+/** OrderPlacementPaused: Order placement is paused */
+export const GOLD_CLOB_MARKET_ERROR__ORDER_PLACEMENT_PAUSED = 0x1794; // 6036
+/** MarketCreationPaused: Market creation is paused */
+export const GOLD_CLOB_MARKET_ERROR__MARKET_CREATION_PAUSED = 0x1795; // 6037
+/** ConfigFrozen: Config is permanently frozen */
+export const GOLD_CLOB_MARKET_ERROR__CONFIG_FROZEN = 0x1796; // 6038
+/** MarketStillOpen: Market is still open */
+export const GOLD_CLOB_MARKET_ERROR__MARKET_STILL_OPEN = 0x1797; // 6039
+/** NothingToReclaim: Nothing to reclaim */
+export const GOLD_CLOB_MARKET_ERROR__NOTHING_TO_RECLAIM = 0x1798; // 6040
 
-export type GoldClobMarketError = typeof GOLD_CLOB_MARKET_ERROR__BETTING_CLOSED | typeof GOLD_CLOB_MARKET_ERROR__COST_TOO_LOW | typeof GOLD_CLOB_MARKET_ERROR__DUEL_MISMATCH | typeof GOLD_CLOB_MARKET_ERROR__FEE_TOO_HIGH | typeof GOLD_CLOB_MARKET_ERROR__INVALID_AMOUNT | typeof GOLD_CLOB_MARKET_ERROR__INVALID_AUTHORITY | typeof GOLD_CLOB_MARKET_ERROR__INVALID_FEE_ACCOUNT | typeof GOLD_CLOB_MARKET_ERROR__INVALID_MARKET_KIND | typeof GOLD_CLOB_MARKET_ERROR__INVALID_OPERATOR | typeof GOLD_CLOB_MARKET_ERROR__INVALID_ORDER_BEHAVIOR | typeof GOLD_CLOB_MARKET_ERROR__INVALID_ORDER_ID | typeof GOLD_CLOB_MARKET_ERROR__INVALID_PRICE | typeof GOLD_CLOB_MARKET_ERROR__INVALID_REMAINING_ACCOUNT | typeof GOLD_CLOB_MARKET_ERROR__INVALID_SIDE | typeof GOLD_CLOB_MARKET_ERROR__MARKET_ALREADY_RESOLVED | typeof GOLD_CLOB_MARKET_ERROR__MARKET_CREATION_CLOSED | typeof GOLD_CLOB_MARKET_ERROR__MARKET_NOT_OPEN | typeof GOLD_CLOB_MARKET_ERROR__MARKET_NOT_RESOLVED | typeof GOLD_CLOB_MARKET_ERROR__MATH_OVERFLOW | typeof GOLD_CLOB_MARKET_ERROR__MISSING_LINKED_ORDER_ACCOUNT | typeof GOLD_CLOB_MARKET_ERROR__MISSING_MATCH_ACCOUNTS | typeof GOLD_CLOB_MARKET_ERROR__MISSING_TAIL_ORDER | typeof GOLD_CLOB_MARKET_ERROR__NOTHING_TO_CLAIM | typeof GOLD_CLOB_MARKET_ERROR__NOTHING_TO_CONTINUE | typeof GOLD_CLOB_MARKET_ERROR__NOT_ORDER_MAKER | typeof GOLD_CLOB_MARKET_ERROR__ORDER_NOT_CONTINUABLE | typeof GOLD_CLOB_MARKET_ERROR__ORDER_PRICE_MISMATCH | typeof GOLD_CLOB_MARKET_ERROR__ORDER_SIDE_MISMATCH | typeof GOLD_CLOB_MARKET_ERROR__POST_ONLY_WOULD_CROSS | typeof GOLD_CLOB_MARKET_ERROR__PRECISION_ERROR | typeof GOLD_CLOB_MARKET_ERROR__PRICE_LEVEL_MISMATCH | typeof GOLD_CLOB_MARKET_ERROR__UNAUTHORIZED_CONFIG_AUTHORITY | typeof GOLD_CLOB_MARKET_ERROR__UNAUTHORIZED_INITIALIZER | typeof GOLD_CLOB_MARKET_ERROR__UNAUTHORIZED_MARKET_OPERATOR;
+export type GoldClobMarketError = typeof GOLD_CLOB_MARKET_ERROR__ALREADY_INITIALIZED | typeof GOLD_CLOB_MARKET_ERROR__BETTING_CLOSED | typeof GOLD_CLOB_MARKET_ERROR__CONFIG_AUTHORITY_IMMUTABLE | typeof GOLD_CLOB_MARKET_ERROR__CONFIG_FROZEN | typeof GOLD_CLOB_MARKET_ERROR__COST_TOO_LOW | typeof GOLD_CLOB_MARKET_ERROR__DUEL_MISMATCH | typeof GOLD_CLOB_MARKET_ERROR__FEE_TOO_HIGH | typeof GOLD_CLOB_MARKET_ERROR__INVALID_AMOUNT | typeof GOLD_CLOB_MARKET_ERROR__INVALID_AUTHORITY | typeof GOLD_CLOB_MARKET_ERROR__INVALID_FEE_ACCOUNT | typeof GOLD_CLOB_MARKET_ERROR__INVALID_MARKET_KIND | typeof GOLD_CLOB_MARKET_ERROR__INVALID_OPERATOR | typeof GOLD_CLOB_MARKET_ERROR__INVALID_ORDER_BEHAVIOR | typeof GOLD_CLOB_MARKET_ERROR__INVALID_ORDER_ID | typeof GOLD_CLOB_MARKET_ERROR__INVALID_PRICE | typeof GOLD_CLOB_MARKET_ERROR__INVALID_REMAINING_ACCOUNT | typeof GOLD_CLOB_MARKET_ERROR__INVALID_SIDE | typeof GOLD_CLOB_MARKET_ERROR__MARKET_ALREADY_RESOLVED | typeof GOLD_CLOB_MARKET_ERROR__MARKET_CREATION_CLOSED | typeof GOLD_CLOB_MARKET_ERROR__MARKET_CREATION_PAUSED | typeof GOLD_CLOB_MARKET_ERROR__MARKET_NOT_OPEN | typeof GOLD_CLOB_MARKET_ERROR__MARKET_NOT_RESOLVED | typeof GOLD_CLOB_MARKET_ERROR__MARKET_STILL_OPEN | typeof GOLD_CLOB_MARKET_ERROR__MATH_OVERFLOW | typeof GOLD_CLOB_MARKET_ERROR__MISSING_LINKED_ORDER_ACCOUNT | typeof GOLD_CLOB_MARKET_ERROR__MISSING_MATCH_ACCOUNTS | typeof GOLD_CLOB_MARKET_ERROR__MISSING_TAIL_ORDER | typeof GOLD_CLOB_MARKET_ERROR__NOTHING_TO_CLAIM | typeof GOLD_CLOB_MARKET_ERROR__NOTHING_TO_CONTINUE | typeof GOLD_CLOB_MARKET_ERROR__NOTHING_TO_RECLAIM | typeof GOLD_CLOB_MARKET_ERROR__NOT_ORDER_MAKER | typeof GOLD_CLOB_MARKET_ERROR__ORDER_NOT_CONTINUABLE | typeof GOLD_CLOB_MARKET_ERROR__ORDER_PLACEMENT_PAUSED | typeof GOLD_CLOB_MARKET_ERROR__ORDER_PRICE_MISMATCH | typeof GOLD_CLOB_MARKET_ERROR__ORDER_SIDE_MISMATCH | typeof GOLD_CLOB_MARKET_ERROR__POST_ONLY_WOULD_CROSS | typeof GOLD_CLOB_MARKET_ERROR__PRECISION_ERROR | typeof GOLD_CLOB_MARKET_ERROR__PRICE_LEVEL_MISMATCH | typeof GOLD_CLOB_MARKET_ERROR__UNAUTHORIZED_CONFIG_AUTHORITY | typeof GOLD_CLOB_MARKET_ERROR__UNAUTHORIZED_INITIALIZER | typeof GOLD_CLOB_MARKET_ERROR__UNAUTHORIZED_MARKET_OPERATOR;
 
 let goldClobMarketErrorMessages: Record<GoldClobMarketError, string> | undefined;
 if (true) {
-  goldClobMarketErrorMessages = { [GOLD_CLOB_MARKET_ERROR__BETTING_CLOSED]: `Betting is closed`, [GOLD_CLOB_MARKET_ERROR__COST_TOO_LOW]: `Order cost is too low`, [GOLD_CLOB_MARKET_ERROR__DUEL_MISMATCH]: `The duel account does not match the market`, [GOLD_CLOB_MARKET_ERROR__FEE_TOO_HIGH]: `Fee configuration exceeds 100%`, [GOLD_CLOB_MARKET_ERROR__INVALID_AMOUNT]: `Order amount must be greater than zero`, [GOLD_CLOB_MARKET_ERROR__INVALID_AUTHORITY]: `Authority pubkey is invalid`, [GOLD_CLOB_MARKET_ERROR__INVALID_FEE_ACCOUNT]: `The provided fee account is invalid`, [GOLD_CLOB_MARKET_ERROR__INVALID_MARKET_KIND]: `Only duel-winner markets are currently supported`, [GOLD_CLOB_MARKET_ERROR__INVALID_OPERATOR]: `Market operator pubkey is invalid`, [GOLD_CLOB_MARKET_ERROR__INVALID_ORDER_BEHAVIOR]: `Order behavior must be GTC (0), IOC (1), or POST_ONLY (2)`, [GOLD_CLOB_MARKET_ERROR__INVALID_ORDER_ID]: `Order id does not match the next expected id`, [GOLD_CLOB_MARKET_ERROR__INVALID_PRICE]: `Price must be between 1 and 999`, [GOLD_CLOB_MARKET_ERROR__INVALID_REMAINING_ACCOUNT]: `Remaining account verification failed`, [GOLD_CLOB_MARKET_ERROR__INVALID_SIDE]: `Side must be bid (1) or ask (2)`, [GOLD_CLOB_MARKET_ERROR__MARKET_ALREADY_RESOLVED]: `Market is already resolved or cancelled`, [GOLD_CLOB_MARKET_ERROR__MARKET_CREATION_CLOSED]: `Markets can only be created while betting is open or locked`, [GOLD_CLOB_MARKET_ERROR__MARKET_NOT_OPEN]: `Market is not open for new orders`, [GOLD_CLOB_MARKET_ERROR__MARKET_NOT_RESOLVED]: `Market is not resolved`, [GOLD_CLOB_MARKET_ERROR__MATH_OVERFLOW]: `Math overflow`, [GOLD_CLOB_MARKET_ERROR__MISSING_LINKED_ORDER_ACCOUNT]: `A linked prev/next order account is missing`, [GOLD_CLOB_MARKET_ERROR__MISSING_MATCH_ACCOUNTS]: `Required maker match accounts were not supplied`, [GOLD_CLOB_MARKET_ERROR__MISSING_TAIL_ORDER]: `Required resting tail order account was not supplied`, [GOLD_CLOB_MARKET_ERROR__NOTHING_TO_CLAIM]: `Nothing to claim`, [GOLD_CLOB_MARKET_ERROR__NOTHING_TO_CONTINUE]: `No order remainder is left to continue`, [GOLD_CLOB_MARKET_ERROR__NOT_ORDER_MAKER]: `Only the order maker can cancel this order`, [GOLD_CLOB_MARKET_ERROR__ORDER_NOT_CONTINUABLE]: `Order does not require continuation`, [GOLD_CLOB_MARKET_ERROR__ORDER_PRICE_MISMATCH]: `The supplied order price does not match the stored order`, [GOLD_CLOB_MARKET_ERROR__ORDER_SIDE_MISMATCH]: `The supplied order side does not match the stored order`, [GOLD_CLOB_MARKET_ERROR__POST_ONLY_WOULD_CROSS]: `Post-only orders cannot cross the book`, [GOLD_CLOB_MARKET_ERROR__PRECISION_ERROR]: `The precision implied by amount and price is invalid`, [GOLD_CLOB_MARKET_ERROR__PRICE_LEVEL_MISMATCH]: `The supplied price level does not match the order`, [GOLD_CLOB_MARKET_ERROR__UNAUTHORIZED_CONFIG_AUTHORITY]: `Config authority is required for this action`, [GOLD_CLOB_MARKET_ERROR__UNAUTHORIZED_INITIALIZER]: `Only the upgrade authority can initialize config`, [GOLD_CLOB_MARKET_ERROR__UNAUTHORIZED_MARKET_OPERATOR]: `Market operator is not authorized` };
+  goldClobMarketErrorMessages = { [GOLD_CLOB_MARKET_ERROR__ALREADY_INITIALIZED]: `Config is already initialized`, [GOLD_CLOB_MARKET_ERROR__BETTING_CLOSED]: `Betting is closed`, [GOLD_CLOB_MARKET_ERROR__CONFIG_AUTHORITY_IMMUTABLE]: `Config authority is immutable`, [GOLD_CLOB_MARKET_ERROR__CONFIG_FROZEN]: `Config is permanently frozen`, [GOLD_CLOB_MARKET_ERROR__COST_TOO_LOW]: `Order cost is too low`, [GOLD_CLOB_MARKET_ERROR__DUEL_MISMATCH]: `The duel account does not match the market`, [GOLD_CLOB_MARKET_ERROR__FEE_TOO_HIGH]: `Fee configuration exceeds 100%`, [GOLD_CLOB_MARKET_ERROR__INVALID_AMOUNT]: `Order amount must be greater than zero`, [GOLD_CLOB_MARKET_ERROR__INVALID_AUTHORITY]: `Authority pubkey is invalid`, [GOLD_CLOB_MARKET_ERROR__INVALID_FEE_ACCOUNT]: `The provided fee account is invalid`, [GOLD_CLOB_MARKET_ERROR__INVALID_MARKET_KIND]: `Only duel-winner markets are currently supported`, [GOLD_CLOB_MARKET_ERROR__INVALID_OPERATOR]: `Market operator pubkey is invalid`, [GOLD_CLOB_MARKET_ERROR__INVALID_ORDER_BEHAVIOR]: `Order behavior must be GTC (0), IOC (1), or POST_ONLY (2)`, [GOLD_CLOB_MARKET_ERROR__INVALID_ORDER_ID]: `Order id does not match the next expected id`, [GOLD_CLOB_MARKET_ERROR__INVALID_PRICE]: `Price must be between 1 and 999`, [GOLD_CLOB_MARKET_ERROR__INVALID_REMAINING_ACCOUNT]: `Remaining account verification failed`, [GOLD_CLOB_MARKET_ERROR__INVALID_SIDE]: `Side must be bid (1) or ask (2)`, [GOLD_CLOB_MARKET_ERROR__MARKET_ALREADY_RESOLVED]: `Market is already resolved or cancelled`, [GOLD_CLOB_MARKET_ERROR__MARKET_CREATION_CLOSED]: `Markets can only be created while betting is open or locked`, [GOLD_CLOB_MARKET_ERROR__MARKET_CREATION_PAUSED]: `Market creation is paused`, [GOLD_CLOB_MARKET_ERROR__MARKET_NOT_OPEN]: `Market is not open for new orders`, [GOLD_CLOB_MARKET_ERROR__MARKET_NOT_RESOLVED]: `Market is not resolved`, [GOLD_CLOB_MARKET_ERROR__MARKET_STILL_OPEN]: `Market is still open`, [GOLD_CLOB_MARKET_ERROR__MATH_OVERFLOW]: `Math overflow`, [GOLD_CLOB_MARKET_ERROR__MISSING_LINKED_ORDER_ACCOUNT]: `A linked prev/next order account is missing`, [GOLD_CLOB_MARKET_ERROR__MISSING_MATCH_ACCOUNTS]: `Required maker match accounts were not supplied`, [GOLD_CLOB_MARKET_ERROR__MISSING_TAIL_ORDER]: `Required resting tail order account was not supplied`, [GOLD_CLOB_MARKET_ERROR__NOTHING_TO_CLAIM]: `Nothing to claim`, [GOLD_CLOB_MARKET_ERROR__NOTHING_TO_CONTINUE]: `No order remainder is left to continue`, [GOLD_CLOB_MARKET_ERROR__NOTHING_TO_RECLAIM]: `Nothing to reclaim`, [GOLD_CLOB_MARKET_ERROR__NOT_ORDER_MAKER]: `Only the order maker can cancel this order`, [GOLD_CLOB_MARKET_ERROR__ORDER_NOT_CONTINUABLE]: `Order does not require continuation`, [GOLD_CLOB_MARKET_ERROR__ORDER_PLACEMENT_PAUSED]: `Order placement is paused`, [GOLD_CLOB_MARKET_ERROR__ORDER_PRICE_MISMATCH]: `The supplied order price does not match the stored order`, [GOLD_CLOB_MARKET_ERROR__ORDER_SIDE_MISMATCH]: `The supplied order side does not match the stored order`, [GOLD_CLOB_MARKET_ERROR__POST_ONLY_WOULD_CROSS]: `Post-only orders cannot cross the book`, [GOLD_CLOB_MARKET_ERROR__PRECISION_ERROR]: `The precision implied by amount and price is invalid`, [GOLD_CLOB_MARKET_ERROR__PRICE_LEVEL_MISMATCH]: `The supplied price level does not match the order`, [GOLD_CLOB_MARKET_ERROR__UNAUTHORIZED_CONFIG_AUTHORITY]: `Config authority is required for this action`, [GOLD_CLOB_MARKET_ERROR__UNAUTHORIZED_INITIALIZER]: `Only the upgrade authority can initialize config`, [GOLD_CLOB_MARKET_ERROR__UNAUTHORIZED_MARKET_OPERATOR]: `Market operator is not authorized` };
 }
 
 export function getGoldClobMarketErrorMessage(code: GoldClobMarketError): string {

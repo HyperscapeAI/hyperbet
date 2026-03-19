@@ -97,7 +97,7 @@ async function waitForAnvil(): Promise<void> {
 try {
   await runCommand(
     "bun",
-    ["run", "--cwd", "packages/evm-contracts", "build:foundry"],
+    ["run", "--cwd", "packages/evm-contracts", "build:foundry:pm"],
     {
       stdoutFile: path.join(artifactRoot, "foundry-build.out.log"),
       stderrFile: path.join(artifactRoot, "foundry-build.err.log"),

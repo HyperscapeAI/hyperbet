@@ -43,6 +43,8 @@ import {
 import type { PredictionMarketWinner } from "@hyperbet/chain-registry";
 import { buildResultHash } from "./resultHash";
 
+const DEFAULT_DISPUTE_WINDOW_SECS = 3600;
+
 function asNum(value: unknown, fallback = 0): number {
   if (typeof value === "number") return value;
   if (typeof value === "bigint") return Number(value);
@@ -1511,7 +1513,12 @@ const ensureOracleReady = async (): Promise<void> => {
     await runWithRecovery(
       () =>
         fightProgram.methods
-          .initializeOracle(botKeypair.publicKey)
+          .initializeOracle(
+            botKeypair.publicKey,
+            botKeypair.publicKey,
+            botKeypair.publicKey,
+            new BN(DEFAULT_DISPUTE_WINDOW_SECS),
+          )
           .accountsPartial({
             authority: botKeypair.publicKey,
             oracleConfig: oracleConfigPda,

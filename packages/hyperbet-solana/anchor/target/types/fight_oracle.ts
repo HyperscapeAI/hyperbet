@@ -5,7 +5,7 @@
  * IDL can be found at `target/idl/fight_oracle.json`.
  */
 export type FightOracle = {
-  "address": "6tpRysBFd1yXRipYEYwAw9jxEoVHk15kVXfkDGFLMqcD",
+  "address": "B5mRCRDJk9BrnH7regMWW5mpTQ8QG1CcCGSnDxMt8hmo",
   "metadata": {
     "name": "fightOracle",
     "version": "0.1.0",
@@ -254,6 +254,56 @@ export type FightOracle = {
       ]
     },
     {
+      "name": "freezeOracleConfig",
+      "docs": [
+        "One-way config freeze — after calling, update_oracle_config reverts permanently.",
+        "Pause controls remain functional."
+      ],
+      "discriminator": [
+        82,
+        213,
+        40,
+        194,
+        183,
+        48,
+        32,
+        246
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "signer": true
+        },
+        {
+          "name": "oracleConfig",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  111,
+                  114,
+                  97,
+                  99,
+                  108,
+                  101,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "initializeOracle",
       "discriminator": [
         144,
@@ -299,7 +349,7 @@ export type FightOracle = {
         },
         {
           "name": "program",
-          "address": "6tpRysBFd1yXRipYEYwAw9jxEoVHk15kVXfkDGFLMqcD"
+          "address": "B5mRCRDJk9BrnH7regMWW5mpTQ8QG1CcCGSnDxMt8hmo"
         },
         {
           "name": "programData"
@@ -313,6 +363,18 @@ export type FightOracle = {
         {
           "name": "reporter",
           "type": "pubkey"
+        },
+        {
+          "name": "finalizer",
+          "type": "pubkey"
+        },
+        {
+          "name": "challenger",
+          "type": "pubkey"
+        },
+        {
+          "name": "disputeWindowSecs",
+          "type": "i64"
         }
       ]
     },
@@ -428,6 +490,175 @@ export type FightOracle = {
         {
           "name": "metadataUri",
           "type": "string"
+        }
+      ]
+    },
+    {
+      "name": "reproposeResult",
+      "discriminator": [
+        67,
+        248,
+        197,
+        39,
+        189,
+        160,
+        132,
+        182
+      ],
+      "accounts": [
+        {
+          "name": "reporter",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "oracleConfig",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  111,
+                  114,
+                  97,
+                  99,
+                  108,
+                  101,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "duelState",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  100,
+                  117,
+                  101,
+                  108
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "duelKey"
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "duelKey",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "winner",
+          "type": {
+            "defined": {
+              "name": "marketSide"
+            }
+          }
+        },
+        {
+          "name": "seed",
+          "type": "u64"
+        },
+        {
+          "name": "replayHash",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "resultHash",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "duelEndTs",
+          "type": "i64"
+        },
+        {
+          "name": "metadataUri",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "name": "setOraclePaused",
+      "docs": [
+        "Emergency pause/unpause — remains functional even after config freeze."
+      ],
+      "discriminator": [
+        61,
+        243,
+        64,
+        36,
+        121,
+        38,
+        141,
+        241
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "signer": true
+        },
+        {
+          "name": "oracleConfig",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  111,
+                  114,
+                  97,
+                  99,
+                  108,
+                  101,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "paused",
+          "type": "bool"
         }
       ]
     },
@@ -807,6 +1038,46 @@ export type FightOracle = {
       "code": 6017,
       "name": "disputeWindowActive",
       "msg": "Dispute window still active"
+    },
+    {
+      "code": 6018,
+      "name": "configAuthorityImmutable",
+      "msg": "Config authority is immutable"
+    },
+    {
+      "code": 6019,
+      "name": "bettingWindowActive",
+      "msg": "Cannot propose result while betting window is still active"
+    },
+    {
+      "code": 6020,
+      "name": "notChallenged",
+      "msg": "Duel must be in Challenged status for reproposal"
+    },
+    {
+      "code": 6021,
+      "name": "participantHashImmutable",
+      "msg": "Participant hashes are immutable after betting opens"
+    },
+    {
+      "code": 6022,
+      "name": "timingImmutable",
+      "msg": "Bet timing is immutable after betting opens"
+    },
+    {
+      "code": 6023,
+      "name": "alreadyInitialized",
+      "msg": "Config is already initialized"
+    },
+    {
+      "code": 6024,
+      "name": "oraclePaused",
+      "msg": "Oracle operations are paused"
+    },
+    {
+      "code": 6025,
+      "name": "configFrozen",
+      "msg": "Config is permanently frozen"
     }
   ],
   "types": [
@@ -1154,6 +1425,14 @@ export type FightOracle = {
           {
             "name": "disputeWindowSecs",
             "type": "i64"
+          },
+          {
+            "name": "paused",
+            "type": "bool"
+          },
+          {
+            "name": "configFrozen",
+            "type": "bool"
           },
           {
             "name": "bump",

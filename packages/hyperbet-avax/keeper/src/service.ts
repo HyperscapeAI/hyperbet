@@ -1539,6 +1539,61 @@ function buildPredictionMarketLifecycleRecords(
   return records;
 }
 
+function toFallbackKeeperMarketHealthRecord(
+  record: PredictionMarketLifecycleRecord,
+): KeeperMarketHealthRecord {
+  return {
+    chainKey: record.chainKey,
+    duelId: record.duelId ?? null,
+    duelKey: record.duelKey ?? null,
+    marketRef: record.marketRef ?? null,
+    lifecycleStatus: record.lifecycleStatus,
+    winner: record.winner,
+    fairValue: null,
+    bidPrice: null,
+    askPrice: null,
+    bidUnits: 0,
+    askUnits: 0,
+    openOrderCount: 0,
+    inventoryYes: 0,
+    inventoryNo: 0,
+    openYes: 0,
+    openNo: 0,
+    netExposure: 0,
+    grossExposure: 0,
+    drawdownBps: 0,
+    quoteAgeMs: null,
+    lastStreamAtMs: record.syncedAt ?? null,
+    lastOracleAtMs: record.syncedAt ?? null,
+    lastRpcAtMs: record.syncedAt ?? null,
+    circuitBreakerReason: null,
+    lastResolvedAtMs:
+      typeof record.metadata?.finalizedAt === "number"
+        ? record.metadata.finalizedAt
+        : null,
+    lastClaimAtMs: null,
+    recovery: [],
+  };
+}
+
+function resolveKeeperBotHealthSnapshot(
+  botHealthSnapshot: KeeperBotHealthSnapshot | null,
+): KeeperBotHealthSnapshot | null {
+  if (botHealthSnapshot == null || botHealthSnapshot.markets.length > 0) {
+    return botHealthSnapshot;
+  }
+  const fallbackMarkets = buildPredictionMarketLifecycleRecords(
+    botHealthSnapshot,
+  ).map(toFallbackKeeperMarketHealthRecord);
+  if (fallbackMarkets.length === 0) {
+    return botHealthSnapshot;
+  }
+  return {
+    ...botHealthSnapshot,
+    markets: fallbackMarkets,
+  };
+}
+
 function handlePredictionMarkets(req: Request): Response {
   const botHealthSnapshot = loadKeeperBotHealthSnapshot();
   const markets = buildPredictionMarketLifecycleRecords(botHealthSnapshot);
@@ -3064,7 +3119,9 @@ const server = Bun.serve({
     }
 
     if (url.pathname === "/status") {
-      const botHealthSnapshotRaw = loadKeeperBotHealthSnapshot();
+      const botHealthSnapshotRaw = resolveKeeperBotHealthSnapshot(
+        loadKeeperBotHealthSnapshot(),
+      );
       const predictionMarkets = buildPredictionMarketLifecycleRecords(
         botHealthSnapshotRaw,
       );
@@ -3160,7 +3217,9 @@ const server = Bun.serve({
     }
 
     if (req.method === "GET" && url.pathname === "/api/keeper/bot-health") {
-      const botHealthSnapshotRaw = loadKeeperBotHealthSnapshot();
+      const botHealthSnapshotRaw = resolveKeeperBotHealthSnapshot(
+        loadKeeperBotHealthSnapshot(),
+      );
       return jsonResponse(req, {
         ok: true,
         running: Boolean(botSubprocess),

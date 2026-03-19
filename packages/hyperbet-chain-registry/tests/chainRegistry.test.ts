@@ -127,7 +127,7 @@ describe("chain registry", () => {
     expect(getMissingBettingEvmGovernanceFields(fujiReady)).toEqual([]);
   });
 
-  test("tracks AVAX mainnet as pending and AVAX Fuji as canonicalized", () => {
+  test("tracks AVAX mainnet as pending and AVAX Fuji as canonically addressed", () => {
     expect(
       isBettingEvmDeploymentCanonicalReady(BETTING_DEPLOYMENTS.evm.avaxFuji),
     ).toBe(true);
@@ -135,10 +135,10 @@ describe("chain registry", () => {
       .toEqual([]);
     expect(
       isBettingEvmDeploymentGovernanceReady(BETTING_DEPLOYMENTS.evm.avaxFuji),
-    ).toBe(true);
+    ).toBe(false);
     expect(
       getMissingBettingEvmGovernanceFields(BETTING_DEPLOYMENTS.evm.avaxFuji),
-    ).toEqual([]);
+    ).toEqual(["timelockAddress", "multisigAddress"]);
     expect(
       isBettingEvmDeploymentCanonicalReady(BETTING_DEPLOYMENTS.evm.avax),
     ).toBe(false);

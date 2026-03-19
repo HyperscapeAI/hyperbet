@@ -21,7 +21,7 @@ export const FIGHT_ORACLE_ERROR__INVALID_AUTHORITY = 0x1773; // 6003
 export const FIGHT_ORACLE_ERROR__INVALID_FINALIZER = 0x1774; // 6004
 /** InvalidChallenger: Challenger pubkey cannot be the default address */
 export const FIGHT_ORACLE_ERROR__INVALID_CHALLENGER = 0x1775; // 6005
-/** InvalidDisputeWindow: Dispute window must be non-negative */
+/** InvalidDisputeWindow: Dispute window must be positive */
 export const FIGHT_ORACLE_ERROR__INVALID_DISPUTE_WINDOW = 0x1776; // 6006
 /** InvalidBetWindow: Betting window is invalid */
 export const FIGHT_ORACLE_ERROR__INVALID_BET_WINDOW = 0x1777; // 6007
@@ -41,14 +41,32 @@ export const FIGHT_ORACLE_ERROR__INVALID_WINNER = 0x177d; // 6013
 export const FIGHT_ORACLE_ERROR__NOT_PROPOSED = 0x177e; // 6014
 /** AlreadyChallenged: Proposal already challenged */
 export const FIGHT_ORACLE_ERROR__ALREADY_CHALLENGED = 0x177f; // 6015
+/** ChallengeWindowExpired: Challenge window already expired */
+export const FIGHT_ORACLE_ERROR__CHALLENGE_WINDOW_EXPIRED = 0x1780; // 6016
 /** DisputeWindowActive: Dispute window still active */
-export const FIGHT_ORACLE_ERROR__DISPUTE_WINDOW_ACTIVE = 0x1780; // 6016
+export const FIGHT_ORACLE_ERROR__DISPUTE_WINDOW_ACTIVE = 0x1781; // 6017
+/** ConfigAuthorityImmutable: Config authority is immutable */
+export const FIGHT_ORACLE_ERROR__CONFIG_AUTHORITY_IMMUTABLE = 0x1782; // 6018
+/** BettingWindowActive: Cannot propose result while betting window is still active */
+export const FIGHT_ORACLE_ERROR__BETTING_WINDOW_ACTIVE = 0x1783; // 6019
+/** NotChallenged: Duel must be in Challenged status for reproposal */
+export const FIGHT_ORACLE_ERROR__NOT_CHALLENGED = 0x1784; // 6020
+/** ParticipantHashImmutable: Participant hashes are immutable after betting opens */
+export const FIGHT_ORACLE_ERROR__PARTICIPANT_HASH_IMMUTABLE = 0x1785; // 6021
+/** TimingImmutable: Bet timing is immutable after betting opens */
+export const FIGHT_ORACLE_ERROR__TIMING_IMMUTABLE = 0x1786; // 6022
+/** AlreadyInitialized: Config is already initialized */
+export const FIGHT_ORACLE_ERROR__ALREADY_INITIALIZED = 0x1787; // 6023
+/** OraclePaused: Oracle operations are paused */
+export const FIGHT_ORACLE_ERROR__ORACLE_PAUSED = 0x1788; // 6024
+/** ConfigFrozen: Config is permanently frozen */
+export const FIGHT_ORACLE_ERROR__CONFIG_FROZEN = 0x1789; // 6025
 
-export type FightOracleError = typeof FIGHT_ORACLE_ERROR__ALREADY_CHALLENGED | typeof FIGHT_ORACLE_ERROR__DISPUTE_WINDOW_ACTIVE | typeof FIGHT_ORACLE_ERROR__DUEL_ALREADY_CANCELLED | typeof FIGHT_ORACLE_ERROR__DUEL_ALREADY_FINALIZED | typeof FIGHT_ORACLE_ERROR__DUEL_KEY_MISMATCH | typeof FIGHT_ORACLE_ERROR__INVALID_AUTHORITY | typeof FIGHT_ORACLE_ERROR__INVALID_BET_WINDOW | typeof FIGHT_ORACLE_ERROR__INVALID_CHALLENGER | typeof FIGHT_ORACLE_ERROR__INVALID_DISPUTE_WINDOW | typeof FIGHT_ORACLE_ERROR__INVALID_FINALIZER | typeof FIGHT_ORACLE_ERROR__INVALID_LIFECYCLE_TRANSITION | typeof FIGHT_ORACLE_ERROR__INVALID_PARTICIPANTS | typeof FIGHT_ORACLE_ERROR__INVALID_REPORTER | typeof FIGHT_ORACLE_ERROR__INVALID_WINNER | typeof FIGHT_ORACLE_ERROR__NOT_PROPOSED | typeof FIGHT_ORACLE_ERROR__UNAUTHORIZED | typeof FIGHT_ORACLE_ERROR__UNAUTHORIZED_INITIALIZER;
+export type FightOracleError = typeof FIGHT_ORACLE_ERROR__ALREADY_CHALLENGED | typeof FIGHT_ORACLE_ERROR__ALREADY_INITIALIZED | typeof FIGHT_ORACLE_ERROR__BETTING_WINDOW_ACTIVE | typeof FIGHT_ORACLE_ERROR__CHALLENGE_WINDOW_EXPIRED | typeof FIGHT_ORACLE_ERROR__CONFIG_AUTHORITY_IMMUTABLE | typeof FIGHT_ORACLE_ERROR__CONFIG_FROZEN | typeof FIGHT_ORACLE_ERROR__DISPUTE_WINDOW_ACTIVE | typeof FIGHT_ORACLE_ERROR__DUEL_ALREADY_CANCELLED | typeof FIGHT_ORACLE_ERROR__DUEL_ALREADY_FINALIZED | typeof FIGHT_ORACLE_ERROR__DUEL_KEY_MISMATCH | typeof FIGHT_ORACLE_ERROR__INVALID_AUTHORITY | typeof FIGHT_ORACLE_ERROR__INVALID_BET_WINDOW | typeof FIGHT_ORACLE_ERROR__INVALID_CHALLENGER | typeof FIGHT_ORACLE_ERROR__INVALID_DISPUTE_WINDOW | typeof FIGHT_ORACLE_ERROR__INVALID_FINALIZER | typeof FIGHT_ORACLE_ERROR__INVALID_LIFECYCLE_TRANSITION | typeof FIGHT_ORACLE_ERROR__INVALID_PARTICIPANTS | typeof FIGHT_ORACLE_ERROR__INVALID_REPORTER | typeof FIGHT_ORACLE_ERROR__INVALID_WINNER | typeof FIGHT_ORACLE_ERROR__NOT_CHALLENGED | typeof FIGHT_ORACLE_ERROR__NOT_PROPOSED | typeof FIGHT_ORACLE_ERROR__ORACLE_PAUSED | typeof FIGHT_ORACLE_ERROR__PARTICIPANT_HASH_IMMUTABLE | typeof FIGHT_ORACLE_ERROR__TIMING_IMMUTABLE | typeof FIGHT_ORACLE_ERROR__UNAUTHORIZED | typeof FIGHT_ORACLE_ERROR__UNAUTHORIZED_INITIALIZER;
 
 let fightOracleErrorMessages: Record<FightOracleError, string> | undefined;
 if (true) {
-  fightOracleErrorMessages = { [FIGHT_ORACLE_ERROR__ALREADY_CHALLENGED]: `Proposal already challenged`, [FIGHT_ORACLE_ERROR__DISPUTE_WINDOW_ACTIVE]: `Dispute window still active`, [FIGHT_ORACLE_ERROR__DUEL_ALREADY_CANCELLED]: `The duel was cancelled and cannot be resolved`, [FIGHT_ORACLE_ERROR__DUEL_ALREADY_FINALIZED]: `The duel is already finalized`, [FIGHT_ORACLE_ERROR__DUEL_KEY_MISMATCH]: `The provided duel key does not match the stored duel`, [FIGHT_ORACLE_ERROR__INVALID_AUTHORITY]: `Authority pubkey cannot be the default address`, [FIGHT_ORACLE_ERROR__INVALID_BET_WINDOW]: `Betting window is invalid`, [FIGHT_ORACLE_ERROR__INVALID_CHALLENGER]: `Challenger pubkey cannot be the default address`, [FIGHT_ORACLE_ERROR__INVALID_DISPUTE_WINDOW]: `Dispute window must be non-negative`, [FIGHT_ORACLE_ERROR__INVALID_FINALIZER]: `Finalizer pubkey cannot be the default address`, [FIGHT_ORACLE_ERROR__INVALID_LIFECYCLE_TRANSITION]: `Duel lifecycle transition is invalid`, [FIGHT_ORACLE_ERROR__INVALID_PARTICIPANTS]: `Participants must be present and distinct`, [FIGHT_ORACLE_ERROR__INVALID_REPORTER]: `Reporter pubkey cannot be the default address`, [FIGHT_ORACLE_ERROR__INVALID_WINNER]: `Winner must be side A or side B`, [FIGHT_ORACLE_ERROR__NOT_PROPOSED]: `No active proposal exists`, [FIGHT_ORACLE_ERROR__UNAUTHORIZED]: `Unauthorized oracle action`, [FIGHT_ORACLE_ERROR__UNAUTHORIZED_INITIALIZER]: `Only the current upgrade authority can initialize the oracle` };
+  fightOracleErrorMessages = { [FIGHT_ORACLE_ERROR__ALREADY_CHALLENGED]: `Proposal already challenged`, [FIGHT_ORACLE_ERROR__ALREADY_INITIALIZED]: `Config is already initialized`, [FIGHT_ORACLE_ERROR__BETTING_WINDOW_ACTIVE]: `Cannot propose result while betting window is still active`, [FIGHT_ORACLE_ERROR__CHALLENGE_WINDOW_EXPIRED]: `Challenge window already expired`, [FIGHT_ORACLE_ERROR__CONFIG_AUTHORITY_IMMUTABLE]: `Config authority is immutable`, [FIGHT_ORACLE_ERROR__CONFIG_FROZEN]: `Config is permanently frozen`, [FIGHT_ORACLE_ERROR__DISPUTE_WINDOW_ACTIVE]: `Dispute window still active`, [FIGHT_ORACLE_ERROR__DUEL_ALREADY_CANCELLED]: `The duel was cancelled and cannot be resolved`, [FIGHT_ORACLE_ERROR__DUEL_ALREADY_FINALIZED]: `The duel is already finalized`, [FIGHT_ORACLE_ERROR__DUEL_KEY_MISMATCH]: `The provided duel key does not match the stored duel`, [FIGHT_ORACLE_ERROR__INVALID_AUTHORITY]: `Authority pubkey cannot be the default address`, [FIGHT_ORACLE_ERROR__INVALID_BET_WINDOW]: `Betting window is invalid`, [FIGHT_ORACLE_ERROR__INVALID_CHALLENGER]: `Challenger pubkey cannot be the default address`, [FIGHT_ORACLE_ERROR__INVALID_DISPUTE_WINDOW]: `Dispute window must be positive`, [FIGHT_ORACLE_ERROR__INVALID_FINALIZER]: `Finalizer pubkey cannot be the default address`, [FIGHT_ORACLE_ERROR__INVALID_LIFECYCLE_TRANSITION]: `Duel lifecycle transition is invalid`, [FIGHT_ORACLE_ERROR__INVALID_PARTICIPANTS]: `Participants must be present and distinct`, [FIGHT_ORACLE_ERROR__INVALID_REPORTER]: `Reporter pubkey cannot be the default address`, [FIGHT_ORACLE_ERROR__INVALID_WINNER]: `Winner must be side A or side B`, [FIGHT_ORACLE_ERROR__NOT_CHALLENGED]: `Duel must be in Challenged status for reproposal`, [FIGHT_ORACLE_ERROR__NOT_PROPOSED]: `No active proposal exists`, [FIGHT_ORACLE_ERROR__ORACLE_PAUSED]: `Oracle operations are paused`, [FIGHT_ORACLE_ERROR__PARTICIPANT_HASH_IMMUTABLE]: `Participant hashes are immutable after betting opens`, [FIGHT_ORACLE_ERROR__TIMING_IMMUTABLE]: `Bet timing is immutable after betting opens`, [FIGHT_ORACLE_ERROR__UNAUTHORIZED]: `Unauthorized oracle action`, [FIGHT_ORACLE_ERROR__UNAUTHORIZED_INITIALIZER]: `Only the current upgrade authority can initialize the oracle` };
 }
 
 export function getFightOracleErrorMessage(code: FightOracleError): string {

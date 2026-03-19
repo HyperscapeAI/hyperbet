@@ -1,0 +1,95 @@
+name: Fund Local Smoke Wallets
+
+on:
+  push:
+    branches:
+      - enoomian/pm16-17-20-21
+    paths:
+      - .github/workflows/fund-local-smoke-wallets.yml
+      - docs/release/evidence/local-smoke-wallets.json
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  fund-local-smoke-wallets:
+    name: Fund local smoke wallets
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup funding toolchain
+        uses: ./.github/actions/setup-hyperbet
+        with:
+          install-foundry: "true"
+          install-solana: "true"
+
+      - name: Resolve smoke wallet recipients
+        run: |
+          set -euo pipefail
+          manifest="docs/release/evidence/local-smoke-wallets.json"
+          echo "EVM_UI_SMOKE_ADDRESS=$(jq -r '.evm.uiSmoke' "$manifest")" >> "$GITHUB_ENV"
+          echo "SOLANA_UI_SMOKE_ADDRESS=$(jq -r '.solana.uiSmoke' "$manifest")" >> "$GITHUB_ENV"
+
+      - name: Fund BSC Testnet smoke wallet
+        env:
+          DEPLOYER_KEY: ${{ secrets.TESTNET_DEPLOYER_PRIVATE_KEY }}
+          RPC: ${{ secrets.BSC_TESTNET_RPC }}
+        run: |
+          set -euo pipefail
+          DEPLOYER_ADDRESS=$(cast wallet address --private-key "$DEPLOYER_KEY")
+          NONCE=$(cast nonce "$DEPLOYER_ADDRESS" --rpc-url "$RPC")
+          echo "Sending 0.02 tBNB to $EVM_UI_SMOKE_ADDRESS from $DEPLOYER_ADDRESS (nonce $NONCE)..."
+          cast send "$EVM_UI_SMOKE_ADDRESS" \
+            --value 0.02ether \
+            --rpc-url "$RPC" \
+            --private-key "$DEPLOYER_KEY" \
+            --nonce "$NONCE"
+
+      - name: Fund AVAX Fuji smoke wallet
+        env:
+          DEPLOYER_KEY: ${{ secrets.TESTNET_DEPLOYER_PRIVATE_KEY }}
+          RPC: ${{ secrets.AVAX_FUJI_RPC }}
+        run: |
+          set -euo pipefail
+          DEPLOYER_ADDRESS=$(cast wallet address --private-key "$DEPLOYER_KEY")
+          NONCE=$(cast nonce "$DEPLOYER_ADDRESS" --rpc-url "$RPC")
+          echo "Sending 0.05 AVAX to $EVM_UI_SMOKE_ADDRESS from $DEPLOYER_ADDRESS (nonce $NONCE)..."
+          cast send "$EVM_UI_SMOKE_ADDRESS" \
+            --value 0.05ether \
+            --rpc-url "$RPC" \
+            --private-key "$DEPLOYER_KEY" \
+            --nonce "$NONCE"
+
+      - name: Fund Solana devnet smoke wallet
+        env:
+          TESTNET_SOLANA_DEPLOYER_KEYPAIR: ${{ secrets.TESTNET_SOLANA_DEPLOYER_KEYPAIR }}
+        run: |
+          set -euo pipefail
+          wallet_file="$(mktemp)"
+          trap 'rm -f "$wallet_file"' EXIT
+          printf '%s' "$TESTNET_SOLANA_DEPLOYER_KEYPAIR" > "$wallet_file"
+          chmod 600 "$wallet_file"
+          echo "Sending 0.5 SOL to $SOLANA_UI_SMOKE_ADDRESS..."
+          solana transfer \
+            "$SOLANA_UI_SMOKE_ADDRESS" \
+            0.5 \
+            --url devnet \
+            --keypair "$wallet_file" \
+            --allow-unfunded-recipient
+
+      - name: Verify funded balances
+        env:
+          BSC_RPC: ${{ secrets.BSC_TESTNET_RPC }}
+          AVAX_RPC: ${{ secrets.AVAX_FUJI_RPC }}
+        run: |
+          set -euo pipefail
+          echo "=== BSC Testnet ==="
+          cast balance "$EVM_UI_SMOKE_ADDRESS" --rpc-url "$BSC_RPC" --ether
+          echo "=== AVAX Fuji ==="
+          cast balance "$EVM_UI_SMOKE_ADDRESS" --rpc-url "$AVAX_RPC" --ether
+          echo "=== Solana Devnet ==="
+          solana balance "$SOLANA_UI_SMOKE_ADDRESS" --url devnet

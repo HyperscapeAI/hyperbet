@@ -189,23 +189,22 @@ async function lockMarket(
   duel: string,
   label: string,
 ): Promise<void> {
-  const latestBlock = await fixture.provider.getBlock("latest");
-  const now = BigInt(latestBlock?.timestamp ?? Math.floor(Date.now() / 1000));
+  // Read stored duel to preserve immutable participant hashes and timing (FIX-4)
+  const storedDuel = await fixture.oracle.getDuel(duel);
 
-  await fixture.provider.send("evm_setNextBlockTimestamp", [Number(now + 61n)]);
+  // Advance past betCloseTs so the lock transition is valid
+  const betClose = Number(storedDuel.betCloseTs);
+  await fixture.provider.send("evm_setNextBlockTimestamp", [betClose + 1]);
   await fixture.provider.send("evm_mine", []);
-
-  const lockedBlock = await fixture.provider.getBlock("latest");
-  const lockedAt = BigInt(lockedBlock?.timestamp ?? Math.floor(Date.now() / 1000));
 
   await (
     await fixture.oracle.connect(fixture.reporter).upsertDuel(
       duel,
-      hashParticipant(`${label}:a`),
-      hashParticipant(`${label}:b`),
-      lockedAt - 61n,
-      lockedAt - 1n,
-      lockedAt + 59n,
+      storedDuel.participantAHash,
+      storedDuel.participantBHash,
+      storedDuel.betOpenTs,
+      storedDuel.betCloseTs,
+      storedDuel.duelStartTs,
       `locked://${label}`,
       DUEL_STATUS_LOCKED,
     )

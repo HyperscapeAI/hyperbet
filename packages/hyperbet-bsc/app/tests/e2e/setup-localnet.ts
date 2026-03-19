@@ -574,33 +574,29 @@ async function main(): Promise<void> {
   const currentBetOpenTs = currentUnixTs - 15;
   const currentBetCloseTs = currentUnixTs + currentBetWindowSeconds;
   const currentDuelStartTs = currentUnixTs + currentFightDelaySeconds;
+  const localDisputeWindowSeconds = 60;
 
-  markStage("initialize fight oracle");
-  await fight.methods
-    .initializeOracle(authority.publicKey)
-    .accountsPartial({
-      authority: authority.publicKey,
-      oracleConfig: oracleConfigPda,
-      program: fightProgram.programId,
-      programData: deriveProgramDataAddress(fightProgram.programId),
-      systemProgram: SystemProgram.programId,
-    })
-    .signers([authority])
-    .rpc();
-  await fight.methods
-    .updateOracleConfig(
-      authority.publicKey,
-      authority.publicKey,
-      authority.publicKey,
-      authority.publicKey,
-      new BN(0),
-    )
-    .accountsPartial({
-      authority: authority.publicKey,
-      oracleConfig: oracleConfigPda,
-    })
-    .signers([authority])
-    .rpc();
+  const existingOracleConfig =
+    await fight.account.oracleConfig.fetchNullable(oracleConfigPda);
+  if (!existingOracleConfig) {
+    markStage("initialize fight oracle");
+    await fight.methods
+      .initializeOracle(
+        authority.publicKey,
+        authority.publicKey,
+        authority.publicKey,
+        new BN(localDisputeWindowSeconds),
+      )
+      .accountsPartial({
+        authority: authority.publicKey,
+        oracleConfig: oracleConfigPda,
+        program: fightProgram.programId,
+        programData: deriveProgramDataAddress(fightProgram.programId),
+        systemProgram: SystemProgram.programId,
+      })
+      .signers([authority])
+      .rpc();
+  }
 
   markStage("configure fight oracle");
   await fight.methods
@@ -609,7 +605,7 @@ async function main(): Promise<void> {
       authority.publicKey,
       authority.publicKey,
       authority.publicKey,
-      new BN(0),
+      new BN(localDisputeWindowSeconds),
     )
     .accountsPartial({
       authority: authority.publicKey,
@@ -661,6 +657,7 @@ async function main(): Promise<void> {
       })
       .signers([authority])
       .rpc();
+    await sleep((localDisputeWindowSeconds + 3) * 1000);
     markStage("finalize resolved duel result");
     await fight.methods
       .finalizeResult(

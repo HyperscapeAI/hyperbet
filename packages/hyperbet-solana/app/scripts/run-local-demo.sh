@@ -6,9 +6,9 @@ DEMO_DIR="$(cd "$APP_DIR/.." && pwd)"
 ANCHOR_DIR="$DEMO_DIR/anchor"
 LEDGER_DIR="$ANCHOR_DIR/.local-demo-ledger"
 VALIDATOR_LOG="$APP_DIR/.local-demo-validator.log"
-PROGRAM_ORACLE_ID="6tpRysBFd1yXRipYEYwAw9jxEoVHk15kVXfkDGFLMqcD"
-PROGRAM_MARKET_ID="HbXhqEFevpkfYdZCN6YmJGRmQmj9vsBun2ZHjeeaLRik"
-PROGRAM_CLOB_ID="ARVJNJp49VZnkB8QBYZAAFJmufvtVSPhnuuenwwSLwpi"
+PROGRAM_ORACLE_ID="B5mRCRDJk9BrnH7regMWW5mpTQ8QG1CcCGSnDxMt8hmo"
+PROGRAM_MARKET_ID="EoZdHN8U3qWQje48ToxB1SLWjucsFGqcWaRUJQYX3eoT"
+PROGRAM_CLOB_ID="DYtd7AoyTX2tbmZ8vpC3mxZgqTpyaDei4TFXZukWBJEf"
 APP_PORT="${APP_PORT:-4179}"
 RPC_URL="http://127.0.0.1:8899"
 WALLET_PATH=""
@@ -49,7 +49,7 @@ wait_for_rpc() {
   for _ in {1..90}; do
     if curl -s -X POST "$RPC_URL" \
       -H "content-type: application/json" \
-      -d '{"jsonrpc":"2.0","id":1,"method":"getHealth"}' | rg -q '"result":"ok"'; then
+      -d '{"jsonrpc":"2.0","id":1,"method":"getHealth"}' | grep -q '"result":"ok"'; then
       return 0
     fi
     sleep 1

@@ -6,10 +6,20 @@
   "scripts": {
     "anchor:build": "bun run --cwd anchor build",
     "anchor:deploy:mainnet": "bun run --cwd anchor deploy:mainnet",
+    "anchor:deploy:pm:devnet": "bun run --cwd anchor deploy:pm:devnet",
+    "anchor:deploy:pm:testnet": "bun run --cwd anchor deploy:pm:testnet",
+    "anchor:deploy:pm:mainnet": "bun run --cwd anchor deploy:pm:mainnet",
     "anchor:deploy:testnet": "bun run --cwd anchor deploy:testnet",
     "anchor:test": "bun run --cwd anchor test",
     "deploy:preflight:mainnet": "bun run scripts/preflight-contract-deploy.ts --target mainnet",
+    "deploy:preflight:mainnet:pm": "bun run scripts/preflight-contract-deploy.ts --target mainnet --pm-only",
     "deploy:preflight:testnet": "bun run scripts/preflight-contract-deploy.ts --target testnet",
+    "deploy:preflight:testnet:pm": "bun run scripts/preflight-contract-deploy.ts --target testnet --pm-only",
+    "deploy:preflight:devnet:pm": "bun run scripts/preflight-contract-deploy.ts --cluster devnet --pm-only",
+    "deploy:pm:init:devnet": "node --import tsx scripts/init-pm-config.ts --cluster devnet",
+    "deploy:pm:init:testnet": "node --import tsx scripts/init-pm-config.ts --cluster testnet",
+    "verify:deployment:devnet:pm": "node --import tsx scripts/verify-deployment.ts --cluster devnet --pm-only",
+    "verify:deployment:testnet:pm": "node --import tsx scripts/verify-deployment.ts --cluster testnet --pm-only",
     "codegen:clients": "bunx coda generate -c ./coda/fight-oracle.config.mjs && bunx coda generate -c ./coda/gold-clob-market.config.mjs && bunx coda generate -c ./coda/gold-perps-market.config.mjs",
     "sync:anchor-artifacts": "node scripts/sync-anchor-artifacts.mjs",
     "dev": "bun run --cwd app dev --mode devnet",
@@ -45,10 +55,12 @@
     "@solana/wallet-adapter-react-ui": "^0.9.39",
     "@solana/web3.js": "^1.98.4",
     "@tanstack/react-query": "^5.90.21",
+    "bn.js": "5.2.2",
     "@vitejs/plugin-react": "^5.1.4"
   },
   "devDependencies": {
     "@macalinao/coda": "^0.4.10",
+    "@types/bn.js": "5.2.0",
     "tsx": "^4.21.0"
   }
 }

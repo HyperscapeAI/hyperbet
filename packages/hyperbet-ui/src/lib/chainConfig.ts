@@ -1,6 +1,7 @@
 import {
   BETTING_EVM_CHAIN_ORDER,
   type BettingEvmChain,
+  uiMetaForEvmChain,
 } from "@hyperbet/chain-registry";
 import type { Chain } from "wagmi/chains";
 
@@ -24,11 +25,12 @@ export type EvmChainConfig = {
 
 const CHAIN_UI_META: Partial<
   Record<BettingEvmChain, { shortName: string; color: string; icon: string }>
-> = {
-  bsc: { shortName: "BSC", color: "#F0B90B", icon: "💎" },
-  base: { shortName: "Base", color: "#0052FF", icon: "🔵" },
-  avax: { shortName: "AVAX", color: "#E84142", icon: "🔺" },
-};
+> = Object.fromEntries(
+  BETTING_EVM_CHAIN_ORDER.map((chainKey) => {
+    const meta = uiMetaForEvmChain(chainKey);
+    return [chainKey, meta];
+  }),
+);
 
 function createCustomChain(config: {
   chainId: number;
@@ -147,34 +149,30 @@ export function getWagmiChains(): [Chain, ...Chain[]] {
   return wagmiChains as [Chain, ...Chain[]];
 }
 
-export const CHAIN_DISPLAY: Record<
-  ChainId,
-  { name: string; shortName: string; icon: string; color: string }
-> = {
+type ChainDisplayEntry = { name: string; shortName: string; icon: string; color: string };
+
+export const CHAIN_DISPLAY: Record<ChainId, ChainDisplayEntry> = {
   solana: {
     name: "Solana",
     shortName: "SOL",
     icon: "☀️",
     color: "#9945FF",
   },
-  bsc: {
-    name: getRuntimeChainConfig("bsc")?.name ?? "BNB Smart Chain",
-    shortName: getRuntimeChainConfig("bsc")?.shortName ?? "BSC",
-    icon: getRuntimeChainConfig("bsc")?.icon ?? "💎",
-    color: getRuntimeChainConfig("bsc")?.color ?? "#F0B90B",
-  },
-  base: {
-    name: getRuntimeChainConfig("base")?.name ?? "Base",
-    shortName: getRuntimeChainConfig("base")?.shortName ?? "Base",
-    icon: getRuntimeChainConfig("base")?.icon ?? "🔵",
-    color: getRuntimeChainConfig("base")?.color ?? "#0052FF",
-  },
-  avax: {
-    name: getRuntimeChainConfig("avax")?.name ?? "Avalanche",
-    shortName: getRuntimeChainConfig("avax")?.shortName ?? "AVAX",
-    icon: getRuntimeChainConfig("avax")?.icon ?? "🔺",
-    color: getRuntimeChainConfig("avax")?.color ?? "#E84142",
-  },
+  ...(Object.fromEntries(
+    BETTING_EVM_CHAIN_ORDER.map((chainKey) => {
+      const runtime = getRuntimeChainConfig(chainKey);
+      const meta = uiMetaForEvmChain(chainKey);
+      return [
+        chainKey,
+        {
+          name: runtime?.name ?? meta.shortName,
+          shortName: runtime?.shortName ?? meta.shortName,
+          icon: runtime?.icon ?? meta.icon,
+          color: runtime?.color ?? meta.color,
+        },
+      ];
+    }),
+  ) as Record<Exclude<ChainId, "solana">, ChainDisplayEntry>),
 };
 
 export const LARGEST_MARKET_CACHE_KEY = "goldArena_largestMarketChain";

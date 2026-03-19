@@ -16,9 +16,12 @@ export type {
 } from "./types.ts";
 
 export function createDefaultMarketMakerStateStore(connectionString?: string) {
-  return createPostgresMarketMakerStateStore(
-    connectionString || process.env.MM_DATABASE_URL || "",
-  );
+  const url = connectionString || process.env.MM_DATABASE_URL || "";
+  if (!url) {
+    console.info("[storage] MM_DATABASE_URL not set, falling back to in-memory store");
+    return createInMemoryMarketMakerStateStore();
+  }
+  return createPostgresMarketMakerStateStore(url);
 }
 
 export function createTestMarketMakerStateStore() {

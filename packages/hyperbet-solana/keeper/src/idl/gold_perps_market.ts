@@ -5,7 +5,7 @@
  * IDL can be found at `target/idl/gold_perps_market.json`.
  */
 export type GoldPerpsMarket = {
-  "address": "HbXhqEFevpkfYdZCN6YmJGRmQmj9vsBun2ZHjeeaLRik",
+  "address": "EoZdHN8U3qWQje48ToxB1SLWjucsFGqcWaRUJQYX3eoT",
   "metadata": {
     "name": "goldPerpsMarket",
     "version": "0.1.0",
@@ -122,7 +122,7 @@ export type GoldPerpsMarket = {
         },
         {
           "name": "program",
-          "address": "HbXhqEFevpkfYdZCN6YmJGRmQmj9vsBun2ZHjeeaLRik"
+          "address": "EoZdHN8U3qWQje48ToxB1SLWjucsFGqcWaRUJQYX3eoT"
         },
         {
           "name": "programData"

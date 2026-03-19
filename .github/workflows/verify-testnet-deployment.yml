@@ -1,0 +1,114 @@
+name: Verify Testnet Deployment
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "Verification target"
+        required: true
+        default: all
+        type: choice
+        options:
+          - all
+          - bsc
+          - avax
+          - solana
+      bsc_duel_oracle_address:
+        description: "Optional BSC Testnet DuelOutcomeOracle override"
+        required: false
+        type: string
+      bsc_gold_clob_address:
+        description: "Optional BSC Testnet GoldClob override"
+        required: false
+        type: string
+      avax_duel_oracle_address:
+        description: "Optional AVAX Fuji DuelOutcomeOracle override"
+        required: false
+        type: string
+      avax_gold_clob_address:
+        description: "Optional AVAX Fuji GoldClob override"
+        required: false
+        type: string
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  verify-testnet-deployment:
+    name: Verify Testnet Deployment
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Hyperbet toolchain
+        uses: ./.github/actions/setup-hyperbet
+        with:
+          install-foundry: "true"
+          install-rust: "true"
+          install-solana: "true"
+          install-anchor: "true"
+
+      - name: Install dependencies
+        run: bash scripts/ci-install-verified.sh root
+
+      - name: Resolve Stage A runtime env
+        env:
+          TESTNET_DEPLOYER_PRIVATE_KEY: ${{ secrets.TESTNET_DEPLOYER_PRIVATE_KEY }}
+          ADMIN_ADDRESS: ${{ secrets.ADMIN_ADDRESS }}
+          BSC_TESTNET_RPC: ${{ secrets.BSC_TESTNET_RPC }}
+          AVAX_FUJI_RPC: ${{ secrets.AVAX_FUJI_RPC }}
+          TESTNET_MARKET_OPERATOR_PRIVATE_KEY: ${{ secrets.TESTNET_MARKET_OPERATOR_PRIVATE_KEY }}
+          TESTNET_REPORTER_PRIVATE_KEY: ${{ secrets.TESTNET_REPORTER_PRIVATE_KEY }}
+          TESTNET_FINALIZER_PRIVATE_KEY: ${{ secrets.TESTNET_FINALIZER_PRIVATE_KEY }}
+          TESTNET_CHALLENGER_PRIVATE_KEY: ${{ secrets.TESTNET_CHALLENGER_PRIVATE_KEY }}
+          TESTNET_PAUSER_PRIVATE_KEY: ${{ secrets.TESTNET_PAUSER_PRIVATE_KEY }}
+          TESTNET_TREASURY_PRIVATE_KEY: ${{ secrets.TESTNET_TREASURY_PRIVATE_KEY }}
+          TESTNET_MARKET_MAKER_PRIVATE_KEY: ${{ secrets.TESTNET_MARKET_MAKER_PRIVATE_KEY }}
+          TESTNET_SOLANA_DEPLOYER_KEYPAIR: ${{ secrets.TESTNET_SOLANA_DEPLOYER_KEYPAIR }}
+          DISPUTE_WINDOW_SECONDS: "3600"
+        run: bash scripts/export-stage-a-env.sh
+
+      - name: Prepare verification artifact directory
+        run: mkdir -p .ci-artifacts/testnet-verification
+
+      - name: Verify BSC Testnet PM deployment
+        if: ${{ inputs.target == 'all' || inputs.target == 'bsc' }}
+        run: |
+          node --import tsx packages/evm-contracts/scripts/verify-deployment.ts \
+            --network bscTestnet \
+            ${BSC_DUEL_ORACLE:+--duel-oracle-address "$BSC_DUEL_ORACLE"} \
+            ${BSC_GOLD_CLOB:+--gold-clob-address "$BSC_GOLD_CLOB"} \
+            --out .ci-artifacts/testnet-verification/bscTestnet.json
+        env:
+          BSC_DUEL_ORACLE: ${{ inputs.bsc_duel_oracle_address }}
+          BSC_GOLD_CLOB: ${{ inputs.bsc_gold_clob_address }}
+
+      - name: Verify AVAX Fuji PM deployment
+        if: ${{ inputs.target == 'all' || inputs.target == 'avax' }}
+        run: |
+          node --import tsx packages/evm-contracts/scripts/verify-deployment.ts \
+            --network avaxFuji \
+            ${AVAX_DUEL_ORACLE:+--duel-oracle-address "$AVAX_DUEL_ORACLE"} \
+            ${AVAX_GOLD_CLOB:+--gold-clob-address "$AVAX_GOLD_CLOB"} \
+            --out .ci-artifacts/testnet-verification/avaxFuji.json
+        env:
+          AVAX_DUEL_ORACLE: ${{ inputs.avax_duel_oracle_address }}
+          AVAX_GOLD_CLOB: ${{ inputs.avax_gold_clob_address }}
+
+      - name: Verify Solana PM deployment
+        if: ${{ inputs.target == 'all' || inputs.target == 'solana' }}
+        run: |
+          node --import tsx packages/hyperbet-solana/scripts/verify-deployment.ts \
+            --cluster devnet \
+            --pm-only \
+            --out .ci-artifacts/testnet-verification/solana-devnet.json
+
+      - name: Upload verification artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: testnet-verification
+          path: .ci-artifacts/testnet-verification
+          if-no-files-found: ignore

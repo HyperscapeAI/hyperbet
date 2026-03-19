@@ -29,6 +29,7 @@
     "test:e2e:local": "bun run --cwd app test:e2e:local"
   },
   "dependencies": {
+    "@hyperbet/chain-registry": "workspace:*",
     "@rainbow-me/rainbowkit": "^2.2.10",
     "@tanstack/react-query": "^5.90.21",
     "@vitejs/plugin-react": "^5.1.4",

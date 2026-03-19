@@ -1,0 +1,10 @@
+{
+  "generatedAt": "2026-03-19",
+  "purpose": "Local write-path smoke wallets for deployed Stage A testnets. Private keys remain local under keys/local-smoke/ and are gitignored.",
+  "evm": {
+    "uiSmoke": "0x2a44975A6A5580858244e7aE41a97Ca3d27477b5"
+  },
+  "solana": {
+    "uiSmoke": "F9JcCg2en6fyvJPuLPrKTq6nXz95kn1xkB1QSHN7mwyD"
+  }
+}

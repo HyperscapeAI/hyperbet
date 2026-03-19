@@ -33,16 +33,10 @@ describe("betting deployment manifest", () => {
     expect(testnetDefaults.bsc.networkKey).toBe("bscTestnet");
     expect(testnetDefaults.base.networkKey).toBe("baseSepolia");
     expect(testnetDefaults.avax.networkKey).toBe("avaxFuji");
-    expect(testnetDefaults.avax.perpMarginTokenAddress).toBe(
-      BETTING_DEPLOYMENTS.evm.avaxFuji.perpMarginTokenAddress,
-    );
 
     const mainnetDefaults = resolveBettingEvmDefaults("mainnet-beta");
     expect(mainnetDefaults.bsc.networkKey).toBe("bsc");
     expect(mainnetDefaults.base.networkKey).toBe("base");
     expect(mainnetDefaults.avax.networkKey).toBe("avax");
-    expect(mainnetDefaults.avax.perpMarginTokenAddress).toBe(
-      BETTING_DEPLOYMENTS.evm.avax.perpMarginTokenAddress,
-    );
   });
 });

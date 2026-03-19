@@ -1,0 +1,90 @@
+name: PM Confidence Soak
+
+on:
+  workflow_dispatch:
+    inputs:
+      lane:
+        description: "Soak lane"
+        required: true
+        default: both
+        type: choice
+        options:
+          - staged
+          - both
+      duration_minutes:
+        description: "Staged soak duration in minutes"
+        required: true
+        default: "120"
+        type: string
+      chains:
+        description: "Comma-separated chain set"
+        required: true
+        default: solana,bsc,avax
+        type: string
+      screenshots:
+        description: "Capture staged page screenshots"
+        required: true
+        default: true
+        type: boolean
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  pm-soak:
+    name: PM Confidence Soak
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Hyperbet toolchain
+        uses: ./.github/actions/setup-hyperbet
+
+      - name: Install dependencies
+        run: bash scripts/ci-install-verified.sh root
+
+      - name: Record local preflight contract
+        if: ${{ inputs.lane == 'both' }}
+        run: |
+          cat <<'EOF' >> "$GITHUB_STEP_SUMMARY"
+          ## Local Preflight Required
+
+          `lane=both` keeps the staged soak authoritative, but the local preflight lane is still operator-run because it depends on the sibling `hyperscapes-mono` checkout, local keeper processes, and both desktop UIs.
+
+          Run locally before or alongside this soak:
+
+          ```bash
+          bash scripts/run-hyperscapes-pm-local.sh
+          node --import tsx scripts/pm-soak-monitor.ts --mode=local --duration-min=25
+          ```
+
+          Local artifacts land under `output/playwright/pm-soak/...`.
+          EOF
+
+      - name: Install Chromium for staged screenshots
+        if: ${{ inputs.screenshots }}
+        run: bunx playwright install chromium
+
+      - name: Run staged read-only preflight
+        run: node --import tsx scripts/staged-live-proof.ts --mode=read-only --target=all
+
+      - name: Run staged PM soak
+        env:
+          PM_SOAK_ENABLE_CANARY_TRADES: "true"
+          PM_SOAK_SCREENSHOTS: ${{ inputs.screenshots }}
+        run: >
+          node --import tsx scripts/pm-soak-monitor.ts
+          --mode=staged
+          --chains=${{ inputs.chains }}
+          --duration-min=${{ inputs.duration_minutes }}
+
+      - name: Upload PM soak artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pm-soak
+          path: .ci-artifacts/pm-soak
+          if-no-files-found: ignore

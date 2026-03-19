@@ -306,8 +306,9 @@ continuation behavior on EVM.
 
 ### Why This Gate Exists
 
-The exchange path is functional but still lacks production-complete order
-semantics.
+EVM matching behavior now enforces production-complete order semantics including
+IOC/post-only enforcement, bounded continuation, and protocol-visible
+self-trade policy handling.
 
 ### In Scope
 
@@ -328,10 +329,15 @@ semantics.
 
 ### Merge Criteria
 
-- IOC and post-only are explicit contract behaviors
-- self-trades are rejected by protocol
-- bounded matching has deterministic continuation semantics
-- tests and exploit coverage reflect the new rules
+- IOC, post-only, and continuation rules are enforced in `GoldClob.placeOrder`.
+- Self-trade cancellation policy is explicit at match time and emits policy signals.
+- Bounded match continuation requires explicit continuation when the iteration cap is hit.
+- Claim and refund behavior remains terminal-state gated and aligned with resolver outcome.
+
+### Status
+
+- Completed on `enoomian/pm-17a-evm-order-semantics`.
+- Evidence: `packages/evm-contracts/test/GoldClobSettlement.t.sol`, `packages/evm-contracts/test/fuzz/GoldClobFuzz.t.sol`, `packages/hyperbet-solana/anchor/tests/gold_clob_market.test.ts`.
 
 ### Self-Trade Policy Decision (Cross-Chain Parity)
 
@@ -377,8 +383,9 @@ Add matching order semantics and self-trade prevention on Solana.
 
 ### Why This Gate Exists
 
-The Solana prediction-market runtime is functional, but order semantics are not
-yet equivalent to a production exchange contract.
+Solana matching behavior now includes production-complete order semantics and is
+aligned with EVM intent for IOC, post-only rejection, continuation, and self-cross
+policy.
 
 ### In Scope
 
@@ -401,6 +408,11 @@ yet equivalent to a production exchange contract.
 - Solana order semantics match the intended exchange model
 - STP exists at protocol level
 - continuation rules are deterministic and documented
+
+### Status
+
+- Completed on `enoomian/pm-17b-solana-order-semantics`.
+- Evidence: `packages/hyperbet-solana/anchor/tests/gold_clob_market.test.ts`, `packages/hyperbet-solana/anchor/tests/gold_clob_security.ts`.
 
 ### Required Checks
 

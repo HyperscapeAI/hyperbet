@@ -1,5 +1,6 @@
 import {
   BETTING_EVM_CHAIN_ORDER,
+  resolveBettingSolanaDeployment,
   resolveBettingEvmDeploymentForChain,
   resolveBettingEvmRuntimeEnv,
   type BettingEvmChain,
@@ -16,7 +17,7 @@ const DEFAULT_SOLANA_PROGRAM_ID =
   process.env.SOLANA_VERIFY_PROGRAM_ID ||
   process.env.GOLD_CLOB_MARKET_PROGRAM_ID ||
   process.env.SOLANA_ARENA_MARKET_PROGRAM_ID ||
-  "ARVJNJp49VZnkB8QBYZAAFJmufvtVSPhnuuenwwSLwpi";
+  resolveBettingSolanaDeployment("mainnet-beta").goldClobMarketProgramId;
 const DEFAULT_SOLANA_RPC_URL =
   process.env.SOLANA_VERIFY_RPC_URL ||
   process.env.SOLANA_RPC_URL ||

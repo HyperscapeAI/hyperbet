@@ -216,6 +216,13 @@ export interface DuelOutcomeOracleContract
     activeProposalId: string;
     metadataUri: string;
   }>;
+  disputeWindowSeconds(): Promise<bigint>;
+  oracleActionsPaused(): Promise<boolean>;
+  REPORTER_ROLE(): Promise<string>;
+  FINALIZER_ROLE(): Promise<string>;
+  CHALLENGER_ROLE(): Promise<string>;
+  PAUSER_ROLE(): Promise<string>;
+  hasRole(role: BytesLike, account: string): Promise<boolean>;
 }
 
 export interface SkillOracleContract extends TypedContract<SkillOracleContract> {

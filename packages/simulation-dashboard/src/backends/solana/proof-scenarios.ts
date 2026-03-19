@@ -368,8 +368,8 @@ async function executeCancelReplaceGriefingFlow(
     );
 
     const placements = [
-        { orderId: 2, amount: 500n },
-        { orderId: 3, amount: 550n },
+        { orderId: 2, amount: 1_000n },
+        { orderId: 3, amount: 2_000n },
     ];
     let quoteChecks = 0;
     let quoteActiveChecks = 0;
@@ -1167,7 +1167,7 @@ export async function runSolanaProofScenario(
                     orderId: 3,
                     side: SIDE_BID,
                     price: 600,
-                    amount: 500n,
+                    amount: 1000n,
                 });
                 traces.push(
                     buildTrace("post_lock_order", market, {

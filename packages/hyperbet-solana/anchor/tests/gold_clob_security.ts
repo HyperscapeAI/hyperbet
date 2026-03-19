@@ -9,13 +9,19 @@ import {
   airdrop,
   createOpenMarketFixture,
   deriveMarketStatePda,
+  claimClobWinnings,
   duelStatusBettingOpen,
+  duelStatusLocked,
   ensureClobConfig,
   ensureOracleReady,
   hasProgramError,
   initializeCanonicalMarket,
   placeClobOrder,
+  proposeDuelResult,
+  syncMarketFromDuel,
   uniqueDuelKey,
+  cancelDuel,
+  challengeDuelResult,
   upsertDuel,
   writableAccount,
   cancelClobOrder,
@@ -23,6 +29,8 @@ import {
 import { configureAnchorTests } from "./test-anchor";
 import { FightOracle } from "../target/types/fight_oracle";
 import { GoldClobMarket } from "../target/types/gold_clob_market";
+
+const DISPUTE_WINDOW_SECS = 3600;
 
 describe("gold_clob_market security regressions", () => {
   const provider = configureAnchorTests();
@@ -33,6 +41,16 @@ describe("gold_clob_market security regressions", () => {
     .GoldClobMarket as Program<GoldClobMarket>;
   const authority = (provider.wallet as anchor.Wallet & { payer: Keypair })
     .payer;
+  before(async () => {
+    await ensureOracleReady(
+      fightProgram,
+      authority,
+      authority.publicKey,
+      authority.publicKey,
+      authority.publicKey,
+      DISPUTE_WINDOW_SECS,
+    );
+  });
 
   it("rejects unauthorized canonical market initialization", async () => {
     const outsider = Keypair.generate();
@@ -370,4 +388,230 @@ describe("gold_clob_market security regressions", () => {
       null,
     );
   });
+
+  it("rejects order mutation and claims during non-open lifecycle states", async () => {
+    const maker = Keypair.generate();
+    await airdrop(provider.connection, maker.publicKey, 5);
+
+    const market = await createOpenMarketFixture(
+      fightProgram,
+      clobProgram,
+      authority,
+      { duelKey: uniqueDuelKey("guardrail-non-open-mutations") },
+    );
+
+    const makerAsk = await placeClobOrder(clobProgram, {
+      marketState: market.marketState,
+      duelState: market.duelState,
+      config: market.config,
+      treasury: market.treasury,
+      marketMaker: market.marketMaker,
+      vault: market.vault,
+      user: maker,
+      orderId: 1,
+      side: SIDE_ASK,
+      price: 600,
+      amount: 1000,
+    });
+
+    await upsertDuel(
+      fightProgram,
+      authority,
+      market.duelKey,
+      {
+        status: duelStatusLocked(),
+        betOpenTs: Math.floor(Date.now() / 1000) - 120,
+        betCloseTs: Math.floor(Date.now() / 1000) - 10,
+        duelStartTs: Math.floor(Date.now() / 1000) + 30,
+        metadataUri: "https://hyperscape.gg/tests/security/non-open-mutations",
+      },
+    );
+    await ensureOracleReady(
+      fightProgram,
+      authority,
+      authority.publicKey,
+      authority.publicKey,
+      authority.publicKey,
+      3600,
+    );
+    await syncMarketFromDuel(clobProgram, market.marketState, market.duelState);
+
+    try {
+      await placeClobOrder(clobProgram, {
+        marketState: market.marketState,
+        duelState: market.duelState,
+        config: market.config,
+        treasury: market.treasury,
+        marketMaker: market.marketMaker,
+        vault: market.vault,
+        user: maker,
+        orderId: 2,
+        side: SIDE_BID,
+        price: 550,
+        amount: 1000,
+      });
+      assert.fail("lock-state order placement succeeded");
+    } catch (error: unknown) {
+      assert.ok(
+        hasProgramError(error, "MarketNotOpen"),
+        `expected MarketNotOpen, got ${String(error)}`,
+      );
+    }
+
+    try {
+      await cancelClobOrder(clobProgram, {
+        marketState: market.marketState,
+        duelState: market.duelState,
+        vault: market.vault,
+        user: maker,
+        orderId: 1,
+        side: SIDE_ASK,
+        price: 600,
+      });
+      assert.fail("lock-state cancellation succeeded");
+    } catch (error: unknown) {
+      assert.ok(
+        hasProgramError(error, "MarketNotOpen"),
+        `expected MarketNotOpen, got ${String(error)}`,
+      );
+    }
+
+    await syncMarketFromDuel(clobProgram, market.marketState, market.duelState);
+    await proposeDuelResult(fightProgram, authority, market.duelKey, {
+      winner: { a: {} },
+      duelEndTs: Math.floor(Date.now() / 1000),
+      seed: 42,
+      metadataUri: "https://hyperscape.gg/tests/security/proposed",
+    });
+    await challengeDuelResult(fightProgram, authority, market.duelKey);
+    await syncMarketFromDuel(clobProgram, market.marketState, market.duelState);
+
+    try {
+      await cancelClobOrder(clobProgram, {
+        marketState: market.marketState,
+        duelState: market.duelState,
+        vault: market.vault,
+        user: maker,
+        orderId: 1,
+        side: SIDE_ASK,
+        price: 600,
+      });
+      assert.fail("challenged-state cancellation succeeded");
+    } catch (error: unknown) {
+      assert.ok(
+        hasProgramError(error, "MarketNotOpen"),
+        `expected MarketNotOpen, got ${String(error)}`,
+      );
+    }
+
+    try {
+      await claimClobWinnings(clobProgram, {
+        marketState: market.marketState,
+        duelState: market.duelState,
+        config: market.config,
+        marketMaker: market.marketMaker,
+        vault: market.vault,
+        user: maker,
+      });
+      assert.fail("preterminal claim succeeded");
+    } catch (error: unknown) {
+      assert.ok(
+        hasProgramError(error, "MarketNotResolved"),
+        `expected MarketNotResolved, got ${String(error)}`,
+      );
+    }
+  });
+
+  it("locks non-finalized claims to terminal states and refunds cancelled matches", async () => {
+    const maker = Keypair.generate();
+    await airdrop(provider.connection, maker.publicKey, 5);
+
+    const market = await createOpenMarketFixture(
+      fightProgram,
+      clobProgram,
+      authority,
+      {
+        duelKey: uniqueDuelKey("guardrail-cancelled-claim"),
+        metadataUri: "https://hyperscape.gg/tests/security/cancelled-claim",
+      },
+    );
+
+    const makerAsk = await placeClobOrder(clobProgram, {
+      marketState: market.marketState,
+      duelState: market.duelState,
+      config: market.config,
+      treasury: market.treasury,
+      marketMaker: market.marketMaker,
+      vault: market.vault,
+      user: maker,
+      orderId: 1,
+      side: SIDE_BID,
+      price: 600,
+      amount: 1000,
+    });
+
+    const taker = Keypair.generate();
+    await airdrop(provider.connection, taker.publicKey, 5);
+    const takerBid = await placeClobOrder(clobProgram, {
+      marketState: market.marketState,
+      duelState: market.duelState,
+      config: market.config,
+      treasury: market.treasury,
+      marketMaker: market.marketMaker,
+      vault: market.vault,
+      user: taker,
+      orderId: 2,
+      side: SIDE_ASK,
+      price: 600,
+      amount: 1000,
+      remainingAccounts: [
+        writableAccount(makerAsk.restingLevel),
+        writableAccount(makerAsk.order),
+        writableAccount(makerAsk.userBalance),
+      ],
+    });
+
+    await cancelDuel(fightProgram, authority, market.duelKey);
+    await syncMarketFromDuel(clobProgram, market.marketState, market.duelState);
+
+    const makerBalance = await clobProgram.account.userBalance.fetch(
+      makerAsk.userBalance,
+    );
+    assert.strictEqual(makerBalance.aShares.toString(), "1000");
+    assert.strictEqual(makerBalance.aLockedLamports.toString(), "600");
+
+    await claimClobWinnings(clobProgram, {
+      marketState: market.marketState,
+      duelState: market.duelState,
+      config: market.config,
+      marketMaker: market.marketMaker,
+      vault: market.vault,
+      user: maker,
+    });
+
+    await claimClobWinnings(clobProgram, {
+      marketState: market.marketState,
+      duelState: market.duelState,
+      config: market.config,
+      marketMaker: market.marketMaker,
+      vault: market.vault,
+      user: taker,
+    });
+
+    const makerBalanceAfter = await clobProgram.account.userBalance.fetch(
+      makerAsk.userBalance,
+    );
+    const takerBalanceAfter = await clobProgram.account.userBalance.fetch(
+      takerBid.userBalance,
+    );
+    assert.strictEqual(makerBalanceAfter.aShares.toString(), "0");
+    assert.strictEqual(makerBalanceAfter.bShares.toString(), "0");
+    assert.strictEqual(makerBalanceAfter.aLockedLamports.toString(), "0");
+    assert.strictEqual(makerBalanceAfter.bLockedLamports.toString(), "0");
+    assert.strictEqual(takerBalanceAfter.aShares.toString(), "0");
+    assert.strictEqual(takerBalanceAfter.bShares.toString(), "0");
+    assert.strictEqual(takerBalanceAfter.aLockedLamports.toString(), "0");
+    assert.strictEqual(takerBalanceAfter.bLockedLamports.toString(), "0");
+  });
+
 });

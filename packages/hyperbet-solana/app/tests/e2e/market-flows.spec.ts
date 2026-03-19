@@ -335,31 +335,44 @@ async function createFreshSolanaOpenMarket(
   fightProgram: Program<Idl>,
   clobProgram: Program<Idl>,
   label: string,
+  options?: {
+    betCloseOffsetSeconds?: number;
+    duelStartOffsetSeconds?: number;
+  },
 ): Promise<{
   duelKey: number[];
   duelKeyHex: string;
   duelId: string;
   duelState: PublicKey;
   marketState: PublicKey;
+  betOpenTs: number;
+  betCloseTs: number;
+  duelStartTs: number;
 }> {
   const duelKey = uniqueDuelKey(label);
   const duelKeyHex = Buffer.from(duelKey).toString("hex");
   const duelId = `${Date.now()}`;
   const now = Math.floor(Date.now() / 1000);
+  const betOpenTs = now - 60;
+  const betCloseTs = now + (options?.betCloseOffsetSeconds ?? 600);
+  const duelStartTs = Math.max(
+    betCloseTs,
+    now + (options?.duelStartOffsetSeconds ?? 660),
+  );
   await ensureOracleReady(
     fightProgram as never,
     authority,
     authority.publicKey,
     authority.publicKey,
     authority.publicKey,
-    0,
+    60,
   );
   const duelState = await upsertDuel(fightProgram as never, authority, duelKey, {
     status: duelStatusBettingOpen(),
-    betOpenTs: now - 60,
-    betCloseTs: now + 600,
-    duelStartTs: now + 660,
-      metadataUri: "https://hyperscape.gg/tests/e2e/fresh-open",
+    betOpenTs,
+    betCloseTs,
+    duelStartTs,
+    metadataUri: "https://hyperscape.gg/tests/e2e/fresh-open",
   });
   const derivedMarketState = deriveMarketStatePda(
     clobProgram.programId,
@@ -394,13 +407,13 @@ async function createFreshSolanaOpenMarket(
         duelKeyHex,
         cycleStartTime: Date.now() - 90_000,
         phaseStartTime: Date.now() - 5_000,
-        phaseEndTime: Date.now() + 300_000,
-        betOpenTime: Date.now() - 15_000,
-        betCloseTime: Date.now() + 300_000,
-        fightStartTime: Date.now() + 60_000,
+        phaseEndTime: betCloseTs * 1000,
+        betOpenTime: betOpenTs * 1000,
+        betCloseTime: betCloseTs * 1000,
+        fightStartTime: duelStartTs * 1000,
         duelEndTime: null,
-        countdown: 300,
-        timeRemaining: 300_000,
+        countdown: Math.max(0, betCloseTs - now),
+        timeRemaining: Math.max(0, betCloseTs - now) * 1000,
         winnerId: null,
         winnerName: null,
         winReason: null,
@@ -446,6 +459,9 @@ async function createFreshSolanaOpenMarket(
     duelId,
     duelState,
     marketState,
+    betOpenTs,
+    betCloseTs,
+    duelStartTs,
   };
 }
 
@@ -1139,7 +1155,16 @@ test.describe("market flows", () => {
     const clobProgram = createReadonlyClobProgram(connection, state);
     const { authority, fightProgram, clobProgram: writableClobProgram } =
       createWritablePrograms(connection, state);
-    const { duelKey, duelKeyHex, duelId, duelState, marketState } =
+    const {
+      duelKey,
+      duelKeyHex,
+      duelId,
+      duelState,
+      marketState,
+      betOpenTs,
+      betCloseTs,
+      duelStartTs,
+    } =
       await createFreshSolanaOpenMarket(
         request,
         state,
@@ -1147,6 +1172,10 @@ test.describe("market flows", () => {
         fightProgram,
         writableClobProgram,
         "gate10-solana-resolve-claim",
+        {
+          betCloseOffsetSeconds: 30,
+          duelStartOffsetSeconds: 90,
+        },
       );
     const userBalanceAddress = deriveUserBalancePda(
       clobProgram.programId,
@@ -1307,12 +1336,21 @@ test.describe("market flows", () => {
       );
     }
 
-    const lockNow = Math.floor(Date.now() / 1000);
+    await expect
+      .poll(
+        () => Math.floor(Date.now() / 1000),
+        {
+          timeout: 90_000,
+          intervals: [1_000, 2_000, 5_000],
+        },
+      )
+      .toBeGreaterThanOrEqual(betCloseTs + 1);
+    const resolutionNow = Math.floor(Date.now() / 1000);
     await upsertDuel(fightProgram as never, authority, duelKey, {
       status: duelStatusLocked(),
-      betOpenTs: lockNow - 120,
-      betCloseTs: lockNow - 10,
-      duelStartTs: lockNow - 5,
+      betOpenTs,
+      betCloseTs,
+      duelStartTs,
       metadataUri: "https://hyperscape.gg/tests/e2e/locked",
     });
     await syncMarketFromDuel(
@@ -1322,7 +1360,7 @@ test.describe("market flows", () => {
     );
     await proposeDuelResult(fightProgram as never, authority, duelKey, {
       winner: marketSideA(),
-      duelEndTs: lockNow + 5,
+      duelEndTs: resolutionNow,
       metadataUri: "https://hyperscape.gg/tests/e2e/resolved",
     });
     await finalizeDuelResult(
@@ -1389,7 +1427,15 @@ test.describe("market flows", () => {
     const clobProgram = createReadonlyClobProgram(connection, state);
     const { authority, fightProgram, clobProgram: writableClobProgram } =
       createWritablePrograms(connection, state);
-    const { duelKey, duelKeyHex, duelState, marketState } =
+    const {
+      duelKey,
+      duelKeyHex,
+      duelState,
+      marketState,
+      betOpenTs,
+      betCloseTs,
+      duelStartTs,
+    } =
       await createFreshSolanaOpenMarket(
         request,
         state,
@@ -1397,6 +1443,10 @@ test.describe("market flows", () => {
         fightProgram,
         writableClobProgram,
         "gate10-solana-restart",
+        {
+          betCloseOffsetSeconds: 30,
+          duelStartOffsetSeconds: 90,
+        },
       );
     const userBalanceAddress = deriveUserBalancePda(
       clobProgram.programId,
@@ -1510,12 +1560,21 @@ test.describe("market flows", () => {
       timeout: 60_000,
     });
 
-    const lockNow = Math.floor(Date.now() / 1000);
+    await expect
+      .poll(
+        () => Math.floor(Date.now() / 1000),
+        {
+          timeout: 90_000,
+          intervals: [1_000, 2_000, 5_000],
+        },
+      )
+      .toBeGreaterThanOrEqual(betCloseTs + 1);
+    const resolutionNow = Math.floor(Date.now() / 1000);
     await upsertDuel(fightProgram as never, authority, duelKey, {
       status: duelStatusLocked(),
-      betOpenTs: lockNow - 120,
-      betCloseTs: lockNow - 10,
-      duelStartTs: lockNow - 5,
+      betOpenTs,
+      betCloseTs,
+      duelStartTs,
       metadataUri: "https://hyperscape.gg/tests/e2e/locked-restart",
     });
     await syncMarketFromDuel(
@@ -1525,7 +1584,7 @@ test.describe("market flows", () => {
     );
     await proposeDuelResult(fightProgram as never, authority, duelKey, {
       winner: marketSideA(),
-      duelEndTs: lockNow + 5,
+      duelEndTs: resolutionNow,
       metadataUri: "https://hyperscape.gg/tests/e2e/resolved-restart",
     });
     await finalizeDuelResult(

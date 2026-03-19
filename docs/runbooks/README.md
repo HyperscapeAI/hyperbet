@@ -9,6 +9,9 @@ Use them together with:
 
 Runbooks:
 
+- [Prediction-Market Test Flow](prediction-market-test-flow.md)
+- [PM Confidence Soak](pm-confidence-soak.md)
+- [Hyperscapes Local PM Integration](hyperscapes-local-pm-integration.md)
 - [Staged Live Proof](staged-live-proof.md)
 - [AVAX Fuji Bootstrap Market Smoke](avax-fuji-bootstrap.md)
 - [Prediction-Market Governance And Emergency Controls](prediction-market-governance-and-emergency-controls.md)

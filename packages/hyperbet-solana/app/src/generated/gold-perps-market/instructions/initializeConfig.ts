@@ -14,7 +14,7 @@ export const INITIALIZE_CONFIG_DISCRIMINATOR: ReadonlyUint8Array = new Uint8Arra
 
 export function getInitializeConfigDiscriminatorBytes(): ReadonlyUint8Array { return fixEncoderSize(getBytesEncoder(), 8).encode(INITIALIZE_CONFIG_DISCRIMINATOR); }
 
-export type InitializeConfigInstruction<TProgram extends string = typeof GOLD_PERPS_MARKET_PROGRAM_ADDRESS, TAccountConfig extends string | AccountMeta<string> = string, TAccountAuthority extends string | AccountMeta<string> = string, TAccountProgram extends string | AccountMeta<string> = "HbXhqEFevpkfYdZCN6YmJGRmQmj9vsBun2ZHjeeaLRik", TAccountProgramData extends string | AccountMeta<string> = string, TAccountSystemProgram extends string | AccountMeta<string> = "11111111111111111111111111111111", TRemainingAccounts extends readonly AccountMeta<string>[] = []> =
+export type InitializeConfigInstruction<TProgram extends string = typeof GOLD_PERPS_MARKET_PROGRAM_ADDRESS, TAccountConfig extends string | AccountMeta<string> = string, TAccountAuthority extends string | AccountMeta<string> = string, TAccountProgram extends string | AccountMeta<string> = "EoZdHN8U3qWQje48ToxB1SLWjucsFGqcWaRUJQYX3eoT", TAccountProgramData extends string | AccountMeta<string> = string, TAccountSystemProgram extends string | AccountMeta<string> = "11111111111111111111111111111111", TRemainingAccounts extends readonly AccountMeta<string>[] = []> =
 Instruction<TProgram> & InstructionWithData<ReadonlyUint8Array> & InstructionWithAccounts<[TAccountConfig extends string ? WritableAccount<TAccountConfig> : TAccountConfig, TAccountAuthority extends string ? WritableSignerAccount<TAccountAuthority> & AccountSignerMeta<TAccountAuthority> : TAccountAuthority, TAccountProgram extends string ? ReadonlyAccount<TAccountProgram> : TAccountProgram, TAccountProgramData extends string ? ReadonlyAccount<TAccountProgramData> : TAccountProgramData, TAccountSystemProgram extends string ? ReadonlyAccount<TAccountSystemProgram> : TAccountSystemProgram, ...TRemainingAccounts]>;
 
 export type InitializeConfigInstructionData = { discriminator: ReadonlyUint8Array; keeperAuthority: Address; treasuryAuthority: Address; marketMakerAuthority: Address; defaultSkewScale: bigint; defaultFundingVelocity: bigint; maxOracleStalenessSeconds: bigint; minOracleSpotIndex: bigint; maxOracleSpotIndex: bigint; maxOraclePriceDeltaBps: number; maxLeverage: bigint; minMarginLamports: bigint; maxMarketOpenInterest: bigint; minMarketInsuranceLamports: bigint; maintenanceMarginBps: number; liquidationFeeBps: number; tradeTreasuryFeeBps: number; tradeMarketMakerFeeBps: number;  };
@@ -76,7 +76,7 @@ if (!accounts.config.value) {
 accounts.config.value = await getProgramDerivedAddress({ programAddress, seeds: [getBytesEncoder().encode(new Uint8Array([99, 111, 110, 102, 105, 103]))] });
 }
 if (!accounts.program.value) {
-accounts.program.value = 'HbXhqEFevpkfYdZCN6YmJGRmQmj9vsBun2ZHjeeaLRik' as Address<'HbXhqEFevpkfYdZCN6YmJGRmQmj9vsBun2ZHjeeaLRik'>;
+accounts.program.value = 'EoZdHN8U3qWQje48ToxB1SLWjucsFGqcWaRUJQYX3eoT' as Address<'EoZdHN8U3qWQje48ToxB1SLWjucsFGqcWaRUJQYX3eoT'>;
 }
 if (!accounts.systemProgram.value) {
 accounts.systemProgram.value = '11111111111111111111111111111111' as Address<'11111111111111111111111111111111'>;
@@ -126,7 +126,7 @@ const args = { ...input,  };
 
 // Resolve default values.
 if (!accounts.program.value) {
-accounts.program.value = 'HbXhqEFevpkfYdZCN6YmJGRmQmj9vsBun2ZHjeeaLRik' as Address<'HbXhqEFevpkfYdZCN6YmJGRmQmj9vsBun2ZHjeeaLRik'>;
+accounts.program.value = 'EoZdHN8U3qWQje48ToxB1SLWjucsFGqcWaRUJQYX3eoT' as Address<'EoZdHN8U3qWQje48ToxB1SLWjucsFGqcWaRUJQYX3eoT'>;
 }
 if (!accounts.systemProgram.value) {
 accounts.systemProgram.value = '11111111111111111111111111111111' as Address<'11111111111111111111111111111111'>;

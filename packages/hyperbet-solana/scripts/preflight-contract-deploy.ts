@@ -48,6 +48,28 @@ function parseTarget(argv: string[]): Target {
   throw new Error(`Unsupported --target value '${value}'`);
 }
 
+function parseOptionalCluster(argv: string[]): BettingSolanaCluster | null {
+  const index = argv.findIndex((arg) => arg === "--cluster");
+  if (index < 0) return null;
+  const value = argv[index + 1];
+  if (!value) {
+    throw new Error("Missing value for --cluster");
+  }
+  if (
+    value === "localnet" ||
+    value === "devnet" ||
+    value === "testnet" ||
+    value === "mainnet-beta"
+  ) {
+    return value;
+  }
+  throw new Error(`Unsupported --cluster value '${value}'`);
+}
+
+function parsePmOnly(argv: string[]): boolean {
+  return argv.includes("--pm-only");
+}
+
 function readJson(filepath: string): unknown {
   return JSON.parse(fs.readFileSync(filepath, "utf8"));
 }
@@ -96,7 +118,10 @@ function getTargetCluster(target: Target): BettingSolanaCluster {
 }
 
 async function main(): Promise<void> {
-  const target = parseTarget(process.argv.slice(2));
+  const argv = process.argv.slice(2);
+  const target = parseTarget(argv);
+  const explicitCluster = parseOptionalCluster(argv);
+  const pmOnly = parsePmOnly(argv);
   const __dirname = path.dirname(fileURLToPath(import.meta.url));
   const bettingDir = path.resolve(__dirname, "..");
   const anchorDir = path.join(bettingDir, "anchor");
@@ -105,13 +130,17 @@ async function main(): Promise<void> {
 
   const failures: string[] = [];
   const warnings: string[] = [];
-  const cluster = getTargetCluster(target);
+  const cluster = explicitCluster ?? getTargetCluster(target);
   const solanaDeployment = BETTING_DEPLOYMENTS.solana[cluster];
+  const programs = pmOnly
+    ? PROGRAMS.filter((program) => program.key !== "goldPerpsMarket")
+    : PROGRAMS;
 
   console.log(`[preflight] target=${target}`);
   console.log(`[preflight] solana cluster=${cluster}`);
+  console.log(`[preflight] scope=${pmOnly ? "pm-only" : "all"}`);
 
-  for (const program of PROGRAMS) {
+  for (const program of programs) {
     const expected = solanaDeployment[program.manifestField];
     const keypairPath = path.join(
       anchorDir,

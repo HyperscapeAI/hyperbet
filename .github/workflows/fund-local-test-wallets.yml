@@ -1,0 +1,145 @@
+name: Fund Local Test Wallets
+
+on:
+  push:
+    branches:
+      - enoomian/pm16-17-20-21
+    paths:
+      - .github/workflows/fund-local-test-wallets.yml
+      - .github/local-pm-wallets.json
+      - scripts/export-local-pm-wallet-env.sh
+  workflow_dispatch:
+
+jobs:
+  fund-local-test-wallets:
+    name: Fund local PM test wallets
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup funding toolchain
+        uses: ./.github/actions/setup-hyperbet
+        with:
+          install-foundry: "true"
+          install-solana: "true"
+
+      - name: Resolve local wallet targets
+        run: |
+          node - <<'NODE' >> "$GITHUB_ENV"
+          const wallets = require("./.github/local-pm-wallets.json");
+          const lines = [
+            `EVM_KEEPER_ADDRESS=${wallets.evm.keeper}`,
+            `EVM_CANARY_ADDRESS=${wallets.evm.canary}`,
+            `EVM_MATCHER_ADDRESS=${wallets.evm.matcher}`,
+            `SOLANA_KEEPER_ADDRESS=${wallets.solana.keeper}`,
+            `SOLANA_CANARY_ADDRESS=${wallets.solana.canary}`,
+          ];
+          console.log(lines.join("\n"));
+          NODE
+
+      - name: Fund BSC Testnet wallets
+        env:
+          DEPLOYER_KEY: ${{ secrets.TESTNET_DEPLOYER_PRIVATE_KEY }}
+          RPC: ${{ secrets.BSC_TESTNET_RPC }}
+        run: |
+          set -euo pipefail
+          DEPLOYER_ADDRESS="$(cast wallet address --private-key "$DEPLOYER_KEY")"
+          TARGETS=(
+            "${EVM_KEEPER_ADDRESS}:0.05ether"
+            "${EVM_CANARY_ADDRESS}:0.02ether"
+            "${EVM_MATCHER_ADDRESS}:0.02ether"
+          )
+          NONCE="$(cast nonce "$DEPLOYER_ADDRESS" --rpc-url "$RPC")"
+          for i in "${!TARGETS[@]}"; do
+            target="${TARGETS[$i]}"
+            address="${target%%:*}"
+            value="${target##*:}"
+            current_nonce="$((NONCE + i))"
+            echo "Sending ${value} to ${address} on BSC Testnet (nonce ${current_nonce})"
+            cast send "$address" \
+              --value "$value" \
+              --rpc-url "$RPC" \
+              --private-key "$DEPLOYER_KEY" \
+              --nonce "$current_nonce"
+          done
+
+      - name: Fund AVAX Fuji wallets
+        env:
+          DEPLOYER_KEY: ${{ secrets.TESTNET_DEPLOYER_PRIVATE_KEY }}
+          RPC: ${{ secrets.AVAX_FUJI_RPC }}
+        run: |
+          set -euo pipefail
+          DEPLOYER_ADDRESS="$(cast wallet address --private-key "$DEPLOYER_KEY")"
+          TARGETS=(
+            "${EVM_KEEPER_ADDRESS}:0.20ether"
+            "${EVM_CANARY_ADDRESS}:0.05ether"
+            "${EVM_MATCHER_ADDRESS}:0.05ether"
+          )
+          NONCE="$(cast nonce "$DEPLOYER_ADDRESS" --rpc-url "$RPC")"
+          for i in "${!TARGETS[@]}"; do
+            target="${TARGETS[$i]}"
+            address="${target%%:*}"
+            value="${target##*:}"
+            current_nonce="$((NONCE + i))"
+            echo "Sending ${value} to ${address} on AVAX Fuji (nonce ${current_nonce})"
+            cast send "$address" \
+              --value "$value" \
+              --rpc-url "$RPC" \
+              --private-key "$DEPLOYER_KEY" \
+              --nonce "$current_nonce"
+          done
+
+      - name: Fund Solana devnet wallets
+        env:
+          TESTNET_SOLANA_DEPLOYER_KEYPAIR: ${{ secrets.TESTNET_SOLANA_DEPLOYER_KEYPAIR }}
+        run: |
+          set -euo pipefail
+          wallet_file="$(mktemp)"
+          trap 'rm -f "$wallet_file"' EXIT
+          printf '%s' "$TESTNET_SOLANA_DEPLOYER_KEYPAIR" > "$wallet_file"
+          chmod 600 "$wallet_file"
+          TARGETS=(
+            "${SOLANA_KEEPER_ADDRESS}:0.30"
+            "${SOLANA_CANARY_ADDRESS}:0.15"
+          )
+          for target in "${TARGETS[@]}"; do
+            address="${target%%:*}"
+            value="${target##*:}"
+            echo "Sending ${value} SOL to ${address} on Solana devnet"
+            solana transfer \
+              "$address" \
+              "$value" \
+              --url devnet \
+              --keypair "$wallet_file" \
+              --allow-unfunded-recipient
+          done
+
+      - name: Verify EVM balances
+        env:
+          BSC_RPC: ${{ secrets.BSC_TESTNET_RPC }}
+          AVAX_RPC: ${{ secrets.AVAX_FUJI_RPC }}
+        run: |
+          set -euo pipefail
+          ADDRESSES=(
+            "$EVM_KEEPER_ADDRESS"
+            "$EVM_CANARY_ADDRESS"
+            "$EVM_MATCHER_ADDRESS"
+          )
+          echo "=== BSC Testnet ==="
+          for address in "${ADDRESSES[@]}"; do
+            echo "${address}: $(cast balance "$address" --rpc-url "$BSC_RPC" --ether) tBNB"
+          done
+          echo
+          echo "=== AVAX Fuji ==="
+          for address in "${ADDRESSES[@]}"; do
+            echo "${address}: $(cast balance "$address" --rpc-url "$AVAX_RPC" --ether) AVAX"
+          done
+
+      - name: Verify Solana balances
+        run: |
+          set -euo pipefail
+          echo "=== Solana Devnet ==="
+          for address in "$SOLANA_KEEPER_ADDRESS" "$SOLANA_CANARY_ADDRESS"; do
+            echo "${address}: $(solana balance "$address" --url devnet)"
+          done

@@ -387,11 +387,16 @@ async function main(): Promise<void> {
   );
 
   const initializeOracle = async () => {
-      await fight.methods
-        .initializeOracle(authority.publicKey)
-        .accountsPartial({
-          authority: authority.publicKey,
-          oracleConfig: oracleConfigPda,
+    await fight.methods
+      .initializeOracle(
+        authority.publicKey,
+        authority.publicKey,
+        authority.publicKey,
+        new BN(3600),
+      )
+      .accountsPartial({
+        authority: authority.publicKey,
+        oracleConfig: oracleConfigPda,
         program: fightProgram.programId,
         programData: deriveProgramDataAddress(fightProgram.programId),
         systemProgram: SystemProgram.programId,

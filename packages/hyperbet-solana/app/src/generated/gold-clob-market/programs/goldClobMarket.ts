@@ -7,9 +7,9 @@
  */
 
 import { assertIsInstructionWithAccounts, containsBytes, fixEncoderSize, getBytesEncoder, type Address, type Instruction, type InstructionWithData, type ReadonlyUint8Array } from '@solana/kit';
-import { parseCancelOrderInstruction, parseClaimInstruction, parseContinueOrderInstruction, parseInitializeConfigInstruction, parseInitializeMarketInstruction, parsePlaceOrderInstruction, parseSyncMarketFromDuelInstruction, parseUpdateConfigInstruction, type ParsedCancelOrderInstruction, type ParsedClaimInstruction, type ParsedContinueOrderInstruction, type ParsedInitializeConfigInstruction, type ParsedInitializeMarketInstruction, type ParsedPlaceOrderInstruction, type ParsedSyncMarketFromDuelInstruction, type ParsedUpdateConfigInstruction } from '../instructions/index.js';
+import { parseCancelOrderInstruction, parseClaimInstruction, parseContinueOrderInstruction, parseFreezeConfigInstruction, parseInitializeConfigInstruction, parseInitializeMarketInstruction, parsePlaceOrderInstruction, parseReclaimRestingOrderInstruction, parseSetMarketPausedInstruction, parseSyncMarketFromDuelInstruction, parseUpdateConfigInstruction, type ParsedCancelOrderInstruction, type ParsedClaimInstruction, type ParsedContinueOrderInstruction, type ParsedFreezeConfigInstruction, type ParsedInitializeConfigInstruction, type ParsedInitializeMarketInstruction, type ParsedPlaceOrderInstruction, type ParsedReclaimRestingOrderInstruction, type ParsedSetMarketPausedInstruction, type ParsedSyncMarketFromDuelInstruction, type ParsedUpdateConfigInstruction } from '../instructions/index.js';
 
-export const GOLD_CLOB_MARKET_PROGRAM_ADDRESS = 'ARVJNJp49VZnkB8QBYZAAFJmufvtVSPhnuuenwwSLwpi' as Address<'ARVJNJp49VZnkB8QBYZAAFJmufvtVSPhnuuenwwSLwpi'>;
+export const GOLD_CLOB_MARKET_PROGRAM_ADDRESS = 'DYtd7AoyTX2tbmZ8vpC3mxZgqTpyaDei4TFXZukWBJEf' as Address<'DYtd7AoyTX2tbmZ8vpC3mxZgqTpyaDei4TFXZukWBJEf'>;
 
 export enum GoldClobMarketAccount { DuelState, MarketConfig, MarketState, Order, PriceLevel, UserBalance }
 
@@ -24,28 +24,34 @@ if (containsBytes(data, fixEncoderSize(getBytesEncoder(), 8).encode(new Uint8Arr
 throw new Error("The provided account could not be identified as a goldClobMarket account.")
 }
 
-export enum GoldClobMarketInstruction { CancelOrder, Claim, ContinueOrder, InitializeConfig, InitializeMarket, PlaceOrder, SyncMarketFromDuel, UpdateConfig }
+export enum GoldClobMarketInstruction { CancelOrder, Claim, ContinueOrder, FreezeConfig, InitializeConfig, InitializeMarket, PlaceOrder, ReclaimRestingOrder, SetMarketPaused, SyncMarketFromDuel, UpdateConfig }
 
 export function identifyGoldClobMarketInstruction(instruction: { data: ReadonlyUint8Array } | ReadonlyUint8Array): GoldClobMarketInstruction {
 const data = 'data' in instruction ? instruction.data : instruction;
 if (containsBytes(data, fixEncoderSize(getBytesEncoder(), 8).encode(new Uint8Array([95, 129, 237, 240, 8, 49, 223, 132])), 0)) { return GoldClobMarketInstruction.CancelOrder; }
 if (containsBytes(data, fixEncoderSize(getBytesEncoder(), 8).encode(new Uint8Array([62, 198, 214, 193, 213, 159, 108, 210])), 0)) { return GoldClobMarketInstruction.Claim; }
 if (containsBytes(data, fixEncoderSize(getBytesEncoder(), 8).encode(new Uint8Array([52, 137, 158, 152, 162, 246, 203, 104])), 0)) { return GoldClobMarketInstruction.ContinueOrder; }
+if (containsBytes(data, fixEncoderSize(getBytesEncoder(), 8).encode(new Uint8Array([30, 68, 20, 154, 197, 42, 47, 122])), 0)) { return GoldClobMarketInstruction.FreezeConfig; }
 if (containsBytes(data, fixEncoderSize(getBytesEncoder(), 8).encode(new Uint8Array([208, 127, 21, 1, 194, 190, 196, 70])), 0)) { return GoldClobMarketInstruction.InitializeConfig; }
 if (containsBytes(data, fixEncoderSize(getBytesEncoder(), 8).encode(new Uint8Array([35, 35, 189, 193, 155, 48, 170, 203])), 0)) { return GoldClobMarketInstruction.InitializeMarket; }
 if (containsBytes(data, fixEncoderSize(getBytesEncoder(), 8).encode(new Uint8Array([51, 194, 155, 175, 109, 130, 96, 106])), 0)) { return GoldClobMarketInstruction.PlaceOrder; }
+if (containsBytes(data, fixEncoderSize(getBytesEncoder(), 8).encode(new Uint8Array([6, 69, 10, 23, 16, 193, 161, 163])), 0)) { return GoldClobMarketInstruction.ReclaimRestingOrder; }
+if (containsBytes(data, fixEncoderSize(getBytesEncoder(), 8).encode(new Uint8Array([233, 31, 161, 248, 178, 111, 102, 65])), 0)) { return GoldClobMarketInstruction.SetMarketPaused; }
 if (containsBytes(data, fixEncoderSize(getBytesEncoder(), 8).encode(new Uint8Array([235, 180, 137, 53, 242, 12, 85, 213])), 0)) { return GoldClobMarketInstruction.SyncMarketFromDuel; }
 if (containsBytes(data, fixEncoderSize(getBytesEncoder(), 8).encode(new Uint8Array([29, 158, 252, 191, 10, 83, 219, 99])), 0)) { return GoldClobMarketInstruction.UpdateConfig; }
 throw new Error("The provided instruction could not be identified as a goldClobMarket instruction.")
 }
 
-export type ParsedGoldClobMarketInstruction<TProgram extends string = 'ARVJNJp49VZnkB8QBYZAAFJmufvtVSPhnuuenwwSLwpi'> =
+export type ParsedGoldClobMarketInstruction<TProgram extends string = 'DYtd7AoyTX2tbmZ8vpC3mxZgqTpyaDei4TFXZukWBJEf'> =
 | { instructionType: GoldClobMarketInstruction.CancelOrder } & ParsedCancelOrderInstruction<TProgram>
 | { instructionType: GoldClobMarketInstruction.Claim } & ParsedClaimInstruction<TProgram>
 | { instructionType: GoldClobMarketInstruction.ContinueOrder } & ParsedContinueOrderInstruction<TProgram>
+| { instructionType: GoldClobMarketInstruction.FreezeConfig } & ParsedFreezeConfigInstruction<TProgram>
 | { instructionType: GoldClobMarketInstruction.InitializeConfig } & ParsedInitializeConfigInstruction<TProgram>
 | { instructionType: GoldClobMarketInstruction.InitializeMarket } & ParsedInitializeMarketInstruction<TProgram>
 | { instructionType: GoldClobMarketInstruction.PlaceOrder } & ParsedPlaceOrderInstruction<TProgram>
+| { instructionType: GoldClobMarketInstruction.ReclaimRestingOrder } & ParsedReclaimRestingOrderInstruction<TProgram>
+| { instructionType: GoldClobMarketInstruction.SetMarketPaused } & ParsedSetMarketPausedInstruction<TProgram>
 | { instructionType: GoldClobMarketInstruction.SyncMarketFromDuel } & ParsedSyncMarketFromDuelInstruction<TProgram>
 | { instructionType: GoldClobMarketInstruction.UpdateConfig } & ParsedUpdateConfigInstruction<TProgram>
 
@@ -62,12 +68,18 @@ case GoldClobMarketInstruction.Claim: { assertIsInstructionWithAccounts(instruct
 return { instructionType: GoldClobMarketInstruction.Claim, ...parseClaimInstruction(instruction) }; }
 case GoldClobMarketInstruction.ContinueOrder: { assertIsInstructionWithAccounts(instruction);
 return { instructionType: GoldClobMarketInstruction.ContinueOrder, ...parseContinueOrderInstruction(instruction) }; }
+case GoldClobMarketInstruction.FreezeConfig: { assertIsInstructionWithAccounts(instruction);
+return { instructionType: GoldClobMarketInstruction.FreezeConfig, ...parseFreezeConfigInstruction(instruction) }; }
 case GoldClobMarketInstruction.InitializeConfig: { assertIsInstructionWithAccounts(instruction);
 return { instructionType: GoldClobMarketInstruction.InitializeConfig, ...parseInitializeConfigInstruction(instruction) }; }
 case GoldClobMarketInstruction.InitializeMarket: { assertIsInstructionWithAccounts(instruction);
 return { instructionType: GoldClobMarketInstruction.InitializeMarket, ...parseInitializeMarketInstruction(instruction) }; }
 case GoldClobMarketInstruction.PlaceOrder: { assertIsInstructionWithAccounts(instruction);
 return { instructionType: GoldClobMarketInstruction.PlaceOrder, ...parsePlaceOrderInstruction(instruction) }; }
+case GoldClobMarketInstruction.ReclaimRestingOrder: { assertIsInstructionWithAccounts(instruction);
+return { instructionType: GoldClobMarketInstruction.ReclaimRestingOrder, ...parseReclaimRestingOrderInstruction(instruction) }; }
+case GoldClobMarketInstruction.SetMarketPaused: { assertIsInstructionWithAccounts(instruction);
+return { instructionType: GoldClobMarketInstruction.SetMarketPaused, ...parseSetMarketPausedInstruction(instruction) }; }
 case GoldClobMarketInstruction.SyncMarketFromDuel: { assertIsInstructionWithAccounts(instruction);
 return { instructionType: GoldClobMarketInstruction.SyncMarketFromDuel, ...parseSyncMarketFromDuelInstruction(instruction) }; }
 case GoldClobMarketInstruction.UpdateConfig: { assertIsInstructionWithAccounts(instruction);

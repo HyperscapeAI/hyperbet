@@ -14,8 +14,8 @@ export const CONTINUE_ORDER_DISCRIMINATOR: ReadonlyUint8Array = new Uint8Array([
 
 export function getContinueOrderDiscriminatorBytes(): ReadonlyUint8Array { return fixEncoderSize(getBytesEncoder(), 8).encode(CONTINUE_ORDER_DISCRIMINATOR); }
 
-export type ContinueOrderInstruction<TProgram extends string = typeof GOLD_CLOB_MARKET_PROGRAM_ADDRESS, TAccountMarketState extends string | AccountMeta<string> = string, TAccountDuelState extends string | AccountMeta<string> = string, TAccountUserBalance extends string | AccountMeta<string> = string, TAccountOrder extends string | AccountMeta<string> = string, TAccountRestingLevel extends string | AccountMeta<string> = string, TAccountVault extends string | AccountMeta<string> = string, TAccountUser extends string | AccountMeta<string> = string, TAccountSystemProgram extends string | AccountMeta<string> = "11111111111111111111111111111111", TRemainingAccounts extends readonly AccountMeta<string>[] = []> =
-Instruction<TProgram> & InstructionWithData<ReadonlyUint8Array> & InstructionWithAccounts<[TAccountMarketState extends string ? WritableAccount<TAccountMarketState> : TAccountMarketState, TAccountDuelState extends string ? ReadonlyAccount<TAccountDuelState> : TAccountDuelState, TAccountUserBalance extends string ? WritableAccount<TAccountUserBalance> : TAccountUserBalance, TAccountOrder extends string ? WritableAccount<TAccountOrder> : TAccountOrder, TAccountRestingLevel extends string ? WritableAccount<TAccountRestingLevel> : TAccountRestingLevel, TAccountVault extends string ? WritableAccount<TAccountVault> : TAccountVault, TAccountUser extends string ? WritableSignerAccount<TAccountUser> & AccountSignerMeta<TAccountUser> : TAccountUser, TAccountSystemProgram extends string ? ReadonlyAccount<TAccountSystemProgram> : TAccountSystemProgram, ...TRemainingAccounts]>;
+export type ContinueOrderInstruction<TProgram extends string = typeof GOLD_CLOB_MARKET_PROGRAM_ADDRESS, TAccountMarketState extends string | AccountMeta<string> = string, TAccountDuelState extends string | AccountMeta<string> = string, TAccountUserBalance extends string | AccountMeta<string> = string, TAccountOrder extends string | AccountMeta<string> = string, TAccountRestingLevel extends string | AccountMeta<string> = string, TAccountConfig extends string | AccountMeta<string> = string, TAccountTreasury extends string | AccountMeta<string> = string, TAccountMarketMaker extends string | AccountMeta<string> = string, TAccountVault extends string | AccountMeta<string> = string, TAccountUser extends string | AccountMeta<string> = string, TAccountSystemProgram extends string | AccountMeta<string> = "11111111111111111111111111111111", TRemainingAccounts extends readonly AccountMeta<string>[] = []> =
+Instruction<TProgram> & InstructionWithData<ReadonlyUint8Array> & InstructionWithAccounts<[TAccountMarketState extends string ? WritableAccount<TAccountMarketState> : TAccountMarketState, TAccountDuelState extends string ? ReadonlyAccount<TAccountDuelState> : TAccountDuelState, TAccountUserBalance extends string ? WritableAccount<TAccountUserBalance> : TAccountUserBalance, TAccountOrder extends string ? WritableAccount<TAccountOrder> : TAccountOrder, TAccountRestingLevel extends string ? WritableAccount<TAccountRestingLevel> : TAccountRestingLevel, TAccountConfig extends string ? ReadonlyAccount<TAccountConfig> : TAccountConfig, TAccountTreasury extends string ? WritableAccount<TAccountTreasury> : TAccountTreasury, TAccountMarketMaker extends string ? WritableAccount<TAccountMarketMaker> : TAccountMarketMaker, TAccountVault extends string ? WritableAccount<TAccountVault> : TAccountVault, TAccountUser extends string ? WritableSignerAccount<TAccountUser> & AccountSignerMeta<TAccountUser> : TAccountUser, TAccountSystemProgram extends string ? ReadonlyAccount<TAccountSystemProgram> : TAccountSystemProgram, ...TRemainingAccounts]>;
 
 export type ContinueOrderInstructionData = { discriminator: ReadonlyUint8Array; orderId: bigint;  };
 
@@ -33,24 +33,27 @@ export function getContinueOrderInstructionDataCodec(): FixedSizeCodec<ContinueO
     return combineCodec(getContinueOrderInstructionDataEncoder(), getContinueOrderInstructionDataDecoder());
 }
 
-export type ContinueOrderAsyncInput<TAccountMarketState extends string = string, TAccountDuelState extends string = string, TAccountUserBalance extends string = string, TAccountOrder extends string = string, TAccountRestingLevel extends string = string, TAccountVault extends string = string, TAccountUser extends string = string, TAccountSystemProgram extends string = string> =  {
+export type ContinueOrderAsyncInput<TAccountMarketState extends string = string, TAccountDuelState extends string = string, TAccountUserBalance extends string = string, TAccountOrder extends string = string, TAccountRestingLevel extends string = string, TAccountConfig extends string = string, TAccountTreasury extends string = string, TAccountMarketMaker extends string = string, TAccountVault extends string = string, TAccountUser extends string = string, TAccountSystemProgram extends string = string> =  {
   marketState: Address<TAccountMarketState>;
 duelState: Address<TAccountDuelState>;
 userBalance?: Address<TAccountUserBalance>;
 order?: Address<TAccountOrder>;
 restingLevel: Address<TAccountRestingLevel>;
+config?: Address<TAccountConfig>;
+treasury: Address<TAccountTreasury>;
+marketMaker: Address<TAccountMarketMaker>;
 vault?: Address<TAccountVault>;
 user: TransactionSigner<TAccountUser>;
 systemProgram?: Address<TAccountSystemProgram>;
 orderId: ContinueOrderInstructionDataArgs["orderId"];
 }
 
-export async function getContinueOrderInstructionAsync<TAccountMarketState extends string, TAccountDuelState extends string, TAccountUserBalance extends string, TAccountOrder extends string, TAccountRestingLevel extends string, TAccountVault extends string, TAccountUser extends string, TAccountSystemProgram extends string, TProgramAddress extends Address = typeof GOLD_CLOB_MARKET_PROGRAM_ADDRESS>(input: ContinueOrderAsyncInput<TAccountMarketState, TAccountDuelState, TAccountUserBalance, TAccountOrder, TAccountRestingLevel, TAccountVault, TAccountUser, TAccountSystemProgram>, config?: { programAddress?: TProgramAddress } ): Promise<ContinueOrderInstruction<TProgramAddress, TAccountMarketState, TAccountDuelState, TAccountUserBalance, TAccountOrder, TAccountRestingLevel, TAccountVault, TAccountUser, TAccountSystemProgram>> {
+export async function getContinueOrderInstructionAsync<TAccountMarketState extends string, TAccountDuelState extends string, TAccountUserBalance extends string, TAccountOrder extends string, TAccountRestingLevel extends string, TAccountConfig extends string, TAccountTreasury extends string, TAccountMarketMaker extends string, TAccountVault extends string, TAccountUser extends string, TAccountSystemProgram extends string, TProgramAddress extends Address = typeof GOLD_CLOB_MARKET_PROGRAM_ADDRESS>(input: ContinueOrderAsyncInput<TAccountMarketState, TAccountDuelState, TAccountUserBalance, TAccountOrder, TAccountRestingLevel, TAccountConfig, TAccountTreasury, TAccountMarketMaker, TAccountVault, TAccountUser, TAccountSystemProgram>, config?: { programAddress?: TProgramAddress } ): Promise<ContinueOrderInstruction<TProgramAddress, TAccountMarketState, TAccountDuelState, TAccountUserBalance, TAccountOrder, TAccountRestingLevel, TAccountConfig, TAccountTreasury, TAccountMarketMaker, TAccountVault, TAccountUser, TAccountSystemProgram>> {
   // Program address.
 const programAddress = config?.programAddress ?? GOLD_CLOB_MARKET_PROGRAM_ADDRESS;
 
  // Original accounts.
-const originalAccounts = { marketState: { value: input.marketState ?? null, isWritable: true }, duelState: { value: input.duelState ?? null, isWritable: false }, userBalance: { value: input.userBalance ?? null, isWritable: true }, order: { value: input.order ?? null, isWritable: true }, restingLevel: { value: input.restingLevel ?? null, isWritable: true }, vault: { value: input.vault ?? null, isWritable: true }, user: { value: input.user ?? null, isWritable: true }, systemProgram: { value: input.systemProgram ?? null, isWritable: false } }
+const originalAccounts = { marketState: { value: input.marketState ?? null, isWritable: true }, duelState: { value: input.duelState ?? null, isWritable: false }, userBalance: { value: input.userBalance ?? null, isWritable: true }, order: { value: input.order ?? null, isWritable: true }, restingLevel: { value: input.restingLevel ?? null, isWritable: true }, config: { value: input.config ?? null, isWritable: false }, treasury: { value: input.treasury ?? null, isWritable: true }, marketMaker: { value: input.marketMaker ?? null, isWritable: true }, vault: { value: input.vault ?? null, isWritable: true }, user: { value: input.user ?? null, isWritable: true }, systemProgram: { value: input.systemProgram ?? null, isWritable: false } }
 const accounts = originalAccounts as Record<keyof typeof originalAccounts, ResolvedAccount>;
 
 
@@ -65,6 +68,9 @@ accounts.userBalance.value = await getProgramDerivedAddress({ programAddress, se
 if (!accounts.order.value) {
 accounts.order.value = await getProgramDerivedAddress({ programAddress, seeds: [getBytesEncoder().encode(new Uint8Array([111, 114, 100, 101, 114])), getAddressEncoder().encode(expectAddress(accounts.marketState.value)), getU64Encoder().encode(expectSome(args.orderId))] });
 }
+if (!accounts.config.value) {
+accounts.config.value = await getProgramDerivedAddress({ programAddress, seeds: [getBytesEncoder().encode(new Uint8Array([99, 111, 110, 102, 105, 103]))] });
+}
 if (!accounts.vault.value) {
 accounts.vault.value = await getProgramDerivedAddress({ programAddress, seeds: [getBytesEncoder().encode(new Uint8Array([118, 97, 117, 108, 116])), getAddressEncoder().encode(expectAddress(accounts.marketState.value))] });
 }
@@ -73,27 +79,30 @@ accounts.systemProgram.value = '11111111111111111111111111111111' as Address<'11
 }
 
 const getAccountMeta = getAccountMetaFactory(programAddress, 'programId');
-return Object.freeze({ accounts: [getAccountMeta(accounts.marketState), getAccountMeta(accounts.duelState), getAccountMeta(accounts.userBalance), getAccountMeta(accounts.order), getAccountMeta(accounts.restingLevel), getAccountMeta(accounts.vault), getAccountMeta(accounts.user), getAccountMeta(accounts.systemProgram)], data: getContinueOrderInstructionDataEncoder().encode(args as ContinueOrderInstructionDataArgs), programAddress } as ContinueOrderInstruction<TProgramAddress, TAccountMarketState, TAccountDuelState, TAccountUserBalance, TAccountOrder, TAccountRestingLevel, TAccountVault, TAccountUser, TAccountSystemProgram>);
+return Object.freeze({ accounts: [getAccountMeta(accounts.marketState), getAccountMeta(accounts.duelState), getAccountMeta(accounts.userBalance), getAccountMeta(accounts.order), getAccountMeta(accounts.restingLevel), getAccountMeta(accounts.config), getAccountMeta(accounts.treasury), getAccountMeta(accounts.marketMaker), getAccountMeta(accounts.vault), getAccountMeta(accounts.user), getAccountMeta(accounts.systemProgram)], data: getContinueOrderInstructionDataEncoder().encode(args as ContinueOrderInstructionDataArgs), programAddress } as ContinueOrderInstruction<TProgramAddress, TAccountMarketState, TAccountDuelState, TAccountUserBalance, TAccountOrder, TAccountRestingLevel, TAccountConfig, TAccountTreasury, TAccountMarketMaker, TAccountVault, TAccountUser, TAccountSystemProgram>);
 }
 
-export type ContinueOrderInput<TAccountMarketState extends string = string, TAccountDuelState extends string = string, TAccountUserBalance extends string = string, TAccountOrder extends string = string, TAccountRestingLevel extends string = string, TAccountVault extends string = string, TAccountUser extends string = string, TAccountSystemProgram extends string = string> =  {
+export type ContinueOrderInput<TAccountMarketState extends string = string, TAccountDuelState extends string = string, TAccountUserBalance extends string = string, TAccountOrder extends string = string, TAccountRestingLevel extends string = string, TAccountConfig extends string = string, TAccountTreasury extends string = string, TAccountMarketMaker extends string = string, TAccountVault extends string = string, TAccountUser extends string = string, TAccountSystemProgram extends string = string> =  {
   marketState: Address<TAccountMarketState>;
 duelState: Address<TAccountDuelState>;
 userBalance: Address<TAccountUserBalance>;
 order: Address<TAccountOrder>;
 restingLevel: Address<TAccountRestingLevel>;
+config: Address<TAccountConfig>;
+treasury: Address<TAccountTreasury>;
+marketMaker: Address<TAccountMarketMaker>;
 vault: Address<TAccountVault>;
 user: TransactionSigner<TAccountUser>;
 systemProgram?: Address<TAccountSystemProgram>;
 orderId: ContinueOrderInstructionDataArgs["orderId"];
 }
 
-export function getContinueOrderInstruction<TAccountMarketState extends string, TAccountDuelState extends string, TAccountUserBalance extends string, TAccountOrder extends string, TAccountRestingLevel extends string, TAccountVault extends string, TAccountUser extends string, TAccountSystemProgram extends string, TProgramAddress extends Address = typeof GOLD_CLOB_MARKET_PROGRAM_ADDRESS>(input: ContinueOrderInput<TAccountMarketState, TAccountDuelState, TAccountUserBalance, TAccountOrder, TAccountRestingLevel, TAccountVault, TAccountUser, TAccountSystemProgram>, config?: { programAddress?: TProgramAddress } ): ContinueOrderInstruction<TProgramAddress, TAccountMarketState, TAccountDuelState, TAccountUserBalance, TAccountOrder, TAccountRestingLevel, TAccountVault, TAccountUser, TAccountSystemProgram> {
+export function getContinueOrderInstruction<TAccountMarketState extends string, TAccountDuelState extends string, TAccountUserBalance extends string, TAccountOrder extends string, TAccountRestingLevel extends string, TAccountConfig extends string, TAccountTreasury extends string, TAccountMarketMaker extends string, TAccountVault extends string, TAccountUser extends string, TAccountSystemProgram extends string, TProgramAddress extends Address = typeof GOLD_CLOB_MARKET_PROGRAM_ADDRESS>(input: ContinueOrderInput<TAccountMarketState, TAccountDuelState, TAccountUserBalance, TAccountOrder, TAccountRestingLevel, TAccountConfig, TAccountTreasury, TAccountMarketMaker, TAccountVault, TAccountUser, TAccountSystemProgram>, config?: { programAddress?: TProgramAddress } ): ContinueOrderInstruction<TProgramAddress, TAccountMarketState, TAccountDuelState, TAccountUserBalance, TAccountOrder, TAccountRestingLevel, TAccountConfig, TAccountTreasury, TAccountMarketMaker, TAccountVault, TAccountUser, TAccountSystemProgram> {
   // Program address.
 const programAddress = config?.programAddress ?? GOLD_CLOB_MARKET_PROGRAM_ADDRESS;
 
  // Original accounts.
-const originalAccounts = { marketState: { value: input.marketState ?? null, isWritable: true }, duelState: { value: input.duelState ?? null, isWritable: false }, userBalance: { value: input.userBalance ?? null, isWritable: true }, order: { value: input.order ?? null, isWritable: true }, restingLevel: { value: input.restingLevel ?? null, isWritable: true }, vault: { value: input.vault ?? null, isWritable: true }, user: { value: input.user ?? null, isWritable: true }, systemProgram: { value: input.systemProgram ?? null, isWritable: false } }
+const originalAccounts = { marketState: { value: input.marketState ?? null, isWritable: true }, duelState: { value: input.duelState ?? null, isWritable: false }, userBalance: { value: input.userBalance ?? null, isWritable: true }, order: { value: input.order ?? null, isWritable: true }, restingLevel: { value: input.restingLevel ?? null, isWritable: true }, config: { value: input.config ?? null, isWritable: false }, treasury: { value: input.treasury ?? null, isWritable: true }, marketMaker: { value: input.marketMaker ?? null, isWritable: true }, vault: { value: input.vault ?? null, isWritable: true }, user: { value: input.user ?? null, isWritable: true }, systemProgram: { value: input.systemProgram ?? null, isWritable: false } }
 const accounts = originalAccounts as Record<keyof typeof originalAccounts, ResolvedAccount>;
 
 
@@ -107,7 +116,7 @@ accounts.systemProgram.value = '11111111111111111111111111111111' as Address<'11
 }
 
 const getAccountMeta = getAccountMetaFactory(programAddress, 'programId');
-return Object.freeze({ accounts: [getAccountMeta(accounts.marketState), getAccountMeta(accounts.duelState), getAccountMeta(accounts.userBalance), getAccountMeta(accounts.order), getAccountMeta(accounts.restingLevel), getAccountMeta(accounts.vault), getAccountMeta(accounts.user), getAccountMeta(accounts.systemProgram)], data: getContinueOrderInstructionDataEncoder().encode(args as ContinueOrderInstructionDataArgs), programAddress } as ContinueOrderInstruction<TProgramAddress, TAccountMarketState, TAccountDuelState, TAccountUserBalance, TAccountOrder, TAccountRestingLevel, TAccountVault, TAccountUser, TAccountSystemProgram>);
+return Object.freeze({ accounts: [getAccountMeta(accounts.marketState), getAccountMeta(accounts.duelState), getAccountMeta(accounts.userBalance), getAccountMeta(accounts.order), getAccountMeta(accounts.restingLevel), getAccountMeta(accounts.config), getAccountMeta(accounts.treasury), getAccountMeta(accounts.marketMaker), getAccountMeta(accounts.vault), getAccountMeta(accounts.user), getAccountMeta(accounts.systemProgram)], data: getContinueOrderInstructionDataEncoder().encode(args as ContinueOrderInstructionDataArgs), programAddress } as ContinueOrderInstruction<TProgramAddress, TAccountMarketState, TAccountDuelState, TAccountUserBalance, TAccountOrder, TAccountRestingLevel, TAccountConfig, TAccountTreasury, TAccountMarketMaker, TAccountVault, TAccountUser, TAccountSystemProgram>);
 }
 
 export type ParsedContinueOrderInstruction<TProgram extends string = typeof GOLD_CLOB_MARKET_PROGRAM_ADDRESS, TAccountMetas extends readonly AccountMeta[] = readonly AccountMeta[]> = { programAddress: Address<TProgram>;
@@ -117,14 +126,17 @@ duelState: TAccountMetas[1];
 userBalance: TAccountMetas[2];
 order: TAccountMetas[3];
 restingLevel: TAccountMetas[4];
-vault: TAccountMetas[5];
-user: TAccountMetas[6];
-systemProgram: TAccountMetas[7];
+config: TAccountMetas[5];
+treasury: TAccountMetas[6];
+marketMaker: TAccountMetas[7];
+vault: TAccountMetas[8];
+user: TAccountMetas[9];
+systemProgram: TAccountMetas[10];
 };
 data: ContinueOrderInstructionData; };
 
 export function parseContinueOrderInstruction<TProgram extends string, TAccountMetas extends readonly AccountMeta[]>(instruction: Instruction<TProgram> & InstructionWithAccounts<TAccountMetas> & InstructionWithData<ReadonlyUint8Array>): ParsedContinueOrderInstruction<TProgram, TAccountMetas> {
-  if (instruction.accounts.length < 8) {
+  if (instruction.accounts.length < 11) {
   // TODO: Coded error.
   throw new Error('Not enough accounts');
 }
@@ -134,5 +146,5 @@ const getNextAccount = () => {
   accountIndex += 1;
   return accountMeta;
 }
-  return { programAddress: instruction.programAddress, accounts: { marketState: getNextAccount(), duelState: getNextAccount(), userBalance: getNextAccount(), order: getNextAccount(), restingLevel: getNextAccount(), vault: getNextAccount(), user: getNextAccount(), systemProgram: getNextAccount() }, data: getContinueOrderInstructionDataDecoder().decode(instruction.data) };
+  return { programAddress: instruction.programAddress, accounts: { marketState: getNextAccount(), duelState: getNextAccount(), userBalance: getNextAccount(), order: getNextAccount(), restingLevel: getNextAccount(), config: getNextAccount(), treasury: getNextAccount(), marketMaker: getNextAccount(), vault: getNextAccount(), user: getNextAccount(), systemProgram: getNextAccount() }, data: getContinueOrderInstructionDataDecoder().decode(instruction.data) };
 }

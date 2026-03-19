@@ -9,7 +9,7 @@
 import { assertIsInstructionWithAccounts, containsBytes, fixEncoderSize, getBytesEncoder, type Address, type Instruction, type InstructionWithData, type ReadonlyUint8Array } from '@solana/kit';
 import { parseDepositInsuranceInstruction, parseInitializeConfigInstruction, parseLiquidatePositionInstruction, parseModifyPositionInstruction, parseRecycleMarketMakerFeesInstruction, parseSetMarketStatusInstruction, parseUpdateConfigInstruction, parseUpdateMarketOracleInstruction, parseWithdrawFeeBalanceInstruction, type ParsedDepositInsuranceInstruction, type ParsedInitializeConfigInstruction, type ParsedLiquidatePositionInstruction, type ParsedModifyPositionInstruction, type ParsedRecycleMarketMakerFeesInstruction, type ParsedSetMarketStatusInstruction, type ParsedUpdateConfigInstruction, type ParsedUpdateMarketOracleInstruction, type ParsedWithdrawFeeBalanceInstruction } from '../instructions/index.js';
 
-export const GOLD_PERPS_MARKET_PROGRAM_ADDRESS = 'HbXhqEFevpkfYdZCN6YmJGRmQmj9vsBun2ZHjeeaLRik' as Address<'HbXhqEFevpkfYdZCN6YmJGRmQmj9vsBun2ZHjeeaLRik'>;
+export const GOLD_PERPS_MARKET_PROGRAM_ADDRESS = 'EoZdHN8U3qWQje48ToxB1SLWjucsFGqcWaRUJQYX3eoT' as Address<'EoZdHN8U3qWQje48ToxB1SLWjucsFGqcWaRUJQYX3eoT'>;
 
 export enum GoldPerpsMarketAccount { ConfigState, MarketState, PositionState }
 
@@ -37,7 +37,7 @@ if (containsBytes(data, fixEncoderSize(getBytesEncoder(), 8).encode(new Uint8Arr
 throw new Error("The provided instruction could not be identified as a goldPerpsMarket instruction.")
 }
 
-export type ParsedGoldPerpsMarketInstruction<TProgram extends string = 'HbXhqEFevpkfYdZCN6YmJGRmQmj9vsBun2ZHjeeaLRik'> =
+export type ParsedGoldPerpsMarketInstruction<TProgram extends string = 'EoZdHN8U3qWQje48ToxB1SLWjucsFGqcWaRUJQYX3eoT'> =
 | { instructionType: GoldPerpsMarketInstruction.DepositInsurance } & ParsedDepositInsuranceInstruction<TProgram>
 | { instructionType: GoldPerpsMarketInstruction.InitializeConfig } & ParsedInitializeConfigInstruction<TProgram>
 | { instructionType: GoldPerpsMarketInstruction.LiquidatePosition } & ParsedLiquidatePositionInstruction<TProgram>

@@ -1743,7 +1743,12 @@ const ensureOracleReady = async (): Promise<void> => {
     await runWithRecovery(
       () =>
         fightProgram.methods
-          .initializeOracle(botKeypair.publicKey)
+          .initializeOracle(
+            botKeypair.publicKey,
+            botKeypair.publicKey,
+            botKeypair.publicKey,
+            new BN(3600),
+          )
           .accountsPartial({
             authority: botKeypair.publicKey,
             oracleConfig: oracleConfigPda,

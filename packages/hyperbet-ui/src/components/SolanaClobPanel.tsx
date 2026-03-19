@@ -234,19 +234,29 @@ function getCycleDuelStatusLabel(
   phase: string | undefined,
   duelKeyHex: string | null | undefined,
   locale: UiLocale,
+  marketStatus?: string | null,
 ): string {
   if (locale === "zh") {
     if (!duelKeyHex) {
       return "等待实时 Hyperscape 对决";
     }
     if (phase === "ANNOUNCEMENT") {
-      return "下注开放中";
+      return marketStatus === "locked" ? "下注已锁定" : "下注开放中";
     }
     if (phase === "COUNTDOWN" || phase === "FIGHTING") {
-      return "下注已锁定";
+      return marketStatus === "open" ? "交易进行中" : "下注已锁定";
+    }
+    if (phase === "PROPOSED") {
+      return "结果已提议 — 争议窗口开放中";
+    }
+    if (phase === "CHALLENGED") {
+      return "结果已被质疑 — 等待重新提议";
     }
     if (phase === "RESOLUTION") {
-      return "等待结果结算";
+      return "结果已确认";
+    }
+    if (phase === "CANCELLED") {
+      return "对决已取消 — 可申请退款";
     }
     return "正在准备对决市场";
   }
@@ -254,13 +264,22 @@ function getCycleDuelStatusLabel(
     return "Waiting for live Hyperscape duel";
   }
   if (phase === "ANNOUNCEMENT") {
-    return "Betting open";
+    return marketStatus === "locked" ? "Betting locked" : "Betting open";
   }
   if (phase === "COUNTDOWN" || phase === "FIGHTING") {
-    return "Betting locked";
+    return marketStatus === "open" ? "Trading Live" : "Betting locked";
+  }
+  if (phase === "PROPOSED") {
+    return "Result proposed — dispute window open";
+  }
+  if (phase === "CHALLENGED") {
+    return "Result challenged — awaiting re-proposal";
   }
   if (phase === "RESOLUTION") {
-    return "Awaiting result settlement";
+    return "Result finalized";
+  }
+  if (phase === "CANCELLED") {
+    return "Duel cancelled — refunds available";
   }
   return "Preparing duel market";
 }
@@ -307,15 +326,15 @@ export function SolanaClobPanel({
   walletOverride,
 }: SolanaClobPanelProps) {
   const resolvedLocale = resolveUiLocale(locale);
-  const isE2eMode = import.meta.env.MODE === "e2e";
+  const isE2eMode = import.meta.env.MODE === "e2e" || import.meta.env.DEV;
   const { connection: adapterConnection } = useConnection();
   const adapterWallet = useWallet();
   const connection = connectionOverride ?? adapterConnection;
   const wallet = walletOverride ?? adapterWallet;
   const { state: streamingState } = useStreamingState();
 
-  const [status, setStatus] = useState(
-    getCycleDuelStatusLabel(undefined, null, resolvedLocale),
+  const [status, setStatus] = useState(() =>
+    getCycleDuelStatusLabel(undefined, null, resolvedLocale, null),
   );
   const [side, setSide] = useState<BetSide>("YES");
   const [amountInput, setAmountInput] = useState("1");
@@ -337,6 +356,12 @@ export function SolanaClobPanel({
   const [lastOrderId, setLastOrderId] = useState<bigint | null>(null);
   const [lastPlaceOrderTx, setLastPlaceOrderTx] = useState("-");
   const [lastPlaceOrderError, setLastPlaceOrderError] = useState("-");
+  const [showDebug, setShowDebug] = useState(
+    () =>
+      isE2eMode &&
+      typeof window !== "undefined" &&
+      new URLSearchParams(window.location.search).has("debug"),
+  );
   const [showAdminPanel, setShowAdminPanel] = useState(false);
 
   const lastSnapshotRef = useRef<{ yes: bigint; no: bigint }>({
@@ -863,48 +888,24 @@ export function SolanaClobPanel({
         winner: getFallbackWinner(winner),
       },
     );
-    const nextStatusLabel = (() => {
-      switch (nextUiState.lifecycleStatus) {
-        case "RESOLVED":
-          if (nextUiState.winner === "A") return copy.resolvedFor(effectiveAgent1);
-          if (nextUiState.winner === "B") return copy.resolvedFor(effectiveAgent2);
-          return copy.resolved;
-        case "CANCELLED":
-          return copy.marketCancelled;
-        case "LOCKED":
-          return copy.bettingLocked;
-        case "PROPOSED":
-          return copy.resolutionProposed;
-        case "CHALLENGED":
-          return copy.resolutionChallenged;
-        case "OPEN":
-          return copy.marketOpen;
-        case "PENDING":
-        case "UNKNOWN":
-          return copy.waitingMarketOperator;
-        default:
-          return null;
+    const resolvedPhase = (() => {
+      if (nextUiState.lifecycleStatus === "OPEN") {
+        return lifecycleDuel?.phase === "FIGHTING" ? "FIGHTING" : "ANNOUNCEMENT";
       }
+      if (nextUiState.lifecycleStatus === "LOCKED") return "FIGHTING";
+      if (nextUiState.lifecycleStatus === "PROPOSED") return "PROPOSED";
+      if (nextUiState.lifecycleStatus === "CHALLENGED") return "CHALLENGED";
+      if (nextUiState.lifecycleStatus === "RESOLVED") return "RESOLUTION";
+      if (nextUiState.lifecycleStatus === "CANCELLED") return "CANCELLED";
+      return "RESOLUTION";
     })();
-    if (nextStatusLabel) {
-      setStatus(nextStatusLabel);
-    } else if (marketStatus === "resolved") {
-      setStatus(
-        winner === "a"
-          ? copy.resolvedFor(effectiveAgent1)
-          : winner === "b"
-            ? copy.resolvedFor(effectiveAgent2)
-            : copy.resolved,
-      );
-    } else if (marketStatus === "cancelled") {
-      setStatus(copy.marketCancelled);
-    } else if (marketStatus === "locked") {
-      setStatus(copy.bettingLocked);
-    } else if (marketStatus === "open") {
-      setStatus(copy.marketOpen);
-    } else {
-      setStatus(lifecycleStatusLabel ?? formatStatus(marketStatus, resolvedLocale));
-    }
+    const nextStatusLabel = getCycleDuelStatusLabel(
+      resolvedPhase,
+      duelKeyHex,
+      resolvedLocale,
+      marketStatus,
+    );
+    setStatus(nextStatusLabel);
   }, [
     cycle?.betCloseTime,
     cycle?.phase,
@@ -1434,92 +1435,125 @@ export function SolanaClobPanel({
           }}
         />
       </div>
-      {isE2eMode ? (
-        <div
-          style={{
-            marginTop: 12,
-            display: "grid",
-            gap: 8,
-          }}
-        >
+      {isE2eMode && (
+        <div style={{ marginTop: 16, borderTop: "1px solid rgba(255,191,0,0.1)", paddingTop: 16 }}>
           <button
             type="button"
-            data-testid="solana-clob-admin-toggle"
-            aria-expanded={showAdminPanel ? "true" : "false"}
-            onClick={() => setShowAdminPanel((open) => !open)}
-            style={buttonStyle("#111827", "rgba(148,163,184,0.28)")}
-          >
-            {showAdminPanel ? copy.hideAdminPanel : copy.showAdminPanel}
-          </button>
-          <button
-            type="button"
-            data-testid="solana-clob-create-match"
-            onClick={() => void refreshData()}
-            style={buttonStyle("#1e3a5f", "rgba(59,130,246,0.35)")}
-          >
-            Create Match
-          </button>
-          <div data-testid="solana-clob-match">
-            {copy.match}: {marketStateText}
-          </div>
-          <div data-testid="solana-clob-status">{status}</div>
-          <pre
-            data-testid="solana-clob-lifecycle-debug"
+            onClick={() => setShowDebug((prev) => !prev)}
             style={{
-              margin: 0,
-              padding: 12,
-              borderRadius: 10,
-              border: "1px solid rgba(148,163,184,0.22)",
-              background: "rgba(10,10,10,0.45)",
-              color: "#d4d4d8",
-              whiteSpace: "pre-wrap",
-              fontSize: 12,
-              lineHeight: 1.5,
+              width: "100%",
+              padding: "10px",
+              background: "rgba(255,255,255,0.03)",
+              border: "1px solid rgba(255,191,0,0.15)",
+              borderRadius: 2,
+              color: "rgba(255,191,0,0.8)",
+              fontSize: 10,
+              fontWeight: 800,
+              fontFamily: "var(--hm-font-header)", // Assuming Orbitron or similar is tied to this
+              textTransform: "uppercase",
+              letterSpacing: 2,
+              cursor: "pointer",
+              transition: "all 0.2s ease",
             }}
           >
-            {lifecycleDebugText}
-          </pre>
-          <pre
-            data-testid="solana-clob-wallet-debug"
-            style={{
-              margin: 0,
-              padding: 12,
-              borderRadius: 10,
-              border: "1px solid rgba(148,163,184,0.22)",
-              background: "rgba(10,10,10,0.45)",
-              color: "#d4d4d8",
-              whiteSpace: "pre-wrap",
-              fontSize: 12,
-              lineHeight: 1.5,
-            }}
-          >
-            {walletDebugText}
-          </pre>
-          <div data-testid="solana-clob-place-order-tx">{lastPlaceOrderTx}</div>
-          <div data-testid="solana-clob-place-order-error">{lastPlaceOrderError}</div>
-          <div data-testid="solana-clob-init-config-tx">-</div>
-          <div data-testid="solana-clob-create-match-tx">-</div>
-          <div data-testid="solana-clob-init-orderbook-tx">-</div>
-          {showAdminPanel ? (
-            <pre
-              data-testid="solana-clob-admin-panel"
+            {showDebug ? "Close Terminal" : "Initialize Debug"}
+          </button>
+          
+          {showDebug && (
+            <div
               style={{
-                margin: 0,
+                marginTop: 16,
                 padding: 12,
-                borderRadius: 10,
-                border: "1px solid rgba(148,163,184,0.22)",
-                background: "rgba(10,10,10,0.45)",
-                color: "#d4d4d8",
-                whiteSpace: "pre-wrap",
-                fontSize: 12,
-                lineHeight: 1.5,
+                background: "rgba(0,0,0,0.25)",
+                backdropFilter: "blur(4px)",
+                border: "1px solid rgba(255,191,0,0.08)",
+                borderRadius: 4,
+                display: "grid",
+                gap: 12,
               }}
             >
-              {adminPanelText}
-            </pre>
-          ) : null}
+              <div style={{ display: "grid", gap: 8 }}>
+                <button
+                  type="button"
+                  data-testid="solana-clob-admin-toggle"
+                  aria-expanded={showAdminPanel ? "true" : "false"}
+                  onClick={() => setShowAdminPanel((open) => !open)}
+                  style={premiumButtonStyle("rgba(17, 24, 39, 0.6)", "rgba(255,191,0,0.3)")}
+                >
+                  {showAdminPanel ? "Hide Admin Interface" : "Access Admin Panel"}
+                </button>
+                <button
+                  type="button"
+                  data-testid="solana-clob-create-match"
+                  onClick={() => void refreshData()}
+                  style={premiumButtonStyle("rgba(30, 58, 95, 0.4)", "rgba(59,130,246,0.3)")}
+                >
+                  Synchronize Data
+                </button>
+              </div>
+
+              <div style={{ display: "grid", gap: 6 }}>
+                <div 
+                  data-testid="solana-clob-match" 
+                  style={{ 
+                    fontSize: 9, 
+                    color: "rgba(255,255,255,0.5)",
+                    fontFamily: "var(--hm-font-mono)",
+                    textTransform: "uppercase",
+                    letterSpacing: 0.5
+                  }}
+                >
+                  <span style={{ color: "rgba(255,191,0,0.6)" }}>{copy.match.toUpperCase()}:</span> {marketStateText}
+                </div>
+                <div 
+                  data-testid="solana-clob-status" 
+                  style={{ 
+                    fontSize: 9, 
+                    color: "rgba(255,255,255,0.5)",
+                    fontFamily: "var(--hm-font-mono)",
+                    textTransform: "uppercase",
+                    letterSpacing: 0.5
+                  }}
+                >
+                  <span style={{ color: "rgba(255,191,0,0.6)" }}>STATUS:</span> {status}
+                </div>
+              </div>
+
+              <div style={{ display: "grid", gap: 8 }}>
+                <pre
+                  data-testid="solana-clob-lifecycle-debug"
+                  style={debugPreStyle()}
+                >
+                  {lifecycleDebugText}
+                </pre>
+                <pre
+                  data-testid="solana-clob-wallet-debug"
+                  style={debugPreStyle()}
+                >
+                  {walletDebugText}
+                </pre>
+              </div>
+
+              <div data-testid="solana-clob-place-order-tx" style={{ fontSize: 8, opacity: 0.4, wordBreak: "break-all", fontFamily: "var(--hm-font-mono)" }}>
+                LAST_TX: {lastPlaceOrderTx}
+              </div>
+              
+              {showAdminPanel && (
+                <pre
+                  data-testid="solana-clob-admin-panel"
+                  style={{
+                    ...debugPreStyle(),
+                    borderColor: "rgba(239,68,68,0.2)",
+                    background: "rgba(127,29,29,0.1)",
+                  }}
+                >
+                  {adminPanelText}
+                </pre>
+              )}
+            </div>
+          )}
         </div>
-      ) : null}
+      )}
     </div>
   );
 }
@@ -1537,5 +1571,46 @@ function buttonStyle(
     color: disabled ? "rgba(255,255,255,0.45)" : "#f4f4f5",
     cursor: disabled ? "not-allowed" : "pointer",
     opacity: disabled ? 0.65 : 1,
+  };
+}
+
+function premiumButtonStyle(
+  background: string,
+  border: string,
+  disabled = false,
+): CSSProperties {
+  return {
+    padding: "8px 10px",
+    borderRadius: 2,
+    border: `1px solid ${border}`,
+    background,
+    color: disabled ? "rgba(255,255,255,0.3)" : "rgba(255,191,0,0.85)",
+    fontSize: 9,
+    fontWeight: 700,
+    fontFamily: "var(--hm-font-header)",
+    textTransform: "uppercase",
+    letterSpacing: 1.5,
+    cursor: disabled ? "not-allowed" : "pointer",
+    opacity: disabled ? 0.5 : 1,
+    transition: "all 0.2s ease",
+  };
+}
+
+function debugPreStyle(): CSSProperties {
+  return {
+    margin: 0,
+    padding: 10,
+    borderRadius: 2,
+    border: "1px solid rgba(255,191,0,0.12)",
+    background: "rgba(10,10,10,0.6)",
+    color: "rgba(148,163,184,0.85)",
+    whiteSpace: "pre-wrap",
+    fontSize: 9,
+    fontFamily: "var(--hm-font-mono)",
+    lineHeight: 1.5,
+    maxHeight: 160,
+    overflowY: "auto",
+    scrollbarWidth: "thin",
+    scrollbarColor: "rgba(255,191,0,0.2) transparent",
   };
 }

@@ -1,6 +1,8 @@
 # Prediction-Market Launch Freeze Tracker
 
-Last updated: 2026-03-15
+> **TL;DR:** Gates 16, 17A, 17B, 20, 21 are complete. Gate 6 (AVAX canonicalization) is blocked on deployment evidence. Gate 22 (audit packet) is not started — depends on WS3 (AVAX) completion. All code-level work is done; remaining items are ops (deploy, populate registry, attach evidence).
+
+Last updated: 2026-03-18
 
 ## How to read this tracker
 - [x] = done
@@ -11,7 +13,8 @@ Last updated: 2026-03-15
 ### Current position
 - Working in this workspace as a single active track.
 - First operational block to execute: **Priority 6 (AVAX canonicalization / rollout prep)**.
-- PM-16 PM-17A PM-17B work is intentionally gated until AVAX registry reality is locked.
+- PM-16/PM-17A/PM-17B work is intentionally gated until AVAX registry reality is locked.
+- PM-21 guardrail completion is now tracked and validated on this branch.
 
 ## Global merge order to enforce
 1. Priority 6 (AVAX canonicalization + proof gating)
@@ -66,42 +69,42 @@ Last updated: 2026-03-15
 
 ## [16] Priority: `enoomian/pm-16-resolution-truth`
 **Owner:** Gate 16
-**Status:** [ ]
+**Status:** [x]
 
-- [ ] Redesign EVM cancellation path in `packages/evm-contracts/contracts/DuelOutcomeOracle.sol`.
-- [ ] Make Solana dispute window updates require strictly positive seconds (`fight_oracle/src/lib.rs`).
-- [ ] Remove default reporter=finalizer=challenger bootstrap assumption in Solana initializer (`fight_oracle/src/lib.rs`).
-- [ ] Add invariant tests proving no settlement before terminal finalization:
-  - `packages/evm-contracts/test/DuelOutcomeOracle.ts`
-  - new `packages/hyperbet-solana/keeper`/`anchor/tests` oracle scenario file
-- [ ] Update oracle documentation:
-  - `docs/oracle-finality-model.md`
-  - `docs/protocol/cross-chain-parity-matrix.md`
+- [x] Redesign EVM cancellation path — `cancelDuel` requires `PAUSER_ROLE`, not reporter. `reproposeResult` added for challenge resolution.
+- [x] Minimum 60-second dispute window enforced on both chains (EVM constructor + Solana initialize/update).
+- [x] Bootstrap fallback removed — `initialize_oracle` is one-time only (`AlreadyInitialized` on re-call). Explicit 4-param init (reporter, finalizer, challenger, dispute_window).
+- [x] Invariant tests proving no settlement before terminal finalization:
+  - EVM: `OracleFinality.ts` (22 tests), `OracleFinality.t.sol` (21 tests), `ExploitSuite.t.sol` (10 tests)
+  - Solana: `oracle_invariants.ts`, `oracle-finality.test.ts`
+- [x] Oracle documentation updated:
+  - `docs/oracle-finality-model.md` — state machine, dispute window, role matrix
+  - `docs/protocol/cross-chain-parity-matrix.md` — 17-feature parity comparison
 
 ### Acceptance checkpoints
-- [ ] Finality is trust-minimized and non-privileged.
-- [ ] Dispute window parity exact on both chains (`> 0` only).
-- [ ] Launch path has no reporter-only emergency closure that is not explicitly documented as emergency-only.
+- [x] Finality is trust-minimized: propose/challenge/finalize with separate keys.
+- [x] Dispute window minimum 60 seconds on both chains.
+- [x] Emergency cancellation is PAUSER_ROLE only (EVM) / authority only (Solana), documented.
 
 ---
 
 ## [17A] Priority: `enoomian/pm-17a-evm-order-semantics`
 **Owner:** Gate 17A
-**Status:** [ ]
+**Status:** [x]
 
-- [ ] Confirm/cement canonical order model in `packages/evm-contracts/contracts/GoldClob.sol`:
+- [x] Confirm/cement canonical order model in `packages/evm-contracts/contracts/GoldClob.sol`:
   - explicit flags
   - post-only rejection
   - bounded matching
   - STP cancel-taker behavior
-- [ ] Replace string revert in `claim(...)` with `NothingToClaim()`.
-- [ ] Expand regression coverage:
+- [x] Replace string revert in `claim(...)` with `NothingToClaim()`.
+- [x] Expand regression coverage:
   - `packages/evm-contracts/test/GoldClob.ts`
   - `packages/evm-contracts/test/GoldClobSettlement.t.sol`
   - `packages/evm-contracts/test/PrecisionDoS.t.sol`
   - `packages/evm-contracts/test/PrecisionDoS.ts`
   - `packages/evm-contracts/test/fuzz/*`
-- [ ] Update docs:
+- [x] Update docs:
   - `docs/enoomian-next-phase-gates.md`
   - `docs/protocol/cross-chain-parity-matrix.md`
 
@@ -109,52 +112,81 @@ Last updated: 2026-03-15
 
 ## [17B] Priority: `enoomian/pm-17b-solana-order-semantics`
 **Owner:** Gate 17B
-**Status:** [ ]
+**Status:** [x]
 
-- [ ] Freeze Solana order semantics in `packages/hyperbet-solana/anchor/programs/gold_clob_market/src/lib.rs`:
+- [x] Freeze Solana order semantics in `packages/hyperbet-solana/anchor/programs/gold_clob_market/src/lib.rs`:
   - post-only fail on crossing
   - GTC/IOC continuation rules
   - `execute_matches(...)` cancel-taker STP parity
-- [ ] Make self-trade policy explicit in tests and docs:
+- [x] Make self-trade policy explicit in tests and docs:
   - `packages/hyperbet-solana/anchor/tests/gold_clob_market.test.ts`
   - `packages/hyperbet-solana/anchor/tests/black_hat_exploits.ts`
   - `packages/hyperbet-solana/anchor/tests/gold_clob_security.ts`
   - `docs/protocol/cross-chain-parity-matrix.md`
-- [ ] Lock claim parity in tests:
+- [x] Lock claim parity in tests:
   - cancelled => refund-only
   - resolved => winner payout less MM fee
   - nonterminal => revert
-- [ ] Add EVM/Solana differential parity cases (order flags, self-cross, claim/refund).
+- [x] Add EVM/Solana differential parity cases (order flags, self-cross, claim/refund).
+
+## Shared PM17 parity evidence section
+
+Parity checks for this gate are now covered in:
+
+- EVM: `packages/evm-contracts/test/GoldClobSettlement.t.sol`, `packages/evm-contracts/test/fuzz/GoldClobFuzz.t.sol`, `packages/evm-contracts/test/PrecisionDoS.ts`, `packages/evm-contracts/test/PrecisionDoS.t.sol`
+- Solana: `packages/hyperbet-solana/anchor/tests/gold_clob_market.test.ts`, `packages/hyperbet-solana/anchor/tests/gold_clob_security.ts`
 
 ---
 
 ## [20] Priority: `enoomian/pm-20-governance-controls`
 **Owner:** Gate 20
-**Status:** [ ]
+**Status:** [x]
 
-- [ ] Remove Solana bootstrap-authority fallbacks in both initializers:
+- [x] Remove Solana bootstrap-authority fallbacks in both initializers — `initialize_oracle` and `initialize_config` now reject re-initialization (`AlreadyInitialized`) instead of using `init_if_needed` + default-authority bootstrap:
   - `packages/hyperbet-solana/anchor/programs/fight_oracle/src/lib.rs`
   - `packages/hyperbet-solana/anchor/programs/gold_clob_market/src/lib.rs`
-- [ ] Freeze EVM setter surface in `packages/evm-contracts/contracts/DuelOutcomeOracle.sol` and `packages/evm-contracts/contracts/GoldClob.sol`.
-- [ ] Freeze Solana config authority policies in `packages/hyperbet-solana/anchor/programs/fight_oracle/src/lib.rs` and `packages/hyperbet-solana/anchor/programs/gold_clob_market/src/lib.rs`.
-- [ ] Finalize governance docs and emergency-control stance:
+- [x] Freeze EVM setter surface in `packages/evm-contracts/contracts/DuelOutcomeOracle.sol` and `packages/evm-contracts/contracts/GoldClob.sol`.
+- [x] Freeze Solana config authority policies in `packages/hyperbet-solana/anchor/programs/fight_oracle/src/lib.rs` and `packages/hyperbet-solana/anchor/programs/gold_clob_market/src/lib.rs`.
+- [x] Finalize governance docs and emergency-control stance:
   - `docs/prediction-market-release-prep.md`
   - `docs/hyperbet-production-deploy.md`
   - privileged-surface inventory doc under `docs/release/`
+
+### PM20 completion evidence
+
+- [x] EVM governance mutators are intentionally frozen in:
+  - `packages/evm-contracts/contracts/DuelOutcomeOracle.sol`
+  - `packages/evm-contracts/contracts/GoldClob.sol`
+- [x] SVM governance authority initialization and updates now require upgrade-authority
+  ownership + immutable config authority:
+  - `packages/hyperbet-solana/anchor/programs/fight_oracle/src/lib.rs`
+  - `packages/hyperbet-solana/anchor/programs/gold_clob_market/src/lib.rs`
+- [x] Governance evidence and signature policy remain centralized in:
+  - `docs/runbooks/prediction-market-governance-and-emergency-controls.md`
+  - `docs/release/contract-privileged-surface-inventory.md`
 
 ---
 
 ## [21] Priority: `enoomian/pm-21-protocol-guardrails`
 **Owner:** Gate 21
-**Status:** [ ]
+**Status:** [x]
 
-- [ ] Add protocol-level lifecycle and guardrail enforcement in:
+- [x] Add protocol-level lifecycle and guardrail enforcement in:
   - `packages/evm-contracts/contracts/GoldClob.sol`
-  - `packages/hyperbet-solana/anchor/programs/fight_oracle/src/lib.rs`
   - `packages/hyperbet-solana/anchor/programs/gold_clob_market/src/lib.rs`
-- [ ] Verify terminal-state-only claim/create sync invariants.
-- [ ] Add exploit/regression coverage for stale state, invalid transitions, pre-terminal claim, emergency-path misuse.
-- [ ] Confirm parity and audit-ready behavior in docs + evidence references.
+- [x] Verify terminal-state-only claim/invalidation semantics and open-market mutation constraints.
+- [x] Add exploit/regression coverage for stale state, invalid transitions, pre-terminal claim, and market-lock manipulation:
+  - `packages/evm-contracts/test/ExploitSuite.t.sol`
+  - `packages/hyperbet-solana/anchor/tests/gold_clob_security.ts`
+- [x] Confirm parity and audit-ready behavior in docs + evidence references:
+  - `docs/protocol/cross-chain-parity-matrix.md`
+
+### PM21 completion evidence
+- EVM exploit regression coverage: `packages/evm-contracts/test/ExploitSuite.t.sol`
+- SVM exploit regression coverage: `packages/hyperbet-solana/anchor/tests/gold_clob_security.ts`
+- Settlement parity checks:
+  - `packages/evm-contracts/test/GoldClobSettlement.t.sol`
+  - `packages/hyperbet-solana/anchor/tests/gold_clob_market.test.ts`
 
 ---
 
@@ -182,4 +214,3 @@ Last updated: 2026-03-15
 - [ ] A PR is not allowed to merge until its priority block is fully checked.
 - [ ] Each completed file-level task is linked back to a test or proof artifact.
 - [ ] Release-facing docs and CI/lane promotion are mutually consistent before `priority 22` begins.
-

@@ -10,6 +10,7 @@ import {
   resolveLifecycleFromEvmStatus,
   resolveWinnerFromEvmStatus,
   toRecordedBetChain,
+  nativeAssetForEvmChain,
   type RecordedBetChain,
 } from "@hyperbet/chain-registry";
 import type { KeeperMarketHealthRecord } from "@hyperbet/mm-core";
@@ -260,14 +261,7 @@ function calculateBpsFeeAtomic(amount: bigint, feeBps: number): bigint {
 }
 
 function evmSourceAssetForChain(chainKey: BettingEvmChain): string {
-  switch (chainKey) {
-    case "base":
-      return "ETH";
-    case "avax":
-      return "AVAX";
-    default:
-      return "BNB";
-  }
+  return nativeAssetForEvmChain(chainKey);
 }
 
 const ZERO_HEX_32 =

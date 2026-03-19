@@ -24,6 +24,7 @@ import {
   writableAccount,
   marketSideA,
   marketSideB,
+  sleep,
 } from "./clob-test-helpers";
 import { configureAnchorTests } from "./test-anchor";
 import { FightOracle } from "../target/types/fight_oracle";
@@ -116,18 +117,24 @@ describe("fee_simulation (stress test)", () => {
         const treasuryFee = Math.floor((cost * tradeTreasuryFeeBps) / 10000);
         const mmFee = Math.floor((cost * tradeMarketMakerFeeBps) / 10000);
         
-        expectedTreasuryFees += treasuryFee;
-        expectedMmFees += mmFee;
-
         let remainingAccounts: any[] = [];
         if (side === SIDE_ASK) {
-            // Predictable crossing with the previous BID
-            const lastBid = openOrders[openOrders.length - 1];
-            remainingAccounts = [
-                writableAccount(lastBid.restingLevel),
-                writableAccount(lastBid.order),
-                writableAccount(lastBid.userBalance),
-            ];
+            // MATCHING: Provide FIFO head(s)
+            // In this specific sim, we just match the current head.
+            if (openOrders.length > 0) {
+                const head = openOrders[0];
+                remainingAccounts = [
+                    writableAccount(head.restingLevel),
+                    writableAccount(head.order),
+                    writableAccount(head.userBalance),
+                ];
+            }
+        } else {
+            // RESTING: If the book is not empty, provide the tail for linking
+            if (openOrders.length > 0) {
+                const tail = openOrders[openOrders.length - 1];
+                remainingAccounts = [writableAccount(tail.order)];
+            }
         }
 
         const orderParams = await placeClobOrder(clobProgram, {
@@ -144,10 +151,26 @@ describe("fee_simulation (stress test)", () => {
             amount,
             remainingAccounts,
         });
-        
+
+        // Track fee math (only if not a self-trade cancellation)
+        // Wait, fees are taken on entry regardless of match? Yes, in this program.
+        expectedTreasuryFees += treasuryFee;
+        expectedMmFees += mmFee;
+
         if (side === SIDE_BID) {
-            // Only push maker orders that rest
-            openOrders.push({...orderParams, trader});
+            // BIDs always try to rest in this sim
+            openOrders.push({ ...orderParams, trader });
+        } else {
+            // ASKs are takers. Check if it matched.
+            if (openOrders.length > 0) {
+                const head = openOrders[0];
+                if (head.trader.publicKey.equals(trader.publicKey)) {
+                    // Self-trade: Taker (ASK) cancelled, Maker (BID) remains.
+                } else {
+                    // Match: Both are cleared in this simplified 1-to-1 sim.
+                    openOrders.shift();
+                }
+            }
         }
         nextOrderId++;
     }
@@ -178,6 +201,7 @@ describe("fee_simulation (stress test)", () => {
       winner: marketSideA(),
       duelEndTs: now + 4000, // past betCloseTs
     });
+    await sleep(61_000);
     await finalizeDuelResult(fightProgram, authority, market.duelKey);
     await syncMarketFromDuel(clobProgram, market.marketState, market.duelState);
 

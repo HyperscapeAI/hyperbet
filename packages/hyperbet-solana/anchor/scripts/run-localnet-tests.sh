@@ -188,9 +188,9 @@ fi
 
 WALLET_PATH="$(resolve_wallet_path)"
 MINT_AUTHORITY="$(resolve_mint_authority "$WALLET_PATH")"
-PROGRAM_ORACLE_ID="$(resolve_program_id fight_oracle 6tpRysBFd1yXRipYEYwAw9jxEoVHk15kVXfkDGFLMqcD)"
-PROGRAM_CLOB_ID="$(resolve_program_id gold_clob_market ARVJNJp49VZnkB8QBYZAAFJmufvtVSPhnuuenwwSLwpi)"
-PROGRAM_PERPS_ID="$(resolve_program_id gold_perps_market HbXhqEFevpkfYdZCN6YmJGRmQmj9vsBun2ZHjeeaLRik)"
+PROGRAM_ORACLE_ID="$(resolve_program_id fight_oracle B5mRCRDJk9BrnH7regMWW5mpTQ8QG1CcCGSnDxMt8hmo)"
+PROGRAM_CLOB_ID="$(resolve_program_id gold_clob_market DYtd7AoyTX2tbmZ8vpC3mxZgqTpyaDei4TFXZukWBJEf)"
+PROGRAM_PERPS_ID="$(resolve_program_id gold_perps_market EoZdHN8U3qWQje48ToxB1SLWjucsFGqcWaRUJQYX3eoT)"
 
 : >"$TEST_LOG"
 

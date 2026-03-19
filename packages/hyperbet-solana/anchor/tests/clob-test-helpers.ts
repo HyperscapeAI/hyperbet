@@ -30,6 +30,25 @@ export const ORDER_BEHAVIOR_IOC = 1;
 export const ORDER_BEHAVIOR_POST_ONLY = 2;
 const duelKeyCounters = new Map<string, number>();
 
+function bnLikeToNumber(value: unknown): number {
+  if (typeof value === "number") {
+    return value;
+  }
+  if (typeof value === "bigint") {
+    return Number(value);
+  }
+  if (value instanceof BN) {
+    return value.toNumber();
+  }
+  if (value && typeof value === "object" && "toNumber" in value) {
+    const toNumber = (value as { toNumber?: () => number }).toNumber;
+    if (typeof toNumber === "function") {
+      return toNumber.call(value);
+    }
+  }
+  return Number(value ?? 0);
+}
+
 function u16Le(value: number): Buffer {
   const buffer = Buffer.alloc(2);
   buffer.writeUInt16LE(value, 0);
@@ -42,6 +61,26 @@ function u64Le(value: bigint | number): Buffer {
   return buffer;
 }
 
+export const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function currentChainUnixTimestamp(
+  connection: anchor.web3.Connection,
+): Promise<number> {
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    try {
+      const slot = await connection.getSlot("confirmed");
+      const blockTime = await connection.getBlockTime(slot);
+      if (typeof blockTime === "number" && Number.isFinite(blockTime) && blockTime > 0) {
+        return blockTime;
+      }
+    } catch {
+      // Fall back to the local clock below if block time is temporarily unavailable.
+    }
+    await sleep(250);
+  }
+  return Math.floor(Date.now() / 1000);
+}
+
 function toBn(value: bigint | number): BN {
   return new BN(BigInt(value).toString());
 }
@@ -49,8 +88,9 @@ function toBn(value: bigint | number): BN {
 export function uniqueDuelKey(label: string): number[] {
   const next = (duelKeyCounters.get(label) ?? 0) + 1;
   duelKeyCounters.set(label, next);
+  const salt = Date.now();
   return Array.from(
-    crypto.createHash("sha256").update(`${label}:${next}`).digest(),
+    crypto.createHash("sha256").update(`${label}:${next}:${salt}`).digest(),
   );
 }
 
@@ -202,28 +242,20 @@ export async function ensureOracleReady(
   reporter = authority.publicKey,
   finalizer = authority.publicKey,
   challenger = authority.publicKey,
-  disputeWindowSecs = 3600,
+  disputeWindowSecs = 60,
 ): Promise<PublicKey> {
   const oracleConfig = deriveOracleConfigPda(program.programId);
   const existingConfig =
     await program.account.oracleConfig.fetchNullable(oracleConfig);
 
   if (!existingConfig) {
-    const pdata = await program.provider.connection.getAccountInfo(deriveProgramDataAddress(program.programId));
-    console.log("ProgramData exists:", !!pdata);
-    if (pdata) {
-        const upgradeAuthOffset = 13;
-        const upgradeAuthHasKey = pdata.data[12];
-        console.log("Upgrade Auth exists byte:", upgradeAuthHasKey);
-        if (upgradeAuthHasKey === 1) {
-            const authBytes = pdata.data.slice(upgradeAuthOffset, upgradeAuthOffset + 32);
-            console.log("Upgrade Auth Address:", new anchor.web3.PublicKey(authBytes).toBase58());
-        }
-    }
-    console.log("Wanted Authority:", authority.publicKey.toBase58());
-
     await program.methods
-      .initializeOracle(reporter)
+      .initializeOracle(
+        reporter,
+        finalizer,
+        challenger,
+        new BN(disputeWindowSecs),
+      )
       .accountsPartial({
         authority: authority.publicKey,
         oracleConfig,
@@ -464,7 +496,7 @@ export async function finalizeDuelResult(
   const duelState = deriveDuelStatePda(program.programId, duelKey);
   let lastError: unknown = null;
 
-  for (let attempt = 0; attempt < 20; attempt += 1) {
+  for (let attempt = 0; attempt < 120; attempt += 1) {
     try {
       await program.methods
         .finalizeResult([...duelKey], metadataUri)
@@ -481,12 +513,24 @@ export async function finalizeDuelResult(
       if (!hasProgramError(error, "DisputeWindowActive")) {
         throw error;
       }
-      await new Promise((resolve) => setTimeout(resolve, 500));
+      const [oracleConfigAccount, duelStateAccount] = await Promise.all([
+        program.account.oracleConfig.fetch(oracleConfig),
+        program.account.duelState.fetch(duelState),
+      ]);
+      const finalizableAt =
+        bnLikeToNumber(
+          (duelStateAccount as { pendingProposedAt?: unknown }).pendingProposedAt,
+        ) +
+        bnLikeToNumber(
+          (oracleConfigAccount as { disputeWindowSecs?: unknown }).disputeWindowSecs,
+        );
+      const now = await currentChainUnixTimestamp(program.provider.connection);
+      const remainingMs = Math.max(500, (finalizableAt - now + 1) * 1_000);
+      await sleep(Math.min(remainingMs, 5_000));
     }
   }
 
   throw lastError;
-
 }
 
 export async function initializeCanonicalMarket(
@@ -649,6 +693,9 @@ export async function continueClobOrder(
   args: {
     marketState: PublicKey;
     duelState: PublicKey;
+    config: PublicKey;
+    treasury: PublicKey;
+    marketMaker: PublicKey;
     vault: PublicKey;
     user: Keypair;
     orderId: bigint | number;
@@ -682,6 +729,9 @@ export async function continueClobOrder(
       userBalance,
       order,
       restingLevel,
+      config: args.config,
+      treasury: args.treasury,
+      marketMaker: args.marketMaker,
       vault: args.vault,
       user: args.user.publicKey,
       systemProgram: SystemProgram.programId,
@@ -722,6 +772,52 @@ export async function cancelClobOrder(
 
   let builder = program.methods
     .cancelOrder(toBn(args.orderId), args.side, args.price)
+    .accountsPartial({
+      marketState: args.marketState,
+      duelState: args.duelState,
+      order,
+      priceLevel,
+      vault: args.vault,
+      user: args.user.publicKey,
+      systemProgram: SystemProgram.programId,
+    });
+
+  if (args.remainingAccounts && args.remainingAccounts.length > 0) {
+    builder = builder.remainingAccounts(args.remainingAccounts);
+  }
+
+  await builder.signers([args.user]).rpc();
+
+  return { order, priceLevel };
+}
+
+export async function reclaimClobOrder(
+  program: Program<GoldClobMarket>,
+  args: {
+    marketState: PublicKey;
+    duelState: PublicKey;
+    vault: PublicKey;
+    user: Keypair;
+    orderId: bigint | number;
+    side: number;
+    price: number;
+    remainingAccounts?: AccountMeta[];
+  },
+): Promise<{ order: PublicKey; priceLevel: PublicKey }> {
+  const order = deriveOrderPda(
+    program.programId,
+    args.marketState,
+    args.orderId,
+  );
+  const priceLevel = derivePriceLevelPda(
+    program.programId,
+    args.marketState,
+    args.side,
+    args.price,
+  );
+
+  let builder = (program.methods as any)
+    .reclaimRestingOrder(toBn(args.orderId), args.side, args.price)
     .accountsPartial({
       marketState: args.marketState,
       duelState: args.duelState,

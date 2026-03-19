@@ -58,6 +58,7 @@
     "ci:gate:e2e:avax": "node --import tsx scripts/ci-gate-e2e.ts --chain=avax",
     "ci:gate:base": "node --import tsx scripts/ci-gate-base.ts",
     "staged:proof": "node --import tsx scripts/staged-live-proof.ts",
+    "pm:soak": "node --import tsx scripts/pm-soak-monitor.ts",
     "ci:prepr": "node scripts/check-pr-ready.mjs"
   },
   "devDependencies": {

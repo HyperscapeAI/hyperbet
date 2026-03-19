@@ -28,6 +28,10 @@ describe("DuelOutcomeOracle", () => {
     reporter: Awaited<ReturnType<typeof deployFixture>>["reporter"],
     duelKey: string,
   ) {
+    const now = BigInt((await ethers.provider.getBlock("latest"))!.timestamp);
+    if (now < 2_001n) {
+      await advanceToTimestamp(2_001n);
+    }
     await oracle.connect(reporter).upsertDuel(
       duelKey,
       "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -216,7 +220,7 @@ describe("DuelOutcomeOracle", () => {
     ).to.be.revertedWithCustomError(oracle, "DuelNotLocked");
   });
 
-  it("rejects proposals before betting closes", async () => {
+  it("rejects proposals while betting is still open", async () => {
     const { oracle, reporter } = await deployFixture();
     const duelKey =
       "0x6666666666666666666666666666666666666666666666666666666666666666";
@@ -230,7 +234,7 @@ describe("DuelOutcomeOracle", () => {
       now + 600n,
       now + 660n,
       "https://example.com/duels/6",
-      3,
+      2,
     );
 
     await expect(
@@ -243,7 +247,51 @@ describe("DuelOutcomeOracle", () => {
         Number(now + 720n),
         "proposal",
       ),
+    ).to.be.revertedWithCustomError(oracle, "DuelNotLocked");
+  });
+
+  it("rejects locking before betting closes and allows it at close", async () => {
+    const { oracle, reporter } = await deployFixture();
+    const duelKey =
+      "0x6666666666666666666666666666666666666666666666666666666666666667";
+    const now = BigInt((await ethers.provider.getBlock("latest"))!.timestamp);
+
+    await expect(
+      oracle.connect(reporter).upsertDuel(
+        duelKey,
+        "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        now,
+        now + 60n,
+        now + 120n,
+        "https://example.com/duels/7",
+        3,
+      ),
     ).to.be.revertedWithCustomError(oracle, "BettingWindowActive");
+
+    await advanceToTimestamp(now + 60n);
+
+    await expect(
+      oracle.connect(reporter).upsertDuel(
+        duelKey,
+        "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        now,
+        now + 60n,
+        now + 120n,
+        "https://example.com/duels/7",
+        3,
+      ),
+    )
+      .to.emit(oracle, "DuelUpserted")
+      .withArgs(
+        duelKey,
+        3,
+        now,
+        now + 60n,
+        now + 120n,
+        "https://example.com/duels/7",
+      );
   });
 
   it("rejects late challenges after the dispute window expires", async () => {
@@ -337,6 +385,6 @@ describe("DuelOutcomeOracle", () => {
       .withArgs(duelKey, "emergency-cancel");
 
     const duel = await oracle.getDuel(duelKey);
-    expect(duel.status).to.equal(6n);
+    expect(duel.status).to.equal(7n); // CANCELLED
   });
 });

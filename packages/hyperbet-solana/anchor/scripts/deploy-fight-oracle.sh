@@ -28,6 +28,97 @@ resolve_wallet_path() {
   exit 1
 }
 
+cleanup_stale_buffers() {
+  local context="${1:-cleanup}"
+  local output=""
+  local status=0
+
+  set +e
+  output="$(
+    solana program close \
+      --buffers \
+      --url "$TARGET_CLUSTER" \
+      --keypair "$WALLET_PATH" \
+      --authority "$WALLET_PATH" \
+      --recipient "$WALLET_ADDRESS" 2>&1
+  )"
+  status=$?
+  set -e
+
+  if [[ $status -eq 0 ]]; then
+    if [[ -n "$output" ]]; then
+      printf '%s\n' "$output"
+    fi
+    echo "[deploy] reclaimed stale buffers ($context)"
+    return 0
+  fi
+
+  if grep -Eqi "no .*buffer" <<<"$output"; then
+    echo "[deploy] no stale buffers to reclaim ($context)"
+    return 0
+  fi
+
+  printf '%s\n' "$output" >&2
+  return $status
+}
+
+program_matches_binary() {
+  local dumped_binary
+  local local_hash
+  local deployed_hash
+
+  if ! solana program show \
+    --url "$TARGET_CLUSTER" \
+    --keypair "$WALLET_PATH" \
+    "$PROGRAM_ID" >/dev/null 2>&1; then
+    return 1
+  fi
+
+  dumped_binary="$(mktemp "${TMPDIR:-/tmp}/fight-oracle-dump.XXXXXX.so")"
+  if ! solana program dump \
+    --url "$TARGET_CLUSTER" \
+    --keypair "$WALLET_PATH" \
+    "$PROGRAM_ID" \
+    "$dumped_binary" >/dev/null 2>&1; then
+    rm -f "$dumped_binary"
+    return 1
+  fi
+
+  local_hash="$(shasum -a 256 "$BINARY_PATH" | cut -d' ' -f1)"
+  deployed_hash="$(shasum -a 256 "$dumped_binary" | cut -d' ' -f1)"
+  rm -f "$dumped_binary"
+
+  [[ "$local_hash" == "$deployed_hash" ]]
+}
+
+deploy_program() {
+  local output=""
+  local status=0
+
+  set +e
+  output="$(
+    solana program deploy \
+      --url "$TARGET_CLUSTER" \
+      --keypair "$WALLET_PATH" \
+      --fee-payer "$WALLET_PATH" \
+      --upgrade-authority "$WALLET_PATH" \
+      --program-id "$KEYPAIR_PATH" \
+      "$BINARY_PATH" 2>&1
+  )"
+  status=$?
+  set -e
+
+  printf '%s\n' "$output"
+  if [[ $status -eq 0 ]]; then
+    return 0
+  fi
+
+  echo "[deploy] deployment failed for $PROGRAM; reclaiming any staged buffers"
+  cleanup_stale_buffers "after failed $PROGRAM deploy"
+  echo "[deploy] balance after failed $PROGRAM deploy: $(solana balance --url "$TARGET_CLUSTER" --keypair "$WALLET_PATH")"
+  return $status
+}
+
 if [[ -z "$TARGET_CLUSTER" ]]; then
   echo "usage: bash anchor/scripts/deploy-fight-oracle.sh <devnet|testnet|mainnet-beta>" >&2
   exit 1
@@ -52,6 +143,7 @@ for required in bun solana solana-keygen; do
 done
 
 WALLET_PATH="$(resolve_wallet_path)"
+WALLET_ADDRESS="$(solana-keygen pubkey "$WALLET_PATH")"
 KEYPAIR_PATH="$ROOT_DIR/target/deploy/${PROGRAM}-keypair.json"
 BINARY_PATH="$ROOT_DIR/target/deploy/${PROGRAM}.so"
 
@@ -66,8 +158,10 @@ fi
 
 echo "[deploy] cluster: $TARGET_CLUSTER"
 echo "[deploy] wallet:  $WALLET_PATH"
-echo "[deploy] address: $(solana-keygen pubkey "$WALLET_PATH")"
+echo "[deploy] address: $WALLET_ADDRESS"
 echo "[deploy] balance: $(solana balance --url "$TARGET_CLUSTER" --keypair "$WALLET_PATH")"
+cleanup_stale_buffers "before deployment"
+echo "[deploy] balance after cleanup: $(solana balance --url "$TARGET_CLUSTER" --keypair "$WALLET_PATH")"
 
 if [[ "${SKIP_BUILD:-0}" != "1" ]]; then
   echo "[deploy] building anchor workspace"
@@ -75,14 +169,14 @@ if [[ "${SKIP_BUILD:-0}" != "1" ]]; then
 fi
 
 PROGRAM_ID="$(solana-keygen pubkey "$KEYPAIR_PATH")"
-echo "[deploy] deploying $PROGRAM ($PROGRAM_ID)"
-solana program deploy \
-  --url "$TARGET_CLUSTER" \
-  --keypair "$WALLET_PATH" \
-  --program-id "$KEYPAIR_PATH" \
-  "$BINARY_PATH"
+if program_matches_binary; then
+  echo "[deploy] $PROGRAM ($PROGRAM_ID) already matches current binary; skipping deploy"
+else
+  echo "[deploy] deploying $PROGRAM ($PROGRAM_ID)"
+  deploy_program
+fi
 
 echo "[deploy] verifying $PROGRAM ($PROGRAM_ID)"
-solana program show --url "$TARGET_CLUSTER" "$PROGRAM_ID"
+solana program show --url "$TARGET_CLUSTER" --keypair "$WALLET_PATH" "$PROGRAM_ID"
 
 echo "[deploy] complete"

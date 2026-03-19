@@ -138,7 +138,7 @@ async function main(): Promise<void> {
   const target = parseTarget(process.argv.slice(2));
   const __dirname = path.dirname(fileURLToPath(import.meta.url));
   const bettingDir = path.resolve(__dirname, "..");
-  const anchorDir = path.join(bettingDir, "anchor");
+  const anchorDir = path.resolve(bettingDir, "..", "hyperbet-solana", "anchor");
   const evmDir = path.resolve(bettingDir, "..", "evm-contracts");
   const appDir = path.join(bettingDir, "app");
   const keeperDir = path.join(bettingDir, "keeper");

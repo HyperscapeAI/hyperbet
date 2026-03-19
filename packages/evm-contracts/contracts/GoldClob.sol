@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import "@openzeppelin/contracts/access/AccessControl.sol";
-import "@openzeppelin/contracts/utils/Address.sol";
-import "@openzeppelin/contracts/utils/math/Math.sol";
-import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
+import {Address} from "@openzeppelin/contracts/utils/Address.sol";
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
+import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
-import "./DuelOutcomeOracle.sol";
+import {DuelOutcomeOracle} from "./DuelOutcomeOracle.sol";
 
 contract GoldClob is AccessControl, ReentrancyGuard {
     using Address for address payable;
@@ -23,12 +23,15 @@ contract GoldClob is AccessControl, ReentrancyGuard {
     uint8 public constant ORDER_FLAG_GTC = 0x01;
     uint8 public constant ORDER_FLAG_IOC = 0x02;
     uint8 public constant ORDER_FLAG_POST_ONLY = 0x04;
-    uint8 public constant MAX_MATCH_ITERATIONS = 100;
+    uint8 public constant MAX_MATCH_ITERATIONS = 50;
     uint8 private constant ORDER_FLAGS_GTC_POST_ONLY = ORDER_FLAG_GTC | ORDER_FLAG_POST_ONLY;
 
-    DuelOutcomeOracle public duelOracle;
-    address public treasury;
-    address public marketMaker;
+    // forge-lint: disable-next-line(screaming-snake-case-immutable)
+    DuelOutcomeOracle public immutable duelOracle;
+    // forge-lint: disable-next-line(screaming-snake-case-immutable)
+    address public immutable treasury;
+    // forge-lint: disable-next-line(screaming-snake-case-immutable)
+    address public immutable marketMaker;
     uint256 public tradeTreasuryFeeBps;
     uint256 public tradeMarketMakerFeeBps;
     uint256 public winningsMarketMakerFeeBps;
@@ -41,6 +44,7 @@ contract GoldClob is AccessControl, ReentrancyGuard {
     error InvalidTreasury();
     error InvalidMarketMaker();
     error InvalidPauser();
+    error GovernanceSurfaceFrozen();
     error TreasuryFeeTooHigh();
     error MarketMakerFeeTooHigh();
     error TotalTradeFeeTooHigh();
@@ -65,6 +69,7 @@ contract GoldClob is AccessControl, ReentrancyGuard {
     error CostTooLow();
     error MarketCreationIsPaused();
     error OrderPlacementIsPaused();
+    error MarketStillOpen();
 
     enum MarketStatus {
         NULL,
@@ -152,6 +157,8 @@ contract GoldClob is AccessControl, ReentrancyGuard {
         uint256 matchedAmount,
         uint16 price
     );
+    /// @notice Raised when a taker would match their own resting order
+    /// @dev Strict "Cancel Taker" policy ensures taker order is cancelled if a self-match is detected
     event SelfTradePolicyTriggered(
         bytes32 indexed marketRef,
         address indexed makerAuthority,
@@ -200,6 +207,7 @@ contract GoldClob is AccessControl, ReentrancyGuard {
     }
 
     function marketKey(bytes32 duelKey, uint8 marketKind) public pure returns (bytes32) {
+        // forge-lint: disable-next-line(asm-keccak256)
         return keccak256(abi.encode(duelKey, marketKind));
     }
 
@@ -217,22 +225,16 @@ contract GoldClob is AccessControl, ReentrancyGuard {
         return (level.headOrderId, level.tailOrderId, level.totalOpen);
     }
 
-    function setOracle(address oracle) external onlyRole(DEFAULT_ADMIN_ROLE) {
-        if (oracle == address(0)) revert InvalidOracle();
-        duelOracle = DuelOutcomeOracle(oracle);
-        emit OracleUpdated(oracle);
+    function setOracle(address /* oracle */) external view onlyRole(DEFAULT_ADMIN_ROLE) {
+        revert GovernanceSurfaceFrozen();
     }
 
-    function setTreasury(address treasury_) external onlyRole(DEFAULT_ADMIN_ROLE) {
-        if (treasury_ == address(0)) revert InvalidTreasury();
-        treasury = treasury_;
-        emit TreasuryUpdated(treasury_);
+    function setTreasury(address /* treasury_ */) external view onlyRole(DEFAULT_ADMIN_ROLE) {
+        revert GovernanceSurfaceFrozen();
     }
 
-    function setMarketMaker(address marketMaker_) external onlyRole(DEFAULT_ADMIN_ROLE) {
-        if (marketMaker_ == address(0)) revert InvalidMarketMaker();
-        marketMaker = marketMaker_;
-        emit MarketMakerUpdated(marketMaker_);
+    function setMarketMaker(address /* marketMaker_ */) external view onlyRole(DEFAULT_ADMIN_ROLE) {
+        revert GovernanceSurfaceFrozen();
     }
 
     function setPauser(address pauser, bool enabled) external onlyRole(DEFAULT_ADMIN_ROLE) {
@@ -243,6 +245,23 @@ contract GoldClob is AccessControl, ReentrancyGuard {
             _revokeRole(PAUSER_ROLE, pauser);
         }
         emit PauserUpdated(pauser, enabled);
+    }
+
+    // ── PM20 governance freeze: block inherited AccessControl role mutations ──
+
+    function grantRole(bytes32 role, address account) public override onlyRole(getRoleAdmin(role)) {
+        if (role != PAUSER_ROLE) revert GovernanceSurfaceFrozen();
+        _grantRole(role, account);
+    }
+
+    function revokeRole(bytes32 role, address account) public override onlyRole(getRoleAdmin(role)) {
+        if (role != PAUSER_ROLE) revert GovernanceSurfaceFrozen();
+        _revokeRole(role, account);
+    }
+
+    function renounceRole(bytes32 role, address callerConfirmation) public override {
+        if (role != PAUSER_ROLE) revert GovernanceSurfaceFrozen();
+        super.renounceRole(role, callerConfirmation);
     }
 
     function setMarketCreationPaused(bool paused) external onlyRole(PAUSER_ROLE) {
@@ -256,24 +275,11 @@ contract GoldClob is AccessControl, ReentrancyGuard {
     }
 
     function setFeeConfig(
-        uint256 tradeTreasuryFeeBps_,
-        uint256 tradeMarketMakerFeeBps_,
-        uint256 winningsMarketMakerFeeBps_
-    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
-        if (tradeTreasuryFeeBps_ > MAX_FEE_BPS) revert TreasuryFeeTooHigh();
-        if (tradeMarketMakerFeeBps_ > MAX_FEE_BPS) revert MarketMakerFeeTooHigh();
-        if (tradeTreasuryFeeBps_ + tradeMarketMakerFeeBps_ > MAX_FEE_BPS) revert TotalTradeFeeTooHigh();
-        if (winningsMarketMakerFeeBps_ > MAX_FEE_BPS) revert WinningsFeeTooHigh();
-
-        tradeTreasuryFeeBps = tradeTreasuryFeeBps_;
-        tradeMarketMakerFeeBps = tradeMarketMakerFeeBps_;
-        winningsMarketMakerFeeBps = winningsMarketMakerFeeBps_;
-
-        emit FeeConfigUpdated(
-            tradeTreasuryFeeBps_,
-            tradeMarketMakerFeeBps_,
-            winningsMarketMakerFeeBps_
-        );
+        uint256 /* tradeTreasuryFeeBps_ */,
+        uint256 /* tradeMarketMakerFeeBps_ */,
+        uint256 /* winningsMarketMakerFeeBps_ */
+    ) external view onlyRole(DEFAULT_ADMIN_ROLE) {
+        revert GovernanceSurfaceFrozen();
     }
 
     function feeBps() external view returns (uint256) {
@@ -300,8 +306,11 @@ contract GoldClob is AccessControl, ReentrancyGuard {
         market.exists = true;
         market.duelKey = duelKey;
         market.status = _mapDuelStatus(duel.status);
+        // forge-lint: disable-next-line(unsafe-typecast)
         market.tradeTreasuryFeeBpsSnapshot = uint16(tradeTreasuryFeeBps);
+        // forge-lint: disable-next-line(unsafe-typecast)
         market.tradeMarketMakerFeeBpsSnapshot = uint16(tradeMarketMakerFeeBps);
+        // forge-lint: disable-next-line(unsafe-typecast)
         market.winningsMarketMakerFeeBpsSnapshot = uint16(winningsMarketMakerFeeBps);
         market.nextOrderId = 1;
         market.bestAsk = MAX_PRICE;
@@ -350,7 +359,16 @@ contract GoldClob is AccessControl, ReentrancyGuard {
 
         uint256 restingCost = 0;
         if (progress.remainingAmount > 0 && _isGoodTilCancelled(orderFlags) && !progress.selfTradePrevented) {
-            _restOrder(key, market, side, price, uint128(progress.remainingAmount), takerOrderId);
+            _restOrder(
+                key,
+                market,
+                side,
+                price,
+                msg.sender,
+                amount,
+                amount - uint128(progress.remainingAmount),
+                takerOrderId
+            );
             restingCost = _quoteCost(side, price, uint128(progress.remainingAmount));
         } else {
             _persistInactiveTakerOrder(key, side, price, amount, amount - progress.remainingAmount, takerOrderId);
@@ -374,7 +392,7 @@ contract GoldClob is AccessControl, ReentrancyGuard {
         if (!market.exists) revert MarketMissing();
 
         DuelOutcomeOracle.DuelState memory duel = duelOracle.getDuel(duelKey);
-        _syncMarketFromOracle(duelKey, key, market, duel);
+        if (_syncMarketFromOracle(duelKey, key, market, duel) != MarketStatus.OPEN) revert MarketNotOpen();
 
         Order storage order = orders[key][orderId];
         if (order.maker != msg.sender) revert NotMaker();
@@ -395,6 +413,36 @@ contract GoldClob is AccessControl, ReentrancyGuard {
         if (refund > 0) payable(msg.sender).sendValue(refund);
 
         emit OrderCancelled(key, orderId);
+    }
+
+    // FIX-2: Allow resting order collateral recovery once market leaves OPEN status
+    function reclaimRestingOrder(bytes32 duelKey, uint8 marketKind, uint64 orderId) external nonReentrant {
+        bytes32 key = marketKey(duelKey, marketKind);
+        Market storage market = markets[key];
+        if (!market.exists) revert MarketMissing();
+
+        DuelOutcomeOracle.DuelState memory duel = duelOracle.getDuel(duelKey);
+        MarketStatus status = _syncMarketFromOracle(duelKey, key, market, duel);
+        if (status == MarketStatus.OPEN) revert MarketStillOpen();
+
+        Order storage order = orders[key][orderId];
+        if (order.maker != msg.sender) revert NotMaker();
+        if (!order.active) revert OrderInactive();
+
+        uint128 remaining = order.amount - order.filled;
+        if (remaining == 0) revert AlreadyFilled();
+
+        PriceLevel storage level = priceLevels[key][order.side][order.price];
+        _unlinkOrder(key, market, level, order, remaining);
+
+        uint256 refund = _quoteCost(order.side, order.price, remaining);
+        order.filled = order.amount;
+        order.active = false;
+        order.prevOrderId = 0;
+        order.nextOrderId = 0;
+
+        emit OrderCancelled(key, orderId);
+        if (refund > 0) payable(msg.sender).sendValue(refund);
     }
 
     function claim(bytes32 duelKey, uint8 marketKind) external nonReentrant {
@@ -636,7 +684,9 @@ contract GoldClob is AccessControl, ReentrancyGuard {
         Market storage market,
         uint8 side,
         uint16 price,
+        address maker,
         uint128 amount,
+        uint128 filled,
         uint64 orderId
     ) internal {
         Order storage newOrder = orders[key][orderId];
@@ -645,8 +695,9 @@ contract GoldClob is AccessControl, ReentrancyGuard {
         newOrder.id = orderId;
         newOrder.side = side;
         newOrder.price = price;
-        newOrder.maker = msg.sender;
+        newOrder.maker = maker;
         newOrder.amount = amount;
+        newOrder.filled = filled;
         newOrder.prevOrderId = level.tailOrderId;
         newOrder.active = true;
 
@@ -656,7 +707,7 @@ contract GoldClob is AccessControl, ReentrancyGuard {
             level.headOrderId = orderId;
         }
         level.tailOrderId = orderId;
-        level.totalOpen += amount;
+        level.totalOpen += (amount - filled);
 
         _activatePrice(key, market, side, price);
     }
@@ -723,8 +774,6 @@ contract GoldClob is AccessControl, ReentrancyGuard {
             level.tailOrderId = 0;
             level.totalOpen = 0;
             _deactivatePrice(key, market, order.side, order.price);
-        } else {
-            _refreshBestPrices(key, market);
         }
     }
 
@@ -757,12 +806,6 @@ contract GoldClob is AccessControl, ReentrancyGuard {
         }
     }
 
-    function _refreshBestPrices(bytes32 key, Market storage market) internal {
-        market.bestBid = _highestSetPrice(key, BUY_SIDE);
-        uint16 bestAsk = _lowestSetPrice(key, SELL_SIDE);
-        market.bestAsk = bestAsk == 0 ? MAX_PRICE : bestAsk;
-    }
-
     function _syncMarketFromOracle(
         bytes32 duelKey,
         bytes32 key,
@@ -789,6 +832,7 @@ contract GoldClob is AccessControl, ReentrancyGuard {
             if (word == 0) continue;
 
             uint256 price = (wordIndex * 256) + Math.log2(word);
+            // forge-lint: disable-next-line(unsafe-typecast)
             if (price < MAX_PRICE) return uint16(price);
         }
 
@@ -804,6 +848,7 @@ contract GoldClob is AccessControl, ReentrancyGuard {
 
             uint256 isolatedBit = word & (~word + 1);
             uint256 price = (wordIndex * 256) + Math.log2(isolatedBit);
+            // forge-lint: disable-next-line(unsafe-typecast)
             if (price > 0 && price < MAX_PRICE) return uint16(price);
         }
 

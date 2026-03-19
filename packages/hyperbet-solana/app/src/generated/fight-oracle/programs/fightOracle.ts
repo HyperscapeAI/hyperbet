@@ -7,9 +7,9 @@
  */
 
 import { assertIsInstructionWithAccounts, containsBytes, fixEncoderSize, getBytesEncoder, type Address, type Instruction, type InstructionWithData, type ReadonlyUint8Array } from '@solana/kit';
-import { parseCancelDuelInstruction, parseChallengeResultInstruction, parseFinalizeResultInstruction, parseInitializeOracleInstruction, parseProposeResultInstruction, parseUpdateOracleConfigInstruction, parseUpsertDuelInstruction, type ParsedCancelDuelInstruction, type ParsedChallengeResultInstruction, type ParsedFinalizeResultInstruction, type ParsedInitializeOracleInstruction, type ParsedProposeResultInstruction, type ParsedUpdateOracleConfigInstruction, type ParsedUpsertDuelInstruction } from '../instructions/index.js';
+import { parseCancelDuelInstruction, parseChallengeResultInstruction, parseFinalizeResultInstruction, parseFreezeOracleConfigInstruction, parseInitializeOracleInstruction, parseProposeResultInstruction, parseReproposeResultInstruction, parseSetOraclePausedInstruction, parseUpdateOracleConfigInstruction, parseUpsertDuelInstruction, type ParsedCancelDuelInstruction, type ParsedChallengeResultInstruction, type ParsedFinalizeResultInstruction, type ParsedFreezeOracleConfigInstruction, type ParsedInitializeOracleInstruction, type ParsedProposeResultInstruction, type ParsedReproposeResultInstruction, type ParsedSetOraclePausedInstruction, type ParsedUpdateOracleConfigInstruction, type ParsedUpsertDuelInstruction } from '../instructions/index.js';
 
-export const FIGHT_ORACLE_PROGRAM_ADDRESS = '6tpRysBFd1yXRipYEYwAw9jxEoVHk15kVXfkDGFLMqcD' as Address<'6tpRysBFd1yXRipYEYwAw9jxEoVHk15kVXfkDGFLMqcD'>;
+export const FIGHT_ORACLE_PROGRAM_ADDRESS = 'B5mRCRDJk9BrnH7regMWW5mpTQ8QG1CcCGSnDxMt8hmo' as Address<'B5mRCRDJk9BrnH7regMWW5mpTQ8QG1CcCGSnDxMt8hmo'>;
 
 export enum FightOracleAccount { DuelState, OracleConfig }
 
@@ -20,26 +20,32 @@ if (containsBytes(data, fixEncoderSize(getBytesEncoder(), 8).encode(new Uint8Arr
 throw new Error("The provided account could not be identified as a fightOracle account.")
 }
 
-export enum FightOracleInstruction { CancelDuel, ChallengeResult, FinalizeResult, InitializeOracle, ProposeResult, UpdateOracleConfig, UpsertDuel }
+export enum FightOracleInstruction { CancelDuel, ChallengeResult, FinalizeResult, FreezeOracleConfig, InitializeOracle, ProposeResult, ReproposeResult, SetOraclePaused, UpdateOracleConfig, UpsertDuel }
 
 export function identifyFightOracleInstruction(instruction: { data: ReadonlyUint8Array } | ReadonlyUint8Array): FightOracleInstruction {
 const data = 'data' in instruction ? instruction.data : instruction;
 if (containsBytes(data, fixEncoderSize(getBytesEncoder(), 8).encode(new Uint8Array([83, 124, 224, 237, 235, 44, 38, 57])), 0)) { return FightOracleInstruction.CancelDuel; }
 if (containsBytes(data, fixEncoderSize(getBytesEncoder(), 8).encode(new Uint8Array([62, 59, 36, 3, 171, 25, 241, 163])), 0)) { return FightOracleInstruction.ChallengeResult; }
 if (containsBytes(data, fixEncoderSize(getBytesEncoder(), 8).encode(new Uint8Array([217, 193, 113, 98, 13, 191, 186, 78])), 0)) { return FightOracleInstruction.FinalizeResult; }
+if (containsBytes(data, fixEncoderSize(getBytesEncoder(), 8).encode(new Uint8Array([82, 213, 40, 194, 183, 48, 32, 246])), 0)) { return FightOracleInstruction.FreezeOracleConfig; }
 if (containsBytes(data, fixEncoderSize(getBytesEncoder(), 8).encode(new Uint8Array([144, 223, 131, 120, 196, 253, 181, 99])), 0)) { return FightOracleInstruction.InitializeOracle; }
 if (containsBytes(data, fixEncoderSize(getBytesEncoder(), 8).encode(new Uint8Array([7, 96, 132, 38, 128, 145, 133, 242])), 0)) { return FightOracleInstruction.ProposeResult; }
+if (containsBytes(data, fixEncoderSize(getBytesEncoder(), 8).encode(new Uint8Array([67, 248, 197, 39, 189, 160, 132, 182])), 0)) { return FightOracleInstruction.ReproposeResult; }
+if (containsBytes(data, fixEncoderSize(getBytesEncoder(), 8).encode(new Uint8Array([61, 243, 64, 36, 121, 38, 141, 241])), 0)) { return FightOracleInstruction.SetOraclePaused; }
 if (containsBytes(data, fixEncoderSize(getBytesEncoder(), 8).encode(new Uint8Array([83, 16, 11, 254, 57, 99, 156, 58])), 0)) { return FightOracleInstruction.UpdateOracleConfig; }
 if (containsBytes(data, fixEncoderSize(getBytesEncoder(), 8).encode(new Uint8Array([174, 7, 139, 223, 70, 128, 251, 128])), 0)) { return FightOracleInstruction.UpsertDuel; }
 throw new Error("The provided instruction could not be identified as a fightOracle instruction.")
 }
 
-export type ParsedFightOracleInstruction<TProgram extends string = '6tpRysBFd1yXRipYEYwAw9jxEoVHk15kVXfkDGFLMqcD'> =
+export type ParsedFightOracleInstruction<TProgram extends string = 'B5mRCRDJk9BrnH7regMWW5mpTQ8QG1CcCGSnDxMt8hmo'> =
 | { instructionType: FightOracleInstruction.CancelDuel } & ParsedCancelDuelInstruction<TProgram>
 | { instructionType: FightOracleInstruction.ChallengeResult } & ParsedChallengeResultInstruction<TProgram>
 | { instructionType: FightOracleInstruction.FinalizeResult } & ParsedFinalizeResultInstruction<TProgram>
+| { instructionType: FightOracleInstruction.FreezeOracleConfig } & ParsedFreezeOracleConfigInstruction<TProgram>
 | { instructionType: FightOracleInstruction.InitializeOracle } & ParsedInitializeOracleInstruction<TProgram>
 | { instructionType: FightOracleInstruction.ProposeResult } & ParsedProposeResultInstruction<TProgram>
+| { instructionType: FightOracleInstruction.ReproposeResult } & ParsedReproposeResultInstruction<TProgram>
+| { instructionType: FightOracleInstruction.SetOraclePaused } & ParsedSetOraclePausedInstruction<TProgram>
 | { instructionType: FightOracleInstruction.UpdateOracleConfig } & ParsedUpdateOracleConfigInstruction<TProgram>
 | { instructionType: FightOracleInstruction.UpsertDuel } & ParsedUpsertDuelInstruction<TProgram>
 
@@ -56,10 +62,16 @@ case FightOracleInstruction.ChallengeResult: { assertIsInstructionWithAccounts(i
 return { instructionType: FightOracleInstruction.ChallengeResult, ...parseChallengeResultInstruction(instruction) }; }
 case FightOracleInstruction.FinalizeResult: { assertIsInstructionWithAccounts(instruction);
 return { instructionType: FightOracleInstruction.FinalizeResult, ...parseFinalizeResultInstruction(instruction) }; }
+case FightOracleInstruction.FreezeOracleConfig: { assertIsInstructionWithAccounts(instruction);
+return { instructionType: FightOracleInstruction.FreezeOracleConfig, ...parseFreezeOracleConfigInstruction(instruction) }; }
 case FightOracleInstruction.InitializeOracle: { assertIsInstructionWithAccounts(instruction);
 return { instructionType: FightOracleInstruction.InitializeOracle, ...parseInitializeOracleInstruction(instruction) }; }
 case FightOracleInstruction.ProposeResult: { assertIsInstructionWithAccounts(instruction);
 return { instructionType: FightOracleInstruction.ProposeResult, ...parseProposeResultInstruction(instruction) }; }
+case FightOracleInstruction.ReproposeResult: { assertIsInstructionWithAccounts(instruction);
+return { instructionType: FightOracleInstruction.ReproposeResult, ...parseReproposeResultInstruction(instruction) }; }
+case FightOracleInstruction.SetOraclePaused: { assertIsInstructionWithAccounts(instruction);
+return { instructionType: FightOracleInstruction.SetOraclePaused, ...parseSetOraclePausedInstruction(instruction) }; }
 case FightOracleInstruction.UpdateOracleConfig: { assertIsInstructionWithAccounts(instruction);
 return { instructionType: FightOracleInstruction.UpdateOracleConfig, ...parseUpdateOracleConfigInstruction(instruction) }; }
 case FightOracleInstruction.UpsertDuel: { assertIsInstructionWithAccounts(instruction);

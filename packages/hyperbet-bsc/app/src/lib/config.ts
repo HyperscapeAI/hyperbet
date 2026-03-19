@@ -146,6 +146,8 @@ function defaultRpcUrlForEvmNetwork(network: BettingEvmNetwork): string {
       return "https://mainnet.base.org";
     case "baseSepolia":
       return "https://sepolia.base.org";
+    default:
+      return "https://bsc-dataseed.binance.org";
   }
 }
 
