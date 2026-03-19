@@ -1,5 +1,7 @@
 pub mod init;
 pub use init::*;
+pub mod init_config;
+pub use init_config::*;
 pub mod init_bet;
 pub use init_bet::*;
 

@@ -40,4 +40,16 @@ pub enum PredictionMarketError {
 
     #[msg("Overflow or Underflow")]
     MathErr,
+
+    #[msg("Invalid address (zero/default)")]
+    InvalidAddress,
+
+    #[msg("Fee BPS exceeds maximum (1000 = 10%)")]
+    FeeTooHigh,
+
+    #[msg("Market is paused")]
+    MarketPaused,
+
+    #[msg("Config is frozen")]
+    ConfigFrozen,
 }

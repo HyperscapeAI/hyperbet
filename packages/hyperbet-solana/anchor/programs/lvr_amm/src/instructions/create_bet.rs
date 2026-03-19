@@ -1,7 +1,7 @@
 use anchor_lang::prelude::*;
 use std::mem::size_of;
 
-use crate::{error::PredictionMarketError, state::bet::Bet};
+use crate::{error::PredictionMarketError, state::bet::Bet, state::config::AmmConfig};
 use crate::math;
 
 use anchor_spl::token::{Mint, Token};
@@ -9,13 +9,14 @@ use anchor_spl::token::{Mint, Token};
 pub fn create_bet(
     ctx: Context<CreateBet>,
     bet_id: u64,
-    initial_liq: u64, // Collateral In
+    initial_liq: u64,
     is_dynamic: bool,
     bet_prompt: String,
     expiration: i64,
-    fee_bps: u16,
-    treasury: Pubkey,
 ) -> Result<()> {
+    let config = &ctx.accounts.amm_config;
+    require!(!config.paused, PredictionMarketError::MarketPaused);
+
     require!(
         initial_liq > 0,
         PredictionMarketError::InvalidInitialLiq
@@ -26,11 +27,7 @@ pub fn create_bet(
 
     bet.bet_id = bet_id;
     bet.is_dynamic = is_dynamic;
-    
-    // Calculates L = collateral / pdf(0)
     bet.initial_liq = math::calc_initial_liquidity(initial_liq);
-    
-    // Set Virtual Reserves of YES and NO to collateral initially
     bet.reserves = [initial_liq, initial_liq];
 
     bet.bet_prompt = bet_prompt;
@@ -39,8 +36,10 @@ pub fn create_bet(
     bet.expiration_at = expiration;
     bet.is_initialized = false;
     bet.side_won = None;
-    bet.treasury = treasury;
-    bet.fee_bps = fee_bps;
+
+    // Read fee/treasury from protocol config — not caller inputs
+    bet.treasury = config.treasury;
+    bet.fee_bps = config.fee_bps;
 
     Ok(())
 }
@@ -52,9 +51,15 @@ pub struct CreateBet<'info> {
     pub signer: Signer<'info>,
 
     #[account(
+        seeds = [b"amm_config"],
+        bump = amm_config.bump,
+    )]
+    pub amm_config: Account<'info, AmmConfig>,
+
+    #[account(
         init,
         payer = signer,
-        space = size_of::<Bet>() + 8 + 128, // Extra buffer for string and safety
+        space = size_of::<Bet>() + 8 + 128,
         seeds = [b"bet".as_ref(), bet_id.to_le_bytes().as_ref(), signer.key().as_ref()],
         bump
     )]
