@@ -562,6 +562,7 @@ async function recordContextEvent(
       path.join("events", `${baseName}.screenshot-error.json`),
       { error: String(error) },
     );
+    throw error;
   }
   return detailPath;
 }
@@ -609,7 +610,8 @@ function localScreenshotTargets(): ScreenshotTarget[] {
   const targets: ScreenshotTarget[] = [];
   const hyperscapes =
     optionalEnv("HYPERSCAPES_UI_URL") ?? "http://127.0.0.1:3333/stream.html";
-  const hyperbet = optionalEnv("HYPERBET_UI_URL") ?? "http://127.0.0.1:4179";
+  const hyperbet =
+    optionalEnv("HYPERBET_UI_URL") ?? "http://127.0.0.1:4179/?debug";
   targets.push({ name: "hyperscapes", url: hyperscapes });
   targets.push({ name: "hyperbet", url: hyperbet });
   return targets;
