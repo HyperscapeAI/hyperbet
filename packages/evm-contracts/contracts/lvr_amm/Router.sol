@@ -2,13 +2,15 @@
 pragma solidity ^0.8.13;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
+import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {LvrMarket} from "./LvrMarket.sol";
 import {IMarketBuyCallback} from "./interfaces/IMarketBuyCallback.sol";
 import {IMarketSellCallback} from "./interfaces/IMarketSellCallback.sol";
-import {IMarketRedeemCallback} from "./interfaces/IMarketRedeemCallback.sol";   
+import {IMarketRedeemCallback} from "./interfaces/IMarketRedeemCallback.sol";
 import {IMarketBondCallback} from "./interfaces/IMarketBondCallback.sol";
 
-contract Router is IMarketBuyCallback, IMarketSellCallback, IMarketRedeemCallback, IMarketBondCallback{
+contract Router is AccessControl, ReentrancyGuard, IMarketBuyCallback, IMarketSellCallback, IMarketRedeemCallback, IMarketBondCallback{
     // Enhanced event with full metadata for frontend indexing
     event MarketCreated(
         bytes32 indexed marketId, 
@@ -37,20 +39,38 @@ contract Router is IMarketBuyCallback, IMarketSellCallback, IMarketRedeemCallbac
     mapping(bytes32 marketId => MarketInfo info) public markets;
     address[] public allMarkets; // Array for enumeration
     bytes32[] public allMarketIds; // Corresponding market IDs
+    uint256 public constant MAX_FEE_BPS = 1000; // 10% cap
+
     IERC20 public immutable mUSD; // Collateral Token
     address public treasury;     // Protocol Treasury
     uint256 public feeBps;       // Global Swap Fee Bps
-    
-    constructor(address _mUSD, address _treasury, uint256 _feeBps){
+
+    mapping(address => bool) public allowedMarkets; // Market allowlist for callbacks
+
+    error FeeTooHigh();
+    error MarketNotAllowed();
+    error SlippageExceeded();
+
+    event FeeConfigUpdated(address indexed treasury, uint256 feeBps);
+
+    constructor(address _mUSD, address _treasury, uint256 _feeBps, address admin){
+        require(_feeBps <= MAX_FEE_BPS, "Fee too high");
         mUSD = IERC20(_mUSD);
         treasury = _treasury;
         feeBps = _feeBps;
-    } 
+        _grantRole(DEFAULT_ADMIN_ROLE, admin);
+    }
 
-    function setFeeConfig(address _treasury, uint256 _feeBps) public {
-        // In a real scenario, this would have an onlyOwner/admin modifier
+    modifier onlyAllowedMarket() {
+        if (!allowedMarkets[msg.sender]) revert MarketNotAllowed();
+        _;
+    }
+
+    function setFeeConfig(address _treasury, uint256 _feeBps) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        if (_feeBps > MAX_FEE_BPS) revert FeeTooHigh();
         treasury = _treasury;
         feeBps = _feeBps;
+        emit FeeConfigUpdated(_treasury, _feeBps);
     }
     function create(
         string memory title, 
@@ -65,7 +85,8 @@ contract Router is IMarketBuyCallback, IMarketSellCallback, IMarketRedeemCallbac
         require(!markets[marketId].initialized, "Market Already Exists");
 
         LvrMarket market = new LvrMarket(address(this), isDynamic, duration, address(mUSD), msg.sender, treasury, feeBps);
-        
+        allowedMarkets[address(market)] = true;
+
         // Transfer USD token to market contract
         mUSD.transferFrom(msg.sender, address(market), collateralIn);
         uint256 liquidity = market.initializeLiquidity(collateralIn);
@@ -128,28 +149,28 @@ contract Router is IMarketBuyCallback, IMarketSellCallback, IMarketRedeemCallbac
         return allMarkets;
     }
 
-    function buyYes(address market, uint256 collateralIn) public {
-        // Takes mUSD from user
-        // Mints Yes + No token
-        // Sells No token to AMM
-        // Sends corresponding Yes token to User
-
-        LvrMarket(market).buy(true, collateralIn, msg.sender);
+    function buyYes(address market, uint256 collateralIn, uint256 minAmountOut) external nonReentrant {
+        if (!allowedMarkets[market]) revert MarketNotAllowed();
+        uint256 amountOut = LvrMarket(market).buy(true, collateralIn, msg.sender);
+        if (amountOut < minAmountOut) revert SlippageExceeded();
     }
 
-    function buyNo(address market, uint256 collateralIn) public {
-        LvrMarket(market).buy(false, collateralIn, msg.sender);
+    function buyNo(address market, uint256 collateralIn, uint256 minAmountOut) external nonReentrant {
+        if (!allowedMarkets[market]) revert MarketNotAllowed();
+        uint256 amountOut = LvrMarket(market).buy(false, collateralIn, msg.sender);
+        if (amountOut < minAmountOut) revert SlippageExceeded();
     }
 
-    function sellYes(address market, uint256 tokenIn) public {
-        // Takes yesToken from the user
-        // Sells Yes token to AMM
-        // Sends corresponding No token to User
-        LvrMarket(market).sell(true, tokenIn, msg.sender);
+    function sellYes(address market, uint256 tokenIn, uint256 minAmountOut) external nonReentrant {
+        if (!allowedMarkets[market]) revert MarketNotAllowed();
+        uint256 amountOut = LvrMarket(market).sell(true, tokenIn, msg.sender);
+        if (amountOut < minAmountOut) revert SlippageExceeded();
     }
 
-    function sellNo(address market, uint256 tokenIn) public {
-        LvrMarket(market).sell(false, tokenIn, msg.sender);
+    function sellNo(address market, uint256 tokenIn, uint256 minAmountOut) external nonReentrant {
+        if (!allowedMarkets[market]) revert MarketNotAllowed();
+        uint256 amountOut = LvrMarket(market).sell(false, tokenIn, msg.sender);
+        if (amountOut < minAmountOut) revert SlippageExceeded();
     }
 
     function proposerOutcome(address market, uint256 _outcome) public {
@@ -168,31 +189,26 @@ contract Router is IMarketBuyCallback, IMarketSellCallback, IMarketRedeemCallbac
         LvrMarket(market).redeemCollateralWithToken(amountYes, amountNo, msg.sender);
     }
 
-    // Callbacks
+    // Callbacks — only callable by allowlisted markets
 
-    function marketBuyCallback(uint256 collateralIn, bytes calldata data) external override {
+    function marketBuyCallback(uint256 collateralIn, bytes calldata data) external override onlyAllowedMarket {
         (address collateral, address buyer) = abi.decode(data, (address, address));
-
-        // msg.sender is the Market Contract which calls the callback
         IERC20(collateral).transferFrom(buyer, msg.sender, collateralIn);
     }
 
-    function marketSellCallback(uint256 tokenIn, bytes calldata data) external override {
+    function marketSellCallback(uint256 tokenIn, bytes calldata data) external override onlyAllowedMarket {
         (address tokenToSell, address seller) = abi.decode(data, (address, address));
-
         IERC20(tokenToSell).transferFrom(seller, msg.sender, tokenIn);
     }
 
-    function marketRedeemCallback(uint256 amountYes, uint256 amountNo, bytes calldata data) external override {
+    function marketRedeemCallback(uint256 amountYes, uint256 amountNo, bytes calldata data) external override onlyAllowedMarket {
         (address yesToken, address noToken, address redeemer) = abi.decode(data, (address, address, address));
-
         IERC20(yesToken).transferFrom(redeemer, msg.sender, amountYes);
         IERC20(noToken).transferFrom(redeemer, msg.sender, amountNo);
     }
 
-    function marketBondCallback(uint256 bond, bytes calldata data) external override {
+    function marketBondCallback(uint256 bond, bytes calldata data) external override onlyAllowedMarket {
         (address collateral, address proposer) = abi.decode(data, (address, address));
-
         IERC20(collateral).transferFrom(proposer, msg.sender, bond);
     }
 }

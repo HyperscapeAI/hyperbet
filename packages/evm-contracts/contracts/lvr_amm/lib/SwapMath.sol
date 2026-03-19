@@ -7,9 +7,12 @@ import {FixedPointMathLib} from "lib/solady/src/utils/FixedPointMathLib.sol";
 
 library SwapMath {
     int256 constant APPROX = 1e15;
-    int256 constant MAX_ITERS = 50; // Increased from 10 for better convergence
-    int256 constant MIN_RESERVE = 1e15; // Minimum reserve to prevent edge case issues
-    int256 constant MIN_DERIVATIVE = 1e14; // Floor for derivative to prevent div by near-zero
+    int256 constant MAX_ITERS = 50;
+    int256 constant MIN_RESERVE = 1e15;
+    int256 constant MIN_DERIVATIVE = 1e14;
+    int256 constant MAX_Z_SCORE = 38e18; // |z| > 38 WAD → beyond f64 precision, clamp to boundary
+
+    error ZScoreOutOfBounds();
 
     function ammFunc(int256 x, int256 y, int256 l) internal pure returns(int256) {
         int256 z = FixedPointMathLib.sDivWad((y-x), l);
@@ -65,9 +68,15 @@ library SwapMath {
 // f(t) = (a + t) * Gaussian.cdf((a + t) / liquidity) + liquidity * Gaussian.pdf((a + t) / liquidity) - y
 
     function getSwapAmount(bool yesToNo, int256 currentReserveYes, int256 currentReserveNo, uint256 initialLiquidity, int256 amountIn) external pure returns(uint256){
-        // Apply minimum reserve floor to inputs
         int256 reserveYes = currentReserveYes < MIN_RESERVE ? MIN_RESERVE : currentReserveYes;
         int256 reserveNo = currentReserveNo < MIN_RESERVE ? MIN_RESERVE : currentReserveNo;
+
+        // Validate z-score at entry: if reserves are too divergent relative to liquidity, reject
+        int256 l = int256(initialLiquidity);
+        if (l > 0) {
+            int256 z = FixedPointMathLib.sDivWad((reserveNo - reserveYes), l);
+            if (abs(z) > MAX_Z_SCORE) revert ZScoreOutOfBounds();
+        }
         
         if(yesToNo){
             return uint256(abs(reserveNo - getNewReserve(reserveNo, reserveYes + amountIn, int256(initialLiquidity))));
