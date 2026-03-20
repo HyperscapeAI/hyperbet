@@ -95,6 +95,8 @@ contract LvrMarket is ReentrancyGuard {
         _;
     }
 
+    // Trusted router callback transfers the proposer bond into this market before state advances.
+    // slither-disable-next-line reentrancy-balance,reentrancy-no-eth,reentrancy-benign
     function proposeOutcome(uint256 outcomeValue, address proposerAddress) external isRouter nonReentrant {
         require(state == MarketState.OPEN, "Market Not Open");
         require(block.timestamp >= deadline, "Market not finished");
@@ -211,6 +213,8 @@ contract LvrMarket is ReentrancyGuard {
         return liquidity;
     }
 
+    // Trusted router callback settles collateral into the market; nonReentrant + balance delta gate reentry.
+    // slither-disable-next-line reentrancy-balance
     function buy(bool isBuyYes, uint256 amountIn, address buyer) public isRouter nonReentrant returns (uint256) {
         require(state == MarketState.OPEN, "Market Not Open");
 
@@ -245,6 +249,8 @@ contract LvrMarket is ReentrancyGuard {
         return totalOut;
     }
 
+    // Trusted router callback settles input shares into the market; nonReentrant + balance delta gate reentry.
+    // slither-disable-next-line reentrancy-balance
     function sell(bool isSellYes, uint256 amountIn, address seller) public isRouter nonReentrant returns (uint256) {
         require(state == MarketState.OPEN, "Market Not Open");
 
