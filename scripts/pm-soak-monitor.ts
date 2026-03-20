@@ -1,7 +1,6 @@
-import { execFile } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { promisify } from "node:util";
+import { pathToFileURL } from "node:url";
 
 import BN from "../packages/hyperbet-solana/keeper/node_modules/bn.js/lib/bn.js";
 import * as solanaWeb3 from "../packages/hyperbet-solana/keeper/node_modules/@solana/web3.js/lib/index.esm.js";
@@ -27,8 +26,6 @@ import {
 import { GOLD_CLOB_ABI } from "../packages/hyperbet-ui/src/lib/goldClobAbi";
 import { resolveArtifactRoot, rootDir, writeJsonArtifact } from "./ci-lib";
 
-const execFileAsync = promisify(execFile);
-const BUN_BIN = process.env.BUN_BIN?.trim() || "bun";
 const { PublicKey, SystemProgram } = solanaWeb3;
 const { createPublicClient, createWalletClient, http } = viem;
 const { privateKeyToAccount } = viemAccounts;
@@ -145,8 +142,53 @@ type SyncStatusResponse = {
   lastSeenSeq?: number | null;
   lastAppliedSeq?: number | null;
   applyLagMs?: number | null;
+  sourceEventAgeMs?: number | null;
   replayMode?: string | null;
   degradedReason?: string | null;
+  rendererHealth?: RendererHealth | null;
+  rendererHealthAgeMs?: number | null;
+  lastEventReceivedAt?: number | null;
+  lastAppliedAt?: number | null;
+  connectedAt?: number | null;
+  enabled?: boolean | null;
+};
+
+type RendererHealth = {
+  ready?: boolean | null;
+  degradedReason?: string | null;
+  updatedAt?: number | null;
+  phase?: string | null;
+};
+
+type BetSyncSourceEvent = {
+  sourceEpoch?: number | null;
+  seq?: number | null;
+  duelId?: string | null;
+  duelKey?: string | null;
+  phase?: string | null;
+  rendererHealth?: RendererHealth | null;
+};
+
+type BetSyncBootstrapStateResponse = {
+  sourceEpoch?: number | null;
+  seq?: number | null;
+  latestSeq?: number | null;
+  oldestReplaySeq?: number | null;
+  duelId?: string | null;
+  duelKey?: string | null;
+  phase?: string | null;
+  rendererHealth?: RendererHealth | null;
+  latestEvent?: BetSyncSourceEvent | null;
+  replay?: {
+    sourceEpoch?: number | null;
+    latestSeq?: number | null;
+    oldestSeq?: number | null;
+  } | null;
+};
+
+type SourceRtmpStatusResponse = {
+  updatedAt?: number | null;
+  rendererHealth?: RendererHealth | null;
 };
 
 type KeeperStatusResponse = {
@@ -192,6 +234,80 @@ type BotHealthResponse = {
 type ScreenshotTarget = {
   name: string;
   url: string;
+  selector?: string;
+  fullPage?: boolean;
+  pageKey?: string;
+};
+
+type SelectorClip = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
+
+type EmbeddedFrameMeta = {
+  href: string;
+  title: string;
+  bodyPreview: string;
+  streamReady: JsonValue;
+  rendererHealth: JsonValue;
+  canvasCount: number;
+};
+
+type ScreenshotCaptureResult = {
+  target: string;
+  filePath: string;
+  meta: Record<string, JsonValue>;
+};
+
+type ScreenshotRuntimeModule = {
+  chromium: {
+    launch(options?: Record<string, unknown>): Promise<{
+      newContext(options?: Record<string, unknown>): Promise<{
+        newPage(): Promise<{
+          goto(
+            url: string,
+            options?: Record<string, unknown>,
+          ): Promise<unknown>;
+          url(): string;
+          waitForLoadState(
+            state?: string,
+            options?: Record<string, unknown>,
+          ): Promise<unknown>;
+          waitForTimeout(timeout: number): Promise<unknown>;
+          screenshot(options: Record<string, unknown>): Promise<unknown>;
+          evaluate<T>(callback: () => T): Promise<T>;
+          isClosed?(): boolean;
+          close(options?: Record<string, unknown>): Promise<unknown>;
+        }>;
+        close(options?: Record<string, unknown>): Promise<unknown>;
+      }>;
+      close(options?: Record<string, unknown>): Promise<unknown>;
+    }>;
+  };
+  devices?: Record<string, Record<string, unknown>>;
+};
+
+type ScreenshotSession = {
+  browser: Awaited<ReturnType<ScreenshotRuntimeModule["chromium"]["launch"]>>;
+  context: Awaited<
+    ReturnType<
+      Awaited<ReturnType<ScreenshotRuntimeModule["chromium"]["launch"]>>["newContext"]
+    >
+  >;
+  pages: Map<
+    string,
+    Awaited<
+      ReturnType<
+        Awaited<
+          ReturnType<
+            Awaited<ReturnType<ScreenshotRuntimeModule["chromium"]["launch"]>>["newContext"]
+          >
+        >["newPage"]
+      >
+    >
+  >;
 };
 
 type Incident = {
@@ -253,6 +369,8 @@ type ChainSnapshot = {
   active: PredictionMarketsResponse | null;
   overview: PredictionMarketsOverviewResponse | null;
   syncStatus: SyncStatusResponse | null;
+  sourceBetSyncState: BetSyncBootstrapStateResponse | null;
+  sourceRtmpStatus: SourceRtmpStatusResponse | null;
   botHealth: BotHealthResponse | null;
   streamState: StreamState | null;
   fetchedAtMs: number;
@@ -490,11 +608,14 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function requestJson<T>(url: string): Promise<T> {
+async function requestJson<T>(url: string, init: RequestInit = {}): Promise<T> {
+  const headers = new Headers(init.headers);
+  if (!headers.has("accept")) {
+    headers.set("accept", "application/json");
+  }
   const response = await fetch(url, {
-    headers: {
-      accept: "application/json",
-    },
+    ...init,
+    headers,
   });
   const raw = await response.text();
   if (!response.ok) {
@@ -503,9 +624,12 @@ async function requestJson<T>(url: string): Promise<T> {
   return JSON.parse(raw) as T;
 }
 
-async function requestJsonOrNull<T>(url: string): Promise<T | null> {
+async function requestJsonOrNull<T>(
+  url: string,
+  init: RequestInit = {},
+): Promise<T | null> {
   try {
-    return await requestJson<T>(url);
+    return await requestJson<T>(url, init);
   } catch {
     return null;
   }
@@ -548,6 +672,14 @@ function currentStreamDuelKey(streamState: StreamState | null): string | null {
   );
 }
 
+function currentSourceBetSyncDuelKey(
+  sourceBetSyncState: BetSyncBootstrapStateResponse | null,
+): string | null {
+  return normalizeDuelKey(
+    sourceBetSyncState?.latestEvent?.duelKey ?? sourceBetSyncState?.duelKey ?? null,
+  );
+}
+
 function currentActiveDuelKey(
   active: PredictionMarketsResponse | null,
 ): string | null {
@@ -564,6 +696,52 @@ function currentOverviewRecentSettlementDuelKey(
   overview: PredictionMarketsOverviewResponse | null,
 ): string | null {
   return normalizeDuelKey(overview?.recentSettlement?.duel?.duelKey ?? null);
+}
+
+function currentRendererHealth(
+  snapshot: ChainSnapshot | null,
+): RendererHealth | null {
+  return (
+    snapshot?.sourceBetSyncState?.latestEvent?.rendererHealth ??
+    snapshot?.sourceBetSyncState?.rendererHealth ??
+    snapshot?.syncStatus?.rendererHealth ??
+    snapshot?.sourceRtmpStatus?.rendererHealth ??
+    null
+  );
+}
+
+function currentSourceEpoch(snapshot: ChainSnapshot | null): number | null {
+  return (
+    snapshot?.sourceBetSyncState?.latestEvent?.sourceEpoch ??
+    snapshot?.sourceBetSyncState?.sourceEpoch ??
+    snapshot?.syncStatus?.sourceEpoch ??
+    null
+  );
+}
+
+function currentSourceSeq(snapshot: ChainSnapshot | null): number | null {
+  return (
+    snapshot?.sourceBetSyncState?.latestEvent?.seq ??
+    snapshot?.sourceBetSyncState?.seq ??
+    snapshot?.sourceBetSyncState?.latestSeq ??
+    snapshot?.syncStatus?.sourceLatestSeq ??
+    null
+  );
+}
+
+function currentSourceBetSyncPhase(
+  sourceBetSyncState: BetSyncBootstrapStateResponse | null,
+): string | null {
+  const phase =
+    sourceBetSyncState?.latestEvent?.phase ?? sourceBetSyncState?.phase ?? null;
+  return typeof phase === "string" && phase.trim().length > 0 ? phase : null;
+}
+
+function buildAuthHeadersFromEnv(token: string | null): HeadersInit | undefined {
+  if (!token) return undefined;
+  return {
+    authorization: `Bearer ${token}`,
+  };
 }
 
 function currentPhase(
@@ -610,30 +788,249 @@ function hasAnyQuote(health: KeeperMarketHealth | null | undefined): boolean {
   );
 }
 
-async function takeScreenshot(url: string, filePath: string): Promise<void> {
-  await execFileAsync(
-    BUN_BIN,
-    [
-      "x",
-      "playwright",
-      "screenshot",
-      "--browser",
-      "chromium",
-      "--device",
-      "Desktop Chrome",
-      "--full-page",
-      "--timeout",
-      "30000",
-      "--wait-for-timeout",
-      "1500",
-      url,
-      filePath,
-    ],
-    {
-      cwd: rootDir,
-      env: process.env,
-    },
+let screenshotRuntimePromise: Promise<ScreenshotRuntimeModule> | null = null;
+let screenshotSessionPromise: Promise<ScreenshotSession> | null = null;
+
+function resolvePlaywrightModuleUrl(): string {
+  const bunModulesDir = path.join(rootDir, "node_modules", ".bun");
+  const playwrightEntry = readdirSync(bunModulesDir).find((entry) =>
+    entry.startsWith("playwright@"),
   );
+  if (!playwrightEntry) {
+    throw new Error(
+      `could not locate playwright runtime under ${bunModulesDir}`,
+    );
+  }
+  return pathToFileURL(
+    path.join(
+      bunModulesDir,
+      playwrightEntry,
+      "node_modules",
+      "playwright",
+      "index.mjs",
+    ),
+  ).href;
+}
+
+async function loadScreenshotRuntime(): Promise<ScreenshotRuntimeModule> {
+  screenshotRuntimePromise ??= import(
+    resolvePlaywrightModuleUrl()
+  ) as Promise<ScreenshotRuntimeModule>;
+  return screenshotRuntimePromise;
+}
+
+async function getScreenshotSession(): Promise<ScreenshotSession> {
+  screenshotSessionPromise ??= (async () => {
+    const runtime = await loadScreenshotRuntime();
+    const device = runtime.devices?.["Desktop Chrome"] ?? {};
+    const viewportWidth = Number.parseInt(
+      process.env.PM_SOAK_SCREENSHOT_WIDTH ?? "",
+      10,
+    );
+    const viewportHeight = Number.parseInt(
+      process.env.PM_SOAK_SCREENSHOT_HEIGHT ?? "",
+      10,
+    );
+    const browser = await runtime.chromium.launch({
+      headless: false,
+    });
+    const context = await browser.newContext({
+      ...device,
+      viewport:
+        Number.isFinite(viewportWidth) &&
+        viewportWidth > 0 &&
+        Number.isFinite(viewportHeight) &&
+        viewportHeight > 0
+          ? {
+              width: viewportWidth,
+              height: viewportHeight,
+            }
+          : ((device.viewport as { width: number; height: number } | undefined) ??
+            {
+              width: 1920,
+              height: 1280,
+            }),
+      ignoreHTTPSErrors: true,
+    });
+    return {
+      browser,
+      context,
+      pages: new Map(),
+    };
+  })();
+  return screenshotSessionPromise;
+}
+
+async function getScreenshotPage(
+  target: ScreenshotTarget,
+): Promise<ScreenshotSession["pages"] extends Map<string, infer T> ? T : never> {
+  const session = await getScreenshotSession();
+  const pageKey = target.pageKey ?? target.name;
+  const existing = session.pages.get(pageKey);
+  if (existing && existing.isClosed?.() !== true) {
+    if (existing.url() !== target.url) {
+      await existing.goto(target.url, {
+        waitUntil: "domcontentloaded",
+        timeout: 30_000,
+      });
+      await existing.waitForTimeout(1_500);
+    }
+    return existing;
+  }
+
+  const page = await session.context.newPage();
+  await page.goto(target.url, {
+    waitUntil: "domcontentloaded",
+    timeout: 30_000,
+  });
+  await page.waitForTimeout(1_500);
+  session.pages.set(pageKey, page);
+  return page;
+}
+
+async function takeScreenshot(
+  target: ScreenshotTarget,
+  filePath: string,
+): Promise<ScreenshotCaptureResult> {
+  const page = await getScreenshotPage(target);
+  await page.bringToFront?.().catch(() => undefined);
+  await page.waitForLoadState("domcontentloaded", { timeout: 5_000 }).catch(
+    () => undefined,
+  );
+  await page.waitForTimeout(1_000);
+
+  let selectorClip: SelectorClip | null = null;
+  let embeddedFrameMeta: EmbeddedFrameMeta | null = null;
+
+  if (target.selector) {
+    const selectorState = (await page.evaluate((selector) => {
+      const element = document.querySelector(selector);
+      if (!element) {
+        return null;
+      }
+      const rect = element.getBoundingClientRect();
+      const clip =
+        rect.width > 0 && rect.height > 0
+          ? {
+              x: Math.max(0, Math.floor(rect.left)),
+              y: Math.max(0, Math.floor(rect.top)),
+              width: Math.max(1, Math.ceil(rect.width)),
+              height: Math.max(1, Math.ceil(rect.height)),
+            }
+          : null;
+      if (!(element instanceof HTMLIFrameElement)) {
+        return {
+          clip,
+          iframe: null,
+        };
+      }
+      return {
+        clip,
+        iframe: {
+          src: element.getAttribute("src") ?? "",
+          title: element.getAttribute("title") ?? "",
+        },
+      };
+    }, target.selector)) as
+      | {
+          clip: SelectorClip | null;
+          iframe: { src: string; title: string } | null;
+        }
+      | null;
+
+    selectorClip = selectorState?.clip ?? null;
+    if (selectorClip) {
+      await page.screenshot({
+        path: filePath,
+        clip: selectorClip,
+      });
+    } else {
+      await page.screenshot({
+        path: filePath,
+        fullPage: target.fullPage ?? true,
+      });
+    }
+
+    if (selectorState?.iframe?.src) {
+      const embeddedFrame = page
+        .frames()
+        .find((frame) => frame.url() === selectorState.iframe?.src);
+      if (embeddedFrame) {
+        embeddedFrameMeta = (await embeddedFrame.evaluate(() => ({
+          href: location.href,
+          title: document.title,
+          bodyPreview: (document.body?.innerText ?? "").slice(0, 2_000),
+          streamReady:
+            (window as typeof window & { __HYPERSCAPE_STREAM_READY__?: unknown })
+              .__HYPERSCAPE_STREAM_READY__ ?? null,
+          rendererHealth:
+            (
+              window as typeof window & {
+                __HYPERSCAPE_STREAM_RENDERER_HEALTH__?: unknown;
+              }
+            ).__HYPERSCAPE_STREAM_RENDERER_HEALTH__ ?? null,
+          canvasCount: document.querySelectorAll("canvas").length,
+        }))) as EmbeddedFrameMeta;
+      }
+    }
+  } else {
+    await page.screenshot({
+      path: filePath,
+      fullPage: target.fullPage ?? true,
+    });
+  }
+
+  const meta = (await page.evaluate(() => {
+    const bodyPreview = (document.body?.innerText ?? "").slice(0, 2_000);
+    const iframeSrcs = Array.from(document.querySelectorAll("iframe"))
+      .map((frame) => frame.getAttribute("src") ?? "")
+      .slice(0, 8);
+    const streamReady =
+      (window as typeof window & { __HYPERSCAPE_STREAM_READY__?: unknown })
+        .__HYPERSCAPE_STREAM_READY__ ?? null;
+    const rendererHealth = (
+      window as typeof window & {
+        __HYPERSCAPE_STREAM_RENDERER_HEALTH__?: unknown;
+      }
+    ).__HYPERSCAPE_STREAM_RENDERER_HEALTH__ ?? null;
+    return {
+      href: location.href,
+      title: document.title,
+      bodyPreview,
+      iframeSrcs,
+      streamReady,
+      rendererHealth,
+    };
+  })) as Record<string, JsonValue>;
+
+  meta.selectorClip = selectorClip;
+  meta.embeddedFrame = embeddedFrameMeta;
+
+  return {
+    target: target.name,
+    filePath,
+    meta,
+  };
+}
+
+async function closeScreenshotSession(): Promise<void> {
+  if (!screenshotSessionPromise) {
+    return;
+  }
+  const session = await screenshotSessionPromise.catch(() => null);
+  screenshotSessionPromise = null;
+  screenshotRuntimePromise = null;
+  if (!session) {
+    return;
+  }
+  for (const page of session.pages.values()) {
+    if (page.isClosed?.() === true) {
+      continue;
+    }
+    await page.close({ runBeforeUnload: true }).catch(() => undefined);
+  }
+  await session.context.close().catch(() => undefined);
+  await session.browser.close().catch(() => undefined);
 }
 
 type LocalCapturePayload = {
@@ -641,6 +1038,9 @@ type LocalCapturePayload = {
   sourceDuelKey: string | null;
   liveDuelKey: string | null;
   recentSettlementDuelKey: string | null;
+  sourceEpoch: number | null;
+  sourceSeq: number | null;
+  rendererHealth: RendererHealth | null;
   aligned: boolean;
   snapshot: ChainSnapshot | null;
   meta?: Record<string, JsonValue>;
@@ -651,7 +1051,8 @@ function buildLocalCapturePayload(
   meta: Record<string, JsonValue> = {},
 ): LocalCapturePayload {
   const sourceDuelKey = snapshot
-    ? currentStreamDuelKey(snapshot.streamState)
+    ? currentSourceBetSyncDuelKey(snapshot.sourceBetSyncState) ??
+      currentStreamDuelKey(snapshot.streamState)
     : null;
   const liveDuelKey = snapshot
     ? currentOverviewLiveDuelKey(snapshot.overview) ??
@@ -665,6 +1066,9 @@ function buildLocalCapturePayload(
     sourceDuelKey,
     liveDuelKey,
     recentSettlementDuelKey,
+    sourceEpoch: currentSourceEpoch(snapshot),
+    sourceSeq: currentSourceSeq(snapshot),
+    rendererHealth: currentRendererHealth(snapshot),
     aligned: duelKeysAligned(sourceDuelKey, liveDuelKey),
     snapshot,
     meta,
@@ -676,18 +1080,17 @@ async function captureScreenshots(
   label: string,
   targets: ScreenshotTarget[],
   screenshotsEnabled: boolean,
-): Promise<string[]> {
+): Promise<ScreenshotCaptureResult[]> {
   if (!screenshotsEnabled || targets.length === 0) {
     return [];
   }
 
-  const written: string[] = [];
+  const written: ScreenshotCaptureResult[] = [];
   const screenshotDir = path.join(artifactRoot, "screenshots");
   mkdirSync(screenshotDir, { recursive: true });
   for (const target of targets) {
     const filePath = path.join(screenshotDir, `${label}.${target.name}.png`);
-    await takeScreenshot(target.url, filePath);
-    written.push(filePath);
+    written.push(await takeScreenshot(target, filePath));
   }
   return written;
 }
@@ -706,17 +1109,22 @@ async function recordContextEvent(
     payload,
   );
   try {
-    const files = await captureScreenshots(
+    const captures = await captureScreenshots(
       context.artifactRoot,
       baseName,
       targets,
       context.screenshotsEnabled,
     );
-    if (files.length > 0) {
+    if (captures.length > 0) {
       writeJsonArtifact(
         context.artifactRoot,
         path.join("events", `${baseName}.screenshots.json`),
-        files,
+        captures.map((capture) => capture.filePath),
+      );
+      writeJsonArtifact(
+        context.artifactRoot,
+        path.join("events", `${baseName}.screenshots.meta.json`),
+        captures,
       );
     }
   } catch (error) {
@@ -778,6 +1186,13 @@ function localScreenshotTargets(): ScreenshotTarget[] {
     optionalEnv("HYPERBET_UI_URL") ?? "http://127.0.0.1:4179/?debug";
   targets.push({ name: "hyperscapes", url: hyperscapes });
   targets.push({ name: "hyperbet", url: hyperbet });
+  targets.push({
+    name: "hyperbet-stream",
+    url: hyperbet,
+    selector: 'iframe[title="Live Stream"]',
+    fullPage: false,
+    pageKey: "hyperbet",
+  });
   return targets;
 }
 
@@ -882,16 +1297,27 @@ async function fetchLocalSnapshot(): Promise<{
   active: PredictionMarketsResponse | null;
   overview: PredictionMarketsOverviewResponse | null;
   syncStatus: SyncStatusResponse | null;
+  sourceBetSyncState: BetSyncBootstrapStateResponse | null;
+  sourceRtmpStatus: SourceRtmpStatusResponse | null;
   status: KeeperStatusResponse | null;
   botHealth: BotHealthResponse | null;
   buildInfo: BuildInfo | null;
   fetchedAtMs: number;
 }> {
   const fetchedAtMs = Date.now();
+  const sourceBetSyncToken =
+    optionalEnv("SOURCE_BET_SYNC_BEARER_TOKEN") ??
+    optionalEnv("STREAMING_VIEWER_ACCESS_TOKEN");
   const sourceStreamStateUrl =
     optionalEnv("SOURCE_STREAM_STATE_URL") ??
     optionalEnv("STREAM_STATE_URL") ??
     "http://127.0.0.1:5555/api/streaming/state";
+  const sourceBetSyncStateUrl =
+    optionalEnv("SOURCE_BET_SYNC_STATE_URL") ??
+    "http://127.0.0.1:5555/api/internal/bet-sync/state";
+  const sourceRtmpStatusUrl =
+    optionalEnv("SOURCE_RTMP_STATUS_URL") ??
+    "http://127.0.0.1:5555/api/streaming/rtmp/status";
   const activeMarketsUrl =
     optionalEnv("ACTIVE_MARKETS_URL") ??
     "http://127.0.0.1:8080/api/arena/prediction-markets/active";
@@ -907,9 +1333,26 @@ async function fetchLocalSnapshot(): Promise<{
     optionalEnv("SYNC_STATUS_URL") ?? "http://127.0.0.1:8080/api/sync/status";
   const buildInfoUrl = optionalEnv("HYPERBET_BUILD_INFO_URL");
 
-  const [streamState, active, overview, syncStatus, status, botHealth, buildInfo] =
+  const [
+    streamState,
+    sourceBetSyncState,
+    sourceRtmpStatus,
+    active,
+    overview,
+    syncStatus,
+    status,
+    botHealth,
+    buildInfo,
+  ] =
     await Promise.all([
       requestJson<StreamState>(sourceStreamStateUrl),
+      requestJsonOrNull<BetSyncBootstrapStateResponse>(
+        sourceBetSyncStateUrl,
+        {
+          headers: buildAuthHeadersFromEnv(sourceBetSyncToken),
+        },
+      ),
+      requestJsonOrNull<SourceRtmpStatusResponse>(sourceRtmpStatusUrl),
       requestJson<PredictionMarketsResponse>(activeMarketsUrl),
       requestJsonOrNull<PredictionMarketsOverviewResponse>(overviewMarketsUrl),
       requestJsonOrNull<SyncStatusResponse>(syncStatusUrl),
@@ -923,6 +1366,8 @@ async function fetchLocalSnapshot(): Promise<{
   return {
     chain: "local",
     streamState,
+    sourceBetSyncState,
+    sourceRtmpStatus,
     active,
     overview,
     syncStatus,
@@ -972,6 +1417,8 @@ async function fetchStagedChainSnapshot(
     active,
     overview,
     syncStatus,
+    sourceBetSyncState: null,
+    sourceRtmpStatus: null,
     botHealth,
     streamState,
     fetchedAtMs,
@@ -1006,6 +1453,8 @@ async function runLocalSoak(args: MonitorArgs): Promise<void> {
   let lastSnapshot: ChainSnapshot | null = null;
   let driftConsecutivePolls = 0;
   let driftHandled = false;
+  let rendererDegradedPolls = 0;
+  let syncDegradedPolls = 0;
 
   await recordContextEvent(
     context,
@@ -1025,13 +1474,16 @@ async function runLocalSoak(args: MonitorArgs): Promise<void> {
     try {
       const snapshot = await fetchLocalSnapshot();
       lastSnapshot = snapshot;
-      const sourceDuelKey = currentStreamDuelKey(snapshot.streamState);
+      const sourceDuelKey =
+        currentSourceBetSyncDuelKey(snapshot.sourceBetSyncState) ??
+        currentStreamDuelKey(snapshot.streamState);
       const liveDuelKey =
         currentOverviewLiveDuelKey(snapshot.overview) ??
         currentActiveDuelKey(snapshot.active);
       const recentSettlementDuelKey = currentOverviewRecentSettlementDuelKey(
         snapshot.overview,
       );
+      const rendererHealth = currentRendererHealth(snapshot);
       const aligned = duelKeysAligned(sourceDuelKey, liveDuelKey);
       context.streamDuelKey = sourceDuelKey;
       context.activeDuelKey = liveDuelKey;
@@ -1045,6 +1497,9 @@ async function runLocalSoak(args: MonitorArgs): Promise<void> {
           sourceDuelKey,
           liveDuelKey,
           recentSettlementDuelKey,
+          sourceEpoch: currentSourceEpoch(snapshot),
+          sourceSeq: currentSourceSeq(snapshot),
+          rendererHealth,
           aligned,
         },
       );
@@ -1054,9 +1509,71 @@ async function runLocalSoak(args: MonitorArgs): Promise<void> {
         liveDuelKey ??
         sourceDuelKey ??
         currentDuelKey(snapshot.streamState, snapshot.active);
-      const phase = currentPhase(snapshot.streamState, snapshot.active);
+      const phase =
+        currentSourceBetSyncPhase(snapshot.sourceBetSyncState) ??
+        currentPhase(snapshot.streamState, snapshot.active);
       const marketCount = snapshot.active?.markets?.length ?? 0;
       const driftRelevant = marketCount > 0 || phase !== "IDLE";
+      const rendererSignoffRelevant = phase !== "IDLE" || marketCount > 0;
+      const syncDegradedReason =
+        snapshot.syncStatus?.degradedReason &&
+        snapshot.syncStatus.degradedReason !== rendererHealth?.degradedReason
+          ? snapshot.syncStatus.degradedReason
+          : null;
+
+      if (rendererSignoffRelevant && rendererHealth?.ready === false) {
+        rendererDegradedPolls += 1;
+        if (rendererDegradedPolls >= 2) {
+          currentCycle?.incidents.push("renderer_unhealthy");
+          await recordIncident(
+            context,
+            "local",
+            "renderer_unhealthy",
+            `standalone source renderer is degraded: ${rendererHealth.degradedReason || "unknown"}`,
+            {
+              sourceDuelKey,
+              liveDuelKey,
+              recentSettlementDuelKey,
+              sourceEpoch: currentSourceEpoch(snapshot),
+              sourceSeq: currentSourceSeq(snapshot),
+              rendererHealth,
+              syncStatus: snapshot.syncStatus,
+            },
+            context.screenshotTargets,
+          );
+          throw new Error(
+            `local renderer unhealthy during active duel: ${rendererHealth.degradedReason || "unknown"}`,
+          );
+        }
+      } else {
+        rendererDegradedPolls = 0;
+      }
+
+      if (rendererSignoffRelevant && syncDegradedReason) {
+        syncDegradedPolls += 1;
+        if (syncDegradedPolls >= 2) {
+          currentCycle?.incidents.push("sync_status_degraded");
+          await recordIncident(
+            context,
+            "local",
+            "sync_status_degraded",
+            `keeper sync status is degraded: ${syncDegradedReason}`,
+            {
+              sourceDuelKey,
+              liveDuelKey,
+              recentSettlementDuelKey,
+              sourceEpoch: currentSourceEpoch(snapshot),
+              sourceSeq: currentSourceSeq(snapshot),
+              rendererHealth,
+              syncStatus: snapshot.syncStatus,
+            },
+            context.screenshotTargets,
+          );
+          throw new Error(`local sync status degraded: ${syncDegradedReason}`);
+        }
+      } else {
+        syncDegradedPolls = 0;
+      }
 
       if (phase === "IDLE") {
         idlePolls += 1;
@@ -2535,7 +3052,14 @@ async function main(): Promise<void> {
   await runStagedSoak(args);
 }
 
-main().catch((error) => {
-  console.error(`[pm-soak] failed: ${String(error)}`);
-  process.exit(1);
-});
+main()
+  .catch((error) => {
+    console.error(`[pm-soak] failed: ${String(error)}`);
+    process.exitCode = 1;
+  })
+  .finally(async () => {
+    await closeScreenshotSession().catch(() => undefined);
+    if ((process.exitCode ?? 0) !== 0) {
+      process.exit(process.exitCode ?? 1);
+    }
+  });
