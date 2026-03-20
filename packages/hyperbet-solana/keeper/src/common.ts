@@ -187,6 +187,11 @@ export const GOLD_PERPS_MARKET_PROGRAM_ID = resolveConfiguredProgramId(
   goldPerpsMarketIdl,
   solanaDeployment.goldPerpsMarketProgramId,
 );
+export const GOLD_AMM_MARKET_PROGRAM_ID = new PublicKey(
+  process.env.GOLD_AMM_MARKET_PROGRAM_ID ??
+    solanaDeployment.goldAmmMarketProgramId ??
+    "Af4LMYfaBtcFFM6dBjwLYH6QJLMqEwneQ8VHfn2z7NY5",
+);
 
 /** @deprecated Binary market is no longer deployed. Retained for backward compat. */
 export const GOLD_BINARY_MARKET_PROGRAM_ID = new PublicKey(

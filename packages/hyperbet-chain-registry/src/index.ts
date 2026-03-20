@@ -62,6 +62,7 @@ export interface NativeCurrencyConfig {
 export interface ChainFeatureFlags {
   predictionMarkets: boolean;
   perps: boolean;
+  amm: boolean;
 }
 
 export interface BettingSolanaDeployment {
@@ -69,6 +70,7 @@ export interface BettingSolanaDeployment {
   fightOracleProgramId: string;
   goldClobMarketProgramId: string;
   goldPerpsMarketProgramId: string;
+  goldAmmMarketProgramId: string;
   goldMint: string;
   usdcMint: string;
 }
@@ -88,6 +90,7 @@ export interface BettingEvmDeployment {
   rpcEnvVar: string;
   duelOracleAddress: string;
   goldClobAddress: string;
+  goldAmmRouterAddress: string;
   adminAddress: string;
   marketOperatorAddress: string;
   treasuryAddress: string;
@@ -217,6 +220,7 @@ export const BETTING_EVM_CHAIN_ORDER: BettingEvmChain[] = [
 const DEFAULT_FEATURE_FLAGS: ChainFeatureFlags = {
   predictionMarkets: true,
   perps: false,
+  amm: false,
 };
 
 const SOLANA_DEPLOYMENTS: Record<BettingSolanaCluster, BettingSolanaDeployment> =
@@ -226,6 +230,7 @@ const SOLANA_DEPLOYMENTS: Record<BettingSolanaCluster, BettingSolanaDeployment> 
       fightOracleProgramId: "B5mRCRDJk9BrnH7regMWW5mpTQ8QG1CcCGSnDxMt8hmo",
       goldClobMarketProgramId: "DYtd7AoyTX2tbmZ8vpC3mxZgqTpyaDei4TFXZukWBJEf",
       goldPerpsMarketProgramId: "EoZdHN8U3qWQje48ToxB1SLWjucsFGqcWaRUJQYX3eoT",
+      goldAmmMarketProgramId: "Af4LMYfaBtcFFM6dBjwLYH6QJLMqEwneQ8VHfn2z7NY5",
       goldMint: "DK9nBUMfdu4XprPRWeh8f6KnQiGWD8Z4xz3yzs9gpump",
       usdcMint: "",
     },
@@ -234,6 +239,7 @@ const SOLANA_DEPLOYMENTS: Record<BettingSolanaCluster, BettingSolanaDeployment> 
       fightOracleProgramId: "B5mRCRDJk9BrnH7regMWW5mpTQ8QG1CcCGSnDxMt8hmo",
       goldClobMarketProgramId: "DYtd7AoyTX2tbmZ8vpC3mxZgqTpyaDei4TFXZukWBJEf",
       goldPerpsMarketProgramId: "EoZdHN8U3qWQje48ToxB1SLWjucsFGqcWaRUJQYX3eoT",
+      goldAmmMarketProgramId: "Af4LMYfaBtcFFM6dBjwLYH6QJLMqEwneQ8VHfn2z7NY5",
       goldMint: "DK9nBUMfdu4XprPRWeh8f6KnQiGWD8Z4xz3yzs9gpump",
       usdcMint: "",
     },
@@ -242,6 +248,7 @@ const SOLANA_DEPLOYMENTS: Record<BettingSolanaCluster, BettingSolanaDeployment> 
       fightOracleProgramId: "B5mRCRDJk9BrnH7regMWW5mpTQ8QG1CcCGSnDxMt8hmo",
       goldClobMarketProgramId: "DYtd7AoyTX2tbmZ8vpC3mxZgqTpyaDei4TFXZukWBJEf",
       goldPerpsMarketProgramId: "EoZdHN8U3qWQje48ToxB1SLWjucsFGqcWaRUJQYX3eoT",
+      goldAmmMarketProgramId: "",
       goldMint: "",
       usdcMint: "",
     },
@@ -250,6 +257,7 @@ const SOLANA_DEPLOYMENTS: Record<BettingSolanaCluster, BettingSolanaDeployment> 
       fightOracleProgramId: "B5mRCRDJk9BrnH7regMWW5mpTQ8QG1CcCGSnDxMt8hmo",
       goldClobMarketProgramId: "DYtd7AoyTX2tbmZ8vpC3mxZgqTpyaDei4TFXZukWBJEf",
       goldPerpsMarketProgramId: "EoZdHN8U3qWQje48ToxB1SLWjucsFGqcWaRUJQYX3eoT",
+      goldAmmMarketProgramId: "",
       goldMint: "DK9nBUMfdu4XprPRWeh8f6KnQiGWD8Z4xz3yzs9gpump",
       usdcMint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
     },
@@ -265,6 +273,7 @@ const EVM_DEPLOYMENTS: Record<BettingEvmNetwork, BettingEvmDeployment> = {
     rpcEnvVar: "BSC_TESTNET_RPC",
     duelOracleAddress: "0xAd13D36b02f0F6C44d508824Ae9D407931D91f91",
     goldClobAddress: "0x067335E0b1F226a8e345a289B3b93Ed5377d636e",
+    goldAmmRouterAddress: "",
     adminAddress: "0x7908b93DF1A91A5e1B83a4538107Db3c9131eED8",
     marketOperatorAddress: "0x99622633cF1e476C8bD9161f5B9d4F290a1D2Ea1",
     treasuryAddress: "0x5c5A3554F12875aBB63a6b8027b9A23C423F5C84",
@@ -294,6 +303,7 @@ const EVM_DEPLOYMENTS: Record<BettingEvmNetwork, BettingEvmDeployment> = {
     rpcEnvVar: "BSC_MAINNET_RPC",
     duelOracleAddress: "0x8F582bc1D34Ca6dA12ac46B7c7Fdec02f2465961",
     goldClobAddress: "0x443C09B1E7bb7bA3392b02500772B185654A6F33",
+    goldAmmRouterAddress: "",
     adminAddress: "0x7908b93DF1A91A5e1B83a4538107Db3c9131eED8",
     marketOperatorAddress: "0x7908b93DF1A91A5e1B83a4538107Db3c9131eED8",
     treasuryAddress: "0x0262dC245f38d614d508D8BD680c69E3B6D26F4c",
@@ -323,6 +333,7 @@ const EVM_DEPLOYMENTS: Record<BettingEvmNetwork, BettingEvmDeployment> = {
     rpcEnvVar: "BASE_SEPOLIA_RPC",
     duelOracleAddress: "",
     goldClobAddress: "",
+    goldAmmRouterAddress: "",
     adminAddress: "",
     marketOperatorAddress: "",
     treasuryAddress: "",
@@ -352,6 +363,7 @@ const EVM_DEPLOYMENTS: Record<BettingEvmNetwork, BettingEvmDeployment> = {
     rpcEnvVar: "BASE_MAINNET_RPC",
     duelOracleAddress: "0x63BF7f48A2795832C2b5f78172A1C6BE655F3a72",
     goldClobAddress: "0xb8c66D6895Bafd1B0027F2c0865865043064437C",
+    goldAmmRouterAddress: "",
     adminAddress: "0x7908b93DF1A91A5e1B83a4538107Db3c9131eED8",
     marketOperatorAddress: "0x7908b93DF1A91A5e1B83a4538107Db3c9131eED8",
     treasuryAddress: "0x0262dC245f38d614d508D8BD680c69E3B6D26F4c",
@@ -381,6 +393,7 @@ const EVM_DEPLOYMENTS: Record<BettingEvmNetwork, BettingEvmDeployment> = {
     rpcEnvVar: "AVAX_FUJI_RPC",
     duelOracleAddress: "0xAd13D36b02f0F6C44d508824Ae9D407931D91f91",
     goldClobAddress: "0x067335E0b1F226a8e345a289B3b93Ed5377d636e",
+    goldAmmRouterAddress: "",
     adminAddress: "0x7908b93DF1A91A5e1B83a4538107Db3c9131eED8",
     marketOperatorAddress: "0x99622633cF1e476C8bD9161f5B9d4F290a1D2Ea1",
     treasuryAddress: "0x5c5A3554F12875aBB63a6b8027b9A23C423F5C84",
@@ -410,6 +423,7 @@ const EVM_DEPLOYMENTS: Record<BettingEvmNetwork, BettingEvmDeployment> = {
     rpcEnvVar: "AVAX_MAINNET_RPC",
     duelOracleAddress: "",
     goldClobAddress: "",
+    goldAmmRouterAddress: "",
     adminAddress: "",
     marketOperatorAddress: "",
     treasuryAddress: "",

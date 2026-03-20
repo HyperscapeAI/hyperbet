@@ -132,6 +132,7 @@ function buildSolanaProgramConfig(
   | "fightOracleProgramId"
   | "goldClobMarketProgramId"
   | "goldPerpsMarketProgramId"
+  | "goldAmmMarketProgramId"
   | "goldMint"
   | "usdcMint"
 > {
@@ -140,6 +141,7 @@ function buildSolanaProgramConfig(
     fightOracleProgramId: deployment.fightOracleProgramId,
     goldClobMarketProgramId: deployment.goldClobMarketProgramId,
     goldPerpsMarketProgramId: deployment.goldPerpsMarketProgramId,
+    goldAmmMarketProgramId: deployment.goldAmmMarketProgramId,
     goldMint: deployment.goldMint,
     usdcMint: deployment.usdcMint,
   };
@@ -152,6 +154,7 @@ export interface EnvConfig {
   fightOracleProgramId: string;
   goldClobMarketProgramId: string;
   goldPerpsMarketProgramId: string;
+  goldAmmMarketProgramId: string;
   goldMint: string;
   usdcMint?: string;
   betWindowSeconds: number;
@@ -322,6 +325,9 @@ export const CONFIG: EnvConfig = {
   goldPerpsMarketProgramId:
     readEnvString("VITE_GOLD_PERPS_MARKET_PROGRAM_ID") ??
     baseEnvConfig.goldPerpsMarketProgramId,
+  goldAmmMarketProgramId:
+    readEnvString("VITE_GOLD_AMM_MARKET_PROGRAM_ID") ??
+    baseEnvConfig.goldAmmMarketProgramId,
   goldMint: readEnvString("VITE_GOLD_MINT") ?? baseEnvConfig.goldMint,
   usdcMint: readEnvString("VITE_USDC_MINT") ?? baseEnvConfig.usdcMint,
   betWindowSeconds: readEnvNumber(

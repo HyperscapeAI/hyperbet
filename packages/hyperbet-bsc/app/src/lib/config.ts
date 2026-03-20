@@ -188,14 +188,17 @@ function buildEvmConfig(
   | "bscRpcUrl"
   | "bscChainId"
   | "bscGoldClobAddress"
+  | "bscGoldAmmRouterAddress"
   | "bscGoldTokenAddress"
   | "baseRpcUrl"
   | "baseChainId"
   | "baseGoldClobAddress"
+  | "baseGoldAmmRouterAddress"
   | "baseGoldTokenAddress"
   | "avaxRpcUrl"
   | "avaxChainId"
   | "avaxGoldClobAddress"
+  | "avaxGoldAmmRouterAddress"
   | "avaxGoldTokenAddress"
 > {
   const defaults = resolveBettingEvmDefaults(
@@ -205,14 +208,17 @@ function buildEvmConfig(
     bscRpcUrl: defaultRpcUrlForEvmNetwork(defaults.bsc.networkKey),
     bscChainId: defaults.bsc.chainId,
     bscGoldClobAddress: defaults.bsc.goldClobAddress,
+    bscGoldAmmRouterAddress: defaults.bsc.goldAmmRouterAddress,
     bscGoldTokenAddress: defaults.bsc.goldTokenAddress,
     baseRpcUrl: defaultRpcUrlForEvmNetwork(defaults.base.networkKey),
     baseChainId: defaults.base.chainId,
     baseGoldClobAddress: defaults.base.goldClobAddress,
+    baseGoldAmmRouterAddress: defaults.base.goldAmmRouterAddress,
     baseGoldTokenAddress: defaults.base.goldTokenAddress,
     avaxRpcUrl: defaultAvaxRpcUrlForEnvironment(environment),
     avaxChainId: defaultAvaxChainIdForEnvironment(environment),
     avaxGoldClobAddress: "",
+    avaxGoldAmmRouterAddress: "",
     avaxGoldTokenAddress: "",
   };
 }
@@ -251,14 +257,17 @@ interface EnvConfig {
   bscRpcUrl: string;
   bscChainId: number;
   bscGoldClobAddress: string;
+  bscGoldAmmRouterAddress: string;
   bscGoldTokenAddress: string;
   baseRpcUrl: string;
   baseChainId: number;
   baseGoldClobAddress: string;
+  baseGoldAmmRouterAddress: string;
   baseGoldTokenAddress: string;
   avaxRpcUrl: string;
   avaxChainId: number;
   avaxGoldClobAddress: string;
+  avaxGoldAmmRouterAddress: string;
   avaxGoldTokenAddress: string;
 
   walletConnectProjectId: string;
