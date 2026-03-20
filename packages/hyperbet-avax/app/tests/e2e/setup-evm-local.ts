@@ -19,6 +19,7 @@ import goldClobArtifact from "../../../../evm-contracts/out/GoldClob.sol/GoldClo
 
 type E2eState = Record<string, unknown> & {
   currentDuelKeyHex?: string;
+  evmDuelId?: string;
   evmRpcUrl?: string;
   evmChainId?: number;
   evmHeadlessAddress?: string;
@@ -78,6 +79,14 @@ function ensureHex32(value: string, label: string): `0x${string}` {
 
 function hashLabel(label: string): `0x${string}` {
   return keccak256(stringToHex(label));
+}
+
+function parseTimestampMsEnv(name: string): bigint | null {
+  const raw = process.env[name]?.trim();
+  if (!raw) return null;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0) return null;
+  return BigInt(Math.floor(parsed / 1000));
 }
 
 function quoteCost(side: number, price: number, amount: bigint): bigint {
@@ -225,9 +234,25 @@ async function main(): Promise<void> {
       keccak256(stringToHex("hyperbet-e2e-evm:local")),
     "currentDuelKeyHex",
   );
-  const duelBetOpenTs = latestBlock.timestamp - 15n;
-  const duelBetCloseTs = duelBetOpenTs + 300n;
-  const duelStartTs = duelBetCloseTs + 60n;
+  const duelId =
+    process.env.E2E_EVM_DUEL_ID ||
+    existingState.evmDuelId ||
+    String(existingState.evmMatchId ?? 1);
+  const duelBetOpenTs =
+    parseTimestampMsEnv("E2E_EVM_BET_OPEN_TIME_MS") ??
+    latestBlock.timestamp - 15n;
+  const duelBetCloseTs =
+    parseTimestampMsEnv("E2E_EVM_BET_CLOSE_TIME_MS") ??
+    duelBetOpenTs + 300n;
+  const duelStartTs = (() => {
+    const sourceFightStartTs = parseTimestampMsEnv("E2E_EVM_FIGHT_START_TIME_MS");
+    if (sourceFightStartTs == null) {
+      return duelBetCloseTs;
+    }
+    return sourceFightStartTs > duelBetCloseTs
+      ? sourceFightStartTs
+      : duelBetCloseTs;
+  })();
   let tokenDeployTx = "";
   let oracleDeployTx = "";
   let clobDeployTx = "";
@@ -407,12 +432,13 @@ async function main(): Promise<void> {
   env.VITE_E2E_EVM_PRIVATE_KEY = adminPrivateKey;
   env.VITE_E2E_EVM_ADDRESS = adminAccount.address;
   env.VITE_E2E_EVM_DUEL_KEY = duelKey.replace(/^0x/i, "");
-  env.VITE_E2E_EVM_DUEL_ID = String(existingState.evmMatchId ?? 1);
+  env.VITE_E2E_EVM_DUEL_ID = duelId;
   await fs.writeFile(envPath, serializeDotEnv(env), "utf8");
 
   const state: E2eState = {
     ...existingState,
     currentDuelKeyHex: duelKey.replace(/^0x/i, ""),
+    evmDuelId: duelId,
     evmRpcUrl: rpcUrl,
     evmChainId: chainId,
     evmHeadlessAddress: adminAccount.address,
@@ -439,6 +465,7 @@ async function main(): Promise<void> {
         evmHeadlessAddress: adminAccount.address,
         evmGoldTokenAddress: goldTokenAddress,
         evmGoldClobAddress: goldClobAddress,
+        evmDuelId: duelId,
         evmDuelKeyHex: duelKey,
         evmMarketKey: marketKey,
         evmOracleAddress: oracleAddress,

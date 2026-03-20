@@ -133,6 +133,22 @@ type PredictionMarketsResponse = {
   updatedAt?: number | null;
 };
 
+type PredictionMarketsOverviewResponse = {
+  live: PredictionMarketsResponse | null;
+  recentSettlement: PredictionMarketsResponse | null;
+  updatedAt?: number | null;
+};
+
+type SyncStatusResponse = {
+  sourceEpoch?: number | null;
+  sourceLatestSeq?: number | null;
+  lastSeenSeq?: number | null;
+  lastAppliedSeq?: number | null;
+  applyLagMs?: number | null;
+  replayMode?: string | null;
+  degradedReason?: string | null;
+};
+
 type KeeperStatusResponse = {
   ok?: boolean;
   bot?: {
@@ -235,6 +251,8 @@ type ChainSnapshot = {
   buildInfo: BuildInfo | null;
   status: KeeperStatusResponse | null;
   active: PredictionMarketsResponse | null;
+  overview: PredictionMarketsOverviewResponse | null;
+  syncStatus: SyncStatusResponse | null;
   botHealth: BotHealthResponse | null;
   streamState: StreamState | null;
   fetchedAtMs: number;
@@ -253,6 +271,7 @@ type LocalSummary = {
   bothUiReachable: boolean;
   streamDuelKey: string | null;
   activeDuelKey: string | null;
+  recentSettlementDuelKey: string | null;
   driftPolls: number;
   reconcileAttempts: number;
   incidents: Incident[];
@@ -303,6 +322,7 @@ type LocalContext = {
   captureIndex: number;
   streamDuelKey: string | null;
   activeDuelKey: string | null;
+  recentSettlementDuelKey: string | null;
   driftPolls: number;
   reconcileAttempts: number;
 };
@@ -483,6 +503,14 @@ async function requestJson<T>(url: string): Promise<T> {
   return JSON.parse(raw) as T;
 }
 
+async function requestJsonOrNull<T>(url: string): Promise<T | null> {
+  try {
+    return await requestJson<T>(url);
+  } catch {
+    return null;
+  }
+}
+
 function currentCycleId(
   streamState: StreamState | null,
   active: PredictionMarketsResponse | null,
@@ -524,6 +552,18 @@ function currentActiveDuelKey(
   active: PredictionMarketsResponse | null,
 ): string | null {
   return normalizeDuelKey(active?.duel?.duelKey ?? null);
+}
+
+function currentOverviewLiveDuelKey(
+  overview: PredictionMarketsOverviewResponse | null,
+): string | null {
+  return normalizeDuelKey(overview?.live?.duel?.duelKey ?? null);
+}
+
+function currentOverviewRecentSettlementDuelKey(
+  overview: PredictionMarketsOverviewResponse | null,
+): string | null {
+  return normalizeDuelKey(overview?.recentSettlement?.duel?.duelKey ?? null);
 }
 
 function currentPhase(
@@ -598,8 +638,9 @@ async function takeScreenshot(url: string, filePath: string): Promise<void> {
 
 type LocalCapturePayload = {
   capturedAt: string;
-  streamDuelKey: string | null;
-  activeDuelKey: string | null;
+  sourceDuelKey: string | null;
+  liveDuelKey: string | null;
+  recentSettlementDuelKey: string | null;
   aligned: boolean;
   snapshot: ChainSnapshot | null;
   meta?: Record<string, JsonValue>;
@@ -609,15 +650,22 @@ function buildLocalCapturePayload(
   snapshot: ChainSnapshot | null,
   meta: Record<string, JsonValue> = {},
 ): LocalCapturePayload {
-  const streamDuelKey = snapshot
+  const sourceDuelKey = snapshot
     ? currentStreamDuelKey(snapshot.streamState)
     : null;
-  const activeDuelKey = snapshot ? currentActiveDuelKey(snapshot.active) : null;
+  const liveDuelKey = snapshot
+    ? currentOverviewLiveDuelKey(snapshot.overview) ??
+      currentActiveDuelKey(snapshot.active)
+    : null;
+  const recentSettlementDuelKey = snapshot
+    ? currentOverviewRecentSettlementDuelKey(snapshot.overview)
+    : null;
   return {
     capturedAt: nowIso(),
-    streamDuelKey,
-    activeDuelKey,
-    aligned: duelKeysAligned(streamDuelKey, activeDuelKey),
+    sourceDuelKey,
+    liveDuelKey,
+    recentSettlementDuelKey,
+    aligned: duelKeysAligned(sourceDuelKey, liveDuelKey),
     snapshot,
     meta,
   };
@@ -724,7 +772,8 @@ function safeSlug(value: string): string {
 function localScreenshotTargets(): ScreenshotTarget[] {
   const targets: ScreenshotTarget[] = [];
   const hyperscapes =
-    optionalEnv("HYPERSCAPES_UI_URL") ?? "http://127.0.0.1:3333/stream.html";
+    optionalEnv("HYPERSCAPES_UI_URL") ??
+    "http://127.0.0.1:3333/stream.html?disableBridgeCapture=1";
   const hyperbet =
     optionalEnv("HYPERBET_UI_URL") ?? "http://127.0.0.1:4179/?debug";
   targets.push({ name: "hyperscapes", url: hyperscapes });
@@ -757,8 +806,10 @@ async function reconcileLocalStreamState(
       "duel_key_drift_no_publish_key",
       "stream and active market duel keys diverged, but no publish key is configured for reconciliation",
       {
-        streamDuelKey: currentStreamDuelKey(snapshot.streamState),
-        activeDuelKey: currentActiveDuelKey(snapshot.active),
+        sourceDuelKey: currentStreamDuelKey(snapshot.streamState),
+        liveDuelKey:
+          currentOverviewLiveDuelKey(snapshot.overview) ??
+          currentActiveDuelKey(snapshot.active),
         targetUrl: url,
       },
       context.screenshotTargets,
@@ -788,8 +839,10 @@ async function reconcileLocalStreamState(
     {
       reconciledAt: nowIso(),
       targetUrl: url,
-      streamDuelKey: currentStreamDuelKey(snapshot.streamState),
-      activeDuelKey: currentActiveDuelKey(snapshot.active),
+      sourceDuelKey: currentStreamDuelKey(snapshot.streamState),
+      liveDuelKey:
+        currentOverviewLiveDuelKey(snapshot.overview) ??
+        currentActiveDuelKey(snapshot.active),
       body: bodyText,
     },
     context.screenshotTargets,
@@ -827,41 +880,52 @@ async function fetchLocalSnapshot(): Promise<{
   chain: "local";
   streamState: StreamState | null;
   active: PredictionMarketsResponse | null;
+  overview: PredictionMarketsOverviewResponse | null;
+  syncStatus: SyncStatusResponse | null;
   status: KeeperStatusResponse | null;
   botHealth: BotHealthResponse | null;
   buildInfo: BuildInfo | null;
   fetchedAtMs: number;
 }> {
   const fetchedAtMs = Date.now();
-  const streamStateUrl =
+  const sourceStreamStateUrl =
+    optionalEnv("SOURCE_STREAM_STATE_URL") ??
     optionalEnv("STREAM_STATE_URL") ??
-    "http://127.0.0.1:8080/api/streaming/state";
+    "http://127.0.0.1:5555/api/streaming/state";
   const activeMarketsUrl =
     optionalEnv("ACTIVE_MARKETS_URL") ??
     "http://127.0.0.1:8080/api/arena/prediction-markets/active";
+  const overviewMarketsUrl =
+    optionalEnv("OVERVIEW_MARKETS_URL") ??
+    "http://127.0.0.1:8080/api/arena/prediction-markets/overview";
   const statusUrl =
     optionalEnv("KEEPER_STATUS_URL") ?? "http://127.0.0.1:8080/status";
   const botHealthUrl =
     optionalEnv("KEEPER_BOT_HEALTH_URL") ??
     "http://127.0.0.1:8080/api/keeper/bot-health";
+  const syncStatusUrl =
+    optionalEnv("SYNC_STATUS_URL") ?? "http://127.0.0.1:8080/api/sync/status";
   const buildInfoUrl = optionalEnv("HYPERBET_BUILD_INFO_URL");
 
-  const [streamState, active, status, botHealth, buildInfo] = await Promise.all(
-    [
-      requestJson<StreamState>(streamStateUrl),
+  const [streamState, active, overview, syncStatus, status, botHealth, buildInfo] =
+    await Promise.all([
+      requestJson<StreamState>(sourceStreamStateUrl),
       requestJson<PredictionMarketsResponse>(activeMarketsUrl),
+      requestJsonOrNull<PredictionMarketsOverviewResponse>(overviewMarketsUrl),
+      requestJsonOrNull<SyncStatusResponse>(syncStatusUrl),
       requestJson<KeeperStatusResponse>(statusUrl),
       requestJson<BotHealthResponse>(botHealthUrl),
       buildInfoUrl
         ? requestJson<BuildInfo>(buildInfoUrl)
         : Promise.resolve(null),
-    ],
-  );
+    ]);
 
   return {
     chain: "local",
     streamState,
     active,
+    overview,
+    syncStatus,
     status,
     botHealth,
     buildInfo,
@@ -887,22 +951,27 @@ async function fetchStagedChainSnapshot(
 ): Promise<ChainSnapshot> {
   const urls = stagedKeeperUrls(chain);
   const fetchedAtMs = Date.now();
-  const [buildInfo, status, active, botHealth, streamState] = await Promise.all(
-    [
+  const [buildInfo, status, active, overview, syncStatus, botHealth, streamState] =
+    await Promise.all([
       requestJson<BuildInfo>(`${urls.pagesUrl}/build-info.json`),
       requestJson<KeeperStatusResponse>(`${urls.keeperUrl}/status`),
       requestJson<PredictionMarketsResponse>(
         `${urls.keeperUrl}/api/arena/prediction-markets/active`,
       ),
+      requestJsonOrNull<PredictionMarketsOverviewResponse>(
+        `${urls.keeperUrl}/api/arena/prediction-markets/overview`,
+      ),
+      requestJsonOrNull<SyncStatusResponse>(`${urls.keeperUrl}/api/sync/status`),
       requestJson<BotHealthResponse>(`${urls.keeperUrl}/api/keeper/bot-health`),
       requestJson<StreamState>(`${urls.keeperUrl}/api/streaming/state`),
-    ],
-  );
+    ]);
   return {
     chain,
     buildInfo,
     status,
     active,
+    overview,
+    syncStatus,
     botHealth,
     streamState,
     fetchedAtMs,
@@ -919,6 +988,7 @@ async function runLocalSoak(args: MonitorArgs): Promise<void> {
     captureIndex: 0,
     streamDuelKey: null,
     activeDuelKey: null,
+    recentSettlementDuelKey: null,
     driftPolls: 0,
     reconcileAttempts: 0,
   };
@@ -955,27 +1025,34 @@ async function runLocalSoak(args: MonitorArgs): Promise<void> {
     try {
       const snapshot = await fetchLocalSnapshot();
       lastSnapshot = snapshot;
-      const streamDuelKey = currentStreamDuelKey(snapshot.streamState);
-      const activeDuelKey = currentActiveDuelKey(snapshot.active);
-      const aligned = duelKeysAligned(streamDuelKey, activeDuelKey);
-      context.streamDuelKey = streamDuelKey;
-      context.activeDuelKey = activeDuelKey;
+      const sourceDuelKey = currentStreamDuelKey(snapshot.streamState);
+      const liveDuelKey =
+        currentOverviewLiveDuelKey(snapshot.overview) ??
+        currentActiveDuelKey(snapshot.active);
+      const recentSettlementDuelKey = currentOverviewRecentSettlementDuelKey(
+        snapshot.overview,
+      );
+      const aligned = duelKeysAligned(sourceDuelKey, liveDuelKey);
+      context.streamDuelKey = sourceDuelKey;
+      context.activeDuelKey = liveDuelKey;
+      context.recentSettlementDuelKey = recentSettlementDuelKey;
 
       writeJsonArtifact(
         context.artifactRoot,
         path.join("polls", `${String(pollIndex).padStart(5, "0")}.json`),
         {
           ...snapshot,
-          streamDuelKey,
-          activeDuelKey,
+          sourceDuelKey,
+          liveDuelKey,
+          recentSettlementDuelKey,
           aligned,
         },
       );
 
       const cycleId = currentCycleId(snapshot.streamState, snapshot.active);
       const duelKey =
-        streamDuelKey ??
-        activeDuelKey ??
+        liveDuelKey ??
+        sourceDuelKey ??
         currentDuelKey(snapshot.streamState, snapshot.active);
       const phase = currentPhase(snapshot.streamState, snapshot.active);
       const marketCount = snapshot.active?.markets?.length ?? 0;
@@ -995,8 +1072,9 @@ async function runLocalSoak(args: MonitorArgs): Promise<void> {
           "local Hyperscapes duel stream is still IDLE; create and start two local agents before the soak clock starts",
           {
             ...snapshot,
-            streamDuelKey,
-            activeDuelKey,
+            sourceDuelKey,
+            liveDuelKey,
+            recentSettlementDuelKey,
             aligned,
           },
           context.screenshotTargets,
@@ -1009,16 +1087,22 @@ async function runLocalSoak(args: MonitorArgs): Promise<void> {
       if (driftRelevant && !aligned) {
         driftConsecutivePolls += 1;
         context.driftPolls = driftConsecutivePolls;
-        currentCycle?.incidents.push("duel_key_drift");
+        const driftCode =
+          snapshot.syncStatus?.applyLagMs != null &&
+          snapshot.syncStatus.applyLagMs > 0
+            ? "consumer_lag"
+            : "source_feed_lag";
+        currentCycle?.incidents.push(driftCode);
 
         if (!driftHandled) {
           await recordLocalContextEvent(
             context,
-            `local-duel-drift-${driftConsecutivePolls}`,
+            `local-${driftCode}-${driftConsecutivePolls}`,
             snapshot,
             {
               pollIndex,
               driftConsecutivePolls,
+              driftCode,
             },
           );
         }
@@ -1037,55 +1121,57 @@ async function runLocalSoak(args: MonitorArgs): Promise<void> {
               const refreshedStreamDuelKey = currentStreamDuelKey(
                 refreshed.streamState,
               );
-              const refreshedActiveDuelKey = currentActiveDuelKey(
-                refreshed.active,
-              );
+              const refreshedLiveDuelKey = currentOverviewLiveDuelKey(
+                refreshed.overview,
+              ) ?? currentActiveDuelKey(refreshed.active);
               const refreshedAligned = duelKeysAligned(
                 refreshedStreamDuelKey,
-                refreshedActiveDuelKey,
+                refreshedLiveDuelKey,
               );
               if (!refreshedAligned) {
                 await recordIncident(
                   context,
                   "local",
-                  "duel_key_drift_persisted",
-                  "stream and active market duel keys still diverged after reconciliation",
+                  "source_feed_lag_persisted",
+                  "source and live market duel keys still diverged after local-only repair",
                   {
                     before: {
-                      streamDuelKey,
-                      activeDuelKey,
+                      sourceDuelKey,
+                      liveDuelKey,
                     },
                     after: {
-                      streamDuelKey: refreshedStreamDuelKey,
-                      activeDuelKey: refreshedActiveDuelKey,
+                      sourceDuelKey: refreshedStreamDuelKey,
+                      liveDuelKey: refreshedLiveDuelKey,
                     },
                   },
                   context.screenshotTargets,
                 );
                 throw new Error(
-                  "local duel key drift persisted after reconciliation",
+                  "local duel key drift persisted after local-only repair",
                 );
               }
 
               context.streamDuelKey = refreshedStreamDuelKey;
-              context.activeDuelKey = refreshedActiveDuelKey;
+              context.activeDuelKey = refreshedLiveDuelKey;
+              context.recentSettlementDuelKey =
+                currentOverviewRecentSettlementDuelKey(refreshed.overview);
               driftConsecutivePolls = 0;
               context.driftPolls = 0;
               driftHandled = false;
               await recordLocalContextEvent(
                 context,
-                "local-duel-reconciled",
+                "local-duel-repaired",
                 refreshed,
                 {
                   reconciled: true,
-                  streamDuelKey: refreshedStreamDuelKey,
-                  activeDuelKey: refreshedActiveDuelKey,
+                  sourceDuelKey: refreshedStreamDuelKey,
+                  liveDuelKey: refreshedLiveDuelKey,
                 },
               );
               continue;
             }
 
-            throw new Error("local duel key drift could not be reconciled");
+            throw new Error("local duel key drift could not be repaired");
           }
 
           throw new Error(
@@ -1122,8 +1208,9 @@ async function runLocalSoak(args: MonitorArgs): Promise<void> {
           snapshot,
           {
             cycleId,
-            streamDuelKey,
-            activeDuelKey,
+            sourceDuelKey,
+            liveDuelKey,
+            recentSettlementDuelKey,
             aligned,
             phase,
             marketCount,
@@ -1145,8 +1232,9 @@ async function runLocalSoak(args: MonitorArgs): Promise<void> {
           snapshot,
           {
             cycleId,
-            streamDuelKey,
-            activeDuelKey,
+            sourceDuelKey,
+            liveDuelKey,
+            recentSettlementDuelKey,
             aligned,
             marketCount,
           },
@@ -1163,8 +1251,9 @@ async function runLocalSoak(args: MonitorArgs): Promise<void> {
           "local keeper status or bot-health endpoint reported not-ok",
           {
             ...snapshot,
-            streamDuelKey,
-            activeDuelKey,
+            sourceDuelKey,
+            liveDuelKey,
+            recentSettlementDuelKey,
             aligned,
           },
           context.screenshotTargets,
@@ -1179,12 +1268,10 @@ async function runLocalSoak(args: MonitorArgs): Promise<void> {
         String(error),
         {
           poll: pollIndex,
-          streamDuelKey: context.streamDuelKey,
-          activeDuelKey: context.activeDuelKey,
-          aligned: duelKeysAligned(
-            context.streamDuelKey,
-            context.activeDuelKey,
-          ),
+          sourceDuelKey: context.streamDuelKey,
+          liveDuelKey: context.activeDuelKey,
+          recentSettlementDuelKey: context.recentSettlementDuelKey,
+          aligned: duelKeysAligned(context.streamDuelKey, context.activeDuelKey),
         },
         context.screenshotTargets,
       );
@@ -1242,6 +1329,7 @@ async function runLocalSoak(args: MonitorArgs): Promise<void> {
     bothUiReachable,
     streamDuelKey: context.streamDuelKey,
     activeDuelKey: context.activeDuelKey,
+    recentSettlementDuelKey: context.recentSettlementDuelKey,
     driftPolls: context.driftPolls,
     reconcileAttempts: context.reconcileAttempts,
     incidents: context.incidents,

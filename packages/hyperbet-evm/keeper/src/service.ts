@@ -42,11 +42,17 @@ import {
 } from "./common";
 import {
   deleteIdentityMembers,
+  appendBetSyncApplyLogEntry,
+  type DbBetSyncCheckpoint,
   loadAll,
+  loadBetSyncCheckpoint,
   loadPerpsMarkets,
   loadPerpsOracleSnapshots,
+  loadPredictionMarketsOverviewState,
   saveBet,
+  saveBetSyncCheckpoint,
   savePointsEvent,
+  savePredictionMarketsOverviewState,
   saveWalletDisplay,
   saveWalletPoints,
   saveWalletGoldState,
@@ -57,6 +63,20 @@ import {
   saveInvitedWallet,
   saveReferralFees,
 } from "./db";
+import {
+  mergePredictionMarketsSurface,
+  parseBetSyncBootstrapState,
+  parseBetSyncEvent,
+  parsePredictionMarketsOverview,
+  rollPredictionMarketsOverview,
+  sameDuelIdentity,
+  toStreamStateFromBetSyncEvent,
+  type BetSyncBootstrapState,
+  type BetSyncEvent,
+  type PredictionMarketsOverviewResponse,
+  type PredictionMarketsSurface,
+  type StreamState as BetSyncStreamState,
+} from "./betSync";
 import { modelMarketIdFromCharacterId } from "./modelMarkets";
 import {
   isLegacyDerivedPointsWalletKey,
@@ -103,14 +123,7 @@ type GoldClobMarketReadRecord = {
   totalBShares: bigint;
 };
 
-type StreamState = {
-  type: "STREAMING_STATE_UPDATE";
-  cycle: JsonRecord;
-  leaderboard: JsonRecord[];
-  cameraTarget: string | null;
-  seq: number;
-  emittedAt: number;
-};
+type StreamState = BetSyncStreamState;
 
 type BetRecord = {
   id: string;
@@ -189,6 +202,7 @@ type SolanaKeeperContext = {
 };
 
 const encoder = new TextEncoder();
+const decoder = new TextDecoder();
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const keeperRoot = path.resolve(__dirname, "..");
 const KEEPER_BOT_HEALTH_FILE = (
@@ -259,6 +273,18 @@ function readEnvBoolean(name: string, fallback: boolean): boolean {
   return raw === "1" || raw === "true" || raw === "yes" || raw === "on";
 }
 
+function deriveBetSyncStateUrl(eventsUrl: string): string {
+  if (!eventsUrl) return "";
+  try {
+    const url = new URL(eventsUrl);
+    url.pathname = url.pathname.replace(/\/events$/, "/state");
+    url.search = "";
+    return url.toString();
+  } catch {
+    return "";
+  }
+}
+
 const PORT = Number(process.env.PORT || 8080);
 const ARENA_WRITE_KEY = process.env.ARENA_EXTERNAL_BET_WRITE_KEY?.trim() || "";
 const STREAM_PUBLISH_KEY =
@@ -273,6 +299,14 @@ const STREAM_STATE_SOURCE_URL =
   process.env.STREAM_STATE_SOURCE_URL?.trim() || "";
 const STREAM_STATE_SOURCE_BEARER_TOKEN =
   process.env.STREAM_STATE_SOURCE_BEARER_TOKEN?.trim() || "";
+const BET_SYNC_SOURCE_EVENTS_URL =
+  process.env.BET_SYNC_SOURCE_EVENTS_URL?.trim() || "";
+const BET_SYNC_SOURCE_STATE_URL =
+  process.env.BET_SYNC_SOURCE_STATE_URL?.trim() ||
+  deriveBetSyncStateUrl(BET_SYNC_SOURCE_EVENTS_URL);
+const BET_SYNC_SOURCE_BEARER_TOKEN =
+  process.env.BET_SYNC_SOURCE_BEARER_TOKEN?.trim() ||
+  STREAM_STATE_SOURCE_BEARER_TOKEN;
 const STREAM_STATE_POLL_MS = Math.max(
   1_000,
   Number(process.env.STREAM_STATE_POLL_MS || 2_000),
@@ -284,6 +318,18 @@ const STREAM_STATE_SOURCE_TIMEOUT_MS = Math.max(
 const STREAM_STATE_SOURCE_MAX_BACKOFF_MS = Math.max(
   STREAM_STATE_POLL_MS,
   Number(process.env.STREAM_STATE_SOURCE_MAX_BACKOFF_MS || 30_000),
+);
+const BET_SYNC_CONNECT_TIMEOUT_MS = Math.max(
+  1_000,
+  Number(process.env.BET_SYNC_CONNECT_TIMEOUT_MS || 10_000),
+);
+const BET_SYNC_RECONNECT_MIN_MS = Math.max(
+  500,
+  Number(process.env.BET_SYNC_RECONNECT_MIN_MS || 1_000),
+);
+const BET_SYNC_RECONNECT_MAX_MS = Math.max(
+  BET_SYNC_RECONNECT_MIN_MS,
+  Number(process.env.BET_SYNC_RECONNECT_MAX_MS || 30_000),
 );
 const CONTRACT_POLL_MS = Math.max(
   5_000,
@@ -340,6 +386,8 @@ const WRITE_RATE_LIMIT_BURST = readPositiveEnvInteger(
   1,
 );
 const DISABLE_RATE_LIMIT = readEnvBoolean("DISABLE_RATE_LIMIT", false);
+const ENABLE_STREAM_PUBLISH =
+  !IS_PRODUCTION && readEnvBoolean("ENABLE_STREAM_PUBLISH", false);
 
 const GOLD_CLOB_READ_ABI = [
   {
@@ -450,6 +498,9 @@ const proxyResponseInFlight = new Map<string, Promise<ProxyCacheEntry>>();
 
 // ── Persistent state (hydrated from SQLite on startup, written through on change)
 const _db = loadAll(BET_STORE_LIMIT);
+const persistedBetSyncCheckpoint = _db.betSyncCheckpoint ?? loadBetSyncCheckpoint();
+const persistedPredictionMarketsOverviewState =
+  _db.predictionMarketsOverview ?? loadPredictionMarketsOverviewState();
 
 const bets: BetRecord[] = _db.bets;
 const walletDisplay: Map<string, string> = _db.walletDisplay;
@@ -470,6 +521,46 @@ const referralFeeShareGoldByWallet: Map<string, number> =
   _db.referralFeeShareGoldByWallet;
 const treasuryFeesFromReferralsByWallet: Map<string, number> =
   _db.treasuryFeesFromReferralsByWallet;
+
+function parseStoredJson(raw: string | null): unknown | null {
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+let predictionMarketsOverview: PredictionMarketsOverviewResponse | null =
+  persistedPredictionMarketsOverviewState
+    ? parsePredictionMarketsOverview({
+        updatedAt: persistedPredictionMarketsOverviewState.updatedAt,
+        live: parseStoredJson(persistedPredictionMarketsOverviewState.liveJson),
+        recentSettlement: parseStoredJson(
+          persistedPredictionMarketsOverviewState.recentSettlementJson,
+        ),
+      })
+    : null;
+
+let betSyncCheckpoint =
+  persistedBetSyncCheckpoint ??
+  {
+    sourceEpoch: 0,
+    lastSeenSeq: 0,
+    lastAppliedSeq: 0,
+    replayMode: null,
+    degradedReason: null,
+    updatedAt: 0,
+  };
+let betSyncSourceLatestSeq = betSyncCheckpoint.lastSeenSeq;
+let betSyncOldestReplaySeq: number | null = null;
+let betSyncLatestEvent: BetSyncEvent | null = null;
+let betSyncLastEventReceivedAt: number | null = null;
+let betSyncLastAppliedAt: number | null = null;
+let betSyncLastError: string | null = null;
+let betSyncConnectedAt: number | null = null;
+let betSyncConsumerRunning = false;
+let betSyncReplayMode = betSyncCheckpoint.replayMode;
 
 const parsers: {
   solana: ParserState;
@@ -1435,37 +1526,158 @@ function buildPredictionMarketLifecycleRecords(
   return records;
 }
 
-function handlePredictionMarkets(req: Request): Response {
-  const botHealthSnapshot = loadKeeperBotHealthSnapshot();
-  const markets = buildPredictionMarketLifecycleRecords(botHealthSnapshot);
-  const fallbackMarket =
-    markets.find((market) => market.duelKey != null || market.duelId != null) ?? null;
+function currentDuelSnapshot(): PredictionMarketsSurface["duel"] {
+  return {
+    duelKey: currentDuelKey(),
+    duelId: currentDuelId(),
+    phase:
+      typeof streamState.cycle?.phase === "string" ? streamState.cycle.phase : null,
+    winner: currentWinnerFromCycle(),
+    betCloseTime: currentBetCloseTime(),
+  };
+}
+
+function filterPredictionMarketsForDuel(
+  markets: PredictionMarketLifecycleRecord[],
+  duel: PredictionMarketsSurface["duel"],
+): PredictionMarketLifecycleRecord[] {
+  if (!duel.duelKey && !duel.duelId) {
+    return markets;
+  }
+  return markets.filter((market) => {
+    if (duel.duelKey && market.duelKey) {
+      return market.duelKey === duel.duelKey;
+    }
+    if (duel.duelId && market.duelId) {
+      return market.duelId === duel.duelId;
+    }
+    return false;
+  });
+}
+
+function persistPredictionMarketsOverview(
+  next: PredictionMarketsOverviewResponse,
+): void {
+  predictionMarketsOverview = next;
+  savePredictionMarketsOverviewState({
+    liveJson: next.live ? JSON.stringify(next.live) : null,
+    recentSettlementJson: next.recentSettlement
+      ? JSON.stringify(next.recentSettlement)
+      : null,
+    updatedAt: next.updatedAt ?? Date.now(),
+  });
+}
+
+function buildLivePredictionMarketsSurface(
+  botHealthSnapshot: KeeperBotHealthSnapshot | null = null,
+): PredictionMarketsSurface {
+  const effectiveBotHealth = botHealthSnapshot ?? loadKeeperBotHealthSnapshot();
+  const streamDuelKey = currentDuelKey();
+  const streamDuelId = currentDuelId();
   const cyclePhase =
     typeof streamState.cycle?.phase === "string"
       ? streamState.cycle.phase
-      : resolvePhaseFromLifecycleStatus(fallbackMarket?.lifecycleStatus);
+      : null;
+  const previousLive = predictionMarketsOverview?.live ?? null;
+
+  // Preserve the just-finished duel across the transient source IDLE gap so it
+  // can roll into recentSettlement with intact duel identity and timing.
+  if (
+    cyclePhase === "IDLE" &&
+    !streamDuelKey &&
+    !streamDuelId &&
+    previousLive
+  ) {
+    return buildPredictionMarketsSurfaceForDuel(
+      previousLive.duel,
+      effectiveBotHealth,
+      previousLive,
+    );
+  }
+
+  const markets = buildPredictionMarketLifecycleRecords(effectiveBotHealth);
+  const fallbackMarket =
+    markets.find((market) => market.duelKey != null || market.duelId != null) ?? null;
   const cycleWinner = currentWinnerFromCycle();
-  return jsonResponse(
-    req,
-    {
-      duel: {
-        duelKey: currentDuelKey() ?? fallbackMarket?.duelKey ?? null,
-        duelId: currentDuelId() ?? fallbackMarket?.duelId ?? null,
-        phase: cyclePhase,
-        winner:
-          cycleWinner !== "NONE"
-            ? cycleWinner
-            : (fallbackMarket?.winner ?? "NONE"),
-        betCloseTime: currentBetCloseTime() ?? fallbackMarket?.betCloseTime ?? null,
-      },
-      markets,
-      updatedAt: Date.now(),
+  return {
+    duel: {
+      duelKey: streamDuelKey ?? fallbackMarket?.duelKey ?? null,
+      duelId: streamDuelId ?? fallbackMarket?.duelId ?? null,
+      phase: cyclePhase ?? resolvePhaseFromLifecycleStatus(fallbackMarket?.lifecycleStatus),
+      winner:
+        cycleWinner !== "NONE"
+          ? cycleWinner
+          : (fallbackMarket?.winner ?? "NONE"),
+      betCloseTime: currentBetCloseTime() ?? fallbackMarket?.betCloseTime ?? null,
     },
-    200,
-    {
-      "cache-control": "no-store",
-    },
+    markets,
+    updatedAt: Date.now(),
+  };
+}
+
+function buildPredictionMarketsSurfaceForDuel(
+  duel: PredictionMarketsSurface["duel"],
+  botHealthSnapshot: KeeperBotHealthSnapshot | null,
+  previous: PredictionMarketsSurface | null,
+): PredictionMarketsSurface {
+  const nextSurface: PredictionMarketsSurface = {
+    duel,
+    markets: filterPredictionMarketsForDuel(
+      buildPredictionMarketLifecycleRecords(botHealthSnapshot),
+      duel,
+    ).map((market) => ({
+      ...market,
+      duelKey: duel.duelKey ?? market.duelKey ?? null,
+      duelId: duel.duelId ?? market.duelId ?? null,
+      betCloseTime: duel.betCloseTime ?? market.betCloseTime ?? null,
+    })),
+    updatedAt: Date.now(),
+  };
+  return mergePredictionMarketsSurface(previous, nextSurface) ?? nextSurface;
+}
+
+function rebuildPredictionMarketsOverview(
+  botHealthSnapshot: KeeperBotHealthSnapshot | null = null,
+): PredictionMarketsOverviewResponse {
+  const effectiveBotHealth = botHealthSnapshot ?? loadKeeperBotHealthSnapshot();
+  const live = buildLivePredictionMarketsSurface(effectiveBotHealth);
+  const rolled = rollPredictionMarketsOverview(
+    predictionMarketsOverview,
+    live,
+    Date.now(),
   );
+  const refreshedRecentSettlement = rolled.recentSettlement
+    ? buildPredictionMarketsSurfaceForDuel(
+        rolled.recentSettlement.duel,
+        effectiveBotHealth,
+        rolled.recentSettlement,
+      )
+    : null;
+  const next: PredictionMarketsOverviewResponse = {
+    updatedAt: Date.now(),
+    live,
+    recentSettlement:
+      refreshedRecentSettlement &&
+      sameDuelIdentity(refreshedRecentSettlement, live)
+        ? null
+        : refreshedRecentSettlement,
+  };
+  persistPredictionMarketsOverview(next);
+  return next;
+}
+
+function handlePredictionMarkets(req: Request): Response {
+  const overview = rebuildPredictionMarketsOverview();
+  return jsonResponse(req, overview.live, 200, {
+    "cache-control": "no-store",
+  });
+}
+
+function handlePredictionMarketsOverview(req: Request): Response {
+  const overview = rebuildPredictionMarketsOverview();
+  return jsonResponse(req, overview, 200, {
+    "cache-control": "no-store",
+  });
 }
 
 function handleStreamingLeaderboardDetails(req: Request, url: URL): Response {
@@ -1726,15 +1938,39 @@ function publishStreamState(next: StreamState, sourceLabel: string): void {
     ...next,
     type: "STREAMING_STATE_UPDATE",
     seq: streamSeq,
-    emittedAt: Date.now(),
+    emittedAt:
+      typeof next.emittedAt === "number" && Number.isFinite(next.emittedAt)
+        ? next.emittedAt
+        : Date.now(),
   };
   streamLastUpdatedAt = Date.now();
   streamLastSourceError = null;
   persistStreamStateSnapshot(streamState);
   broadcastStreamState(streamState, "state");
+  try {
+    rebuildPredictionMarketsOverview(loadKeeperBotHealthSnapshot());
+  } catch (error) {
+    console.warn(
+      `[${nowIso()}] [prediction-markets] failed to refresh overview after stream publish: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
   console.log(
     `[${nowIso()}] [stream] updated from ${sourceLabel} cycle=${streamState.cycle?.cycleId ?? "unknown"} phase=${streamState.cycle?.phase ?? "unknown"}`,
   );
+}
+
+function persistBetSyncCheckpointState(
+  next: Partial<DbBetSyncCheckpoint> = {},
+): void {
+  betSyncCheckpoint = {
+    ...betSyncCheckpoint,
+    ...next,
+    updatedAt: Date.now(),
+  };
+  betSyncReplayMode = betSyncCheckpoint.replayMode;
+  saveBetSyncCheckpoint(betSyncCheckpoint);
 }
 
 function nextStreamSourceBackoffMs(): number {
@@ -1829,6 +2065,278 @@ async function pollStreamStateSource(): Promise<void> {
     clearTimeout(timeoutId);
     streamSourcePollInFlight = false;
   }
+}
+
+function delayMs(durationMs: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, durationMs));
+}
+
+function buildBetSyncHeaders(lastEventId?: number): Record<string, string> {
+  const headers: Record<string, string> = {
+    accept: "text/event-stream",
+    connection: "keep-alive",
+  };
+  if (BET_SYNC_SOURCE_BEARER_TOKEN) {
+    headers.authorization = `Bearer ${BET_SYNC_SOURCE_BEARER_TOKEN}`;
+  }
+  if (lastEventId && lastEventId > 0) {
+    headers["last-event-id"] = String(lastEventId);
+  }
+  return headers;
+}
+
+function matchesPredictionMarketDuel(
+  market: PredictionMarketLifecycleRecord,
+  duel: PredictionMarketsSurface["duel"],
+): boolean {
+  if (duel.duelKey && market.duelKey) {
+    return market.duelKey === duel.duelKey;
+  }
+  if (duel.duelId && market.duelId) {
+    return market.duelId === duel.duelId;
+  }
+  return false;
+}
+
+function applyRecentSettlementRefresh(
+  overview: PredictionMarketsOverviewResponse,
+  botHealthSnapshot: KeeperBotHealthSnapshot | null,
+): PredictionMarketsOverviewResponse {
+  if (!overview.recentSettlement) {
+    return overview;
+  }
+  const recent = buildPredictionMarketsSurfaceForDuel(
+    overview.recentSettlement.duel,
+    botHealthSnapshot,
+    overview.recentSettlement,
+  );
+  return {
+    ...overview,
+    updatedAt: Date.now(),
+    recentSettlement: sameDuelIdentity(recent, overview.live) ? null : recent,
+  };
+}
+
+function syncStatusPayload(): Record<string, unknown> {
+  return {
+    sourceEpoch: betSyncCheckpoint.sourceEpoch,
+    sourceLatestSeq: betSyncSourceLatestSeq,
+    oldestReplaySeq: betSyncOldestReplaySeq,
+    lastSeenSeq: betSyncCheckpoint.lastSeenSeq,
+    lastAppliedSeq: betSyncCheckpoint.lastAppliedSeq,
+    applyLagMs:
+      betSyncSourceLatestSeq > betSyncCheckpoint.lastAppliedSeq &&
+      betSyncLastAppliedAt != null
+        ? Math.max(0, Date.now() - betSyncLastAppliedAt)
+        : 0,
+    replayMode: betSyncReplayMode,
+    degradedReason: betSyncCheckpoint.degradedReason ?? betSyncLastError,
+    lastEventReceivedAt: betSyncLastEventReceivedAt,
+    lastAppliedAt: betSyncLastAppliedAt,
+    connectedAt: betSyncConnectedAt,
+    sourceEventsUrl: BET_SYNC_SOURCE_EVENTS_URL
+      ? sanitizeUrlForStatus(BET_SYNC_SOURCE_EVENTS_URL)
+      : null,
+    sourceStateUrl: BET_SYNC_SOURCE_STATE_URL
+      ? sanitizeUrlForStatus(BET_SYNC_SOURCE_STATE_URL)
+      : null,
+    enabled: Boolean(BET_SYNC_SOURCE_EVENTS_URL),
+  };
+}
+
+async function applyBetSyncEvent(
+  event: BetSyncEvent,
+  sourceLabel: string,
+): Promise<void> {
+  betSyncSourceLatestSeq = Math.max(betSyncSourceLatestSeq, event.seq);
+  betSyncLatestEvent = event;
+  betSyncLastEventReceivedAt = Date.now();
+
+  if (event.sourceEpoch !== betSyncCheckpoint.sourceEpoch) {
+    persistBetSyncCheckpointState({
+      sourceEpoch: event.sourceEpoch,
+      lastSeenSeq: 0,
+      lastAppliedSeq: 0,
+      replayMode: betSyncReplayMode,
+      degradedReason: null,
+    });
+  }
+
+  persistBetSyncCheckpointState({
+    lastSeenSeq: Math.max(betSyncCheckpoint.lastSeenSeq, event.seq),
+    degradedReason: null,
+  });
+
+  const inserted = appendBetSyncApplyLogEntry({
+    sourceEpoch: event.sourceEpoch,
+    seq: event.seq,
+    eventType: "state",
+    duelKey: event.duelKey,
+    duelId: event.duelId,
+    phase: event.phase,
+    phaseVersion: event.phaseVersion,
+    emittedAt: event.emittedAt,
+    payloadJson: JSON.stringify(event),
+    receivedAt: Date.now(),
+    appliedAt: Date.now(),
+  });
+
+  if (!inserted && event.seq <= betSyncCheckpoint.lastAppliedSeq) {
+    return;
+  }
+
+  publishStreamState(toStreamStateFromBetSyncEvent(event), sourceLabel);
+  betSyncLastAppliedAt = Date.now();
+  persistBetSyncCheckpointState({
+    lastAppliedSeq: Math.max(betSyncCheckpoint.lastAppliedSeq, event.seq),
+    degradedReason: null,
+  });
+  persistPredictionMarketsOverview(
+    applyRecentSettlementRefresh(
+      rollPredictionMarketsOverview(
+        predictionMarketsOverview,
+        buildLivePredictionMarketsSurface(loadKeeperBotHealthSnapshot()),
+        Date.now(),
+      ),
+      loadKeeperBotHealthSnapshot(),
+    ),
+  );
+}
+
+async function bootstrapBetSyncState(): Promise<BetSyncBootstrapState | null> {
+  if (!BET_SYNC_SOURCE_STATE_URL) return null;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), BET_SYNC_CONNECT_TIMEOUT_MS);
+  try {
+    const response = await fetch(BET_SYNC_SOURCE_STATE_URL, {
+      cache: "no-store",
+      headers: buildBetSyncHeaders(),
+      signal: controller.signal,
+    });
+    if (!response.ok) {
+      throw new Error(`bootstrap failed (${response.status})`);
+    }
+    const state = parseBetSyncBootstrapState(await response.json());
+    if (!state) {
+      throw new Error("bootstrap payload was invalid");
+    }
+    betSyncSourceLatestSeq = state.latestSeq;
+    betSyncOldestReplaySeq = state.oldestReplaySeq;
+    if (state.latestEvent) {
+      await applyBetSyncEvent(state.latestEvent, "bet-sync-bootstrap");
+    }
+    return state;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+async function consumeBetSyncEventsOnce(): Promise<void> {
+  const url = new URL(BET_SYNC_SOURCE_EVENTS_URL);
+  if (betSyncCheckpoint.lastSeenSeq > 0) {
+    url.searchParams.set("since", String(betSyncCheckpoint.lastSeenSeq));
+  }
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), BET_SYNC_CONNECT_TIMEOUT_MS);
+  const response = await fetch(url, {
+    cache: "no-store",
+    headers: buildBetSyncHeaders(betSyncCheckpoint.lastSeenSeq),
+    signal: controller.signal,
+  });
+  clearTimeout(timeoutId);
+
+  if (!response.ok || !response.body) {
+    throw new Error(`bet-sync stream failed (${response.status})`);
+  }
+
+  betSyncConnectedAt = Date.now();
+  let buffer = "";
+  for await (const chunk of response.body as unknown as AsyncIterable<Uint8Array>) {
+    buffer += decoder.decode(chunk, { stream: true });
+    let boundary = buffer.indexOf("\n\n");
+    while (boundary >= 0) {
+      const frame = buffer.slice(0, boundary);
+      buffer = buffer.slice(boundary + 2);
+      boundary = buffer.indexOf("\n\n");
+
+      if (!frame.trim() || frame.startsWith(":")) {
+        continue;
+      }
+
+      const lines = frame.split(/\r?\n/);
+      let eventName = "message";
+      let data = "";
+      for (const line of lines) {
+        if (line.startsWith("event:")) {
+          eventName = line.slice(6).trim();
+          continue;
+        }
+        if (line.startsWith("data:")) {
+          data += `${line.slice(5).trim()}\n`;
+        }
+      }
+
+      if (eventName === "heartbeat" || !data.trim()) {
+        continue;
+      }
+
+      let decoded: unknown;
+      try {
+        decoded = JSON.parse(data);
+      } catch {
+        continue;
+      }
+      const parsed = parseBetSyncEvent(decoded);
+      if (!parsed) {
+        continue;
+      }
+
+      if (eventName === "reset") {
+        betSyncReplayMode = "reset";
+        betSyncOldestReplaySeq = parsed.seq;
+      } else if (betSyncCheckpoint.lastSeenSeq > 0) {
+        betSyncReplayMode = "replay";
+      } else {
+        betSyncReplayMode = "live";
+      }
+      persistBetSyncCheckpointState({
+        replayMode: betSyncReplayMode,
+        degradedReason: null,
+      });
+      await applyBetSyncEvent(parsed, "bet-sync-events");
+    }
+  }
+}
+
+function startBetSyncConsumer(): void {
+  if (!BET_SYNC_SOURCE_EVENTS_URL || betSyncConsumerRunning) return;
+  betSyncConsumerRunning = true;
+  void (async () => {
+    let reconnectDelayMs = BET_SYNC_RECONNECT_MIN_MS;
+    while (true) {
+      try {
+        await bootstrapBetSyncState();
+        await consumeBetSyncEventsOnce();
+        reconnectDelayMs = BET_SYNC_RECONNECT_MIN_MS;
+        betSyncLastError = null;
+      } catch (error) {
+        betSyncLastError =
+          error instanceof Error ? error.message : "bet-sync consumer failed";
+        persistBetSyncCheckpointState({
+          replayMode: betSyncReplayMode,
+          degradedReason: betSyncLastError,
+        });
+        console.warn(
+          `[${nowIso()}] [bet-sync] consumer error: ${betSyncLastError}; reconnecting in ${reconnectDelayMs}ms`,
+        );
+        await delayMs(reconnectDelayMs);
+        reconnectDelayMs = Math.min(
+          BET_SYNC_RECONNECT_MAX_MS,
+          reconnectDelayMs * 2,
+        );
+      }
+    }
+  })();
 }
 
 function connectedSseCount(): number {
@@ -2056,6 +2564,7 @@ async function pollContractParsers(): Promise<void> {
       pollEvmSnapshot("base", baseClient, baseContractAddress),
       pollEvmSnapshot("avax", avaxClient, avaxContractAddress),
     ]);
+    rebuildPredictionMarketsOverview(loadKeeperBotHealthSnapshot());
   } finally {
     contractPollInFlight = false;
   }
@@ -2829,6 +3338,13 @@ async function handleItemManifest(
 }
 
 async function handleStreamPublish(req: Request): Promise<Response> {
+  if (!ENABLE_STREAM_PUBLISH) {
+    return jsonResponse(
+      req,
+      { error: "Stream publish is disabled outside explicit local/dev mode" },
+      403,
+    );
+  }
   if (!requireWriteAuth(req, STREAM_PUBLISH_KEY)) {
     return jsonResponse(req, { error: "Unauthorized stream publish key" }, 401);
   }
@@ -2875,9 +3391,8 @@ const server = Bun.serve({
 
     if (url.pathname === "/status") {
       const botHealthSnapshotRaw = loadKeeperBotHealthSnapshot();
-      const predictionMarkets = buildPredictionMarketLifecycleRecords(
-        botHealthSnapshotRaw,
-      );
+      const overview = rebuildPredictionMarketsOverview(botHealthSnapshotRaw);
+      const predictionMarkets = overview.live?.markets ?? [];
       const botHealthSnapshot = botHealthSnapshotRaw
         ? {
           ...botHealthSnapshotRaw,
@@ -2897,13 +3412,16 @@ const server = Bun.serve({
           cycleId: streamState.cycle?.cycleId ?? null,
           phase: streamState.cycle?.phase ?? null,
           lastUpdatedAt: streamLastUpdatedAt,
-          sourceUrl: STREAM_STATE_SOURCE_URL
-            ? sanitizeUrlForStatus(STREAM_STATE_SOURCE_URL)
+          sourceUrl: BET_SYNC_SOURCE_EVENTS_URL
+            ? sanitizeUrlForStatus(BET_SYNC_SOURCE_EVENTS_URL)
+            : STREAM_STATE_SOURCE_URL
+              ? sanitizeUrlForStatus(STREAM_STATE_SOURCE_URL)
             : null,
           lastSourcePollAt: streamLastSourcePollAt,
           lastSourceError: streamLastSourceError,
           sseClients: connectedSseCount(),
         },
+        sync: syncStatusPayload(),
         parsers,
         proxies: {
           solanaRpc: Boolean(SOLANA_RPC_PROXY_URL),
@@ -2924,9 +3442,10 @@ const server = Bun.serve({
           knownWallets: walletDisplay.size,
         },
         predictionMarkets: {
-          activeDuelKey: currentDuelKey(),
+          activeDuelKey: overview.live?.duel.duelKey ?? currentDuelKey(),
           marketCount: predictionMarkets.length,
           botHealthUpdatedAt: botHealthSnapshot?.updatedAtMs ?? null,
+          overviewUpdatedAt: overview.updatedAt ?? null,
           chains: marketStatuses.map((market) => ({
             chainKey: market.chainKey,
             marketRef: market.marketRef,
@@ -2967,6 +3486,27 @@ const server = Bun.serve({
       url.pathname === "/api/arena/prediction-markets/active"
     ) {
       return handlePredictionMarkets(req);
+    }
+
+    if (
+      req.method === "GET" &&
+      url.pathname === "/api/arena/prediction-markets/overview"
+    ) {
+      return handlePredictionMarketsOverview(req);
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/sync/status") {
+      return jsonResponse(
+        req,
+        {
+          ok: true,
+          ...syncStatusPayload(),
+        },
+        200,
+        {
+          "cache-control": "no-store",
+        },
+      );
     }
 
     if (req.method === "GET" && url.pathname === "/api/keeper/bot-health") {
@@ -3200,7 +3740,12 @@ setInterval(() => {
   }
 }, 20_000);
 
-if (STREAM_STATE_SOURCE_URL) {
+if (BET_SYNC_SOURCE_EVENTS_URL) {
+  console.log(
+    `[${nowIso()}] [bet-sync] consuming ${BET_SYNC_SOURCE_EVENTS_URL}`,
+  );
+  startBetSyncConsumer();
+} else if (STREAM_STATE_SOURCE_URL) {
   console.log(
     `[${nowIso()}] [stream] polling source ${STREAM_STATE_SOURCE_URL}`,
   );

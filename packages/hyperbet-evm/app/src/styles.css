@@ -4093,6 +4093,143 @@ select:focus-visible {
   max-width: 240px;
 }
 
+.hm-truth-block {
+  display: grid;
+  gap: 6px;
+  padding: 0 12px 10px;
+  border-bottom: 1px solid var(--hm-border);
+}
+
+.hm-truth-banner,
+.hm-truth-card {
+  min-width: 0;
+  border: 1px solid var(--hm-panel-card-border, var(--hm-border));
+  border-radius: var(--hm-radius);
+  background: var(--hm-panel-card-bg, var(--hm-surface-raised));
+  box-shadow: inset 0 1px 0 var(--hm-panel-card-highlight, rgba(255, 255, 255, 0.08));
+}
+
+.hm-truth-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 10px;
+}
+
+.hm-truth-banner--aligned {
+  border-color: rgba(34, 197, 94, 0.22);
+  background: linear-gradient(
+    180deg,
+    rgba(34, 197, 94, 0.08) 0%,
+    rgba(18, 20, 23, 0.98) 100%
+  );
+}
+
+.hm-truth-banner--drift {
+  border-color: rgba(232, 65, 66, 0.24);
+  background: linear-gradient(
+    180deg,
+    rgba(232, 65, 66, 0.08) 0%,
+    rgba(18, 20, 23, 0.98) 100%
+  );
+}
+
+.hm-truth-banner-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  flex: 1 1 160px;
+}
+
+.hm-truth-banner-status {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--hm-text);
+  line-height: 1.35;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hm-truth-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 6px;
+}
+
+.hm-truth-card {
+  display: grid;
+  gap: 4px;
+  padding: 8px 10px;
+}
+
+.hm-truth-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.hm-truth-card-title {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--hm-text);
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.hm-truth-card-meta {
+  font-size: 10px;
+  color: var(--hm-panel-subtle-text, var(--hm-text-muted));
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.hm-truth-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 20px;
+  padding: 0 8px;
+  border-radius: var(--hm-radius);
+  border: 1px solid var(--hm-stone-dark);
+  background: var(--hm-surface-raised);
+  color: var(--hm-text-dim);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.hm-truth-pill--live {
+  background: rgba(34, 197, 94, 0.12);
+  border-color: rgba(34, 197, 94, 0.34);
+  color: var(--hm-accent-green);
+}
+
+.hm-truth-pill--settlement {
+  background: var(--hm-gold-glow-subtle);
+  border-color: var(--hm-gold-border-light);
+  color: var(--hm-accent-gold);
+}
+
+.hm-truth-pill--idle {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: var(--hm-stone-mid);
+  color: var(--hm-text-muted);
+}
+
+.hm-truth-pill--danger {
+  background: rgba(232, 65, 66, 0.12);
+  border-color: rgba(232, 65, 66, 0.34);
+  color: var(--hm-accent-red);
+}
+
 /* ================================================================
    SIDEBAR MATCHUP
    ================================================================ */
@@ -5036,6 +5173,17 @@ select:focus-visible {
     overflow: hidden;
   }
 
+  .hm-header {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: flex-start;
+    grid-template-columns: none;
+    gap: 0;
+    padding: 0;
+    min-height: auto;
+  }
+
   .hm-main {
     overflow: hidden;
   }
@@ -5158,10 +5306,77 @@ select:focus-visible {
   }
 
   /* Desktop header classes not rendered on mobile (isMobile branch in React) */
-  .hm-header {
-    padding: 0;
-    min-height: auto;
-    flex-direction: column;
+  .hm-header-mob-row1,
+  .hm-header-mob-row2 {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    min-width: 0;
+    overflow: hidden;
+  }
+
+  .hm-header-mob-row1 .hm-logo {
+    min-width: 0;
+    flex: 1 1 auto;
+    gap: 6px;
+    overflow: hidden;
+  }
+
+  .hm-header-mob-row1 .chain-select-wrap,
+  .hm-header-mob-row1 .chain-badge {
+    min-width: 0;
+    max-width: 132px;
+    flex: 0 1 auto;
+  }
+
+  .hm-header-mob-row1 .chain-select {
+    max-width: 132px;
+    font-size: 10px;
+    padding-right: 16px;
+  }
+
+  .hm-header-mob-controls {
+    flex: 0 0 auto;
+  }
+
+  .hm-header-mob-row2 {
+    height: auto;
+    padding: 6px 8px;
+  }
+
+  .hm-nav-tabs--mobile,
+  .hm-view-tabs--mobile {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    gap: 2px;
+    padding: 4px;
+  }
+
+  .hm-nav-tabs--mobile .hm-nav-tab,
+  .hm-view-tabs--mobile .hm-view-tab {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    padding: 8px 4px;
+  }
+
+  .hm-trades-summary {
+    flex-wrap: wrap;
+    gap: 8px 16px;
+  }
+
+  .hm-bottom-panel,
+  .hm-bottom-tabs,
+  .hm-trades-panel {
+    min-width: 0;
+    max-width: 100%;
   }
 
   .hm-back-btn {
@@ -5264,10 +5479,29 @@ select:focus-visible {
     gap: 6px;
   }
 
+  .hm-header-mob-controls {
+    gap: 4px;
+  }
+
   .hm-header-mob-row2 {
-    height: 36px;
+    height: auto;
     padding: 0 8px;
     gap: 6px;
+  }
+
+  .hm-nav-tabs--mobile,
+  .hm-view-tabs--mobile {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  .hm-nav-tabs--mobile .hm-nav-tab,
+  .hm-view-tabs--mobile .hm-view-tab {
+    min-width: 0;
+    flex: 1 1 0;
+    padding-inline: 8px;
+    font-size: 9px;
+    letter-spacing: 0.04em;
   }
 
   .hm-header-mob-row2 .hm-market-name {
@@ -5299,9 +5533,27 @@ select:focus-visible {
     flex-shrink: 0;
   }
 
+  .hm-header-mob-wallet-btn {
+    max-width: 88px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
   /* Hide chain badge on very small screens to reclaim ~40px */
   .hm-header-mob-row1 .chain-badge {
     display: none;
+  }
+
+  .hm-header-mob-row1 .chain-select-wrap {
+    max-width: 104px;
+  }
+
+  .hm-header-mob-row1 .chain-select {
+    max-width: 104px;
+    font-size: 9px;
+    padding-left: 6px;
+    padding-right: 14px;
   }
 
   .hm-statusbar {
@@ -5311,13 +5563,21 @@ select:focus-visible {
   /* bottom-panel inherits flex:1 from ≤768px — no fixed height override needed */
 
   .hm-bottom-tabs {
-    padding: 0 4px;
+    padding: 0 6px;
+    flex-wrap: wrap;
+    gap: 0 4px;
+    overflow-x: visible;
   }
 
   .hm-bottom-tab {
-    padding: 9px 9px;
-    font-size: 11px;
-    min-height: 40px;
+    flex: 1 1 calc(33.333% - 4px);
+    min-width: 0;
+    padding: 8px 6px;
+    font-size: 10px;
+    line-height: 1.2;
+    min-height: 36px;
+    white-space: normal;
+    text-align: center;
   }
 
   .hm-sidebar {
@@ -5344,7 +5604,7 @@ select:focus-visible {
   }
 
   .hm-bet-fab {
-    bottom: 16px;
+    bottom: 72px;
     right: 16px;
     height: 48px;
     padding: 0 20px;
@@ -5698,6 +5958,32 @@ select:focus-visible {
   );
 }
 
+.hm-header {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.hm-header-left {
+  flex-wrap: wrap;
+  row-gap: 8px;
+}
+
+.hm-header-center {
+  display: none;
+}
+
+.hm-market-info,
+.hm-mode-summary {
+  flex: 1 1 220px;
+}
+
+.hm-mode-summary-copy,
+.hm-mode-summary-meta,
+.hm-nav-tab-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .hm-wallet-btn:hover,
 .hm-locale-selector:hover,
 .hm-theme-toggle:hover,
@@ -5716,6 +6002,20 @@ select:focus-visible {
 .hm-header-mob-row1,
 .hm-header-mob-row2 {
   background: transparent;
+}
+
+.hm-truth-block {
+  gap: 8px;
+  padding: 0 16px 14px;
+}
+
+.hm-truth-grid {
+  gap: 8px;
+}
+
+.hm-truth-card,
+.hm-truth-banner {
+  padding: 10px 12px;
 }
 
 .hm-theme-toggle {

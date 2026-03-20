@@ -11,7 +11,7 @@ if [[ -n "$COMMON_GIT_DIR" && -d "$COMMON_GIT_DIR" ]]; then
 else
   WORKSPACE_ROOT="$(cd "$ROOT/.." && pwd)"
 fi
-HYPERSCAPES_ROOT="${HYPERSCAPES_ROOT:-$ROOT/.worktrees/hyperscapes-stream-bet-sync}"
+HYPERSCAPES_ROOT="${HYPERSCAPES_ROOT:-$WORKSPACE_ROOT/.worktrees/hyperscapes-stream-bet-sync}"
 PM_LOCAL_EVM_MODE="${PM_LOCAL_EVM_MODE:-anvil}"
 ANVIL_BIN="${ANVIL_BIN:-$(command -v anvil 2>/dev/null || true)}"
 if [[ -z "$ANVIL_BIN" && -x "/opt/homebrew/bin/anvil" ]]; then
@@ -29,6 +29,7 @@ if [[ -z "$BUN_BIN" ]]; then
   echo "[pm-local] bun binary not found; set BUN_BIN or install bun" >&2
   exit 1
 fi
+export PATH="$(dirname "$BUN_BIN"):$PATH"
 NODE_BIN="${NODE_BIN:-$(command -v node 2>/dev/null || true)}"
 if [[ -z "$NODE_BIN" && -x "/usr/local/bin/node" ]]; then
   NODE_BIN="/usr/local/bin/node"
@@ -111,10 +112,12 @@ EVM_KEEPER_CHAINS="${EVM_KEEPER_CHAINS:-bsc,avax}"
 HYPERSCAPES_SKIP_CHAIN_SETUP="${HYPERSCAPES_SKIP_CHAIN_SETUP:-true}"
 HYPERSCAPES_DUEL_NODE_ENV="${HYPERSCAPES_DUEL_NODE_ENV:-development}"
 HYPERSCAPES_JWT_SECRET="${HYPERSCAPES_JWT_SECRET:-local-dev-secret}"
+STREAMING_VIEWER_ACCESS_TOKEN="${STREAMING_VIEWER_ACCESS_TOKEN:-pm-local-stream-viewer-token}"
 KEEPER_URL="http://127.0.0.1:${KEEPER_PORT}"
 LOCAL_EVM_UI_KEY_FILE="${LOCAL_EVM_UI_KEY_FILE:-$ROOT/keys/local-smoke/evm-ui.privatekey}"
-STREAM_URL="${VITE_STREAM_URL:-${GAME_CLIENT_URL}/stream.html}"
-HYPERSCAPES_UI_URL="${HYPERSCAPES_UI_URL:-${GAME_CLIENT_URL}/stream.html}"
+DEFAULT_STREAM_URL="${GAME_CLIENT_URL}/stream.html?disableBridgeCapture=1&streamToken=${STREAMING_VIEWER_ACCESS_TOKEN}"
+STREAM_URL="${VITE_STREAM_URL:-${DEFAULT_STREAM_URL}}"
+HYPERSCAPES_UI_URL="${HYPERSCAPES_UI_URL:-${DEFAULT_STREAM_URL}}"
 HYPERBET_UI_URL="${HYPERBET_UI_URL:-http://127.0.0.1:${APP_PORT}/?debug}"
 OPEN_LOCAL_UI="${OPEN_LOCAL_UI:-true}"
 CAPTURE_LOCAL_UI_FLOW="${CAPTURE_LOCAL_UI_FLOW:-true}"
@@ -123,6 +126,11 @@ WRITER_KEYS_READY="false"
 KEEPER_BOT_DEFAULT="true"
 EVM_KEEPER_DEFER_FINALIZE="${EVM_KEEPER_DEFER_FINALIZE:-true}"
 LOCAL_STREAM_DUEL_KEY_HEX=""
+LOCAL_STREAM_DUEL_ID=""
+LOCAL_STREAM_PHASE=""
+LOCAL_STREAM_BET_OPEN_TIME_MS=""
+LOCAL_STREAM_BET_CLOSE_TIME_MS=""
+LOCAL_STREAM_FIGHT_START_TIME_MS=""
 LOCAL_EVM_ADMIN_PRIVATE_KEY="${LOCAL_EVM_ADMIN_PRIVATE_KEY:-0xac0974bec39a17e36ba4d238ff944bacb478cbed5efcae784d7bf4f2ff80}"
 LOCAL_BSC_CHAIN_ID="${LOCAL_BSC_CHAIN_ID:-97}"
 LOCAL_AVAX_CHAIN_ID="${LOCAL_AVAX_CHAIN_ID:-43113}"
@@ -304,10 +312,10 @@ seed_hyperscapes_agents() {
   for _ in $(seq 1 120); do
     local phase
     local duel_key
-    phase="$(curl -fsSL "${GAME_HTTP_URL}/api/streaming/state" | json_path_from_stdin "cycle.phase")"
-    duel_key="$(curl -fsSL "${GAME_HTTP_URL}/api/streaming/state" | json_path_from_stdin "cycle.duelKeyHex")"
+    refresh_live_duel_seed_state || true
+    phase="$LOCAL_STREAM_PHASE"
+    duel_key="$LOCAL_STREAM_DUEL_KEY_HEX"
     if [[ "$phase" != "IDLE" && -n "$duel_key" ]]; then
-      LOCAL_STREAM_DUEL_KEY_HEX="$duel_key"
       echo "[pm-local] Hyperscapes duel seeded: phase=${phase} duelKey=${duel_key}"
       return 0
     fi
@@ -316,6 +324,18 @@ seed_hyperscapes_agents() {
 
   echo "[pm-local] timed out waiting for Hyperscapes duel to leave IDLE" >&2
   return 1
+}
+
+refresh_live_duel_seed_state() {
+  local stream_state
+  stream_state="$(curl -fsSL "${GAME_HTTP_URL}/api/streaming/state")" || return 1
+
+  LOCAL_STREAM_PHASE="$(printf '%s' "$stream_state" | json_path_from_stdin "cycle.phase")"
+  LOCAL_STREAM_DUEL_KEY_HEX="$(printf '%s' "$stream_state" | json_path_from_stdin "cycle.duelKeyHex")"
+  LOCAL_STREAM_DUEL_ID="$(printf '%s' "$stream_state" | json_path_from_stdin "cycle.duelId")"
+  LOCAL_STREAM_BET_OPEN_TIME_MS="$(printf '%s' "$stream_state" | json_path_from_stdin "cycle.betOpenTime")"
+  LOCAL_STREAM_BET_CLOSE_TIME_MS="$(printf '%s' "$stream_state" | json_path_from_stdin "cycle.betCloseTime")"
+  LOCAL_STREAM_FIGHT_START_TIME_MS="$(printf '%s' "$stream_state" | json_path_from_stdin "cycle.fightStartTime")"
 }
 
 start_local_evm_chain() {
@@ -420,12 +440,20 @@ seed_local_evm_chain() {
   local state_path="$4"
   local duel_key="$5"
   local rpc_url="$6"
+  local duel_id="$7"
+  local bet_open_time_ms="$8"
+  local bet_close_time_ms="$9"
+  local fight_start_time_ms="${10}"
   local seed_log="/tmp/hyperbet-pm-local-${chain_key}-reseed.log"
 
   echo "[pm-local] re-seeding local ${chain_key} contracts for duel ${duel_key}"
   E2E_EVM_RPC_URL="$rpc_url" \
   E2E_EVM_CHAIN_ID="$chain_id" \
   E2E_EVM_DUEL_KEY="$duel_key" \
+  E2E_EVM_DUEL_ID="$duel_id" \
+  E2E_EVM_BET_OPEN_TIME_MS="$bet_open_time_ms" \
+  E2E_EVM_BET_CLOSE_TIME_MS="$bet_close_time_ms" \
+  E2E_EVM_FIGHT_START_TIME_MS="$fight_start_time_ms" \
   E2E_EVM_REUSE_DEPLOYMENT="true" \
     "$NODE_BIN" --import tsx "$setup_script" >"$seed_log" 2>&1
 
@@ -489,10 +517,11 @@ follow_live_evm_duel_seed() {
 
   while true; do
     local current_duel_key=""
-    current_duel_key="$(curl -fsSL "${GAME_HTTP_URL}/api/streaming/state" | json_path_from_stdin "cycle.duelKeyHex")"
+    refresh_live_duel_seed_state || true
+    current_duel_key="$LOCAL_STREAM_DUEL_KEY_HEX"
     if [[ -n "$current_duel_key" && "$current_duel_key" != "$last_duel_key" ]]; then
-      seed_local_evm_chain "bsc" "$LOCAL_BSC_CHAIN_ID" "$LOCAL_BSC_SETUP_SCRIPT" "$LOCAL_BSC_STATE_PATH" "$current_duel_key" "$LOCAL_BSC_RPC_URL" || return 1
-      seed_local_evm_chain "avax" "$LOCAL_AVAX_CHAIN_ID" "$LOCAL_AVAX_SETUP_SCRIPT" "$LOCAL_AVAX_STATE_PATH" "$current_duel_key" "$LOCAL_AVAX_RPC_URL" || return 1
+      seed_local_evm_chain "bsc" "$LOCAL_BSC_CHAIN_ID" "$LOCAL_BSC_SETUP_SCRIPT" "$LOCAL_BSC_STATE_PATH" "$current_duel_key" "$LOCAL_BSC_RPC_URL" "$LOCAL_STREAM_DUEL_ID" "$LOCAL_STREAM_BET_OPEN_TIME_MS" "$LOCAL_STREAM_BET_CLOSE_TIME_MS" "$LOCAL_STREAM_FIGHT_START_TIME_MS" || return 1
+      seed_local_evm_chain "avax" "$LOCAL_AVAX_CHAIN_ID" "$LOCAL_AVAX_SETUP_SCRIPT" "$LOCAL_AVAX_STATE_PATH" "$current_duel_key" "$LOCAL_AVAX_RPC_URL" "$LOCAL_STREAM_DUEL_ID" "$LOCAL_STREAM_BET_OPEN_TIME_MS" "$LOCAL_STREAM_BET_CLOSE_TIME_MS" "$LOCAL_STREAM_FIGHT_START_TIME_MS" || return 1
       last_duel_key="$current_duel_key"
       echo "[pm-local] local EVM markets re-anchored to duel ${current_duel_key}"
     fi
@@ -542,15 +571,20 @@ fi
 
 warn_missing_writer_keys
 LOCAL_PM_SOLANA_KEEPER_KEYPAIR="${LOCAL_PM_SOLANA_KEEPER_KEYPAIR:-$ROOT/keys/local-pm/solana-keeper.json}"
+LOCAL_PM_SOLANA_BOOTSTRAP_KEYPAIR="${LOCAL_PM_SOLANA_BOOTSTRAP_KEYPAIR:-$WORKSPACE_ROOT/.ci-artifacts/e2e-solana/solana-bootstrap-keypair.json}"
 if [[ -z "${BOT_KEYPAIR:-}" && -z "${ORACLE_AUTHORITY_KEYPAIR:-}" && -z "${MARKET_MAKER_KEYPAIR:-}" ]]; then
   if [[ -f "$LOCAL_PM_SOLANA_KEEPER_KEYPAIR" ]]; then
     export BOT_KEYPAIR="$LOCAL_PM_SOLANA_KEEPER_KEYPAIR"
     export ORACLE_AUTHORITY_KEYPAIR="$LOCAL_PM_SOLANA_KEEPER_KEYPAIR"
     export MARKET_MAKER_KEYPAIR="$LOCAL_PM_SOLANA_KEEPER_KEYPAIR"
     echo "[pm-local] using local PM Solana keeper keypair: $LOCAL_PM_SOLANA_KEEPER_KEYPAIR"
+  elif [[ -f "$LOCAL_PM_SOLANA_BOOTSTRAP_KEYPAIR" ]]; then
+    export BOT_KEYPAIR="$LOCAL_PM_SOLANA_BOOTSTRAP_KEYPAIR"
+    export ORACLE_AUTHORITY_KEYPAIR="$LOCAL_PM_SOLANA_BOOTSTRAP_KEYPAIR"
+    export MARKET_MAKER_KEYPAIR="$LOCAL_PM_SOLANA_BOOTSTRAP_KEYPAIR"
+    echo "[pm-local] using fallback Solana bootstrap keypair for local bot startup: $LOCAL_PM_SOLANA_BOOTSTRAP_KEYPAIR"
   else
-    KEEPER_BOT_DEFAULT="false"
-    echo "[pm-local] local PM Solana keeper keypair not found at $LOCAL_PM_SOLANA_KEEPER_KEYPAIR; disabling keeper bot for this run"
+    echo "[pm-local] local PM Solana keeper keypair not found at $LOCAL_PM_SOLANA_KEEPER_KEYPAIR; keeping local EVM keeper bot enabled and disabling only Solana writes"
   fi
 fi
 ENABLE_KEEPER_BOT="${ENABLE_KEEPER_BOT:-$KEEPER_BOT_DEFAULT}"
@@ -583,6 +617,7 @@ echo "[pm-local] starting Hyperscapes duel stack from $HYPERSCAPES_ROOT"
     PORT="$GAME_PORT" \
     DUEL_NODE_ENV="$HYPERSCAPES_DUEL_NODE_ENV" \
     JWT_SECRET="$HYPERSCAPES_JWT_SECRET" \
+    STREAMING_VIEWER_ACCESS_TOKEN="$STREAMING_VIEWER_ACCESS_TOKEN" \
     "$BUN_BIN" "${duel_args[@]}"
 ) &
 DUEL_PID=$!
@@ -597,7 +632,10 @@ if [[ "$PM_LOCAL_EVM_MODE" == "anvil" ]]; then
   fi
 
   export E2E_EVM_DUEL_KEY="$LOCAL_STREAM_DUEL_KEY_HEX"
-  export E2E_EVM_DUEL_ID="${E2E_EVM_DUEL_ID:-1}"
+  export E2E_EVM_DUEL_ID="${LOCAL_STREAM_DUEL_ID:-${E2E_EVM_DUEL_ID:-1}}"
+  export E2E_EVM_BET_OPEN_TIME_MS="${LOCAL_STREAM_BET_OPEN_TIME_MS:-}"
+  export E2E_EVM_BET_CLOSE_TIME_MS="${LOCAL_STREAM_BET_CLOSE_TIME_MS:-}"
+  export E2E_EVM_FIGHT_START_TIME_MS="${LOCAL_STREAM_FIGHT_START_TIME_MS:-}"
 
   start_local_evm_chain "bsc" "$LOCAL_BSC_CHAIN_ID" "$LOCAL_BSC_ANVIL_PORT" "$LOCAL_BSC_SETUP_SCRIPT" "$LOCAL_BSC_STATE_PATH"
   start_local_evm_chain "avax" "$LOCAL_AVAX_CHAIN_ID" "$LOCAL_AVAX_ANVIL_PORT" "$LOCAL_AVAX_SETUP_SCRIPT" "$LOCAL_AVAX_STATE_PATH"
@@ -610,6 +648,9 @@ echo "[pm-local] starting Hyperbet EVM keeper service on :$KEEPER_PORT"
 (
   cd "$ROOT"
     keeper_env=(
+      BET_SYNC_SOURCE_EVENTS_URL="${GAME_HTTP_URL}/api/internal/bet-sync/events"
+      BET_SYNC_SOURCE_STATE_URL="${GAME_HTTP_URL}/api/internal/bet-sync/state"
+      BET_SYNC_SOURCE_BEARER_TOKEN="$STREAMING_VIEWER_ACCESS_TOKEN"
       STREAM_STATE_SOURCE_URL="${GAME_HTTP_URL}/api/streaming/state"
       PORT="$KEEPER_PORT"
       GAME_URL="$KEEPER_URL"
@@ -619,6 +660,7 @@ echo "[pm-local] starting Hyperbet EVM keeper service on :$KEEPER_PORT"
       SOLANA_CLUSTER="$SOLANA_CLUSTER"
       EVM_KEEPER_CHAINS="$EVM_KEEPER_CHAINS"
       ENABLE_KEEPER_BOT="$ENABLE_KEEPER_BOT"
+      ENABLE_STREAM_PUBLISH="true"
     )
   if [[ -n "${BSC_RPC_URL:-}" ]]; then
     keeper_env+=(BSC_RPC_URL="$BSC_RPC_URL")
@@ -686,10 +728,14 @@ if [[ "$CAPTURE_LOCAL_UI_FLOW" == "true" ]]; then
   echo "[pm-local] starting local PM follow monitor"
   (
     cd "$ROOT"
-    HYPERSCAPES_UI_URL="$HYPERSCAPES_UI_URL" \
+      HYPERSCAPES_UI_URL="$HYPERSCAPES_UI_URL" \
       HYPERBET_UI_URL="$HYPERBET_UI_URL" \
-      STREAM_STATE_URL="${KEEPER_URL}/api/streaming/state" \
+      VITE_STREAM_URL="${VITE_STREAM_URL:-$HYPERSCAPES_UI_URL}" \
+      SOURCE_STREAM_STATE_URL="${SOURCE_STREAM_STATE_URL:-${GAME_HTTP_URL}/api/streaming/state}" \
+      STREAM_STATE_URL="${STREAM_STATE_URL:-${KEEPER_URL}/api/streaming/state}" \
       ACTIVE_MARKETS_URL="${KEEPER_URL}/api/arena/prediction-markets/active" \
+      OVERVIEW_MARKETS_URL="${OVERVIEW_MARKETS_URL:-${KEEPER_URL}/api/arena/prediction-markets/overview}" \
+      SYNC_STATUS_URL="${SYNC_STATUS_URL:-${KEEPER_URL}/api/sync/status}" \
       PM_SOAK_RECONCILE_PUBLISH_URL="${PM_SOAK_RECONCILE_PUBLISH_URL:-${KEEPER_URL}/api/streaming/state/publish}" \
       PM_SOAK_RECONCILE_PUBLISH_KEY="${PM_SOAK_RECONCILE_PUBLISH_KEY:-${STREAM_PUBLISH_KEY:-${ARENA_EXTERNAL_BET_WRITE_KEY:-${E2E_ARENA_WRITE_KEY:-}}}}" \
       PM_SOAK_SCREENSHOTS="${PM_SOAK_SCREENSHOTS:-true}" \
@@ -712,8 +758,8 @@ cat <<EOF
 
 [pm-local] notes:
   - Hyperscapes remains the duel event source.
-  - Hyperbet keeper polls ${GAME_HTTP_URL}/api/streaming/state and exposes
-    /api/arena/prediction-markets/active for the UI.
+  - Hyperbet keeper consumes ${GAME_HTTP_URL}/api/internal/bet-sync/events and exposes
+    /api/arena/prediction-markets/overview for the UI.
   - Current local game lifecycle supports open -> lock -> resolve, not cancel.
   - This local runner defaults to skipping Hyperscapes MUD chain bootstrap and
     running the duel server in development mode because Hyperbet consumes the

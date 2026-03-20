@@ -142,6 +142,7 @@ function getEvmPanelCopy(locale: UiLocale) {
       resolutionChallenged: "结果已被挑战，结算已暂停",
       marketOpen: "市场开放中",
       refreshFailed: (message: string) => `刷新失败：${message}`,
+      streamDriftDetected: "流与市场不同步，已暂停交易",
       walletNotConnected: "钱包未连接",
       amountTooLow: "数量必须大于 0",
       placingOrder: "正在下单...",
@@ -196,6 +197,7 @@ function getEvmPanelCopy(locale: UiLocale) {
     resolutionChallenged: "Result challenged; settlement paused",
     marketOpen: "Market open",
     refreshFailed: (message: string) => `Refresh failed: ${message}`,
+    streamDriftDetected: "Stream drift detected; trading paused",
     walletNotConnected: "Wallet not connected",
     amountTooLow: "Amount must be greater than zero",
     placingOrder: "Placing order...",
@@ -455,9 +457,6 @@ export function EvmBettingPanel({
   const streamedDuelId = typeof cycle?.duelId === "string" ? cycle.duelId : null;
   const cycleAgent1 = cycle?.agent1?.name ?? agent1Name;
   const cycleAgent2 = cycle?.agent2?.name ?? agent2Name;
-  const nativeDecimals = chainConfig?.nativeCurrency.decimals ?? 18;
-  const chainNativeSymbol: Record<string, string> = { bsc: "BNB", base: "ETH", avax: "AVAX" };
-  const nativeSymbol = chainConfig?.nativeCurrency.symbol ?? chainNativeSymbol[activeChain] ?? "ETH";
   const lifecycleChainKey =
     activeChain === "bsc" || activeChain === "base" || activeChain === "avax"
       ? activeChain
@@ -475,12 +474,11 @@ export function EvmBettingPanel({
     });
   const effectiveLifecycleDuel = lifecycleDuelOverride ?? lifecycleDuel;
   const effectiveLifecycleMarket = lifecycleMarketOverride ?? lifecycleMarket;
-  const duelKeyHex = useMemo(
+  const liveLifecycleDuelKey = useMemo(
     () =>
       normalizePredictionMarketDuelKeyHex(
         effectiveLifecycleMarket?.duelKey ??
           effectiveLifecycleDuel?.duelKey ??
-          streamedDuelKeyHex ??
           (isE2eMode ? configuredE2eDuelKey : null),
       ),
     [
@@ -488,9 +486,19 @@ export function EvmBettingPanel({
       effectiveLifecycleDuel?.duelKey,
       effectiveLifecycleMarket?.duelKey,
       isE2eMode,
-      streamedDuelKeyHex,
     ],
   );
+  const streamedDuelKey = useMemo(
+    () => normalizePredictionMarketDuelKeyHex(streamedDuelKeyHex),
+    [streamedDuelKeyHex],
+  );
+  const streamDriftDetected =
+    Boolean(liveLifecycleDuelKey) &&
+    (streamedDuelKey == null || streamedDuelKey !== liveLifecycleDuelKey);
+  const nativeDecimals = chainConfig?.nativeCurrency.decimals ?? 18;
+  const chainNativeSymbol: Record<string, string> = { bsc: "BNB", base: "ETH", avax: "AVAX" };
+  const nativeSymbol = chainConfig?.nativeCurrency.symbol ?? chainNativeSymbol[activeChain] ?? "ETH";
+  const duelKeyHex = liveLifecycleDuelKey;
   const duelId =
     effectiveLifecycleMarket?.duelId ??
     effectiveLifecycleDuel?.duelId ??
@@ -1033,8 +1041,10 @@ export function EvmBettingPanel({
       ? copy.claimCleanupHelp
       : copy.claimHelp;
   const programsReady = Boolean(
-    chainConfig && duelKeyHex && uiState.canTrade,
+    chainConfig && duelKeyHex && uiState.canTrade && !streamDriftDetected,
   );
+  const shouldShowStatusBanner =
+    streamDriftDetected || lastRefreshError != null;
   const e2eWalletDebug = isE2eMode
     ? [
       `key=${configuredHeadlessPrivateKey ? "yes" : "no"}`,
@@ -1056,6 +1066,7 @@ export function EvmBettingPanel({
       `metaStatus=${marketMeta?.status ?? "-"}`,
       `metaWinner=${marketMeta?.winner ?? "-"}`,
       `metaKey=${marketMeta?.marketKey ?? "-"}`,
+      `streamAligned=${streamDriftDetected ? "no" : "yes"}`,
       `aShares=${effectivePosition?.aShares?.toString() ?? "0"}`,
       `bShares=${effectivePosition?.bShares?.toString() ?? "0"}`,
       `aStake=${effectivePosition?.aStake?.toString() ?? "0"}`,
@@ -1097,8 +1108,8 @@ export function EvmBettingPanel({
         <div
           style={{
             display: "grid",
-            gap: compact ? 10 : 10,
-            padding: compact ? "4px 0 0" : "12px 0 0",
+            gap: 12,
+            padding: "12px 0 0",
             color: "var(--hm-text, #d4d4d8)",
             fontFamily: "var(--hm-font-body)",
             fontSize: 12,
@@ -1112,7 +1123,7 @@ export function EvmBettingPanel({
             className="gm-metric-grid"
             style={{
               display: "grid",
-              gap: compact ? 6 : 8,
+              gap: 8,
               width: "100%",
               minWidth: 0,
             }}
@@ -1126,14 +1137,59 @@ export function EvmBettingPanel({
               label={copy.youHold}
               value={`${formatCompactTokenAmount(selectedShares, nativeDecimals)} / ${formatCompactTokenAmount(selectedStake, nativeDecimals)} ${nativeSymbol}`}
             />
+        </div>
+        {shouldShowStatusBanner && (
+          <div
+            style={{
+              display: "grid",
+              gap: 4,
+              padding: "10px 12px",
+              borderRadius: "var(--hm-radius)",
+              border: streamDriftDetected
+                ? "1px solid color-mix(in srgb, var(--hm-sell) 34%, transparent)"
+                : "1px solid var(--hm-panel-card-border, rgba(255,255,255,0.08))",
+              background: streamDriftDetected
+                ? "color-mix(in srgb, var(--hm-sell) 10%, transparent)"
+                : "var(--hm-panel-card-bg, linear-gradient(180deg, rgba(255,255,255,0.04) 0%, rgba(255,255,255,0.02) 100%))",
+              color: "var(--hm-text, #f8fafc)",
+              width: "100%",
+              boxSizing: "border-box",
+            }}
+          >
+            <span
+              style={{
+                fontSize: 9,
+                fontWeight: 800,
+                letterSpacing: 1,
+                textTransform: "uppercase",
+                color: "rgba(255,255,255,0.58)",
+                fontFamily: "var(--hm-font-display)",
+              }}
+            >
+              {streamDriftDetected ? copy.streamDriftDetected : "Status"}
+            </span>
+            <span
+              style={{
+                fontSize: compact ? 11 : 12,
+                fontWeight: 700,
+                lineHeight: 1.4,
+                overflowWrap: "anywhere",
+                minWidth: 0,
+              }}
+            >
+              {streamDriftDetected
+                ? copy.streamDriftDetected
+                : copy.refreshFailed(lastRefreshError ?? "unknown")}
+            </span>
           </div>
+        )}
 
           <div
             style={{
               display: "grid",
-              gap: compact ? 6 : 8,
-              padding: compact ? "9px" : "12px",
-              borderRadius: compact ? 12 : 14,
+              gap: 8,
+              padding: "12px",
+              borderRadius: "var(--hm-radius)",
               border:
                 "1px solid var(--hm-panel-card-border, rgba(255,255,255,0.08))",
               background:
@@ -1148,7 +1204,7 @@ export function EvmBettingPanel({
                 display: "grid",
                 gridTemplateColumns: compact ? "1fr" : "minmax(0, 1fr) auto",
                 alignItems: "start",
-                gap: compact ? 8 : 12,
+                gap: 12,
                 width: "100%",
                 minWidth: 0,
               }}
@@ -1156,7 +1212,7 @@ export function EvmBettingPanel({
               <div
                 style={{
                   display: "grid",
-                  gap: compact ? 2 : 4,
+                  gap: 4,
                   minWidth: 0,
                 }}
               >
@@ -1191,7 +1247,7 @@ export function EvmBettingPanel({
                 style={{
                   display: "grid",
                   justifyItems: compact ? "stretch" : "end",
-                  gap: compact ? 3 : 5,
+                  gap: 6,
                   maxWidth: compact ? "100%" : "none",
                   minWidth: 0,
                   width: "100%",
@@ -1205,8 +1261,8 @@ export function EvmBettingPanel({
                   aria-label={showAdvancedPricing ? copy.hideAdvancedPricing : copy.showAdvancedPricing}
                   className="gm-pricing-toggle"
                   style={{
-                    padding: compact ? "6px 9px" : "7px 10px",
-                    borderRadius: 999,
+                    padding: "7px 10px",
+                    borderRadius: "var(--hm-radius)",
                     border:
                       "1px solid var(--hm-panel-pill-border, rgba(255,255,255,0.08))",
                     background:
@@ -1256,14 +1312,14 @@ export function EvmBettingPanel({
                       minWidth: 0,
                       width: "100%",
                       marginLeft: 0,
-                      padding: compact ? "9px 11px" : "10px 12px",
-                      borderRadius: compact ? 10 : 12,
+                      padding: "10px 12px",
+                      borderRadius: "var(--hm-radius)",
                     }}
                   />
                   <div
                     style={{
-                      padding: compact ? "9px 11px" : "10px 12px",
-                      borderRadius: compact ? 10 : 12,
+                      padding: "10px 12px",
+                      borderRadius: "var(--hm-radius)",
                       border:
                         "1px solid var(--hm-panel-pill-border, rgba(255,255,255,0.08))",
                       background:
@@ -1318,11 +1374,11 @@ export function EvmBettingPanel({
           </div>
 
           <div
-            style={{
-              display: "grid",
-              gap: 6,
-              padding: compact ? "10px" : "12px",
-              borderRadius: compact ? 12 : 14,
+              style={{
+                display: "grid",
+                gap: 6,
+                padding: "12px",
+              borderRadius: "var(--hm-radius)",
               border:
                 "1px solid var(--hm-panel-card-border, rgba(255,255,255,0.08))",
               background:
@@ -1551,7 +1607,7 @@ function CompactMetricCard({
         display: "grid",
         gap: 4,
         padding: "8px 10px",
-        borderRadius: 12,
+        borderRadius: "var(--hm-radius)",
         border:
           "1px solid var(--hm-panel-card-border, rgba(255,255,255,0.08))",
         background:
@@ -1609,7 +1665,7 @@ function buttonStyle(
     alignItems: "center",
     justifyContent: "center",
     padding: "9px 11px",
-    borderRadius: 10,
+    borderRadius: "var(--hm-radius)",
     border: `1px solid ${border}`,
     background,
     color: disabled
@@ -1637,10 +1693,10 @@ function debugPreStyle(): CSSProperties {
     maxWidth: "100%",
     margin: 0,
     padding: 10,
-    borderRadius: 10,
-    border: "1px solid rgba(255,255,255,0.08)",
+    borderRadius: "var(--hm-radius)",
+    border: "1px solid var(--hm-panel-card-border, rgba(255,255,255,0.08))",
     background:
-      "linear-gradient(180deg, rgba(255,255,255,0.04) 0%, rgba(255,255,255,0.015) 100%)",
+      "var(--hm-panel-card-bg, linear-gradient(180deg, rgba(255,255,255,0.04) 0%, rgba(255,255,255,0.015) 100%))",
     color: "var(--hm-panel-muted-text, rgba(255,255,255,0.78))",
     whiteSpace: "pre-wrap",
     overflowWrap: "anywhere",
@@ -1659,7 +1715,7 @@ const inputStyle: CSSProperties = {
   width: 78,
   marginLeft: 8,
   padding: "6px 9px",
-  borderRadius: 8,
+  borderRadius: "var(--hm-radius)",
   border: "1px solid var(--hm-panel-card-border, rgba(255,255,255,0.14))",
   background: "var(--hm-panel-card-bg, rgba(17,24,39,0.65))",
   color: "var(--hm-text, #f4f4f5)",

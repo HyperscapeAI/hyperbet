@@ -2,7 +2,9 @@ import { describe, expect, it } from "bun:test";
 
 import {
   normalizePredictionMarketDuelKeyHex,
+  parsePredictionMarketsOverviewResponse,
   parsePredictionMarketsResponse,
+  selectPredictionMarketOverviewRecord,
   selectPredictionMarketLifecycleRecord,
 } from "../src/lib/predictionMarkets";
 import {
@@ -123,6 +125,60 @@ describe("prediction market lifecycle helpers", () => {
       "avax:12",
     );
     expect(selectPredictionMarketLifecycleRecord(payload, "base")).toBeNull();
+  });
+
+  it("parses live and recent settlement overview payloads", () => {
+    const duelKey = "12".repeat(32);
+    const parsed = parsePredictionMarketsOverviewResponse({
+      live: {
+        duel: {
+          duelKey: `0x${duelKey}`,
+          duelId: "duel-live",
+          phase: "FIGHTING",
+          winner: "NONE",
+          betCloseTime: 111,
+        },
+        markets: [
+          {
+            chainKey: "bsc",
+            duelKey,
+            duelId: "duel-live",
+            marketId: "market-live",
+            marketRef: "market-live",
+            lifecycleStatus: "OPEN",
+            winner: "NONE",
+            betCloseTime: 111,
+            contractAddress: "0x123",
+            programId: null,
+            txRef: null,
+            syncedAt: 1,
+          },
+        ],
+        updatedAt: 100,
+      },
+      recentSettlement: {
+        duel: {
+          duelKey,
+          duelId: "duel-previous",
+          phase: "RESOLUTION",
+          winner: "A",
+          betCloseTime: 222,
+        },
+        markets: [],
+        updatedAt: 90,
+      },
+      updatedAt: 123,
+    });
+
+    expect(parsed).not.toBeNull();
+    expect(parsed?.live?.duel.duelId).toBe("duel-live");
+    expect(parsed?.recentSettlement?.duel.duelId).toBe("duel-previous");
+    expect(selectPredictionMarketOverviewRecord(parsed, "bsc", "live")?.marketRef).toBe(
+      "market-live",
+    );
+    expect(
+      selectPredictionMarketOverviewRecord(parsed, "bsc", "recentSettlement"),
+    ).toBeNull();
   });
 });
 

@@ -51,6 +51,10 @@ import {
   toDuelKeyHex,
 } from "@hyperbet/ui/lib/evmClient";
 import { getEvmChainConfig } from "@hyperbet/ui/lib/chainConfig";
+import {
+  normalizePredictionMarketDuelKeyHex,
+  usePredictionMarketOverview,
+} from "@hyperbet/ui/lib/predictionMarkets";
 
 // ── Shared UI utilities ──────────────────────────────────────────────────────
 function formatGold(v: number, locale: UiLocale): string {
@@ -221,12 +225,17 @@ function getAppCopy(locale: UiLocale) {
       models: "模型",
       modelMarkets: "模型市场",
       leaderboardAndStats: "排行榜与统计",
+      latestSettlement: "最近结算",
+      claimOnly: "仅可领取",
       addEvmWallet: "添加 EVM 钱包",
       switchNetwork: "切换网络",
       unmuteStream: "开启声音",
       muteStream: "静音",
       source: "信源",
       waitingForStream: "等待直播流…",
+      streamReady: "直播流已就绪",
+      rendererUnhealthy: "渲染器异常",
+      streamDriftDetected: "直播流与市场状态不同步",
       trades: "成交",
       orderBook: "订单簿",
       matchLog: "对局日志",
@@ -311,12 +320,17 @@ function getAppCopy(locale: UiLocale) {
     models: "Models",
     modelMarkets: "Model Markets",
     leaderboardAndStats: "Leaderboard & Stats",
+    latestSettlement: "Latest settlement",
+    claimOnly: "Claim only",
     addEvmWallet: "Add EVM Wallet",
     switchNetwork: "Switch Network",
     unmuteStream: "Unmute stream",
     muteStream: "Mute stream",
     source: "Source",
     waitingForStream: "Waiting for stream…",
+    streamReady: "Stream ready",
+    rendererUnhealthy: "Renderer unhealthy",
+    streamDriftDetected: "Stream and market state are out of sync",
     trades: "Trades",
     orderBook: "Order Book",
     matchLog: "Match Log",
@@ -461,6 +475,37 @@ function PanelFallback({
   );
 }
 
+function MarketSurfaceCard({
+  label,
+  status,
+  title,
+  detail,
+  tone,
+}: {
+  label: string;
+  status: string;
+  title: string;
+  detail: string;
+  tone: "live" | "settlement" | "idle";
+}) {
+  return (
+    <div className="hm-truth-card">
+      <div className="hm-truth-card-header">
+        <span className="hm-matchup-label">{label}</span>
+        <span className={`hm-truth-pill hm-truth-pill--${tone}`}>
+          {status}
+        </span>
+      </div>
+      <div className="hm-truth-card-title">
+        {title}
+      </div>
+      <div className="hm-truth-card-meta">
+        {detail}
+      </div>
+    </div>
+  );
+}
+
 export function App() {
   const mockData = useMockDataOptional();
   const searchParams = useMemo(
@@ -559,11 +604,25 @@ export function App() {
 
   const { state: streamingState } = useStreamingState();
   const { context: duelContext } = useDuelContext();
+  const {
+    live: liveOverviewMarket,
+    recentSettlement: recentSettlementMarket,
+    liveDuel: liveOverviewDuel,
+    recentSettlementDuel,
+    refresh: refreshMarketOverview,
+    error: marketOverviewError,
+  } = usePredictionMarketOverview(activeEvmChain);
+  const requestOverviewRefresh = useCallback(async () => {
+    await refreshMarketOverview();
+  }, [refreshMarketOverview]);
   const liveCycle = streamingState?.cycle ?? null;
   const streamSources = STREAM_URLS;
   // Keep the stream visible in e2e/local integration lanes when a real source
   // URL is configured. Wallet/chain polling stays gated separately above.
   const activeStreamUrl = streamSources[streamSourceIndex] ?? "";
+  const [streamSurfaceReady, setStreamSurfaceReady] = useState(false);
+  const [streamSurfaceUnavailable, setStreamSurfaceUnavailable] =
+    useState(false);
 
   const handleLocaleChange = useCallback((nextLocale: UiLocale) => {
     setStoredUiLocale(nextLocale);
@@ -586,6 +645,11 @@ export function App() {
     if (streamSourceIndex < streamSources.length) return;
     setStreamSourceIndex(0);
   }, [streamSourceIndex, streamSources.length]);
+
+  useEffect(() => {
+    setStreamSurfaceReady(false);
+    setStreamSurfaceUnavailable(false);
+  }, [activeStreamUrl]);
 
   useEffect(() => {
     captureInviteCodeFromLocation();
@@ -723,18 +787,19 @@ export function App() {
   // ── Market data polling ───────────────────────────────────────────────────
   // Runs independently of wallet connection — spectators see live odds too.
   useEffect(() => {
-    const duelKeyHex =
-      typeof liveCycle?.duelKeyHex === "string" ? liveCycle.duelKeyHex : null;
+    const duelKeyHex = normalizePredictionMarketDuelKeyHex(
+      typeof liveCycle?.duelKeyHex === "string" ? liveCycle.duelKeyHex : null,
+    );
     const chainConfig = getEvmChainConfig(activeEvmChain);
     if (!duelKeyHex || !chainConfig) return;
 
     const publicClient = createEvmPublicClient(chainConfig);
     const contractAddr = chainConfig.goldClobAddress as `0x${string}`;
-    const duelKey = toDuelKeyHex(duelKeyHex);
     let cancelled = false;
 
     const fetchMarket = async () => {
       try {
+        const duelKey = toDuelKeyHex(duelKeyHex);
         const market = await getMarketMeta(
           publicClient,
           contractAddr,
@@ -897,6 +962,37 @@ export function App() {
   const countdownText = liveCycle
     ? formatCountdown(normalizeRemainingSeconds(liveCycle.timeRemaining))
     : "";
+  const liveOverviewDuelKey = normalizePredictionMarketDuelKeyHex(
+    liveOverviewDuel?.duelKey ?? null,
+  );
+  const streamedDuelKey = normalizePredictionMarketDuelKeyHex(
+    liveCycle?.duelKeyHex ?? null,
+  );
+  const streamMarketAligned = !liveOverviewDuelKey
+    ? true
+    : streamedDuelKey === liveOverviewDuelKey;
+  const recentSurfaceStatus = recentSettlementMarket
+    ? copy.claimOnly
+    : copy.phaseIdle;
+  const recentSurfaceMeta = recentSettlementMarket
+    ? getMarketStatusLabel(recentSettlementMarket.lifecycleStatus, copy)
+    : copy.waitingForMarketOperator;
+  const recentSurfaceTitle =
+    recentSettlementDuel?.winner === "A"
+      ? effA1.name
+      : recentSettlementDuel?.winner === "B"
+        ? effA2.name
+        : recentSettlementDuel?.phase ?? copy.phaseIdle;
+  const streamIssueText = !streamMarketAligned
+    ? copy.streamDriftDetected
+    : streamSurfaceUnavailable
+      ? copy.rendererUnhealthy
+      : marketOverviewError
+        ? copy.waitingForStream
+        : null;
+  const shouldRenderTruthBlock = Boolean(
+    streamIssueText || recentSettlementMarket || recentSettlementDuel,
+  );
 
   // Sidebar bet state
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -920,6 +1016,9 @@ const [hmBottomTab, setHmBottomTab] = useState<
         agent2Name={effAgent2Name}
         compact
         locale={locale}
+        lifecycleDuelOverride={liveOverviewDuel}
+        lifecycleMarketOverride={liveOverviewMarket}
+        onLifecycleRefreshRequested={requestOverviewRefresh}
       />
     </Suspense>
   );
@@ -992,6 +1091,38 @@ const [hmBottomTab, setHmBottomTab] = useState<
           </span>
         </div>
       </div>
+
+      {shouldRenderTruthBlock ? (
+        <div className="hm-truth-block">
+          {streamIssueText ? (
+            <div className="hm-truth-banner hm-truth-banner--drift">
+              <div className="hm-truth-banner-copy">
+                <span className="hm-matchup-label">{copy.source}</span>
+                <span className="hm-truth-banner-status">{streamIssueText}</span>
+              </div>
+              <span className="hm-truth-pill hm-truth-pill--danger">
+                {copy.streamDriftDetected}
+              </span>
+            </div>
+          ) : null}
+
+          {recentSettlementMarket || recentSettlementDuel ? (
+            <div className="hm-truth-grid">
+              <MarketSurfaceCard
+                label={copy.latestSettlement}
+                status={recentSurfaceStatus}
+                title={recentSurfaceTitle}
+                detail={
+                  recentSettlementMarket
+                    ? `${recentSurfaceMeta} · ${copy.claimOnly}`
+                    : copy.waitingForMarketOperator
+                }
+                tone={recentSettlementMarket ? "settlement" : "idle"}
+              />
+            </div>
+          ) : null}
+        </div>
+      ) : null}
 
       <div className="hm-market-panel-wrap">
         <div className="hm-market-panel-body">
@@ -1461,11 +1592,6 @@ const [hmBottomTab, setHmBottomTab] = useState<
                 <ChainSelector />
               </div>
               <div className="hm-header-mob-controls">
-                <LocaleSelector
-                  locale={locale}
-                  onChange={handleLocaleChange}
-                  compact
-                />
                 <ThemeSelector compact />
                 <button
                   type="button"
@@ -1528,31 +1654,15 @@ const [hmBottomTab, setHmBottomTab] = useState<
             </div>
             {/* Row 2: Match strip — name + agent side-select chips */}
             <div className="hm-header-mob-row2">
-              <div className="hm-view-tabs hm-view-tabs--mobile">
-                <button
-                  data-testid="surface-mode-duels"
-                  className={`hm-view-tab ${surfaceMode === "DUELS" ? "hm-view-tab--active" : ""}`}
-                  onClick={() => startTransition(() => setSurfaceMode("DUELS"))}
-                  type="button"
-                >
-                  {copy.duels}
-                </button>
-                <button
-                  data-testid="surface-mode-models"
-                  className={`hm-view-tab ${surfaceMode === "MODELS" ? "hm-view-tab--active" : ""}`}
-                  onClick={() =>
-                    startTransition(() => setSurfaceMode("MODELS"))
-                  }
-                  type="button"
-                >
-                  {copy.models}
-                </button>
-              </div>
-              {surfaceMode !== "DUELS" && (
-                <div className="hm-mode-summary hm-mode-summary--mobile">
-                  <span className="hm-market-name">{copy.modelMarkets}</span>
-                </div>
-              )}
+              <NavTabs
+                variant="mobile"
+                activeTab={surfaceMode}
+                onChange={(id) => setSurfaceMode(id as "DUELS" | "MODELS")}
+                tabs={[
+                  { id: "DUELS", label: copy.duels, testId: "surface-mode-duels" },
+                  { id: "MODELS", label: copy.models, testId: "surface-mode-models" },
+                ]}
+              />
             </div>
           </>
         ) : (
@@ -1563,9 +1673,6 @@ const [hmBottomTab, setHmBottomTab] = useState<
                 <span className="hm-logo-text">HYPERBET</span>
                 <ChainSelector />
               </div>
-            </div>
-
-            <div className="hm-header-center">
               <NavTabs
                 activeTab={surfaceMode}
                 onChange={(id) => setSurfaceMode(id as "DUELS" | "MODELS")}
@@ -1574,9 +1681,29 @@ const [hmBottomTab, setHmBottomTab] = useState<
                   { id: "MODELS", label: copy.models, testId: "surface-mode-models" },
                 ]}
               />
+              {surfaceMode === "DUELS" ? (
+                <div className="hm-market-info">
+                  <span className="hm-market-name">
+                    {effA1.name} vs {effA2.name}
+                  </span>
+                </div>
+              ) : (
+                <div className="hm-mode-summary">
+                  <span className="hm-market-name">{copy.modelMarkets}</span>
+                  <span className="hm-mode-summary-copy">
+                    {copy.modelsStatus(effLeaderboard.length)}
+                  </span>
+                </div>
+              )}
             </div>
 
             <div className="hm-header-right">
+              <span
+                className="hm-status-text"
+                style={{ color: effStatusColor }}
+              >
+                {effStatus}
+              </span>
               <LocaleSelector locale={locale} onChange={handleLocaleChange} />
               <ThemeSelector />
               {/* <PointsDisplay
@@ -1683,7 +1810,14 @@ const [hmBottomTab, setHmBottomTab] = useState<
                         streamUrl={activeStreamUrl}
                         muted={hmMuted}
                         autoPlay={true}
-                        onStreamUnavailable={switchToBackupStream}
+                        onStreamReady={() => {
+                          setStreamSurfaceReady(true);
+                          setStreamSurfaceUnavailable(false);
+                        }}
+                        onStreamUnavailable={() => {
+                          setStreamSurfaceUnavailable(true);
+                          switchToBackupStream();
+                        }}
                         style={{
                           position: "absolute",
                           inset: 0,

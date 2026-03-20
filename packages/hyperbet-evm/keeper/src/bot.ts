@@ -1505,6 +1505,8 @@ const managedClobQuoteConfig = {
 
 type EvmKeeperRuntime = {
   chainKey: BettingEvmChain;
+  rpcUrl: string;
+  supportsTimeTravel: boolean;
   duelOracleAddress: Address;
   goldClobAddress: Address;
   publicClient: ReturnType<typeof createPublicClient>;
@@ -1530,6 +1532,87 @@ function parsePrivateKey(value: string | undefined): `0x${string}` | null {
   return withPrefix as `0x${string}`;
 }
 
+function isLocalRpcUrl(value: string): boolean {
+  try {
+    const parsed = new URL(value);
+    return (
+      parsed.hostname === "127.0.0.1" ||
+      parsed.hostname === "localhost" ||
+      parsed.hostname === "::1"
+    );
+  } catch {
+    return false;
+  }
+}
+
+async function requestRpc<T>(
+  chain: EvmKeeperRuntime,
+  method: string,
+  params: unknown[] = [],
+): Promise<T> {
+  const response = await fetch(chain.rpcUrl, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id: `${chain.chainKey}-${method}-${Date.now()}`,
+      method,
+      params,
+    }),
+  });
+  if (!response.ok) {
+    throw new Error(
+      `${chain.chainKey} rpc ${method} failed with HTTP ${response.status}`,
+    );
+  }
+  const payload = (await response.json()) as {
+    result?: T;
+    error?: { code?: number; message?: string };
+  };
+  if (payload.error) {
+    throw new Error(
+      `${chain.chainKey} rpc ${method} failed: ${payload.error.message ?? "unknown error"}`,
+    );
+  }
+  return payload.result as T;
+}
+
+async function alignLocalChainTime(
+  chain: EvmKeeperRuntime,
+  targetTimeMs: number | null | undefined,
+  label: string,
+): Promise<void> {
+  if (!chain.supportsTimeTravel) return;
+  if (typeof targetTimeMs !== "number" || !Number.isFinite(targetTimeMs)) return;
+
+  const targetTimestamp = Math.max(0, Math.floor(targetTimeMs / 1000));
+  if (targetTimestamp <= 0) return;
+
+  const latestBlock = await requestRpc<{ timestamp?: string }>(
+    chain,
+    "eth_getBlockByNumber",
+    ["latest", false],
+  );
+  const currentTimestamp = Number.parseInt(
+    latestBlock?.timestamp ?? "0x0",
+    16,
+  );
+  if (Number.isFinite(currentTimestamp) && currentTimestamp >= targetTimestamp) {
+    return;
+  }
+
+  await requestRpc(chain, "evm_setNextBlockTimestamp", [targetTimestamp]);
+  await requestRpc(chain, "evm_mine", []);
+  lastSuccessfulRpcAtMs = Date.now();
+  console.log(
+    `[bot] advanced ${chain.chainKey} chain time to ${new Date(
+      targetTimestamp * 1000,
+    ).toISOString()} for ${label}`,
+  );
+}
+
 function buildEvmRuntime(
   chainKey: BettingEvmChain,
   privateKey: `0x${string}` | null,
@@ -1546,9 +1629,12 @@ function buildEvmRuntime(
   }
 
   const account = privateKeyToAccount(privateKey);
-  const transport = http(runtimeEnv.rpcUrl.trim());
+  const rpcUrl = runtimeEnv.rpcUrl.trim();
+  const transport = http(rpcUrl);
   return {
     chainKey,
+    rpcUrl,
+    supportsTimeTravel: isLocalRpcUrl(rpcUrl),
     duelOracleAddress: oracle,
     goldClobAddress: clob,
     publicClient: createPublicClient({ transport }),
@@ -2797,6 +2883,13 @@ async function upsertEvmDuelLifecycle(
 
   const results = await Promise.allSettled(
     evmKeeperChains.map(async (chain) => {
+      if (status >= 3) {
+        await alignLocalChainTime(
+          chain,
+          (data.betCloseTime ?? data.fightStartTime ?? Date.now()) + 1_000,
+          `lock:${data.duelId}`,
+        );
+      }
       const upsertHash = await chain.walletClient.writeContract({
         chain: undefined,
         address: chain.duelOracleAddress,
@@ -2853,6 +2946,7 @@ async function upsertEvmDuelLifecycle(
         hash: syncHash,
         confirmations: 1,
       });
+      lastSuccessfulRpcAtMs = Date.now();
     }),
   );
 
@@ -2902,6 +2996,14 @@ async function reportEvmResult(data: DuelLifecycleEvent): Promise<void> {
 
   const results = await Promise.allSettled(
     evmKeeperChains.map(async (chain) => {
+      await alignLocalChainTime(
+        chain,
+        Math.max(
+          data.betCloseTime ?? 0,
+          (data.duelEndTime ?? data.betCloseTime ?? Date.now()) + 1_000,
+        ),
+        `settle:${data.duelId}`,
+      );
       const proposeHash = await chain.walletClient.writeContract({
         chain: undefined,
         address: chain.duelOracleAddress,
@@ -2940,6 +3042,7 @@ async function reportEvmResult(data: DuelLifecycleEvent): Promise<void> {
         hash: syncHash,
         confirmations: 1,
       });
+      lastSuccessfulRpcAtMs = Date.now();
 
       if (EVM_KEEPER_DEFER_FINALIZE) {
         console.log(

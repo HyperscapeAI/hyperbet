@@ -272,4 +272,69 @@ describe("keeper db persistence", () => {
       inspectDb.close(false);
     }
   });
+
+  test("persists bet-sync checkpoint and overview state", async () => {
+    const db = (await import(
+      `./db.ts?case=${Date.now()}-bet-sync`
+    )) as typeof import("./db.ts");
+    loadedModules.push(db);
+
+    db.saveBetSyncCheckpoint({
+      sourceEpoch: 7,
+      lastSeenSeq: 101,
+      lastAppliedSeq: 99,
+      replayMode: "replay",
+      degradedReason: "consumer lag",
+      updatedAt: 1_700_000_100_000,
+    });
+    db.savePredictionMarketsOverviewState({
+      liveJson: JSON.stringify({ duel: { duelId: "duel-live" } }),
+      recentSettlementJson: JSON.stringify({ duel: { duelId: "duel-old" } }),
+      updatedAt: 1_700_000_100_500,
+    });
+
+    expect(db.loadBetSyncCheckpoint()).toEqual({
+      sourceEpoch: 7,
+      lastSeenSeq: 101,
+      lastAppliedSeq: 99,
+      replayMode: "replay",
+      degradedReason: "consumer lag",
+      updatedAt: 1_700_000_100_000,
+    });
+    expect(db.loadPredictionMarketsOverviewState()).toEqual({
+      liveJson: JSON.stringify({ duel: { duelId: "duel-live" } }),
+      recentSettlementJson: JSON.stringify({ duel: { duelId: "duel-old" } }),
+      updatedAt: 1_700_000_100_500,
+    });
+    expect(
+      db.appendBetSyncApplyLogEntry({
+        sourceEpoch: 7,
+        seq: 101,
+        eventType: "state",
+        duelKey: "aa".repeat(32),
+        duelId: "duel-live",
+        phase: "COUNTDOWN",
+        phaseVersion: 2,
+        emittedAt: 1_700_000_100_100,
+        payloadJson: JSON.stringify({ seq: 101 }),
+        receivedAt: 1_700_000_100_200,
+        appliedAt: 1_700_000_100_300,
+      }),
+    ).toBe(true);
+    expect(
+      db.appendBetSyncApplyLogEntry({
+        sourceEpoch: 7,
+        seq: 101,
+        eventType: "state",
+        duelKey: "aa".repeat(32),
+        duelId: "duel-live",
+        phase: "COUNTDOWN",
+        phaseVersion: 2,
+        emittedAt: 1_700_000_100_100,
+        payloadJson: JSON.stringify({ seq: 101 }),
+        receivedAt: 1_700_000_100_200,
+        appliedAt: 1_700_000_100_300,
+      }),
+    ).toBe(false);
+  });
 });
