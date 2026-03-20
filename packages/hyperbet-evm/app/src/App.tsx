@@ -11,9 +11,7 @@ import {
 import { useMockDataOptional } from "./lib/useMockAvaxStreamData";
 import { ConnectButton } from "@rainbow-me/rainbowkit";
 import { useAccount } from "wagmi";
-import { hexToBytes, toHex } from "viem";
-import { publicKeyToAddress } from "viem/accounts";
-import { secp256k1 } from "@noble/curves/secp256k1";
+import { privateKeyToAccount } from "viem/accounts";
 
 import {
   formatLocaleAmount,
@@ -100,9 +98,7 @@ function deriveAddressFromPrivateKey(
 ): `0x${string}` | null {
   if (!privateKey) return null;
   try {
-    const privateKeyBytes = hexToBytes(privateKey, { size: 32 });
-    const publicKey = toHex(secp256k1.getPublicKey(privateKeyBytes, false));
-    return publicKeyToAddress(publicKey) as `0x${string}`;
+    return privateKeyToAccount(privateKey).address;
   } catch {
     return null;
   }
@@ -987,7 +983,7 @@ export function App() {
     : copy.phaseIdle;
   const recentSurfaceMeta = recentSettlementMarket
     ? getMarketStatusLabel(recentSettlementMarket.lifecycleStatus, copy)
-    : copy.waitingForMarketOperator;
+    : copy.statusPending;
   const recentSurfaceTitle =
     recentSettlementDuel?.winner === "A"
       ? effA1.name
@@ -1131,7 +1127,7 @@ const [hmBottomTab, setHmBottomTab] = useState<
                 detail={
                   recentSettlementMarket
                     ? `${recentSurfaceMeta} · ${copy.claimOnly}`
-                    : copy.waitingForMarketOperator
+                    : copy.statusPending
                 }
                 tone={recentSettlementMarket ? "settlement" : "idle"}
               />
