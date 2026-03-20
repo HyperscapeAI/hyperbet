@@ -21,7 +21,7 @@ const MAX_NEWTON_ITERS: u32 = 50;
 
 /// Convert u64 (scaled by 1e6) to Q64.64
 fn to_q(val: u64) -> i128 {
-    (val as i128) << FRAC_BITS / (SCALE as i128)
+    ((val as i128) << FRAC_BITS) / (SCALE as i128)
 }
 
 /// More precise: multiply first then divide to avoid truncation

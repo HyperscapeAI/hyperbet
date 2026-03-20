@@ -7,6 +7,7 @@ contract YesToken is ERC20{
     address immutable market;
 
     constructor(address _market, uint256 liquidity) ERC20("YesToken", "YES") {
+        require(_market != address(0), "invalid market");
         market = _market;
         mint(market, liquidity);
     }
@@ -26,6 +27,7 @@ contract NoToken is ERC20{
     address immutable market;
 
     constructor(address _market, uint256 liquidity) ERC20("NoToken", "NO") {
+        require(_market != address(0), "invalid market");
         market = _market;
         mint(market, liquidity);
     }
