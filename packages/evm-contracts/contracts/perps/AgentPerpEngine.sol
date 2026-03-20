@@ -42,6 +42,8 @@ contract AgentPerpEngine is AccessControl, ReentrancyGuard {
         uint256 maxOpenInterest;
         uint256 tradeTreasuryFeeBps;
         uint256 tradeMarketMakerFeeBps;
+        uint256 maxOraclePriceDeltaBps;
+        uint256 minInsuranceFund;
         bool exists;
     }
 
@@ -60,6 +62,7 @@ contract AgentPerpEngine is AccessControl, ReentrancyGuard {
         uint256 settlementPrice;
         uint256 treasuryFeeBalance;
         uint256 marketMakerFeeBalance;
+        uint256 openPositions;
         MarketStatus status;
     }
 
@@ -111,6 +114,9 @@ contract AgentPerpEngine is AccessControl, ReentrancyGuard {
     error MarketCreationPaused();
     error SlippageExceeded(uint256 executionPrice, uint256 acceptablePrice);
     error MaxOpenInterestExceeded();
+    error OraclePriceDeltaTooLarge();
+    error InsufficientInsurance();
+    error MarketHasOpenPositions();
 
     mapping(bytes32 => MarketConfig) public marketConfigs;
     mapping(bytes32 => MarketState) public markets;
@@ -326,7 +332,9 @@ contract AgentPerpEngine is AccessControl, ReentrancyGuard {
             DEFAULT_MAX_ORACLE_DELAY,
             0, // maxOpenInterest (0 = unlimited)
             0, // tradeTreasuryFeeBps
-            0  // tradeMarketMakerFeeBps
+            0, // tradeMarketMakerFeeBps
+            0, // maxOraclePriceDeltaBps (0 = disabled)
+            0  // minInsuranceFund (0 = disabled)
         );
     }
 
@@ -342,13 +350,16 @@ contract AgentPerpEngine is AccessControl, ReentrancyGuard {
         uint256 tradeMarketMakerFeeBps
     ) external onlyRole(MARKET_OPERATOR_ROLE) {
         if (marketCreationPaused) revert MarketCreationPaused();
-        _createMarket(agentId, skewScale, maxLeverage, maintenanceMarginBps, liquidationRewardBps, maxOracleDelay, maxOpenInterest, tradeTreasuryFeeBps, tradeMarketMakerFeeBps);
+        _createMarket(agentId, skewScale, maxLeverage, maintenanceMarginBps, liquidationRewardBps, maxOracleDelay, maxOpenInterest, tradeTreasuryFeeBps, tradeMarketMakerFeeBps, 0, 0);
     }
 
     function setMarketStatus(bytes32 agentId, MarketStatus newStatus) external onlyRole(MARKET_OPERATOR_ROLE) {
         if (!marketConfigs[agentId].exists) revert MarketNotFound();
         if (newStatus == MarketStatus.UNINITIALIZED) revert MarketNotTradable();
         MarketState storage market = markets[agentId];
+        if (newStatus == MarketStatus.ARCHIVED) {
+            if (market.openPositions > 0) revert MarketHasOpenPositions();
+        }
         market.status = newStatus;
         if (newStatus == MarketStatus.CLOSE_ONLY && market.settlementPrice == 0) {
             market.settlementPrice = market.lastOraclePrice;
@@ -429,7 +440,34 @@ contract AgentPerpEngine is AccessControl, ReentrancyGuard {
             }
         }
 
+        // Oracle price step validation
+        if (config.maxOraclePriceDeltaBps > 0 && sizeDelta != 0) {
+            uint256 prevPrice = market.lastOraclePrice;
+            if (prevPrice > 0) {
+                uint256 priceDelta = executionPrice > prevPrice ? executionPrice - prevPrice : prevPrice - executionPrice;
+                if (priceDelta * BPS / prevPrice > config.maxOraclePriceDeltaBps) {
+                    revert OraclePriceDeltaTooLarge();
+                }
+            }
+        }
+
+        // Min insurance fund check — block new/increased positions when insurance is too low
+        if (config.minInsuranceFund > 0 && sizeDelta != 0) {
+            bool isIncrease = oldSize == 0 || (oldSize > 0 && sizeDelta > 0) || (oldSize < 0 && sizeDelta < 0);
+            if (isIncrease && market.insuranceFund < config.minInsuranceFund) {
+                revert InsufficientInsurance();
+            }
+        }
+
+        // Track open positions counter
+        if (oldSize == 0 && position.size != 0) {
+            market.openPositions += 1;
+        }
+
         if (position.size == 0) {
+            if (oldSize != 0) {
+                market.openPositions -= 1;
+            }
             uint256 payout = position.margin;
             position.margin = 0;
             position.entryPrice = 0;
@@ -563,6 +601,7 @@ contract AgentPerpEngine is AccessControl, ReentrancyGuard {
             position.size = 0;
             position.margin = 0;
             position.entryPrice = 0;
+            market.openPositions -= 1;
 
             if (seizedMargin > 0) {
                 // Cap socialized loss per position
@@ -679,7 +718,9 @@ contract AgentPerpEngine is AccessControl, ReentrancyGuard {
         uint256 maxOracleDelay,
         uint256 maxOpenInterest,
         uint256 tradeTreasuryFeeBps,
-        uint256 tradeMarketMakerFeeBps
+        uint256 tradeMarketMakerFeeBps,
+        uint256 maxOraclePriceDeltaBps,
+        uint256 minInsuranceFund
     ) internal {
         if (marketConfigs[agentId].exists) revert MarketAlreadyExists();
         _validateConfig(skewScale, maxLeverage, maintenanceMarginBps, liquidationRewardBps, maxOracleDelay);
@@ -693,6 +734,8 @@ contract AgentPerpEngine is AccessControl, ReentrancyGuard {
             maxOpenInterest: maxOpenInterest,
             tradeTreasuryFeeBps: tradeTreasuryFeeBps,
             tradeMarketMakerFeeBps: tradeMarketMakerFeeBps,
+            maxOraclePriceDeltaBps: maxOraclePriceDeltaBps,
+            minInsuranceFund: minInsuranceFund,
             exists: true
         });
 

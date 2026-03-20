@@ -44,6 +44,9 @@ contract AgentPerpEngineNative is AccessControl, ReentrancyGuard {
     error CloseOnlyMode();
     error SlippageExceeded(uint256 executionPrice, uint256 acceptablePrice);
     error MaxOpenInterestExceeded();
+    error OraclePriceDeltaTooLarge();
+    error InsufficientInsurance();
+    error MarketHasOpenPositions();
 
     enum MarketStatus {
         UNINITIALIZED,
@@ -61,6 +64,8 @@ contract AgentPerpEngineNative is AccessControl, ReentrancyGuard {
         uint256 maxOpenInterest;
         uint256 tradeTreasuryFeeBps;
         uint256 tradeMarketMakerFeeBps;
+        uint256 maxOraclePriceDeltaBps;
+        uint256 minInsuranceFund;
         bool exists;
     }
 
@@ -77,6 +82,7 @@ contract AgentPerpEngineNative is AccessControl, ReentrancyGuard {
         uint256 settlementPrice;
         uint256 treasuryFeeBalance;
         uint256 marketMakerFeeBalance;
+        uint256 openPositions;
         MarketStatus status;
     }
 
@@ -208,6 +214,8 @@ contract AgentPerpEngineNative is AccessControl, ReentrancyGuard {
             maxOpenInterest: 0,
             tradeTreasuryFeeBps: 0,
             tradeMarketMakerFeeBps: 0,
+            maxOraclePriceDeltaBps: 0,
+            minInsuranceFund: 0,
             exists: true
         });
         markets[agentId].status = MarketStatus.ACTIVE;
@@ -219,6 +227,9 @@ contract AgentPerpEngineNative is AccessControl, ReentrancyGuard {
     function setMarketStatus(bytes32 agentId, MarketStatus newStatus) external onlyRole(MARKET_OPERATOR_ROLE) {
         if (!marketConfigs[agentId].exists) revert MarketNotFound();
         MarketState storage market = markets[agentId];
+        if (newStatus == MarketStatus.ARCHIVED) {
+            if (market.openPositions > 0) revert MarketHasOpenPositions();
+        }
         market.status = newStatus;
         if (newStatus == MarketStatus.CLOSE_ONLY && market.settlementPrice == 0) {
             market.settlementPrice = market.lastOraclePrice;
@@ -458,9 +469,36 @@ contract AgentPerpEngineNative is AccessControl, ReentrancyGuard {
             }
         }
 
+        // Oracle price step validation
+        if (config.maxOraclePriceDeltaBps > 0 && sizeDelta != 0) {
+            uint256 prevPrice = market.lastOraclePrice;
+            if (prevPrice > 0) {
+                uint256 priceDelta = execPrice > prevPrice ? execPrice - prevPrice : prevPrice - execPrice;
+                if (priceDelta * BPS / prevPrice > config.maxOraclePriceDeltaBps) {
+                    revert OraclePriceDeltaTooLarge();
+                }
+            }
+        }
+
+        // Min insurance fund check
+        if (config.minInsuranceFund > 0 && sizeDelta != 0) {
+            bool isIncrease = oldSize == 0 || (oldSize > 0 && sizeDelta > 0) || (oldSize < 0 && sizeDelta < 0);
+            if (isIncrease && market.insuranceFund < config.minInsuranceFund) {
+                revert InsufficientInsurance();
+            }
+        }
+
         _assertLeverage(agentId, pos.size, pos.margin);
 
+        // Track open positions counter
+        if (oldSize == 0 && pos.size != 0) {
+            market.openPositions += 1;
+        }
+
         if (pos.size == 0 && pos.margin > 0) {
+            if (oldSize != 0) {
+                market.openPositions -= 1;
+            }
             uint256 payout = pos.margin;
             pos.margin = 0;
             emit PositionClosed(agentId, msg.sender, oldSize, execPrice, realizedPnl);
@@ -560,6 +598,7 @@ contract AgentPerpEngineNative is AccessControl, ReentrancyGuard {
             pos.margin = 0;
             pos.entryPrice = 0;
             market.insuranceFund += remaining;
+            market.openPositions -= 1;
         }
 
         emit PositionLiquidated(agentId, trader, msg.sender, pos.size, liquidationPrice, equity, reward);

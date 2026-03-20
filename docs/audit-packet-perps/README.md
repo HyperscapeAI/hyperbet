@@ -46,25 +46,31 @@ Audit handoff for Hyperbet perpetuals contracts. Branch: `feature/perps-hardenin
 
 | ID | Severity | Description | Status |
 |----|----------|-------------|--------|
-| KI-1 | Low | EVM ARCHIVED market does not enforce zero OI before archiving (Solana does) | Accepted — operator manages wind-down |
-| KI-2 | Low | Native engine funding settlement uses simple margin deduction (no pool-backed credit) | Accepted — simpler model for native margin |
-| KI-3 | Info | Oracle price step validation (`max_oracle_price_delta_bps`) exists only in Solana | Accepted — EVM has delta caps in SkillOracle |
-| KI-4 | Info | Conservative skill score (mu - 3*sigma) tracked in ERC20 engine only, not in Native | Informational only |
+| KI-1 | Low | Native engine insurance waterfall lacks socialized loss cap (sends all remaining margin to insurance) | Accepted — simpler model for native margin |
+| KI-2 | Low | Conservative skill score (mu - 3*sigma) tracked in ERC20 engine only, not in Native or Solana | Informational only |
+| KI-3 | Info | Oracle pause mechanism exists only in EVM (Solana relies on staleness + bounds) | Accepted — staleness check provides equivalent protection |
+| KI-4 | Info | Insurance withdrawal instruction not yet implemented in Solana (managed via authority) | Accepted — v2 feature |
 
 ## Test Evidence
 
 ### Forge Tests (EVM)
-- 34 unit tests in `AgentPerpEngine.t.sol`
+- 40 unit tests in `AgentPerpEngine.t.sol`
 - 2 fuzz tests in `AgentPerpEngineFuzz.t.sol` (512 runs each)
 - Balance sheet invariant: engine balance == sum(trader margins) + insurance + vault + fees
 - Liquidation bad debt invariant: tracked bad debt matches actual deficit
 
 ### Coverage Areas
-- Oracle: convergence, delta caps, staleness, pause, first-update bypass
+- Oracle: convergence, delta caps, staleness, pause, first-update bypass, price step validation
 - Governance: freeze on grantRole/revokeRole, frozen setters, PAUSER_ROLE allowed
-- Risk: partial liquidation, insurance waterfall, close-only mode, archived market
-- Parity: slippage protection, fee splitting, OI caps, settlement price freeze
+- Risk: partial liquidation, insurance waterfall, close-only mode, archived market, maintenance margin
+- Parity: slippage protection, fee splitting, OI caps, settlement price freeze, min insurance, open positions counter, archive validation
 - Fuzz: balance sheet conservation across random trade sequences
+
+### Solana Parity Features (P1B.9)
+- Partial liquidation: 2x maintenance target, 10% min close, manual account closing
+- Insurance waterfall: socialized loss cap (50bps), insurance drawdown, bad debt tracking
+- Maintenance margin health check: PnL-aware, blocks position increases when underwater
+- Bad debt repayment: `repay_bad_debt` instruction for governance
 
 ### CI
 - `ci.yml`: perps-contract-tests job (forge test with fuzz 512)

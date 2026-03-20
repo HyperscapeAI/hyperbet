@@ -144,7 +144,7 @@ contract AgentPerpEngineFuzzTest is Test {
     }
 
     function _assertBalanceSheet() internal view {
-        (,,,,,,,, uint256 vaultBalance, uint256 insuranceFund,,,uint256 treasuryFees, uint256 mmFees,) = engine.markets(agentId);
+        (,,,,,,,, uint256 vaultBalance, uint256 insuranceFund,,,uint256 treasuryFees, uint256 mmFees,,) = engine.markets(agentId);
         uint256 expectedBalance = _sumTrackedMargins() + insuranceFund + vaultBalance + treasuryFees + mmFees;
         assertEq(
             marginToken.balanceOf(address(engine)),

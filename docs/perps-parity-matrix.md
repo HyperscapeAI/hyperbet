@@ -27,21 +27,24 @@ Feature parity status between EVM perps engines and Solana `gold_perps_market`.
 | CLOSE_ONLY allows position reductions only | G | G | G |
 | ARCHIVED blocks all trades | G | G | G |
 | Settlement price frozen on CLOSE_ONLY | G | G | G |
-| Archive requires zero OI / zero positions | R | R | G |
+| Archive requires zero OI / zero positions | G | G | G |
 
 ## Risk Engine
 
 | Feature | ERC20 | Native | Solana |
 |---------|:-:|:-:|:-:|
-| Maintenance margin check | G | G | G |
+| Maintenance margin check (PnL-aware) | G | G | G |
 | Max leverage enforcement | G | G | G |
-| Partial liquidation (2x maintenance target) | G | G | R |
+| Partial liquidation (2x maintenance target, 10% min close) | G | G | G |
 | Full liquidation fallback | G | G | G |
 | Liquidation reward (proportional to closed size) | G | G | G |
-| Insurance waterfall (socialized loss cap 50bps) | G | Y | R |
-| Bad debt tracking | G | Y | R |
+| Insurance waterfall (socialized loss cap 50bps) | G | Y | G |
+| Bad debt tracking | G | Y | G |
 | Oracle staleness blocks new positions | G | G | G |
 | Open interest caps (`maxOpenInterest`) | G | G | G |
+| Oracle price step validation (`maxOraclePriceDeltaBps`) | G | G | G |
+| Minimum market insurance requirement | G | G | G |
+| Open positions counter | G | G | G |
 
 ## Fee Model
 
@@ -60,7 +63,7 @@ Feature parity status between EVM perps engines and Solana `gold_perps_market`.
 | Per-market insurance fund isolation | G | G | G |
 | Insurance deposit (admin, repays bad debt first) | G | G | G |
 | Insurance withdrawal (admin) | G | G | R |
-| Minimum market insurance requirement | R | R | G |
+| Bad debt repayment (`repay_bad_debt`) | G | G | G |
 
 ## Oracle
 
@@ -69,7 +72,6 @@ Feature parity status between EVM perps engines and Solana `gold_perps_market`.
 | Staleness check (`maxOracleDelay`) | G | G | G |
 | Mu/sigma delta caps per update | G | G | Y |
 | Oracle pause mechanism | G | G | R |
-| Oracle price step validation (`max_oracle_price_delta_bps`) | R | R | G |
 | Conservative skill score (mu - 3σ) | G | R | R |
 
 ## Governance
@@ -82,12 +84,12 @@ Feature parity status between EVM perps engines and Solana `gold_perps_market`.
 | Trading pause (PAUSER_ROLE / authority) | G | G | G |
 | Market creation pause | G | R | R |
 
-## Known Gaps (Deferred)
+## Known Gaps (Deferred / Informational)
 
 | Gap | Risk | Notes |
 |-----|------|-------|
-| Oracle price step validation (EVM) | Low | Delta caps in SkillOracle provide similar protection |
-| Archive requires zero positions (EVM) | Low | Operator must manage position wind-down manually |
-| Minimum market insurance (EVM) | Low | Admin controls deposits; can enforce off-chain |
 | Conservative skill score (Native) | Low | Not used for pricing; informational in ERC20 engine |
-| Partial liquidation (Solana) | Medium | Solana uses full liquidation only; viable for v1 |
+| Oracle pause (Solana) | Low | Solana has staleness + bounds; pause is EVM-only convenience |
+| Insurance withdrawal (Solana) | Low | Insurance can be managed via authority; no explicit withdraw instruction |
+| Market creation pause (Native/Solana) | Low | Operator role controls market creation |
+| Insurance waterfall (Native) | Low | Native engine sends remaining margin to insurance but lacks socialized loss cap |
