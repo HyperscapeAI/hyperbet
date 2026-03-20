@@ -58,7 +58,7 @@ jobs:
 
           ```bash
           bash scripts/run-hyperscapes-pm-local.sh
-          node --import tsx scripts/pm-soak-monitor.ts --mode=local --duration-min=25
+          node --import tsx scripts/pm-soak-monitor.ts --mode=local --follow --duration-min=25
           ```
 
           Local artifacts land under `output/playwright/pm-soak/...`.

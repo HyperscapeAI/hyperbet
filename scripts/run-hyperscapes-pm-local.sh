@@ -49,8 +49,8 @@ HYPERSCAPES_JWT_SECRET="${HYPERSCAPES_JWT_SECRET:-local-dev-secret}"
 STREAM_URL="${VITE_STREAM_URL:-${GAME_CLIENT_URL}/?page=stream}"
 KEEPER_URL="http://127.0.0.1:${KEEPER_PORT}"
 LOCAL_EVM_UI_KEY_FILE="${LOCAL_EVM_UI_KEY_FILE:-$ROOT/keys/local-smoke/evm-ui.privatekey}"
-HYPERSCAPES_UI_URL="${HYPERSCAPES_UI_URL:-${GAME_CLIENT_URL}/stream.html}"
-HYPERBET_UI_URL="${HYPERBET_UI_URL:-http://127.0.0.1:${APP_PORT}}"
+HYPERSCAPES_UI_URL="${HYPERSCAPES_UI_URL:-http://127.0.0.1:3333/?page=stream}"
+HYPERBET_UI_URL="${HYPERBET_UI_URL:-http://127.0.0.1:${APP_PORT}/?debug}"
 OPEN_LOCAL_UI="${OPEN_LOCAL_UI:-true}"
 CAPTURE_LOCAL_UI_FLOW="${CAPTURE_LOCAL_UI_FLOW:-true}"
 WRITER_KEYS_READY="false"
@@ -207,14 +207,17 @@ if [[ "$OPEN_LOCAL_UI" == "true" ]]; then
 fi
 
 if [[ "$CAPTURE_LOCAL_UI_FLOW" == "true" ]]; then
-  echo "[pm-local] starting local UI flow capture"
+  echo "[pm-local] starting local PM follow monitor"
   (
     cd "$ROOT"
     HYPERSCAPES_UI_URL="$HYPERSCAPES_UI_URL" \
       HYPERBET_UI_URL="$HYPERBET_UI_URL" \
       STREAM_STATE_URL="${KEEPER_URL}/api/streaming/state" \
       ACTIVE_MARKETS_URL="${KEEPER_URL}/api/arena/prediction-markets/active" \
-      node --import tsx scripts/capture-hyperscapes-pm-local-flow.ts
+      PM_SOAK_RECONCILE_PUBLISH_URL="${PM_SOAK_RECONCILE_PUBLISH_URL:-${KEEPER_URL}/api/streaming/state/publish}" \
+      PM_SOAK_RECONCILE_PUBLISH_KEY="${PM_SOAK_RECONCILE_PUBLISH_KEY:-${STREAM_PUBLISH_KEY:-${ARENA_EXTERNAL_BET_WRITE_KEY:-${E2E_ARENA_WRITE_KEY:-}}}}" \
+      PM_SOAK_SCREENSHOTS="${PM_SOAK_SCREENSHOTS:-true}" \
+      node --import tsx scripts/pm-soak-monitor.ts --mode=local --follow --duration-min="${PM_SOAK_LOCAL_DURATION_MIN:-25}" --poll-ms="${PM_SOAK_POLL_MS:-5000}"
   ) &
   CAPTURE_PID=$!
 fi

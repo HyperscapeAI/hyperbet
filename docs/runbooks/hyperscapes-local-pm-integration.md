@@ -137,13 +137,13 @@ The script:
    `http://127.0.0.1:5555/api/streaming/state`
 3. starts the local Hyperbet EVM app pointed at the keeper service
 4. opens both local UIs by default:
-   - Hyperscapes stream UI: `http://127.0.0.1:3333/stream.html`
-   - Hyperbet EVM UI: `http://127.0.0.1:4179`
-5. starts a background capture helper that records JSON state plus paired UI
-   screenshots into:
-   - `output/playwright/hyperscapes-pm-local/<timestamp>/`
+   - Hyperscapes stream UI: `http://127.0.0.1:3333/?page=stream`
+   - Hyperbet EVM UI: `http://127.0.0.1:4179/?debug`
+5. starts the PM soak follow monitor in the background, which records JSON
+   state plus paired UI screenshots into:
+   - `output/playwright/pm-soak/<timestamp>/`
 
-The capture helper records key incidences automatically:
+The PM soak monitor records key incidences automatically:
 
 - initial stack-up
 - duel key change
