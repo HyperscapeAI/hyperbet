@@ -832,6 +832,9 @@ export function normalizePredictionMarketLifecycleRecord(
     txRef: typeof candidate.txRef === "string" ? candidate.txRef : null,
     syncedAt: normalizePredictionMarketTimestamp(candidate.syncedAt),
     metadata: normalizePredictionMarketLifecycleMetadata(candidate.metadata),
+    ...(candidate.marketType === "amm" || candidate.marketType === "clob"
+      ? { marketType: candidate.marketType }
+      : {}),
   };
 }
 
