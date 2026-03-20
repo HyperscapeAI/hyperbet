@@ -185,6 +185,11 @@ contract Router is AccessControl, ReentrancyGuard, IMarketBuyCallback, IMarketSe
         LvrMarket(market).settleMarket();
     }
 
+    function settleFromOracle(address market, address oracle, bytes32 duelKey) public {
+        if (!allowedMarkets[market]) revert MarketNotAllowed();
+        LvrMarket(market).settleFromOracle(oracle, duelKey);
+    }
+
     function redeem(address market, uint256 amountYes, uint256 amountNo) public {
         LvrMarket(market).redeemCollateralWithToken(amountYes, amountNo, msg.sender);
     }

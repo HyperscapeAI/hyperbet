@@ -9,6 +9,7 @@ import {IMarketBuyCallback} from "./interfaces/IMarketBuyCallback.sol";
 import {IMarketSellCallback} from "./interfaces/IMarketSellCallback.sol";
 import {IMarketRedeemCallback} from "./interfaces/IMarketRedeemCallback.sol";
 import {IMarketBondCallback} from "./interfaces/IMarketBondCallback.sol";
+import {DuelOutcomeOracle} from "../DuelOutcomeOracle.sol";
 
 contract LvrMarket {
     event MarketInitialized(uint256 liquidity, uint256 collateralIn, uint256 timestamp);
@@ -128,6 +129,33 @@ contract LvrMarket {
         state = MarketState.RESOLVED;
 
         emit MarketResolvedByAdmin(_outcome, msg.sender);
+    }
+
+    function settleFromOracle(address oracle, bytes32 duelKey) external isRouter {
+        require(state == MarketState.OPEN || state == MarketState.PENDING || state == MarketState.DISPUTED, "Invalid Market State");
+
+        DuelOutcomeOracle.DuelState memory duel = DuelOutcomeOracle(oracle).getDuel(duelKey);
+        require(
+            duel.status == DuelOutcomeOracle.DuelStatus.RESOLVED || duel.status == DuelOutcomeOracle.DuelStatus.CANCELLED,
+            "Oracle duel not resolved"
+        );
+
+        if (duel.status == DuelOutcomeOracle.DuelStatus.CANCELLED) {
+            // Cancelled duels resolve as draw — outcome doesn't matter, both tokens redeemable 1:1
+            outcome = 2; // sentinel: no winner
+        } else {
+            // Side.A (1) → outcome 0 (YES wins), Side.B (2) → outcome 1 (NO wins)
+            require(duel.winner == DuelOutcomeOracle.Side.A || duel.winner == DuelOutcomeOracle.Side.B, "Invalid winner");
+            outcome = duel.winner == DuelOutcomeOracle.Side.A ? 0 : 1;
+        }
+
+        // Return bond to proposer if one exists
+        if (proposer != address(0)) {
+            IERC20(i_collateral).transfer(proposer, BOND_VALUE);
+        }
+
+        state = MarketState.RESOLVED;
+        emit MarketSettled(outcome, msg.sender, 0);
     }
 
     function redeemCollateralWithToken(uint256 amountYesIn, uint256 amountNoIn, address redeemer) external isRouter {
