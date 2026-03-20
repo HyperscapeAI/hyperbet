@@ -4,12 +4,14 @@ use anchor_lang::solana_program::system_instruction::transfer;
 
 use crate::error::PredictionMarketError;
 use crate::state::bet::Bet;
+use crate::state::config::AmmConfig;
 use crate::math;
 
 use anchor_spl::associated_token::AssociatedToken;
 use anchor_spl::token::{self, Mint, MintTo, TokenAccount, Token};
 
 pub fn buy_instruction(ctx: Context<Buy>, bet_id: u64, outcome: u8, amount_in: u64) -> Result<()> {
+    require!(!ctx.accounts.amm_config.paused, PredictionMarketError::MarketPaused);
     require!(
         outcome == 0 || outcome == 1,
         PredictionMarketError::OutComeCanOnlyBe01
@@ -145,6 +147,12 @@ pub fn buy_instruction(ctx: Context<Buy>, bet_id: u64, outcome: u8, amount_in: u
 pub struct Buy<'info> {
     #[account(mut)]
     pub signer: Signer<'info>,
+
+    #[account(
+        seeds = [b"amm_config"],
+        bump = amm_config.bump,
+    )]
+    pub amm_config: Account<'info, AmmConfig>,
 
     #[account(
         mut,

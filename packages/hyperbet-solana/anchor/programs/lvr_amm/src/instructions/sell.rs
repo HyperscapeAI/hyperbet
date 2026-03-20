@@ -1,12 +1,13 @@
 use crate::math;
 use crate::{error::PredictionMarketError, state::bet::Bet};
+use crate::state::config::AmmConfig;
 use anchor_lang::prelude::*;
 
 use anchor_spl::associated_token::AssociatedToken;
 use anchor_spl::token::{self, Burn, Mint, MintTo, TokenAccount, Token};
 
-// / Sell shares of a bet, 0 for yes, 1 for no
 pub fn sell_instruction(ctx: Context<Sell>, bet_id: u64, outcome: u8, amount_in: u64) -> Result<()> {
+    require!(!ctx.accounts.amm_config.paused, PredictionMarketError::MarketPaused);
     require!(
         outcome == 0 || outcome == 1,
         PredictionMarketError::OutComeCanOnlyBe01
@@ -133,7 +134,13 @@ pub struct Sell<'info> {
     pub signer: Signer<'info>,
 
     #[account(
-        mut, 
+        seeds = [b"amm_config"],
+        bump = amm_config.bump,
+    )]
+    pub amm_config: Account<'info, AmmConfig>,
+
+    #[account(
+        mut,
         seeds = [b"bet", bet_id.to_le_bytes().as_ref(), bet.creator.as_ref()],
         bump,
     )]
