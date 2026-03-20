@@ -98,6 +98,28 @@ pub mod gold_perps_market {
         Ok(())
     }
 
+    pub fn freeze_config(ctx: Context<UpdateConfig>) -> Result<()> {
+        require!(
+            ctx.accounts.authority.key() == ctx.accounts.config.authority,
+            PerpsError::InvalidAuthority
+        );
+        require!(
+            !ctx.accounts.config.config_frozen,
+            PerpsError::ConfigFrozen
+        );
+        ctx.accounts.config.config_frozen = true;
+        Ok(())
+    }
+
+    pub fn set_paused(ctx: Context<UpdateConfig>, paused: bool) -> Result<()> {
+        require!(
+            ctx.accounts.authority.key() == ctx.accounts.config.authority,
+            PerpsError::InvalidAuthority
+        );
+        ctx.accounts.config.paused = paused;
+        Ok(())
+    }
+
     pub fn update_config(
         ctx: Context<UpdateConfig>,
         keeper_authority: Pubkey,
@@ -121,6 +143,10 @@ pub mod gold_perps_market {
         require!(
             ctx.accounts.authority.key() == ctx.accounts.config.authority,
             PerpsError::InvalidAuthority
+        );
+        require!(
+            !ctx.accounts.config.config_frozen,
+            PerpsError::ConfigFrozen
         );
         validate_config_inputs(
             default_skew_scale,
@@ -238,6 +264,7 @@ pub mod gold_perps_market {
         size_delta: i64,
         acceptable_price: u64,
     ) -> Result<()> {
+        require!(!ctx.accounts.config.paused, PerpsError::TradingPaused);
         require!(
             margin_delta != 0 || size_delta != 0,
             PerpsError::NoopPositionUpdate
@@ -1304,6 +1331,8 @@ pub struct ConfigState {
     pub liquidation_fee_bps: u16,
     pub trade_treasury_fee_bps: u16,
     pub trade_market_maker_fee_bps: u16,
+    pub config_frozen: bool,
+    pub paused: bool,
 }
 
 impl ConfigState {
@@ -1413,6 +1442,10 @@ pub enum PerpsError {
     InvalidPositionState,
     #[msg("Numeric overflow in perps calculation")]
     Overflow,
+    #[msg("Config is frozen and cannot be modified")]
+    ConfigFrozen,
+    #[msg("Trading is paused")]
+    TradingPaused,
 }
 
 #[cfg(test)]

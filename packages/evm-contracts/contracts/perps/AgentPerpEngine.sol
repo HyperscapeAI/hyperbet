@@ -1,15 +1,18 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import "@openzeppelin/contracts/access/Ownable.sol";
-import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
-import "@openzeppelin/contracts/utils/math/Math.sol";
-import "./SkillOracle.sol";
+import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
+import {SkillOracle} from "./SkillOracle.sol";
 
-contract AgentPerpEngine is Ownable, ReentrancyGuard {
+contract AgentPerpEngine is AccessControl, ReentrancyGuard {
     using SafeERC20 for IERC20;
+
+    bytes32 public constant MARKET_OPERATOR_ROLE = keccak256("MARKET_OPERATOR_ROLE");
+    bytes32 public constant PAUSER_ROLE = keccak256("PAUSER_ROLE");
 
     uint256 public constant ONE = 1e18;
     uint256 public constant BPS = 10_000;
@@ -17,6 +20,8 @@ contract AgentPerpEngine is Ownable, ReentrancyGuard {
     uint256 public constant DEFAULT_MAINTENANCE_MARGIN_BPS = 1_000;
     uint256 public constant DEFAULT_LIQUIDATION_REWARD_BPS = 500;
     uint256 public constant DEFAULT_MAX_ORACLE_DELAY = 2 minutes;
+    uint256 public constant PARTIAL_LIQUIDATION_TARGET_MARGIN_RATIO = 2_000; // 20% = 2x maintenance (10%)
+    uint256 public constant MAX_SOCIALIZED_LOSS_BPS = 50; // 0.5% cap per position
 
     SkillOracle public immutable oracle;
     IERC20 public immutable marginToken;
@@ -68,6 +73,9 @@ contract AgentPerpEngine is Ownable, ReentrancyGuard {
         bool liquidatable;
     }
 
+    error InvalidAdmin();
+    error InvalidOperator();
+    error InvalidPauser();
     error InvalidOracle();
     error InvalidMarginToken();
     error InvalidSkewScale();
@@ -75,6 +83,7 @@ contract AgentPerpEngine is Ownable, ReentrancyGuard {
     error InvalidMaintenanceMargin();
     error InvalidLiquidationReward();
     error InvalidOracleDelay();
+    error GovernanceSurfaceFrozen();
     error MarketAlreadyExists();
     error MarketNotFound();
     error MarketNotTradable();
@@ -92,6 +101,8 @@ contract AgentPerpEngine is Ownable, ReentrancyGuard {
     error InvalidRecipient();
     error InsufficientInsuranceFund();
     error InsufficientMarketLiquidity();
+    error TradingPaused();
+    error MarketCreationPaused();
 
     mapping(bytes32 => MarketConfig) public marketConfigs;
     mapping(bytes32 => MarketState) public markets;
@@ -100,6 +111,8 @@ contract AgentPerpEngine is Ownable, ReentrancyGuard {
 
     uint256 public fundingVelocity;
     uint256 public defaultSkewScale;
+    bool public tradingPaused;
+    bool public marketCreationPaused;
 
     event MarketCreated(
         bytes32 indexed agentId,
@@ -162,22 +175,138 @@ contract AgentPerpEngine is Ownable, ReentrancyGuard {
     event InsuranceFundWithdrawn(bytes32 indexed agentId, address indexed to, uint256 amount, uint256 insuranceFund);
     event FundingVelocityUpdated(uint256 newFundingVelocity);
     event DefaultSkewScaleUpdated(uint256 newDefaultSkewScale);
+    event TradingPauseUpdated(bool paused, address indexed actor);
+    event MarketCreationPauseUpdated(bool paused, address indexed actor);
+    event PauserUpdated(address indexed pauser, bool enabled);
 
-    constructor(SkillOracle _oracle, IERC20 _marginToken, uint256 _defaultSkewScale) Ownable(msg.sender) {
+    constructor(
+        SkillOracle _oracle,
+        IERC20 _marginToken,
+        uint256 _defaultSkewScale,
+        address admin,
+        address marketOperator,
+        address pauser
+    ) {
         if (address(_oracle) == address(0)) revert InvalidOracle();
         if (address(_marginToken) == address(0)) revert InvalidMarginToken();
         if (_defaultSkewScale == 0) revert InvalidSkewScale();
+        if (admin == address(0)) revert InvalidAdmin();
+        if (marketOperator == address(0)) revert InvalidOperator();
+        if (pauser == address(0)) revert InvalidPauser();
+
         oracle = _oracle;
         marginToken = _marginToken;
         defaultSkewScale = _defaultSkewScale;
         fundingVelocity = 1e12;
+
+        _grantRole(DEFAULT_ADMIN_ROLE, admin);
+        _grantRole(MARKET_OPERATOR_ROLE, marketOperator);
+        _grantRole(PAUSER_ROLE, pauser);
     }
+
+    // ── PM20 governance freeze: block inherited AccessControl role mutations ──
+
+    function grantRole(bytes32 role, address account) public override onlyRole(getRoleAdmin(role)) {
+        if (role != PAUSER_ROLE) revert GovernanceSurfaceFrozen();
+        _grantRole(role, account);
+    }
+
+    function revokeRole(bytes32 role, address account) public override onlyRole(getRoleAdmin(role)) {
+        if (role != PAUSER_ROLE) revert GovernanceSurfaceFrozen();
+        _revokeRole(role, account);
+    }
+
+    function renounceRole(bytes32 role, address callerConfirmation) public override {
+        if (role != PAUSER_ROLE) revert GovernanceSurfaceFrozen();
+        super.renounceRole(role, callerConfirmation);
+    }
+
+    function setPauser(address pauser, bool enabled) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        if (pauser == address(0)) revert InvalidPauser();
+        if (enabled) {
+            _grantRole(PAUSER_ROLE, pauser);
+        } else {
+            _revokeRole(PAUSER_ROLE, pauser);
+        }
+        emit PauserUpdated(pauser, enabled);
+    }
+
+    function setTradingPaused(bool paused) external onlyRole(PAUSER_ROLE) {
+        tradingPaused = paused;
+        emit TradingPauseUpdated(paused, msg.sender);
+    }
+
+    function setMarketCreationPaused(bool paused) external onlyRole(PAUSER_ROLE) {
+        marketCreationPaused = paused;
+        emit MarketCreationPauseUpdated(paused, msg.sender);
+    }
+
+    // ── Frozen setters ──
+
+    function setFundingVelocity(uint256) external view onlyRole(DEFAULT_ADMIN_ROLE) {
+        revert GovernanceSurfaceFrozen();
+    }
+
+    function setDefaultSkewScale(uint256) external view onlyRole(DEFAULT_ADMIN_ROLE) {
+        revert GovernanceSurfaceFrozen();
+    }
+
+    function updateMarketConfig(bytes32, uint256, uint256, uint256, uint256, uint256)
+        external
+        view
+        onlyRole(DEFAULT_ADMIN_ROLE)
+    {
+        revert GovernanceSurfaceFrozen();
+    }
+
+    // ── Views ──
 
     function marketCount() external view returns (uint256) {
         return marketIds.length;
     }
 
-    function createMarket(bytes32 agentId) external onlyOwner {
+    function getExecutionPrice(bytes32 agentId, int256 sizeDelta) external view returns (uint256) {
+        MarketConfig memory config = marketConfigs[agentId];
+        if (!config.exists) revert MarketNotFound();
+        return _getExecutionPrice(markets[agentId], config, sizeDelta);
+    }
+
+    function getMarkPrice(bytes32 agentId) external view returns (uint256) {
+        MarketConfig memory config = marketConfigs[agentId];
+        if (!config.exists) revert MarketNotFound();
+        return _markPrice(markets[agentId], config);
+    }
+
+    function getPositionHealth(bytes32 agentId, address trader) external view returns (PositionHealth memory) {
+        MarketConfig memory config = marketConfigs[agentId];
+        if (!config.exists) revert MarketNotFound();
+        MarketState memory market = markets[agentId];
+        Position memory position = positions[agentId][trader];
+        (, int256 previewCumulativeFundingRate) = _previewFundingState(market, config);
+        uint256 markPrice = _markPrice(market, config);
+        uint256 notional = _notional(position.size, markPrice);
+        int256 unrealizedPnl = _realizePnl(position.size, position.entryPrice, markPrice, _abs(position.size));
+        int256 fundingPayment = 0;
+        if (position.size != 0) {
+            fundingPayment =
+                (position.size * (previewCumulativeFundingRate - position.lastCumulativeFundingRate)) / int256(ONE);
+        }
+        int256 equity = int256(position.margin) + unrealizedPnl - fundingPayment;
+        uint256 maintenanceMargin = _maintenanceMargin(_abs(position.size), markPrice, config.maintenanceMarginBps);
+        return PositionHealth({
+            markPrice: markPrice,
+            notional: notional,
+            unrealizedPnl: unrealizedPnl,
+            equity: equity,
+            maintenanceMargin: maintenanceMargin,
+            liquidatable: position.size != 0 && equity <= int256(maintenanceMargin)
+        });
+    }
+
+    // ── Market management ──
+
+    function createMarket(bytes32 agentId) external onlyRole(MARKET_OPERATOR_ROLE) {
+        if (marketCreationPaused) revert MarketCreationPaused();
         _createMarket(
             agentId,
             defaultSkewScale,
@@ -195,41 +324,28 @@ contract AgentPerpEngine is Ownable, ReentrancyGuard {
         uint256 maintenanceMarginBps,
         uint256 liquidationRewardBps,
         uint256 maxOracleDelay
-    ) external onlyOwner {
+    ) external onlyRole(MARKET_OPERATOR_ROLE) {
+        if (marketCreationPaused) revert MarketCreationPaused();
         _createMarket(agentId, skewScale, maxLeverage, maintenanceMarginBps, liquidationRewardBps, maxOracleDelay);
     }
 
-    function updateMarketConfig(
-        bytes32 agentId,
-        uint256 skewScale,
-        uint256 maxLeverage,
-        uint256 maintenanceMarginBps,
-        uint256 liquidationRewardBps,
-        uint256 maxOracleDelay
-    ) external onlyOwner {
-        MarketConfig storage config = marketConfigs[agentId];
-        if (!config.exists) revert MarketNotFound();
-        _validateConfig(skewScale, maxLeverage, maintenanceMarginBps, liquidationRewardBps, maxOracleDelay);
-        config.skewScale = skewScale;
-        config.maxLeverage = maxLeverage;
-        config.maintenanceMarginBps = maintenanceMarginBps;
-        config.liquidationRewardBps = liquidationRewardBps;
-        config.maxOracleDelay = maxOracleDelay;
-        emit MarketConfigUpdated(agentId, skewScale, maxLeverage, maintenanceMarginBps, liquidationRewardBps, maxOracleDelay);
-    }
-
-    function setMarketStatus(bytes32 agentId, MarketStatus newStatus) external onlyOwner {
+    function setMarketStatus(bytes32 agentId, MarketStatus newStatus) external onlyRole(MARKET_OPERATOR_ROLE) {
         if (!marketConfigs[agentId].exists) revert MarketNotFound();
         if (newStatus == MarketStatus.UNINITIALIZED) revert MarketNotTradable();
         markets[agentId].status = newStatus;
         emit MarketStatusUpdated(agentId, newStatus);
     }
 
+    // ── Oracle sync ──
+
     function syncOracle(bytes32 agentId) external returns (uint256 price) {
         return _syncOracle(agentId);
     }
 
+    // ── Position management ──
+
     function modifyPosition(bytes32 agentId, int256 marginDelta, int256 sizeDelta) external nonReentrant {
+        if (tradingPaused) revert TradingPaused();
         MarketConfig memory config = _requireMarket(agentId);
         MarketState storage market = markets[agentId];
         Position storage position = positions[agentId][msg.sender];
@@ -282,6 +398,7 @@ contract AgentPerpEngine is Ownable, ReentrancyGuard {
     }
 
     function withdrawMargin(bytes32 agentId, uint256 amount) external nonReentrant {
+        if (tradingPaused) revert TradingPaused();
         MarketConfig memory config = _requireMarket(agentId);
         MarketState storage market = markets[agentId];
         Position storage position = positions[agentId][msg.sender];
@@ -301,6 +418,8 @@ contract AgentPerpEngine is Ownable, ReentrancyGuard {
         marginToken.safeTransfer(msg.sender, amount);
     }
 
+    // ── Liquidation with partial support ──
+
     function liquidate(bytes32 agentId, address trader) external nonReentrant {
         MarketConfig memory config = _requireMarket(agentId);
         MarketState storage market = markets[agentId];
@@ -310,12 +429,44 @@ contract AgentPerpEngine is Ownable, ReentrancyGuard {
         _syncOracle(agentId);
         int256 fundingPayment = _settleFunding(position, market, true);
 
-        uint256 liquidationPrice = _getExecutionPrice(market, config, -position.size);
-        int256 realizedPnl = _realizePnl(position.size, position.entryPrice, liquidationPrice, _abs(position.size));
-        int256 equity = int256(position.margin) + realizedPnl;
-        uint256 maintenanceMargin = _maintenanceMargin(_abs(position.size), liquidationPrice, config.maintenanceMarginBps);
+        uint256 markPrice = _markPrice(market, config);
+        uint256 absSize = _abs(position.size);
+        int256 unrealizedPnl = _realizePnl(position.size, position.entryPrice, markPrice, absSize);
+        int256 equity = int256(position.margin) + unrealizedPnl;
+        uint256 maintenanceMargin = _maintenanceMargin(absSize, markPrice, config.maintenanceMarginBps);
 
         if (equity > int256(maintenanceMargin)) revert NotLiquidatable();
+
+        // Determine liquidation size: partial if equity > 0 and position large enough
+        int256 liquidationSizeDelta;
+        bool isPartial = false;
+        if (equity > 0 && absSize > ONE) {
+            // Close enough to restore 2x maintenance margin ratio
+            uint256 targetMarginBps = PARTIAL_LIQUIDATION_TARGET_MARGIN_RATIO;
+            // Target: equity_after / notional_after >= targetMarginBps / BPS
+            // Solve for size to close: close the minimum to restore health
+            uint256 targetNotional = Math.mulDiv(uint256(equity), BPS, targetMarginBps);
+            uint256 targetSize = Math.mulDiv(targetNotional, ONE, markPrice);
+            if (targetSize > 0 && targetSize < absSize) {
+                uint256 closeSize = absSize - targetSize;
+                // Minimum close of 10% of position
+                uint256 minClose = absSize / 10;
+                if (closeSize < minClose) closeSize = minClose;
+                if (closeSize < absSize) {
+                    liquidationSizeDelta = position.size > 0 ? -int256(closeSize) : int256(closeSize);
+                    isPartial = true;
+                }
+            }
+        }
+
+        // Full liquidation if partial not viable
+        if (!isPartial) {
+            liquidationSizeDelta = -position.size;
+        }
+
+        uint256 liquidationPrice = _getExecutionPrice(market, config, liquidationSizeDelta);
+        uint256 closedSize = _abs(liquidationSizeDelta);
+        int256 realizedPnl = _realizePnl(position.size, position.entryPrice, liquidationPrice, closedSize);
 
         uint256 startingMargin = position.margin;
         if (realizedPnl > 0) {
@@ -326,7 +477,12 @@ contract AgentPerpEngine is Ownable, ReentrancyGuard {
 
         _removeOpenInterest(market, position.size);
 
-        uint256 reward = Math.mulDiv(startingMargin, config.liquidationRewardBps, BPS);
+        // Reward: proportional to closed fraction
+        uint256 reward = Math.mulDiv(
+            Math.mulDiv(startingMargin, config.liquidationRewardBps, BPS),
+            closedSize,
+            absSize
+        );
         uint256 availableForReward = position.margin + market.insuranceFund;
         if (reward > availableForReward) reward = availableForReward;
 
@@ -337,14 +493,30 @@ contract AgentPerpEngine is Ownable, ReentrancyGuard {
             market.insuranceFund -= rewardFromInsurance;
         }
 
-        uint256 seizedMargin = position.margin;
+        if (isPartial) {
+            // Update position for partial close
+            position.size += liquidationSizeDelta;
+            _addOpenInterest(market, position.size);
+        } else {
+            // Full liquidation — insurance waterfall for remaining margin
+            uint256 seizedMargin = position.margin;
+            position.size = 0;
+            position.margin = 0;
+            position.entryPrice = 0;
 
-        position.size = 0;
-        position.margin = 0;
-        position.entryPrice = 0;
+            if (seizedMargin > 0) {
+                // Cap socialized loss per position
+                uint256 maxSocLoss = Math.mulDiv(startingMargin, MAX_SOCIALIZED_LOSS_BPS, BPS);
+                uint256 toInsurance = seizedMargin > maxSocLoss ? maxSocLoss : seizedMargin;
+                market.insuranceFund += toInsurance;
+                uint256 toVault = seizedMargin - toInsurance;
+                if (toVault > 0) {
+                    market.vaultBalance += toVault;
+                }
+            }
+        }
+
         position.lastCumulativeFundingRate = market.cumulativeFundingRate;
-
-        market.vaultBalance += seizedMargin;
 
         emit PositionLiquidated(
             agentId,
@@ -365,7 +537,9 @@ contract AgentPerpEngine is Ownable, ReentrancyGuard {
         }
     }
 
-    function depositInsuranceFund(bytes32 agentId, uint256 amount) external onlyOwner nonReentrant {
+    // ── Insurance fund ──
+
+    function depositInsuranceFund(bytes32 agentId, uint256 amount) external onlyRole(DEFAULT_ADMIN_ROLE) nonReentrant {
         if (!marketConfigs[agentId].exists) revert MarketNotFound();
         if (amount == 0) return;
         marginToken.safeTransferFrom(msg.sender, address(this), amount);
@@ -383,7 +557,11 @@ contract AgentPerpEngine is Ownable, ReentrancyGuard {
         emit InsuranceFundDeposited(agentId, msg.sender, amount, market.insuranceFund);
     }
 
-    function withdrawInsuranceFund(bytes32 agentId, address to, uint256 amount) external onlyOwner nonReentrant {
+    function withdrawInsuranceFund(bytes32 agentId, address to, uint256 amount)
+        external
+        onlyRole(DEFAULT_ADMIN_ROLE)
+        nonReentrant
+    {
         if (!marketConfigs[agentId].exists) revert MarketNotFound();
         if (to == address(0)) revert InvalidRecipient();
         MarketState storage market = markets[agentId];
@@ -393,54 +571,7 @@ contract AgentPerpEngine is Ownable, ReentrancyGuard {
         marginToken.safeTransfer(to, amount);
     }
 
-    function setFundingVelocity(uint256 newFundingVelocity) external onlyOwner {
-        fundingVelocity = newFundingVelocity;
-        emit FundingVelocityUpdated(newFundingVelocity);
-    }
-
-    function setDefaultSkewScale(uint256 newDefaultSkewScale) external onlyOwner {
-        if (newDefaultSkewScale == 0) revert InvalidSkewScale();
-        defaultSkewScale = newDefaultSkewScale;
-        emit DefaultSkewScaleUpdated(newDefaultSkewScale);
-    }
-
-    function getExecutionPrice(bytes32 agentId, int256 sizeDelta) external view returns (uint256) {
-        MarketConfig memory config = marketConfigs[agentId];
-        if (!config.exists) revert MarketNotFound();
-        return _getExecutionPrice(markets[agentId], config, sizeDelta);
-    }
-
-    function getMarkPrice(bytes32 agentId) external view returns (uint256) {
-        MarketConfig memory config = marketConfigs[agentId];
-        if (!config.exists) revert MarketNotFound();
-        return _markPrice(markets[agentId], config);
-    }
-
-    function getPositionHealth(bytes32 agentId, address trader) external view returns (PositionHealth memory) {
-        MarketConfig memory config = marketConfigs[agentId];
-        if (!config.exists) revert MarketNotFound();
-        MarketState memory market = markets[agentId];
-        Position memory position = positions[agentId][trader];
-        (, int256 previewCumulativeFundingRate) = _previewFundingState(market, config);
-        uint256 markPrice = _markPrice(market, config);
-        uint256 notional = _notional(position.size, markPrice);
-        int256 unrealizedPnl = _realizePnl(position.size, position.entryPrice, markPrice, _abs(position.size));
-        int256 fundingPayment = 0;
-        if (position.size != 0) {
-            fundingPayment =
-                (position.size * (previewCumulativeFundingRate - position.lastCumulativeFundingRate)) / int256(ONE);
-        }
-        int256 equity = int256(position.margin) + unrealizedPnl - fundingPayment;
-        uint256 maintenanceMargin = _maintenanceMargin(_abs(position.size), markPrice, config.maintenanceMarginBps);
-        return PositionHealth({
-            markPrice: markPrice,
-            notional: notional,
-            unrealizedPnl: unrealizedPnl,
-            equity: equity,
-            maintenanceMargin: maintenanceMargin,
-            liquidatable: position.size != 0 && equity <= int256(maintenanceMargin)
-        });
-    }
+    // ── Internal: market creation ──
 
     function _createMarket(
         bytes32 agentId,
@@ -490,6 +621,8 @@ contract AgentPerpEngine is Ownable, ReentrancyGuard {
         if (!config.exists) revert MarketNotFound();
     }
 
+    // ── Internal: oracle ──
+
     function _syncOracle(bytes32 agentId) internal returns (uint256 price) {
         MarketConfig memory config = _requireMarket(agentId);
         MarketState storage market = markets[agentId];
@@ -508,6 +641,8 @@ contract AgentPerpEngine is Ownable, ReentrancyGuard {
 
         emit OracleSynced(agentId, price, conservativeSkill, lastUpdate, market.cumulativeFundingRate);
     }
+
+    // ── Internal: funding ──
 
     function _accrueFunding(MarketState storage market, MarketConfig memory config) internal {
         uint256 lastTimestamp = market.lastFundingTimestamp;
@@ -573,6 +708,8 @@ contract AgentPerpEngine is Ownable, ReentrancyGuard {
         position.lastCumulativeFundingRate = market.cumulativeFundingRate;
     }
 
+    // ── Internal: position math ──
+
     function _applySizeDelta(
         MarketState storage market,
         Position storage position,
@@ -629,6 +766,8 @@ contract AgentPerpEngine is Ownable, ReentrancyGuard {
         }
     }
 
+    // ── Internal: margin pool ──
+
     function _creditMarginFromPool(MarketState storage market, Position storage position, uint256 profit) internal {
         if (profit == 0) return;
         uint256 fromVault = profit > market.vaultBalance ? market.vaultBalance : profit;
@@ -673,7 +812,12 @@ contract AgentPerpEngine is Ownable, ReentrancyGuard {
         }
     }
 
-    function _assertPositionHealthy(Position memory position, uint256 markPrice, MarketConfig memory config) internal pure {
+    // ── Internal: health checks ──
+
+    function _assertPositionHealthy(Position memory position, uint256 markPrice, MarketConfig memory config)
+        internal
+        pure
+    {
         if (position.size == 0) return;
         if (position.margin == 0) revert Undercollateralized();
 
@@ -703,7 +847,13 @@ contract AgentPerpEngine is Ownable, ReentrancyGuard {
         revert CloseOnlyMode();
     }
 
-    function _maintenanceMargin(uint256 absSize, uint256 price, uint256 maintenanceMarginBps) internal pure returns (uint256) {
+    // ── Internal: pure math ──
+
+    function _maintenanceMargin(uint256 absSize, uint256 price, uint256 maintenanceMarginBps)
+        internal
+        pure
+        returns (uint256)
+    {
         return Math.mulDiv(Math.mulDiv(absSize, price, ONE), maintenanceMarginBps, BPS);
     }
 

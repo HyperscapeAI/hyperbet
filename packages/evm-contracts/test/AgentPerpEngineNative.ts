@@ -24,6 +24,8 @@ describe("AgentPerpEngineNative — security regressions", function () {
     );
     await engine.waitForDeployment();
 
+    await engine.connect(owner).createMarket(agentId);
+
     await engine
       .connect(trader)
       .modifyPosition(agentId, ethers.parseEther("1"), {
@@ -61,6 +63,8 @@ describe("AgentPerpEngineNative — security regressions", function () {
       owner,
     );
     await engine.waitForDeployment();
+
+    await engine.connect(owner).createMarket(agentId);
 
     await engine
       .connect(trader)

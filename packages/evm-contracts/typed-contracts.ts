@@ -368,8 +368,15 @@ export async function deploySkillOracle(
   const factory = runner
     ? await ethers.getContractFactory("SkillOracle", runner)
     : await ethers.getContractFactory("SkillOracle");
+  const signerAddr = runner
+    ? await runner.getAddress()
+    : await (await ethers.getSigners())[0].getAddress();
   return (await factory.deploy(
     initialBasePrice,
+    120, // maxOracleDelay: 2 minutes
+    signerAddr, // admin
+    signerAddr, // reporter
+    signerAddr, // pauser
   )) as unknown as SkillOracleContract;
 }
 
@@ -393,10 +400,16 @@ export async function deployAgentPerpEngine(
   const factory = runner
     ? await ethers.getContractFactory("AgentPerpEngine", runner)
     : await ethers.getContractFactory("AgentPerpEngine");
+  const signerAddr = runner
+    ? await runner.getAddress()
+    : await (await ethers.getSigners())[0].getAddress();
   return (await factory.deploy(
     oracleAddress,
     marginTokenAddress,
     skewScale,
+    signerAddr, // admin
+    signerAddr, // marketOperator
+    signerAddr, // pauser
   )) as unknown as AgentPerpEngineContract;
 }
 
@@ -408,8 +421,14 @@ export async function deployAgentPerpEngineNative(
   const factory = runner
     ? await ethers.getContractFactory("AgentPerpEngineNative", runner)
     : await ethers.getContractFactory("AgentPerpEngineNative");
+  const signerAddr = runner
+    ? await runner.getAddress()
+    : await (await ethers.getSigners())[0].getAddress();
   return (await factory.deploy(
     oracleAddress,
     skewScale,
+    signerAddr, // admin
+    signerAddr, // marketOperator
+    signerAddr, // pauser
   )) as unknown as AgentPerpEngineNativeContract;
 }

@@ -44,16 +44,20 @@ describe("SkillOracle", () => {
     expect(higherPrice).to.be.greaterThan(lowerPrice);
   });
 
-  it("allows owner-managed reporter rotation for updates", async () => {
+  it("only allows REPORTER_ROLE to update skills", async () => {
     const { owner, oracle } = await deployFixture();
-    const [, reporter] = await ethers.getSigners();
+    const [, nonReporter] = await ethers.getSigners();
     const agent = ethers.encodeBytes32String("MODEL_A");
 
-    await oracle.connect(owner).setReporter(reporter.address, true);
-    await oracle.connect(reporter).updateAgentSkill(agent, 1_700, 25);
-
+    // Owner has REPORTER_ROLE from construction
+    await oracle.connect(owner).updateAgentSkill(agent, 1_700, 25);
     const stored = await oracle.agentSkills(agent);
     expect(stored.mu).to.equal(1_700n);
     expect(stored.sigma).to.equal(25n);
+
+    // Non-reporter should fail
+    await expect(
+      oracle.connect(nonReporter).updateAgentSkill(agent, 1_800, 30),
+    ).to.be.reverted;
   });
 });

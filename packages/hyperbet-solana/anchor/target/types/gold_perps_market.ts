@@ -84,6 +84,45 @@ export type GoldPerpsMarket = {
       ]
     },
     {
+      "name": "freezeConfig",
+      "discriminator": [
+        30,
+        68,
+        20,
+        154,
+        197,
+        42,
+        47,
+        122
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority",
+          "signer": true
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "initializeConfig",
       "discriminator": [
         208,
@@ -531,6 +570,50 @@ export type GoldPerpsMarket = {
         {
           "name": "settlementSpotIndex",
           "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "setPaused",
+      "discriminator": [
+        91,
+        60,
+        125,
+        192,
+        176,
+        225,
+        166,
+        218
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority",
+          "signer": true
+        }
+      ],
+      "args": [
+        {
+          "name": "paused",
+          "type": "bool"
         }
       ]
     },
@@ -990,6 +1073,16 @@ export type GoldPerpsMarket = {
       "code": 6028,
       "name": "overflow",
       "msg": "Numeric overflow in perps calculation"
+    },
+    {
+      "code": 6029,
+      "name": "configFrozen",
+      "msg": "Config is frozen and cannot be modified"
+    },
+    {
+      "code": 6030,
+      "name": "tradingPaused",
+      "msg": "Trading is paused"
     }
   ],
   "types": [
@@ -1069,6 +1162,14 @@ export type GoldPerpsMarket = {
           {
             "name": "tradeMarketMakerFeeBps",
             "type": "u16"
+          },
+          {
+            "name": "configFrozen",
+            "type": "bool"
+          },
+          {
+            "name": "paused",
+            "type": "bool"
           }
         ]
       }

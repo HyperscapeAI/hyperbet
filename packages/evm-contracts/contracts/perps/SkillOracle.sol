@@ -1,19 +1,26 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import "@openzeppelin/contracts/access/Ownable.sol";
+import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
 
-/**
- * @title SkillOracle
- * @notice Receives TrueSkill or Glicko data (mu, sigma) from the game server
- *         and computes a skill-relative index price for perp markets.
- */
-contract SkillOracle is Ownable {
+contract SkillOracle is AccessControl {
+    bytes32 public constant REPORTER_ROLE = keccak256("REPORTER_ROLE");
+    bytes32 public constant PAUSER_ROLE = keccak256("PAUSER_ROLE");
+
     uint256 public constant Z_SCORE = 3;
     uint256 public constant K_FACTOR = 500;
+    uint256 public constant MAX_MU_DELTA = 500;
+    uint256 public constant MAX_SIGMA_DELTA = 300;
 
+    error InvalidAdmin();
     error InvalidReporter();
+    error InvalidPauser();
+    error GovernanceSurfaceFrozen();
     error UnauthorizedReporter();
+    error OraclePaused();
+    error StaleOracle();
+    error MuDeltaExceeded();
+    error SigmaDeltaExceeded();
 
     struct AgentSkill {
         uint256 mu;
@@ -23,39 +30,89 @@ contract SkillOracle is Ownable {
 
     mapping(bytes32 => AgentSkill) public agentSkills;
     bytes32[] public activeAgents;
-    mapping(address => bool) public reporters;
 
     uint256 public globalMeanMu;
     uint256 private totalMu;
     uint256 public immutable basePrice;
+    uint256 public maxOracleDelay;
+    bool public oraclePaused;
 
     event SkillUpdated(bytes32 indexed agentId, uint256 mu, uint256 sigma);
-    event ReporterUpdated(address indexed reporter, bool enabled);
+    event OraclePauseUpdated(bool paused, address indexed actor);
+    event PauserUpdated(address indexed pauser, bool enabled);
+    event MaxOracleDelayUpdated(uint256 newMaxOracleDelay);
 
-    constructor(uint256 initialBasePrice) Ownable(msg.sender) {
+    constructor(
+        uint256 initialBasePrice,
+        uint256 maxOracleDelay_,
+        address admin,
+        address reporter,
+        address pauser
+    ) {
         require(initialBasePrice > 0, "Invalid base price");
-        basePrice = initialBasePrice;
-        reporters[msg.sender] = true;
-        emit ReporterUpdated(msg.sender, true);
-    }
-
-    modifier onlyReporter() {
-        if (!reporters[msg.sender]) revert UnauthorizedReporter();
-        _;
-    }
-
-    function setReporter(address reporter, bool enabled) external onlyOwner {
+        if (admin == address(0)) revert InvalidAdmin();
         if (reporter == address(0)) revert InvalidReporter();
-        reporters[reporter] = enabled;
-        emit ReporterUpdated(reporter, enabled);
+        if (pauser == address(0)) revert InvalidPauser();
+
+        basePrice = initialBasePrice;
+        maxOracleDelay = maxOracleDelay_;
+
+        _grantRole(DEFAULT_ADMIN_ROLE, admin);
+        _grantRole(REPORTER_ROLE, reporter);
+        _grantRole(PAUSER_ROLE, pauser);
     }
 
-    function updateAgentSkill(bytes32 agentId, uint256 mu, uint256 sigma) external onlyReporter {
-        if (agentSkills[agentId].lastUpdate == 0) {
+    // ── PM20 governance freeze: block inherited AccessControl role mutations ──
+
+    function grantRole(bytes32 role, address account) public override onlyRole(getRoleAdmin(role)) {
+        if (role != PAUSER_ROLE) revert GovernanceSurfaceFrozen();
+        _grantRole(role, account);
+    }
+
+    function revokeRole(bytes32 role, address account) public override onlyRole(getRoleAdmin(role)) {
+        if (role != PAUSER_ROLE) revert GovernanceSurfaceFrozen();
+        _revokeRole(role, account);
+    }
+
+    function renounceRole(bytes32 role, address callerConfirmation) public override {
+        if (role != PAUSER_ROLE) revert GovernanceSurfaceFrozen();
+        super.renounceRole(role, callerConfirmation);
+    }
+
+    function setPauser(address pauser, bool enabled) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        if (pauser == address(0)) revert InvalidPauser();
+        if (enabled) {
+            _grantRole(PAUSER_ROLE, pauser);
+        } else {
+            _revokeRole(PAUSER_ROLE, pauser);
+        }
+        emit PauserUpdated(pauser, enabled);
+    }
+
+    function setOraclePaused(bool paused) external onlyRole(PAUSER_ROLE) {
+        oraclePaused = paused;
+        emit OraclePauseUpdated(paused, msg.sender);
+    }
+
+    function setMaxOracleDelay(uint256 newMaxOracleDelay) external view onlyRole(DEFAULT_ADMIN_ROLE) {
+        // Frozen post-bootstrap — config changes require redeployment
+        revert GovernanceSurfaceFrozen();
+    }
+
+    function updateAgentSkill(bytes32 agentId, uint256 mu, uint256 sigma) external onlyRole(REPORTER_ROLE) {
+        if (oraclePaused) revert OraclePaused();
+
+        AgentSkill storage existing = agentSkills[agentId];
+        if (existing.lastUpdate == 0) {
             activeAgents.push(agentId);
             totalMu += mu;
         } else {
-            totalMu = totalMu - agentSkills[agentId].mu + mu;
+            uint256 muDelta = mu > existing.mu ? mu - existing.mu : existing.mu - mu;
+            uint256 sigmaDelta = sigma > existing.sigma ? sigma - existing.sigma : existing.sigma - sigma;
+            if (muDelta > MAX_MU_DELTA) revert MuDeltaExceeded();
+            if (sigmaDelta > MAX_SIGMA_DELTA) revert SigmaDeltaExceeded();
+
+            totalMu = totalMu - existing.mu + mu;
         }
         agentSkills[agentId] = AgentSkill(mu, sigma, block.timestamp);
         globalMeanMu = totalMu / activeAgents.length;
@@ -68,11 +125,14 @@ contract SkillOracle is Ownable {
         return int256(skill.mu) - int256(Z_SCORE * skill.sigma);
     }
 
-    // slither-disable-next-line timestamp
     function getIndexPrice(bytes32 agentId) public view returns (uint256) {
-        int256 diff = getConservativeSkill(agentId) - int256(globalMeanMu);
+        AgentSkill memory skill = agentSkills[agentId];
+        require(skill.lastUpdate != 0, "Agent not found");
+        if (maxOracleDelay > 0 && block.timestamp - skill.lastUpdate > maxOracleDelay) {
+            revert StaleOracle();
+        }
 
-        // Clamped linear approximation: price = basePrice * clamp(1 + diff/K_FACTOR, 0.01, ∞)
+        int256 diff = getConservativeSkill(agentId) - int256(globalMeanMu);
         int256 xScaled = (diff * 1e18) / int256(K_FACTOR);
 
         if (xScaled >= 0) {
@@ -81,8 +141,12 @@ contract SkillOracle is Ownable {
 
         uint256 absX = uint256(-xScaled);
         if (absX >= 1e18) {
-            return basePrice / 100; // floor at 1% of base price
+            return basePrice / 100;
         }
         return (basePrice * (1e18 - absX)) / 1e18;
+    }
+
+    function activeAgentCount() external view returns (uint256) {
+        return activeAgents.length;
     }
 }

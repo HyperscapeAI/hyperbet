@@ -78,6 +78,45 @@
       ]
     },
     {
+      "name": "freeze_config",
+      "discriminator": [
+        30,
+        68,
+        20,
+        154,
+        197,
+        42,
+        47,
+        122
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority",
+          "signer": true
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "initialize_config",
       "discriminator": [
         208,
@@ -525,6 +564,50 @@
         {
           "name": "settlement_spot_index",
           "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "set_paused",
+      "discriminator": [
+        91,
+        60,
+        125,
+        192,
+        176,
+        225,
+        166,
+        218
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority",
+          "signer": true
+        }
+      ],
+      "args": [
+        {
+          "name": "paused",
+          "type": "bool"
         }
       ]
     },
@@ -984,6 +1067,16 @@
       "code": 6028,
       "name": "Overflow",
       "msg": "Numeric overflow in perps calculation"
+    },
+    {
+      "code": 6029,
+      "name": "ConfigFrozen",
+      "msg": "Config is frozen and cannot be modified"
+    },
+    {
+      "code": 6030,
+      "name": "TradingPaused",
+      "msg": "Trading is paused"
     }
   ],
   "types": [
@@ -1063,6 +1156,14 @@
           {
             "name": "trade_market_maker_fee_bps",
             "type": "u16"
+          },
+          {
+            "name": "config_frozen",
+            "type": "bool"
+          },
+          {
+            "name": "paused",
+            "type": "bool"
           }
         ]
       }
