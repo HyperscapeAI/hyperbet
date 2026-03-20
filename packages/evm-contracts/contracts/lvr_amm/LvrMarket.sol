@@ -20,12 +20,12 @@ contract LvrMarket is ReentrancyGuard {
     using SafeCast for uint256;
 
     event MarketInitialized(uint256 liquidity, uint256 collateralIn, uint256 timestamp);
-    
+
     event OutcomeProposed(uint256 outcome, address indexed proposer, uint256 resolutionTimestamp);
     event MarketDisputed();
     event MarketSettled(uint256 outcome, address indexed proposer, uint256 bondReturned);
     event MarketResolvedByAdmin(uint256 outcome, address indexed admin);
-    
+
     event MarketBuy(address indexed buyer, bool isBuyYes, uint256 amountIn, uint256 amountOut);
     event MarketSell(address indexed seller, bool isSellYes, uint256 amountIn, uint256 amountOut);
     event CollateralRedeemed(address indexed redeemer, uint256 amountYes, uint256 amountNo, uint256 payout);
@@ -132,10 +132,10 @@ contract LvrMarket is ReentrancyGuard {
 
     function dispute() external isRouter nonReentrant {
         require(state == MarketState.PENDING, "Challenge Window Not opened");
-        // Break the bond 
+        // Break the bond
         state = MarketState.DISPUTED;
         // set the market outcome through creator/resolver voting/admin
-        
+
         emit MarketDisputed();
     }
 
@@ -243,7 +243,7 @@ contract LvrMarket is ReentrancyGuard {
         noToken = new NoToken(address(this), collateralIn);
         liquidity = Math.calcInitialLiquidity(collateralIn);
         liquidityInitialized = true;
-        
+
         emit MarketInitialized(liquidity, collateralIn, block.timestamp);
         return liquidity;
     }

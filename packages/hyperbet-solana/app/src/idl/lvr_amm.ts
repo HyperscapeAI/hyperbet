@@ -501,15 +501,6 @@ export type LvrAmm = {
         {
           "name": "expirationAt",
           "type": "i64"
-        },
-        {
-          "name": "duelKey",
-          "type": {
-            "array": [
-              "u8",
-              32
-            ]
-          }
         }
       ]
     },
@@ -1052,6 +1043,18 @@ export type LvrAmm = {
               ]
             }
           }
+        },
+        {
+          "name": "treasury",
+          "writable": true
+        },
+        {
+          "name": "treasuryYesAta",
+          "writable": true
+        },
+        {
+          "name": "treasuryNoAta",
+          "writable": true
         },
         {
           "name": "tokenProgram",
@@ -1676,51 +1679,36 @@ export type LvrAmm = {
     },
     {
       "code": 6010,
-      "name": "betNotInitialized",
-      "msg": "Bet not initialized"
-    },
-    {
-      "code": 6011,
       "name": "betNotSettled",
       "msg": "Bet not settled"
     },
     {
-      "code": 6012,
+      "code": 6011,
       "name": "betNotExpired",
       "msg": "Bet not expired"
     },
     {
-      "code": 6013,
-      "name": "invalidOracleAccount",
-      "msg": "Invalid oracle account"
-    },
-    {
-      "code": 6014,
-      "name": "oracleBetMismatch",
-      "msg": "Oracle duel does not match bet"
-    },
-    {
-      "code": 6015,
+      "code": 6012,
       "name": "mathErr",
       "msg": "Overflow or Underflow"
     },
     {
-      "code": 6016,
+      "code": 6013,
       "name": "invalidAddress",
       "msg": "Invalid address (zero/default)"
     },
     {
-      "code": 6017,
+      "code": 6014,
       "name": "feeTooHigh",
       "msg": "Fee BPS exceeds maximum (1000 = 10%)"
     },
     {
-      "code": 6018,
+      "code": 6015,
       "name": "marketPaused",
       "msg": "Market is paused"
     },
     {
-      "code": 6019,
+      "code": 6016,
       "name": "configFrozen",
       "msg": "Config is frozen"
     }
@@ -1897,18 +1885,6 @@ export type LvrAmm = {
           {
             "name": "feeBps",
             "type": "u16"
-          },
-          {
-            "name": "duelKey",
-            "docs": [
-              "Full 32-byte duel key for oracle cross-reference (0 if not set)"
-            ],
-            "type": {
-              "array": [
-                "u8",
-                32
-              ]
-            }
           }
         ]
       }

@@ -164,6 +164,15 @@ function resolveConfiguredProgramId(
   return resolveProgramId(idlJson, fallback);
 }
 
+function resolveOptionalProgramId(
+  configuredAddress: string | undefined,
+  fallback: string | undefined,
+): PublicKey | null {
+  const candidate = configuredAddress?.trim() || fallback?.trim() || "";
+  if (!candidate) return null;
+  return new PublicKey(candidate);
+}
+
 function ensureIdlAddress(idlJson: unknown, programId: PublicKey): Idl {
   const idlWithMaybeAddress = idlJson as Idl & { address?: string };
   return {
@@ -187,10 +196,9 @@ export const GOLD_PERPS_MARKET_PROGRAM_ID = resolveConfiguredProgramId(
   goldPerpsMarketIdl,
   solanaDeployment.goldPerpsMarketProgramId,
 );
-export const GOLD_AMM_MARKET_PROGRAM_ID = new PublicKey(
-  process.env.GOLD_AMM_MARKET_PROGRAM_ID ??
-    solanaDeployment.goldAmmMarketProgramId ??
-    "Af4LMYfaBtcFFM6dBjwLYH6QJLMqEwneQ8VHfn2z7NY5",
+export const GOLD_AMM_MARKET_PROGRAM_ID = resolveOptionalProgramId(
+  process.env.GOLD_AMM_MARKET_PROGRAM_ID,
+  solanaDeployment.goldAmmMarketProgramId,
 );
 
 /** @deprecated Binary market is no longer deployed. Retained for backward compat. */

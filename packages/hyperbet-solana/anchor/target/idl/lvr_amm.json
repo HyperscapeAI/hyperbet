@@ -8,126 +8,340 @@
   },
   "instructions": [
     {
-      "name": "initialize",
+      "name": "buy",
       "discriminator": [
-        175,
-        175,
-        109,
-        31,
-        13,
-        152,
-        155,
-        237
+        102,
+        6,
+        61,
+        18,
+        1,
+        218,
+        235,
+        234
       ],
       "accounts": [
-        {
-          "name": "admin_state",
-          "writable": true
-        },
         {
           "name": "signer",
           "writable": true,
           "signer": true
         },
-        {
-          "name": "system_program"
-        }
-      ],
-      "args": []
-    },
-    {
-      "name": "initialize_config",
-      "discriminator": [
-        208,
-        127,
-        21,
-        1,
-        194,
-        190,
-        196,
-        70
-      ],
-      "accounts": [
         {
           "name": "amm_config",
-          "writable": true
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  109,
+                  109,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
         },
         {
-          "name": "signer",
+          "name": "bet",
           "writable": true,
-          "signer": true
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  101,
+                  116
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "bet_id"
+              },
+              {
+                "kind": "account",
+                "path": "bet.creator",
+                "account": "Bet"
+              }
+            ]
+          }
         },
-        {
-          "name": "system_program"
-        }
-      ],
-      "args": [
         {
           "name": "treasury",
-          "type": "pubkey"
-        },
-        {
-          "name": "market_maker",
-          "type": "pubkey"
-        },
-        {
-          "name": "fee_bps",
-          "type": "u16"
-        }
-      ]
-    },
-    {
-      "name": "freeze_config",
-      "discriminator": [
-        30,
-        68,
-        20,
-        154,
-        197,
-        42,
-        47,
-        122
-      ],
-      "accounts": [
-        {
-          "name": "amm_config",
           "writable": true
         },
         {
-          "name": "signer",
+          "name": "mint_yes",
           "writable": true,
-          "signer": true
-        }
-      ],
-      "args": []
-    },
-    {
-      "name": "set_paused",
-      "discriminator": [
-        91,
-        60,
-        125,
-        192,
-        176,
-        225,
-        166,
-        218
-      ],
-      "accounts": [
-        {
-          "name": "amm_config",
-          "writable": true
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  105,
+                  110,
+                  116,
+                  95,
+                  121,
+                  101,
+                  115
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "bet.bet_id",
+                "account": "Bet"
+              },
+              {
+                "kind": "account",
+                "path": "bet.creator",
+                "account": "Bet"
+              }
+            ]
+          }
         },
         {
-          "name": "signer",
+          "name": "mint_no",
           "writable": true,
-          "signer": true
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  105,
+                  110,
+                  116,
+                  95,
+                  110,
+                  111
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "bet.bet_id",
+                "account": "Bet"
+              },
+              {
+                "kind": "account",
+                "path": "bet.creator",
+                "account": "Bet"
+              }
+            ]
+          }
+        },
+        {
+          "name": "destination_yes",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "signer"
+              },
+              {
+                "kind": "const",
+                "value": [
+                  6,
+                  221,
+                  246,
+                  225,
+                  215,
+                  101,
+                  161,
+                  147,
+                  217,
+                  203,
+                  225,
+                  70,
+                  206,
+                  235,
+                  121,
+                  172,
+                  28,
+                  180,
+                  133,
+                  237,
+                  95,
+                  91,
+                  55,
+                  145,
+                  58,
+                  140,
+                  245,
+                  133,
+                  126,
+                  255,
+                  0,
+                  169
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint_yes"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "destination_no",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "signer"
+              },
+              {
+                "kind": "const",
+                "value": [
+                  6,
+                  221,
+                  246,
+                  225,
+                  215,
+                  101,
+                  161,
+                  147,
+                  217,
+                  203,
+                  225,
+                  70,
+                  206,
+                  235,
+                  121,
+                  172,
+                  28,
+                  180,
+                  133,
+                  237,
+                  95,
+                  91,
+                  55,
+                  145,
+                  58,
+                  140,
+                  245,
+                  133,
+                  126,
+                  255,
+                  0,
+                  169
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint_no"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "associated_token_program",
+          "address": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
         }
       ],
       "args": [
         {
-          "name": "paused",
-          "type": "bool"
+          "name": "bet_id",
+          "type": "u64"
+        },
+        {
+          "name": "outcome",
+          "type": "u8"
+        },
+        {
+          "name": "amount_in",
+          "type": "u64"
         }
       ]
     },
@@ -150,25 +364,115 @@
           "signer": true
         },
         {
-          "name": "amm_config"
+          "name": "amm_config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  109,
+                  109,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
         },
         {
           "name": "bet",
-          "writable": true
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  101,
+                  116
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "bet_id"
+              },
+              {
+                "kind": "account",
+                "path": "signer"
+              }
+            ]
+          }
         },
         {
           "name": "mint_yes",
-          "writable": true
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  105,
+                  110,
+                  116,
+                  95,
+                  121,
+                  101,
+                  115
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "bet_id"
+              },
+              {
+                "kind": "account",
+                "path": "signer"
+              }
+            ]
+          }
         },
         {
           "name": "mint_no",
-          "writable": true
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  105,
+                  110,
+                  116,
+                  95,
+                  110,
+                  111
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "bet_id"
+              },
+              {
+                "kind": "account",
+                "path": "signer"
+              }
+            ]
+          }
         },
         {
-          "name": "system_program"
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
         },
         {
-          "name": "token_program"
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
         }
       ],
       "args": [
@@ -195,37 +499,48 @@
       ]
     },
     {
-      "name": "init_bet_account",
+      "name": "freeze_config",
       "discriminator": [
-        229,
-        240,
-        116,
-        140,
-        5,
-        177,
-        61,
-        69
+        30,
+        68,
+        20,
+        154,
+        197,
+        42,
+        47,
+        122
       ],
       "accounts": [
+        {
+          "name": "amm_config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  109,
+                  109,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
         {
           "name": "signer",
           "writable": true,
           "signer": true
-        },
-        {
-          "name": "bet",
-          "writable": true
-        },
-        {
-          "name": "system_program"
         }
       ],
-      "args": [
-        {
-          "name": "bet_id",
-          "type": "u64"
-        }
-      ]
+      "args": []
     },
     {
       "name": "get_price",
@@ -254,16 +569,16 @@
       "returns": "u64"
     },
     {
-      "name": "buy",
+      "name": "init_bet_account",
       "discriminator": [
-        102,
-        6,
+        229,
+        240,
+        116,
+        140,
+        5,
+        177,
         61,
-        18,
-        1,
-        218,
-        235,
-        234
+        69
       ],
       "accounts": [
         {
@@ -272,54 +587,148 @@
           "signer": true
         },
         {
-          "name": "amm_config"
-        },
-        {
           "name": "bet",
-          "writable": true
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  101,
+                  116
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "bet_id"
+              },
+              {
+                "kind": "account",
+                "path": "signer"
+              }
+            ]
+          }
         },
         {
-          "name": "treasury",
-          "writable": true
-        },
-        {
-          "name": "mint_yes",
-          "writable": true
-        },
-        {
-          "name": "mint_no",
-          "writable": true
-        },
-        {
-          "name": "destination_yes",
-          "writable": true
-        },
-        {
-          "name": "destination_no",
-          "writable": true
-        },
-        {
-          "name": "token_program"
-        },
-        {
-          "name": "system_program"
-        },
-        {
-          "name": "associated_token_program"
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
         }
       ],
       "args": [
         {
           "name": "bet_id",
           "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "initialize",
+      "discriminator": [
+        175,
+        175,
+        109,
+        31,
+        13,
+        152,
+        155,
+        237
+      ],
+      "accounts": [
+        {
+          "name": "admin_state",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  100,
+                  109,
+                  105,
+                  110,
+                  95,
+                  115,
+                  116,
+                  97,
+                  116,
+                  101
+                ]
+              }
+            ]
+          }
         },
         {
-          "name": "outcome",
-          "type": "u8"
+          "name": "signer",
+          "writable": true,
+          "signer": true
         },
         {
-          "name": "amount_in",
-          "type": "u64"
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "initialize_config",
+      "discriminator": [
+        208,
+        127,
+        21,
+        1,
+        194,
+        190,
+        196,
+        70
+      ],
+      "accounts": [
+        {
+          "name": "amm_config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  109,
+                  109,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "signer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "treasury",
+          "type": "pubkey"
+        },
+        {
+          "name": "market_maker",
+          "type": "pubkey"
+        },
+        {
+          "name": "fee_bps",
+          "type": "u16"
         }
       ]
     },
@@ -342,27 +751,292 @@
           "signer": true
         },
         {
-          "name": "amm_config"
+          "name": "amm_config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  109,
+                  109,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
         },
         {
           "name": "bet",
-          "writable": true
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  101,
+                  116
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "bet_id"
+              },
+              {
+                "kind": "account",
+                "path": "bet.creator",
+                "account": "Bet"
+              }
+            ]
+          }
         },
         {
           "name": "mint_yes",
-          "writable": true
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  105,
+                  110,
+                  116,
+                  95,
+                  121,
+                  101,
+                  115
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "bet.bet_id",
+                "account": "Bet"
+              },
+              {
+                "kind": "account",
+                "path": "bet.creator",
+                "account": "Bet"
+              }
+            ]
+          }
         },
         {
           "name": "mint_no",
-          "writable": true
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  105,
+                  110,
+                  116,
+                  95,
+                  110,
+                  111
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "bet.bet_id",
+                "account": "Bet"
+              },
+              {
+                "kind": "account",
+                "path": "bet.creator",
+                "account": "Bet"
+              }
+            ]
+          }
         },
         {
           "name": "destination_yes",
-          "writable": true
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "signer"
+              },
+              {
+                "kind": "const",
+                "value": [
+                  6,
+                  221,
+                  246,
+                  225,
+                  215,
+                  101,
+                  161,
+                  147,
+                  217,
+                  203,
+                  225,
+                  70,
+                  206,
+                  235,
+                  121,
+                  172,
+                  28,
+                  180,
+                  133,
+                  237,
+                  95,
+                  91,
+                  55,
+                  145,
+                  58,
+                  140,
+                  245,
+                  133,
+                  126,
+                  255,
+                  0,
+                  169
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint_yes"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
         },
         {
           "name": "destination_no",
-          "writable": true
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "signer"
+              },
+              {
+                "kind": "const",
+                "value": [
+                  6,
+                  221,
+                  246,
+                  225,
+                  215,
+                  101,
+                  161,
+                  147,
+                  217,
+                  203,
+                  225,
+                  70,
+                  206,
+                  235,
+                  121,
+                  172,
+                  28,
+                  180,
+                  133,
+                  237,
+                  95,
+                  91,
+                  55,
+                  145,
+                  58,
+                  140,
+                  245,
+                  133,
+                  126,
+                  255,
+                  0,
+                  169
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint_no"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
         },
         {
           "name": "treasury",
@@ -377,13 +1051,16 @@
           "writable": true
         },
         {
-          "name": "token_program"
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
         },
         {
-          "name": "system_program"
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
         },
         {
-          "name": "associated_token_program"
+          "name": "associated_token_program",
+          "address": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
         }
       ],
       "args": [
@@ -398,6 +1075,55 @@
         {
           "name": "amount_in",
           "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "set_paused",
+      "discriminator": [
+        91,
+        60,
+        125,
+        192,
+        176,
+        225,
+        166,
+        218
+      ],
+      "accounts": [
+        {
+          "name": "amm_config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  109,
+                  109,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "signer",
+          "writable": true,
+          "signer": true
+        }
+      ],
+      "args": [
+        {
+          "name": "paused",
+          "type": "bool"
         }
       ]
     },
@@ -420,11 +1146,52 @@
           "signer": true
         },
         {
-          "name": "admin_state"
+          "name": "admin_state",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  100,
+                  109,
+                  105,
+                  110,
+                  95,
+                  115,
+                  116,
+                  97,
+                  116,
+                  101
+                ]
+              }
+            ]
+          }
         },
         {
           "name": "bet",
-          "writable": true
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  101,
+                  116
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "bet_id"
+              },
+              {
+                "kind": "account",
+                "path": "bet.creator",
+                "account": "Bet"
+              }
+            ]
+          }
         },
         {
           "name": "duel_state",
@@ -466,32 +1233,280 @@
         },
         {
           "name": "bet",
-          "writable": true
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  101,
+                  116
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "bet_id"
+              },
+              {
+                "kind": "account",
+                "path": "bet.creator",
+                "account": "Bet"
+              }
+            ]
+          }
         },
         {
           "name": "mint_yes",
-          "writable": true
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  105,
+                  110,
+                  116,
+                  95,
+                  121,
+                  101,
+                  115
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "bet.bet_id",
+                "account": "Bet"
+              },
+              {
+                "kind": "account",
+                "path": "bet.creator",
+                "account": "Bet"
+              }
+            ]
+          }
         },
         {
           "name": "mint_no",
-          "writable": true
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  105,
+                  110,
+                  116,
+                  95,
+                  110,
+                  111
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "bet.bet_id",
+                "account": "Bet"
+              },
+              {
+                "kind": "account",
+                "path": "bet.creator",
+                "account": "Bet"
+              }
+            ]
+          }
         },
         {
           "name": "destination_yes",
-          "writable": true
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "signer"
+              },
+              {
+                "kind": "const",
+                "value": [
+                  6,
+                  221,
+                  246,
+                  225,
+                  215,
+                  101,
+                  161,
+                  147,
+                  217,
+                  203,
+                  225,
+                  70,
+                  206,
+                  235,
+                  121,
+                  172,
+                  28,
+                  180,
+                  133,
+                  237,
+                  95,
+                  91,
+                  55,
+                  145,
+                  58,
+                  140,
+                  245,
+                  133,
+                  126,
+                  255,
+                  0,
+                  169
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint_yes"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
         },
         {
           "name": "destination_no",
-          "writable": true
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "signer"
+              },
+              {
+                "kind": "const",
+                "value": [
+                  6,
+                  221,
+                  246,
+                  225,
+                  215,
+                  101,
+                  161,
+                  147,
+                  217,
+                  203,
+                  225,
+                  70,
+                  206,
+                  235,
+                  121,
+                  172,
+                  28,
+                  180,
+                  133,
+                  237,
+                  95,
+                  91,
+                  55,
+                  145,
+                  58,
+                  140,
+                  245,
+                  133,
+                  126,
+                  255,
+                  0,
+                  169
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint_no"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
         },
         {
           "name": "token_program"
         },
         {
-          "name": "system_program"
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
         },
         {
-          "name": "associated_token_program"
+          "name": "associated_token_program",
+          "address": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
         }
       ],
       "args": [
@@ -512,7 +1527,7 @@
   ],
   "accounts": [
     {
-      "name": "lvr_amm::state::admin::Admin",
+      "name": "Admin",
       "discriminator": [
         244,
         158,
@@ -525,20 +1540,7 @@
       ]
     },
     {
-      "name": "lvr_amm::state::bet::Bet",
-      "discriminator": [
-        147,
-        23,
-        35,
-        59,
-        15,
-        75,
-        155,
-        32
-      ]
-    },
-    {
-      "name": "lvr_amm::state::config::AmmConfig",
+      "name": "AmmConfig",
       "discriminator": [
         218,
         244,
@@ -549,11 +1551,165 @@
         43,
         111
       ]
+    },
+    {
+      "name": "Bet",
+      "discriminator": [
+        147,
+        23,
+        35,
+        59,
+        15,
+        75,
+        155,
+        32
+      ]
+    }
+  ],
+  "events": [
+    {
+      "name": "AdminStateInitialized",
+      "discriminator": [
+        211,
+        115,
+        86,
+        90,
+        176,
+        197,
+        254,
+        121
+      ]
+    },
+    {
+      "name": "AmmConfigFrozen",
+      "discriminator": [
+        247,
+        80,
+        58,
+        72,
+        123,
+        117,
+        119,
+        164
+      ]
+    },
+    {
+      "name": "AmmConfigInitialized",
+      "discriminator": [
+        105,
+        30,
+        129,
+        183,
+        100,
+        137,
+        26,
+        239
+      ]
+    },
+    {
+      "name": "AmmPausedChanged",
+      "discriminator": [
+        69,
+        202,
+        147,
+        173,
+        81,
+        7,
+        62,
+        82
+      ]
+    }
+  ],
+  "errors": [
+    {
+      "code": 6000,
+      "name": "CanOnlyBeInitializedByOwner",
+      "msg": "Can only be initialized by owner"
+    },
+    {
+      "code": 6001,
+      "name": "OutComeCanOnlyBe01",
+      "msg": "outcome can only be 0 for yes or 1 for no"
+    },
+    {
+      "code": 6002,
+      "name": "InvalidInitialLiq",
+      "msg": "initial liq must be greater than 100000"
+    },
+    {
+      "code": 6003,
+      "name": "QuantityMustBeGreaterThanZero",
+      "msg": "quantity must be greater than zero"
+    },
+    {
+      "code": 6004,
+      "name": "SignerDoesntHaveEnoughTokens",
+      "msg": "Signer doesn't have enough tokens"
+    },
+    {
+      "code": 6005,
+      "name": "NotEnoughLamports",
+      "msg": "Bet account doesn't have enough lamports"
+    },
+    {
+      "code": 6006,
+      "name": "NotEnoughSharesToReduce",
+      "msg": "Bet account doesn't have enough shares"
+    },
+    {
+      "code": 6007,
+      "name": "AdminStateAlreadyInitialized",
+      "msg": "Admin state already initialized"
+    },
+    {
+      "code": 6008,
+      "name": "SignerIsNotSettlePubKey",
+      "msg": "Signer is not the settle pub key"
+    },
+    {
+      "code": 6009,
+      "name": "BetAlreadySettled",
+      "msg": "Bet already settled"
+    },
+    {
+      "code": 6010,
+      "name": "BetNotSettled",
+      "msg": "Bet not settled"
+    },
+    {
+      "code": 6011,
+      "name": "BetNotExpired",
+      "msg": "Bet not expired"
+    },
+    {
+      "code": 6012,
+      "name": "MathErr",
+      "msg": "Overflow or Underflow"
+    },
+    {
+      "code": 6013,
+      "name": "InvalidAddress",
+      "msg": "Invalid address (zero/default)"
+    },
+    {
+      "code": 6014,
+      "name": "FeeTooHigh",
+      "msg": "Fee BPS exceeds maximum (1000 = 10%)"
+    },
+    {
+      "code": 6015,
+      "name": "MarketPaused",
+      "msg": "Market is paused"
+    },
+    {
+      "code": 6016,
+      "name": "ConfigFrozen",
+      "msg": "Config is frozen"
     }
   ],
   "types": [
     {
-      "name": "lvr_amm::state::admin::Admin",
+      "name": "Admin",
       "type": {
         "kind": "struct",
         "fields": [
@@ -569,7 +1725,103 @@
       }
     },
     {
-      "name": "lvr_amm::state::bet::Bet",
+      "name": "AdminStateInitialized",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "admin",
+            "type": "pubkey"
+          },
+          {
+            "name": "is_initialized",
+            "type": "bool"
+          }
+        ]
+      }
+    },
+    {
+      "name": "AmmConfig",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "treasury",
+            "type": "pubkey"
+          },
+          {
+            "name": "market_maker",
+            "type": "pubkey"
+          },
+          {
+            "name": "fee_bps",
+            "type": "u16"
+          },
+          {
+            "name": "config_frozen",
+            "type": "bool"
+          },
+          {
+            "name": "paused",
+            "type": "bool"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "AmmConfigFrozen",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "authority",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "AmmConfigInitialized",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "treasury",
+            "type": "pubkey"
+          },
+          {
+            "name": "fee_bps",
+            "type": "u16"
+          }
+        ]
+      }
+    },
+    {
+      "name": "AmmPausedChanged",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "paused",
+            "type": "bool"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Bet",
       "type": {
         "kind": "struct",
         "fields": [
@@ -627,42 +1879,6 @@
           {
             "name": "fee_bps",
             "type": "u16"
-          }
-        ]
-      }
-    },
-    {
-      "name": "lvr_amm::state::config::AmmConfig",
-      "type": {
-        "kind": "struct",
-        "fields": [
-          {
-            "name": "authority",
-            "type": "pubkey"
-          },
-          {
-            "name": "treasury",
-            "type": "pubkey"
-          },
-          {
-            "name": "market_maker",
-            "type": "pubkey"
-          },
-          {
-            "name": "fee_bps",
-            "type": "u16"
-          },
-          {
-            "name": "config_frozen",
-            "type": "bool"
-          },
-          {
-            "name": "paused",
-            "type": "bool"
-          },
-          {
-            "name": "bump",
-            "type": "u8"
           }
         ]
       }
