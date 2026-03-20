@@ -65,6 +65,29 @@ import {
 
 type JsonRecord = Record<string, unknown>;
 
+const BUN_BIN = resolveBunBinary();
+
+function resolveBunBinary(): string {
+  const candidates = [
+    process.env.BUN_BIN,
+    "/Users/mac/.bun/bin/bun",
+    "/opt/homebrew/bin/bun",
+    "/usr/local/bin/bun",
+    "bun",
+  ].filter((candidate): candidate is string => Boolean(candidate));
+
+  for (const candidate of candidates) {
+    if (candidate === "bun") {
+      return candidate;
+    }
+    if (fs_node.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+
+  return "bun";
+}
+
 type GoldClobMarketReadRecord = {
   exists: boolean;
   duelKey: `0x${string}`;
@@ -1827,7 +1850,7 @@ function startKeeperBotIfEnabled(): void {
     KEEPER_BOT_HEALTH_FILE,
   };
 
-  botSubprocess = Bun.spawn(["bun", "--bun", "src/bot.ts"], {
+  botSubprocess = Bun.spawn([BUN_BIN, "--bun", "src/bot.ts"], {
     cwd: keeperRoot,
     env: childEnv,
     stdout: "inherit",

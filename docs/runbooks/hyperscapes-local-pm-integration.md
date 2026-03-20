@@ -147,7 +147,7 @@ The script:
    `http://127.0.0.1:5555/api/streaming/state`
 4. starts the local Hyperbet EVM app pointed at the keeper service
 5. opens both local UIs by default:
-   - Hyperscapes stream UI: `http://127.0.0.1:3333/?page=stream`
+   - Hyperscapes stream UI: `http://127.0.0.1:3333/stream.html`
    - Hyperbet EVM UI: `http://127.0.0.1:4179/?debug`
 6. starts the PM soak follow monitor in the background, which records JSON
    state plus paired UI screenshots into:

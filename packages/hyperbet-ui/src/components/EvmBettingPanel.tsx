@@ -2,6 +2,7 @@ import {
   type CSSProperties,
   useCallback,
   useEffect,
+  useId,
   useMemo,
   useRef,
   useState,
@@ -344,6 +345,8 @@ export function EvmBettingPanel({
 }: EvmBettingPanelProps) {
   const resolvedLocale = resolveUiLocale(locale);
   const copy = getEvmPanelCopy(resolvedLocale);
+  const priceInputId = useId();
+  const priceHintId = useId();
   const { activeChain } = useChain();
   const { address } = useAccount();
   const { data: walletClient } = useWalletClient();
@@ -1012,8 +1015,6 @@ export function EvmBettingPanel({
       : 0n;
   const estimatedMaxPayout =
     estimatedAmountUnits > 0n ? estimatedAmountUnits - estimatedFee : 0n;
-  const totalPool =
-    (marketMeta?.totalAShares ?? 0n) + (marketMeta?.totalBShares ?? 0n);
   const selectedStake = side === "YES"
     ? (effectivePosition?.aStake ?? 0n)
     : (effectivePosition?.bStake ?? 0n);
@@ -1091,34 +1092,6 @@ export function EvmBettingPanel({
         currencySymbol={nativeSymbol}
         pointsDisplay={null}
         locale={resolvedLocale}
-        compactHeader={
-          compact ? (
-            <div
-              style={{
-                display: "grid",
-                gap: 10,
-                marginBottom: 2,
-              }}
-            >
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-                  gap: 8,
-                }}
-              >
-                <CompactMetricCard
-                  label={copy.totalPool}
-                  value={`${formatCompactTokenAmount(totalPool, nativeDecimals)} ${nativeSymbol}`}
-                />
-                <CompactMetricCard
-                  label={copy.balance}
-                  value={`${formatCompactTokenAmount(nativeBalance, nativeDecimals)} ${nativeSymbol}`}
-                />
-              </div>
-            </div>
-          ) : null
-        }
         compact={compact}
       >
         <div
@@ -1129,13 +1102,19 @@ export function EvmBettingPanel({
             color: "var(--hm-text, #d4d4d8)",
             fontFamily: "var(--hm-font-body)",
             fontSize: 12,
+            width: "100%",
+            minWidth: 0,
+            overflowX: "hidden",
+            boxSizing: "border-box",
           }}
         >
           <div
+            className="gm-metric-grid"
             style={{
               display: "grid",
-              gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
               gap: compact ? 6 : 8,
+              width: "100%",
+              minWidth: 0,
             }}
           >
             <CompactMetricCard
@@ -1164,11 +1143,14 @@ export function EvmBettingPanel({
             }}
           >
             <div
+              className="gm-pricing-head"
               style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
+                display: "grid",
+                gridTemplateColumns: compact ? "1fr" : "minmax(0, 1fr) auto",
+                alignItems: "start",
                 gap: compact ? 8 : 12,
+                width: "100%",
+                minWidth: 0,
               }}
             >
               <div
@@ -1205,17 +1187,23 @@ export function EvmBettingPanel({
                 </span>
               </div>
               <div
+                className="gm-pricing-head-actions"
                 style={{
                   display: "grid",
-                  justifyItems: "end",
+                  justifyItems: compact ? "stretch" : "end",
                   gap: compact ? 3 : 5,
-                  maxWidth: compact ? 118 : "none",
-                  flexShrink: 0,
+                  maxWidth: compact ? "100%" : "none",
+                  minWidth: 0,
+                  width: "100%",
                 }}
               >
                 <button
                   type="button"
                   onClick={() => setShowAdvancedPricing((value) => !value)}
+                  aria-expanded={showAdvancedPricing}
+                  aria-controls={priceHintId}
+                  aria-label={showAdvancedPricing ? copy.hideAdvancedPricing : copy.showAdvancedPricing}
+                  className="gm-pricing-toggle"
                   style={{
                     padding: compact ? "6px 9px" : "7px 10px",
                     borderRadius: 999,
@@ -1243,19 +1231,29 @@ export function EvmBettingPanel({
             {showAdvancedPricing ? (
               <>
                 <div
+                  className="gm-price-row"
                   style={{
                     display: "flex",
                     alignItems: "center",
                     gap: compact ? 8 : 10,
+                    flexWrap: "wrap",
                   }}
                 >
                   <input
                     data-testid={isE2eMode ? "evm-price-input" : undefined}
+                    id={priceInputId}
                     value={priceInput}
-                    onChange={(event) => setPriceInput(event.target.value)}
+                    onChange={(event) => setPriceInput(event.target.value.replace(/[^\d]/g, ""))}
                     inputMode="numeric"
+                    pattern="[0-9]*"
+                    aria-label={copy.limitPrice}
+                    aria-describedby={priceHintId}
+                    autoComplete="off"
+                    type="text"
                     style={{
                       ...inputStyle,
+                      flex: "1 1 0",
+                      minWidth: 0,
                       width: "100%",
                       marginLeft: 0,
                       padding: compact ? "9px 11px" : "10px 12px",
@@ -1278,6 +1276,9 @@ export function EvmBettingPanel({
                       alignSelf: "stretch",
                       display: "inline-flex",
                       alignItems: "center",
+                      justifyContent: "center",
+                      minWidth: compact ? 52 : 60,
+                      flex: "0 0 auto",
                     }}
                   >
                     {nativeSymbol}
@@ -1285,6 +1286,7 @@ export function EvmBettingPanel({
                 </div>
 
                 <div
+                  id={priceHintId}
                   style={{
                     fontSize: compact ? 9 : 10,
                     color:
@@ -1327,6 +1329,9 @@ export function EvmBettingPanel({
                 "var(--hm-panel-card-bg, linear-gradient(180deg, rgba(255,255,255,0.03) 0%, rgba(255,255,255,0.015) 100%))",
               boxShadow:
                 "inset 0 1px 0 var(--hm-panel-card-highlight, rgba(255,255,255,0.08)), 0 10px 22px var(--hm-panel-card-shadow, rgba(0,0,0,0.14))",
+              width: "100%",
+              minWidth: 0,
+              boxSizing: "border-box",
             }}
           >
             <CompactStatRow
@@ -1347,6 +1352,8 @@ export function EvmBettingPanel({
                 fontSize: 10,
                 color:
                   "var(--hm-panel-subtle-text, rgba(255,255,255,0.46))",
+                minWidth: 0,
+                overflowWrap: "anywhere",
               }}
             >
               {copy.positionHint}
@@ -1375,15 +1382,31 @@ export function EvmBettingPanel({
               fontSize: 11,
               color: "var(--hm-panel-subtle-text, rgba(255,255,255,0.48))",
               lineHeight: 1.45,
+              minWidth: 0,
+              overflowWrap: "anywhere",
+              width: "100%",
+              boxSizing: "border-box",
             }}
           >
             {claimHelpText}
           </div>
           {isE2eMode ? (
-            <div data-testid="evm-wallet-debug">{e2eWalletDebug}</div>
+            <pre
+              data-testid="evm-wallet-debug"
+              className="gm-debug-block"
+              style={debugPreStyle()}
+            >
+              {e2eWalletDebug}
+            </pre>
           ) : null}
           {isE2eMode ? (
-            <div data-testid="evm-lifecycle-debug">{e2eLifecycleDebug}</div>
+            <pre
+              data-testid="evm-lifecycle-debug"
+              className="gm-debug-block"
+              style={debugPreStyle()}
+            >
+              {e2eLifecycleDebug}
+            </pre>
           ) : null}
         </div>
       </PredictionMarketPanel>
@@ -1393,64 +1416,79 @@ export function EvmBettingPanel({
             marginTop: 12,
             display: "grid",
             gap: 4,
+            minWidth: 0,
           }}
         >
-          <div data-testid="evm-last-order-tx">{lastOrderTx}</div>
-          <div data-testid="evm-last-claim-tx">{lastClaimTx}</div>
+          <pre
+            data-testid="evm-last-order-tx"
+            className="gm-debug-block"
+            style={debugPreStyle()}
+          >
+            {lastOrderTx}
+          </pre>
+          <pre
+            data-testid="evm-last-claim-tx"
+            className="gm-debug-block"
+            style={debugPreStyle()}
+          >
+            {lastClaimTx}
+          </pre>
         </div>
       ) : null}
-    </div>
-  );
-}
-
-function CompactMetricCard({
-  label,
-  value,
-  tone = "var(--hm-text, #f4f4f5)",
-}: {
-  label: string;
-  value: string;
-  tone?: string;
-}) {
-  return (
-    <div
-      style={{
-        display: "grid",
-        gap: 4,
-        padding: "8px 10px",
-        borderRadius: 12,
-        border:
-          "1px solid var(--hm-panel-card-border, rgba(255,255,255,0.08))",
-        background:
-          "var(--hm-panel-card-bg, linear-gradient(180deg, rgba(255,255,255,0.04) 0%, rgba(255,255,255,0.015) 100%))",
-        boxShadow:
-          "inset 0 1px 0 var(--hm-panel-card-highlight, rgba(255,255,255,0.08))",
-      }}
-    >
-      <span
-        style={{
-          fontSize: 9,
-          fontWeight: 800,
-          letterSpacing: 0.85,
-          textTransform: "uppercase",
-          color: "var(--hm-panel-subtle-text, rgba(255,255,255,0.46))",
-          fontFamily: "var(--hm-font-display)",
-        }}
-      >
-        {label}
-      </span>
-      <span
-        style={{
-          fontSize: 12,
-          fontWeight: 800,
-          color: tone,
-          fontFamily: "var(--hm-font-mono)",
-          fontVariantNumeric: "tabular-nums",
-          lineHeight: 1.3,
-        }}
-      >
-        {value}
-      </span>
+      <style>{`
+        .gm-metric-grid {
+          grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        }
+        .gm-debug-block {
+          display: block;
+          width: 100%;
+          min-width: 0;
+          max-width: 100%;
+          overflow-wrap: anywhere;
+          word-break: break-word;
+          overflow-x: hidden;
+          box-sizing: border-box;
+        }
+        .gm-btn:focus-visible,
+        .gm-btn-sm:focus-visible,
+        .gm-tab-btn:focus-visible,
+        .gm-btn-submit:focus-visible,
+        .gm-pricing-toggle:focus-visible,
+        .gm-amount-input:focus-visible {
+          outline: 2px solid var(--hm-accent-gold, #e5b84a);
+          outline-offset: 2px;
+          box-shadow: 0 0 0 2px rgba(229,184,74,0.18) !important;
+        }
+        .gm-price-row {
+          min-width: 0;
+        }
+        .gm-pricing-head-actions {
+          width: 100%;
+        }
+        @media (max-width: 720px) {
+          .gm-metric-grid {
+            grid-template-columns: 1fr;
+          }
+        }
+        @media (max-width: 520px) {
+          .gm-pricing-head {
+            grid-template-columns: 1fr;
+          }
+          .gm-pricing-head-actions {
+            justify-items: stretch;
+            max-width: 100% !important;
+          }
+          .gm-price-row {
+            align-items: stretch !important;
+          }
+          .gm-price-row > * {
+            width: 100%;
+          }
+          .gm-pricing-toggle {
+            width: 100%;
+          }
+        }
+      `}</style>
     </div>
   );
 }
@@ -1498,12 +1536,78 @@ function CompactStatRow({
   );
 }
 
+function CompactMetricCard({
+  label,
+  value,
+  tone = "var(--hm-text, #f4f4f5)",
+}: {
+  label: string;
+  value: string;
+  tone?: string;
+}) {
+  return (
+    <div
+      style={{
+        display: "grid",
+        gap: 4,
+        padding: "8px 10px",
+        borderRadius: 12,
+        border:
+          "1px solid var(--hm-panel-card-border, rgba(255,255,255,0.08))",
+        background:
+          "var(--hm-panel-card-bg, linear-gradient(180deg, rgba(255,255,255,0.04) 0%, rgba(255,255,255,0.015) 100%))",
+        boxShadow:
+          "inset 0 1px 0 var(--hm-panel-card-highlight, rgba(255,255,255,0.08))",
+        width: "100%",
+        minWidth: 0,
+        boxSizing: "border-box",
+      }}
+    >
+      <span
+        style={{
+          fontSize: 9,
+          fontWeight: 800,
+          letterSpacing: 0.85,
+          textTransform: "uppercase",
+          color: "var(--hm-panel-subtle-text, rgba(255,255,255,0.46))",
+          fontFamily: "var(--hm-font-display)",
+          minWidth: 0,
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          whiteSpace: "nowrap",
+        }}
+      >
+        {label}
+      </span>
+      <span
+        style={{
+          fontSize: 12,
+          fontWeight: 800,
+          color: tone,
+          fontFamily: "var(--hm-font-mono)",
+          fontVariantNumeric: "tabular-nums",
+          lineHeight: 1.3,
+          minWidth: 0,
+          overflowWrap: "anywhere",
+        }}
+      >
+        {value}
+      </span>
+    </div>
+  );
+}
+
 function buttonStyle(
   background: string,
   border: string,
   disabled = false,
 ): CSSProperties {
   return {
+    width: "100%",
+    minWidth: 0,
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
     padding: "9px 11px",
     borderRadius: 10,
     border: `1px solid ${border}`,
@@ -1518,6 +1622,36 @@ function buttonStyle(
     fontFamily: "var(--hm-font-display)",
     cursor: disabled ? "not-allowed" : "pointer",
     opacity: disabled ? 0.65 : 1,
+    lineHeight: 1.35,
+    whiteSpace: "normal",
+    overflowWrap: "anywhere",
+    textAlign: "center",
+  };
+}
+
+function debugPreStyle(): CSSProperties {
+  return {
+    display: "block",
+    width: "100%",
+    minWidth: 0,
+    maxWidth: "100%",
+    margin: 0,
+    padding: 10,
+    borderRadius: 10,
+    border: "1px solid rgba(255,255,255,0.08)",
+    background:
+      "linear-gradient(180deg, rgba(255,255,255,0.04) 0%, rgba(255,255,255,0.015) 100%)",
+    color: "var(--hm-panel-muted-text, rgba(255,255,255,0.78))",
+    whiteSpace: "pre-wrap",
+    overflowWrap: "anywhere",
+    wordBreak: "break-word",
+    fontSize: 9,
+    fontFamily: "var(--hm-font-mono)",
+    lineHeight: 1.45,
+    maxHeight: 160,
+    overflowY: "auto",
+    overflowX: "hidden",
+    boxSizing: "border-box",
   };
 }
 

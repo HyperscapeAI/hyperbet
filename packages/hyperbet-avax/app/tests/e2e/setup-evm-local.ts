@@ -139,6 +139,7 @@ async function main(): Promise<void> {
   const adminPrivateKey =
     process.env.E2E_EVM_ADMIN_PRIVATE_KEY || DEFAULT_ADMIN_PRIVATE_KEY;
   const makerPrivateKey = process.env.E2E_EVM_MAKER_PRIVATE_KEY || "";
+  const reuseDeployment = process.env.E2E_EVM_REUSE_DEPLOYMENT === "true";
   const seedNoOrderPrice = Number(
     process.env.E2E_EVM_SEED_NO_ORDER_PRICE || 600,
   );
@@ -219,81 +220,97 @@ async function main(): Promise<void> {
   const existingState = (await readJson<E2eState>(statePath)) || {};
   const latestBlock = await publicClient.getBlock({ blockTag: "latest" });
   const duelKey = ensureHex32(
-    existingState.currentDuelKeyHex ||
+    process.env.E2E_EVM_DUEL_KEY ||
+      existingState.currentDuelKeyHex ||
       keccak256(stringToHex("hyperbet-e2e-evm:local")),
     "currentDuelKeyHex",
   );
   const duelBetOpenTs = latestBlock.timestamp - 15n;
   const duelBetCloseTs = duelBetOpenTs + 300n;
   const duelStartTs = duelBetCloseTs + 60n;
+  let tokenDeployTx = "";
+  let oracleDeployTx = "";
+  let clobDeployTx = "";
+  let mintTx = "";
+  let goldTokenAddress = existingState.evmGoldTokenAddress as Address | undefined;
+  let oracleAddress = existingState.evmOracleAddress as Address | undefined;
+  let goldClobAddress = existingState.evmGoldClobAddress as Address | undefined;
 
-  const tokenDeployTx = await walletClient.deployContract({
-    abi: mockErc20Artifact.abi,
-    bytecode: resolveArtifactBytecode(mockErc20Artifact as EvmArtifact),
-    args: ["Mock Gold", "GOLD"],
-    nonce: consumeNonce(),
-  });
-  const tokenDeployReceipt = await publicClient.waitForTransactionReceipt({
-    hash: tokenDeployTx,
-  });
-  const goldTokenAddress = tokenDeployReceipt.contractAddress;
-  if (!goldTokenAddress) {
-    throw new Error("Token deployment did not return contract address");
+  if (!reuseDeployment) {
+    tokenDeployTx = await walletClient.deployContract({
+      abi: mockErc20Artifact.abi,
+      bytecode: resolveArtifactBytecode(mockErc20Artifact as EvmArtifact),
+      args: ["Mock Gold", "GOLD"],
+      nonce: consumeNonce(),
+    });
+    const tokenDeployReceipt = await publicClient.waitForTransactionReceipt({
+      hash: tokenDeployTx as `0x${string}`,
+    });
+    goldTokenAddress = tokenDeployReceipt.contractAddress ?? undefined;
+    if (!goldTokenAddress) {
+      throw new Error("Token deployment did not return contract address");
+    }
+
+    oracleDeployTx = await walletClient.deployContract({
+      abi: duelOutcomeOracleArtifact.abi,
+      bytecode: resolveArtifactBytecode(
+        duelOutcomeOracleArtifact as EvmArtifact,
+      ),
+      args: [
+        adminAccount.address,
+        adminAccount.address,
+        finalizerAccount.address,
+        challengerAccount.address,
+        adminAccount.address,
+        DUEL_ORACLE_DISPUTE_WINDOW_SECONDS,
+      ],
+      nonce: consumeNonce(),
+    });
+    const oracleDeployReceipt = await publicClient.waitForTransactionReceipt({
+      hash: oracleDeployTx as `0x${string}`,
+    });
+    oracleAddress = oracleDeployReceipt.contractAddress ?? undefined;
+    if (!oracleAddress) {
+      throw new Error("Duel oracle deployment did not return contract address");
+    }
+
+    clobDeployTx = await walletClient.deployContract({
+      abi: goldClobArtifact.abi,
+      bytecode: resolveArtifactBytecode(goldClobArtifact as EvmArtifact),
+      args: [
+        adminAccount.address,
+        adminAccount.address,
+        oracleAddress,
+        adminAccount.address,
+        adminAccount.address,
+        adminAccount.address,
+      ],
+      nonce: consumeNonce(),
+    });
+    const clobDeployReceipt = await publicClient.waitForTransactionReceipt({
+      hash: clobDeployTx as `0x${string}`,
+    });
+    goldClobAddress = clobDeployReceipt.contractAddress ?? undefined;
+    if (!goldClobAddress) {
+      throw new Error("GoldClob deployment did not return contract address");
+    }
+
+    mintTx = await walletClient.writeContract({
+      address: goldTokenAddress as Address,
+      abi: mockErc20Artifact.abi,
+      functionName: "mint",
+      args: [adminAccount.address, parseUnits("100000", 18)],
+      account: adminAccount,
+      nonce: consumeNonce(),
+    });
+    await publicClient.waitForTransactionReceipt({ hash: mintTx as `0x${string}` });
+  } else {
+    if (!goldTokenAddress || !oracleAddress || !goldClobAddress) {
+      throw new Error(
+        "Reuse deployment requested but cached EVM contract addresses are missing",
+      );
+    }
   }
-
-  const oracleDeployTx = await walletClient.deployContract({
-    abi: duelOutcomeOracleArtifact.abi,
-    bytecode: resolveArtifactBytecode(
-      duelOutcomeOracleArtifact as EvmArtifact,
-    ),
-    args: [
-      adminAccount.address,
-      adminAccount.address,
-      finalizerAccount.address,
-      challengerAccount.address,
-      adminAccount.address,
-      DUEL_ORACLE_DISPUTE_WINDOW_SECONDS,
-    ],
-    nonce: consumeNonce(),
-  });
-  const oracleDeployReceipt = await publicClient.waitForTransactionReceipt({
-    hash: oracleDeployTx,
-  });
-  const oracleAddress = oracleDeployReceipt.contractAddress;
-  if (!oracleAddress) {
-    throw new Error("Duel oracle deployment did not return contract address");
-  }
-
-  const clobDeployTx = await walletClient.deployContract({
-    abi: goldClobArtifact.abi,
-    bytecode: resolveArtifactBytecode(goldClobArtifact as EvmArtifact),
-    args: [
-      adminAccount.address,
-      adminAccount.address,
-      oracleAddress,
-      adminAccount.address,
-      adminAccount.address,
-      adminAccount.address,
-    ],
-    nonce: consumeNonce(),
-  });
-  const clobDeployReceipt = await publicClient.waitForTransactionReceipt({
-    hash: clobDeployTx,
-  });
-  const goldClobAddress = clobDeployReceipt.contractAddress;
-  if (!goldClobAddress) {
-    throw new Error("GoldClob deployment did not return contract address");
-  }
-
-  const mintTx = await walletClient.writeContract({
-    address: goldTokenAddress as Address,
-    abi: mockErc20Artifact.abi,
-    functionName: "mint",
-    args: [adminAccount.address, parseUnits("100000", 18)],
-    account: adminAccount,
-    nonce: consumeNonce(),
-  });
-  await publicClient.waitForTransactionReceipt({ hash: mintTx });
 
   const upsertDuelTx = await walletClient.writeContract({
     address: oracleAddress as Address,
@@ -395,6 +412,7 @@ async function main(): Promise<void> {
 
   const state: E2eState = {
     ...existingState,
+    currentDuelKeyHex: duelKey.replace(/^0x/i, ""),
     evmRpcUrl: rpcUrl,
     evmChainId: chainId,
     evmHeadlessAddress: adminAccount.address,

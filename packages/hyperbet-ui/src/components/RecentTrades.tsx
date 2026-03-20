@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useId, useState } from "react";
 import {
   formatLocaleAmount,
   formatTimeAgoLabel,
@@ -37,6 +37,7 @@ export function RecentTrades({
 }: RecentTradesProps) {
   const resolvedLocale = resolveUiLocale(locale);
   const copy = getUiCopy(resolvedLocale);
+  const tradesRegionId = useId();
   // We'll use a tick to keep "time ago" fresh
   const [, setTick] = useState(0);
   useEffect(() => {
@@ -56,6 +57,7 @@ export function RecentTrades({
         }
       `}</style>
       <div
+        id={`${tradesRegionId}-heading`}
         style={{
           display: "flex",
           justifyContent: "space-between",
@@ -65,12 +67,14 @@ export function RecentTrades({
         }}
       >
         <div
+          role="heading"
+          aria-level={3}
           style={{
-            fontSize: 14,
+            fontSize: 13,
             fontWeight: 800,
             textTransform: "uppercase",
             letterSpacing: 2,
-            color: "var(--hm-text-dim, rgba(255,255,255,0.4))",
+            color: "var(--hm-text-dim, rgba(255,255,255,0.55))",
             fontFamily: "var(--hm-font-display)",
           }}
         >
@@ -81,11 +85,12 @@ export function RecentTrades({
 
       {/* Header */}
       <div
+        role="presentation"
         style={{
           display: "flex",
           fontSize: 9,
           fontWeight: 900,
-          color: "var(--hm-text-muted, rgba(255,255,255,0.35))",
+          color: "var(--hm-text-muted, rgba(255,255,255,0.55))",
           padding: "2px 4px",
           textTransform: "uppercase",
           letterSpacing: 1.5,
@@ -99,21 +104,30 @@ export function RecentTrades({
 
       {/* Trade List — 7 visible rows, scrollable overflow */}
       <div
+        role="list"
+        aria-label={`${copy.recentTrades} ${assetSymbol}`}
+        aria-labelledby={`${tradesRegionId}-heading`}
+        tabIndex={0}
         style={{
           display: "flex",
           flexDirection: "column",
           gap: 1,
-          height: 164,
-          maxHeight: 164,
+          height: "clamp(132px, 24vh, 220px)",
+          maxHeight: "clamp(132px, 24vh, 220px)",
+          minHeight: 0,
           overflowY: "auto",
+          scrollbarGutter: "stable",
+          paddingRight: 2,
         }}
       >
         {trades.length === 0 ? (
           <div
+            role="status"
+            aria-live="polite"
             style={{
               textAlign: "center",
               padding: "16px 0",
-              color: "var(--hm-text-muted, rgba(255,255,255,0.2))",
+              color: "var(--hm-text-muted, rgba(255,255,255,0.25))",
               fontSize: 12,
               flex: 1,
               display: "flex",
@@ -130,17 +144,20 @@ export function RecentTrades({
             return (
               <div
                 key={trade.id}
+                role="listitem"
+                aria-label={`${trade.side} trade ${formatLocaleAmount(trade.amount, resolvedLocale)} ${assetSymbol} at ${formatTimeAgoLabel(trade.time, resolvedLocale)}`}
                 className={isNew ? "trade-row-new" : ""}
                 style={{
                   display: "flex",
                   fontSize: 11,
-                  padding: "3px 6px",
+                  padding: "4px 6px",
                   borderRadius: 4,
                   borderBottom:
                     i < trades.length - 1
                       ? "1px solid var(--hm-border-subtle, rgba(255,255,255,0.03))"
                       : "none",
                   transition: "background 0.3s",
+                  lineHeight: 1.2,
                 }}
               >
                 <div
@@ -184,7 +201,7 @@ export function RecentTrades({
                   style={{
                     flex: 1,
                     textAlign: "right",
-                    color: "var(--hm-text-muted, rgba(255,255,255,0.35))",
+                    color: "var(--hm-text-muted, rgba(255,255,255,0.55))",
                     fontSize: 11,
                   }}
                 >

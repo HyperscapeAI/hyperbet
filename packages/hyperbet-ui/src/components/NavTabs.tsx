@@ -16,7 +16,7 @@ interface NavTabsProps {
 export function NavTabs({ tabs, activeTab, onChange, variant = "header" }: NavTabsProps) {
   return (
     <nav
-      className={`hm-nav-tabs hm-nav-tabs--${variant}`}
+      className={`hm-nav-tabs hm-nav-tabs--${variant} hm-view-tabs hm-view-tabs--${variant}`}
       aria-label="Navigation"
     >
       {tabs.map((tab) => {
@@ -26,7 +26,7 @@ export function NavTabs({ tabs, activeTab, onChange, variant = "header" }: NavTa
             key={tab.id}
             type="button"
             data-testid={tab.testId}
-            className={`hm-nav-tab${isActive ? " hm-nav-tab--active" : ""}`}
+            className={`hm-nav-tab hm-view-tab${isActive ? " hm-nav-tab--active hm-view-tab--active" : ""}`}
             aria-current={isActive ? "page" : undefined}
             onClick={() => startTransition(() => onChange(tab.id))}
           >

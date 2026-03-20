@@ -28,6 +28,7 @@ import { GOLD_CLOB_ABI } from "../packages/hyperbet-ui/src/lib/goldClobAbi";
 import { resolveArtifactRoot, rootDir, writeJsonArtifact } from "./ci-lib";
 
 const execFileAsync = promisify(execFile);
+const BUN_BIN = process.env.BUN_BIN?.trim() || "bun";
 const { PublicKey, SystemProgram } = solanaWeb3;
 const { createPublicClient, createWalletClient, http } = viem;
 const { privateKeyToAccount } = viemAccounts;
@@ -571,8 +572,9 @@ function hasAnyQuote(health: KeeperMarketHealth | null | undefined): boolean {
 
 async function takeScreenshot(url: string, filePath: string): Promise<void> {
   await execFileAsync(
-    "bunx",
+    BUN_BIN,
     [
+      "x",
       "playwright",
       "screenshot",
       "--browser",

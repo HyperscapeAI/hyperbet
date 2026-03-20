@@ -457,7 +457,7 @@ if [[ "${E2E_SKIP_PREBUILD:-false}" != "true" ]]; then
   fi
 
   echo "[e2e] compiling evm contracts"
-  if ! forge build --root "$EVM_DIR" >"$EVM_BUILD_LOG" 2>&1; then
+  if ! bash "$EVM_DIR/scripts/run-foundry.sh" build --root "$EVM_DIR" >"$EVM_BUILD_LOG" 2>&1; then
     echo "[e2e] evm build failed"
     tail -n 200 "$EVM_BUILD_LOG" || true
     exit 1

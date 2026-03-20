@@ -11,8 +11,35 @@ if [[ -n "$COMMON_GIT_DIR" && -d "$COMMON_GIT_DIR" ]]; then
 else
   WORKSPACE_ROOT="$(cd "$ROOT/.." && pwd)"
 fi
-HYPERSCAPES_ROOT="${HYPERSCAPES_ROOT:-$(cd "$WORKSPACE_ROOT/.." && pwd)/hyperscapes-mono}"
+HYPERSCAPES_ROOT="${HYPERSCAPES_ROOT:-$ROOT/.worktrees/hyperscapes-stream-bet-sync}"
 PM_LOCAL_EVM_MODE="${PM_LOCAL_EVM_MODE:-anvil}"
+ANVIL_BIN="${ANVIL_BIN:-$(command -v anvil 2>/dev/null || true)}"
+if [[ -z "$ANVIL_BIN" && -x "/opt/homebrew/bin/anvil" ]]; then
+  ANVIL_BIN="/opt/homebrew/bin/anvil"
+fi
+if [[ -z "$ANVIL_BIN" ]]; then
+  echo "[pm-local] anvil binary not found; set ANVIL_BIN or install foundry" >&2
+  exit 1
+fi
+BUN_BIN="${BUN_BIN:-$(command -v bun 2>/dev/null || true)}"
+if [[ -z "$BUN_BIN" && -x "/Users/mac/.bun/bin/bun" ]]; then
+  BUN_BIN="/Users/mac/.bun/bin/bun"
+fi
+if [[ -z "$BUN_BIN" ]]; then
+  echo "[pm-local] bun binary not found; set BUN_BIN or install bun" >&2
+  exit 1
+fi
+NODE_BIN="${NODE_BIN:-$(command -v node 2>/dev/null || true)}"
+if [[ -z "$NODE_BIN" && -x "/usr/local/bin/node" ]]; then
+  NODE_BIN="/usr/local/bin/node"
+fi
+if [[ -z "$NODE_BIN" && -x "/opt/homebrew/bin/node" ]]; then
+  NODE_BIN="/opt/homebrew/bin/node"
+fi
+if [[ -z "$NODE_BIN" ]]; then
+  echo "[pm-local] node binary not found; set NODE_BIN or install node" >&2
+  exit 1
+fi
 
 if [[ ! -d "$HYPERSCAPES_ROOT" ]]; then
   echo "[pm-local] hyperscapes repo not found at $HYPERSCAPES_ROOT" >&2
@@ -86,8 +113,8 @@ HYPERSCAPES_DUEL_NODE_ENV="${HYPERSCAPES_DUEL_NODE_ENV:-development}"
 HYPERSCAPES_JWT_SECRET="${HYPERSCAPES_JWT_SECRET:-local-dev-secret}"
 KEEPER_URL="http://127.0.0.1:${KEEPER_PORT}"
 LOCAL_EVM_UI_KEY_FILE="${LOCAL_EVM_UI_KEY_FILE:-$ROOT/keys/local-smoke/evm-ui.privatekey}"
-STREAM_URL="${VITE_STREAM_URL:-${GAME_CLIENT_URL}/?page=stream}"
-HYPERSCAPES_UI_URL="${HYPERSCAPES_UI_URL:-${GAME_CLIENT_URL}/?page=stream}"
+STREAM_URL="${VITE_STREAM_URL:-${GAME_CLIENT_URL}/stream.html}"
+HYPERSCAPES_UI_URL="${HYPERSCAPES_UI_URL:-${GAME_CLIENT_URL}/stream.html}"
 HYPERBET_UI_URL="${HYPERBET_UI_URL:-http://127.0.0.1:${APP_PORT}/?debug}"
 OPEN_LOCAL_UI="${OPEN_LOCAL_UI:-true}"
 CAPTURE_LOCAL_UI_FLOW="${CAPTURE_LOCAL_UI_FLOW:-true}"
@@ -95,6 +122,7 @@ LOCAL_CORS_ORIGINS="${CORS_ORIGINS:-http://127.0.0.1:3333,http://localhost:3333,
 WRITER_KEYS_READY="false"
 KEEPER_BOT_DEFAULT="true"
 EVM_KEEPER_DEFER_FINALIZE="${EVM_KEEPER_DEFER_FINALIZE:-true}"
+LOCAL_STREAM_DUEL_KEY_HEX=""
 LOCAL_EVM_ADMIN_PRIVATE_KEY="${LOCAL_EVM_ADMIN_PRIVATE_KEY:-0xac0974bec39a17e36ba4d238ff944bacb478cbed5efcae784d7bf4f2ff80}"
 LOCAL_BSC_CHAIN_ID="${LOCAL_BSC_CHAIN_ID:-97}"
 LOCAL_AVAX_CHAIN_ID="${LOCAL_AVAX_CHAIN_ID:-43113}"
@@ -116,6 +144,7 @@ LOCAL_AVAX_ANVIL_PID=""
 KEEPER_PID=""
 APP_PID=""
 CAPTURE_PID=""
+EVM_SEED_FOLLOW_PID=""
 
 cleanup() {
   local exit_code=$?
@@ -149,6 +178,11 @@ cleanup() {
   if [[ -n "$LOCAL_BSC_ANVIL_PID" ]] && kill -0 "$LOCAL_BSC_ANVIL_PID" >/dev/null 2>&1; then
     kill "$LOCAL_BSC_ANVIL_PID" >/dev/null 2>&1 || true
     wait "$LOCAL_BSC_ANVIL_PID" >/dev/null 2>&1 || true
+  fi
+
+  if [[ -n "$EVM_SEED_FOLLOW_PID" ]] && kill -0 "$EVM_SEED_FOLLOW_PID" >/dev/null 2>&1; then
+    kill "$EVM_SEED_FOLLOW_PID" >/dev/null 2>&1 || true
+    wait "$EVM_SEED_FOLLOW_PID" >/dev/null 2>&1 || true
   fi
 
   exit "$exit_code"
@@ -209,7 +243,7 @@ wait_for_json_rpc() {
 
 json_path_from_stdin() {
   local path_expr="$1"
-  node -e '
+  "$NODE_BIN" -e '
     const fs = require("fs");
     const pathExpr = process.argv[1].split(".").filter(Boolean);
     const data = JSON.parse(fs.readFileSync(0, "utf8"));
@@ -232,7 +266,7 @@ json_path_from_stdin() {
 json_field() {
   local path="$1"
   local field="$2"
-  node -e 'const fs=require("fs"); const file=process.argv[1]; const key=process.argv[2]; const data=JSON.parse(fs.readFileSync(file,"utf8")); process.stdout.write(String(data[key] ?? ""));' "$path" "$field"
+  "$NODE_BIN" -e 'const fs=require("fs"); const file=process.argv[1]; const key=process.argv[2]; const data=JSON.parse(fs.readFileSync(file,"utf8")); process.stdout.write(String(data[key] ?? ""));' "$path" "$field"
 }
 
 seed_hyperscapes_agents() {
@@ -245,7 +279,7 @@ seed_hyperscapes_agents() {
 
   current_agents="$(
     curl -fsSL "$agents_url" 2>/dev/null \
-      | node -e '
+      | "$NODE_BIN" -e '
           const fs = require("fs");
           const data = JSON.parse(fs.readFileSync(0, "utf8"));
           const agents = Array.isArray(data.agents) ? data.agents : [];
@@ -273,6 +307,7 @@ seed_hyperscapes_agents() {
     phase="$(curl -fsSL "${GAME_HTTP_URL}/api/streaming/state" | json_path_from_stdin "cycle.phase")"
     duel_key="$(curl -fsSL "${GAME_HTTP_URL}/api/streaming/state" | json_path_from_stdin "cycle.duelKeyHex")"
     if [[ "$phase" != "IDLE" && -n "$duel_key" ]]; then
+      LOCAL_STREAM_DUEL_KEY_HEX="$duel_key"
       echo "[pm-local] Hyperscapes duel seeded: phase=${phase} duelKey=${duel_key}"
       return 0
     fi
@@ -296,7 +331,7 @@ start_local_evm_chain() {
 
   echo "[pm-local] starting local ${chain_key} anvil on ${rpc_url}"
   close_existing_anvil_listeners "$anvil_port"
-  anvil \
+  "$ANVIL_BIN" \
     --silent \
     --host 127.0.0.1 \
     --port "$anvil_port" \
@@ -311,12 +346,12 @@ start_local_evm_chain() {
   fi
 
   echo "[pm-local] building local EVM contracts for ${chain_key}"
-  bun run --cwd "$ROOT/packages/evm-contracts" build:foundry:e2e >"$LOCAL_EVM_BUILD_LOG" 2>&1
+  "$BUN_BIN" run --cwd "$ROOT/packages/evm-contracts" build:foundry:e2e >"$LOCAL_EVM_BUILD_LOG" 2>&1
 
   echo "[pm-local] seeding local ${chain_key} contracts"
   E2E_EVM_RPC_URL="$rpc_url" \
   E2E_EVM_CHAIN_ID="$chain_id" \
-    node --import tsx "$setup_script" >"$seed_log" 2>&1
+    "$NODE_BIN" --import tsx "$setup_script" >"$seed_log" 2>&1
 
   local chain_env_path=""
   case "$chain_key" in
@@ -378,6 +413,93 @@ start_local_evm_chain() {
   esac
 }
 
+seed_local_evm_chain() {
+  local chain_key="$1"
+  local chain_id="$2"
+  local setup_script="$3"
+  local state_path="$4"
+  local duel_key="$5"
+  local rpc_url="$6"
+  local seed_log="/tmp/hyperbet-pm-local-${chain_key}-reseed.log"
+
+  echo "[pm-local] re-seeding local ${chain_key} contracts for duel ${duel_key}"
+  E2E_EVM_RPC_URL="$rpc_url" \
+  E2E_EVM_CHAIN_ID="$chain_id" \
+  E2E_EVM_DUEL_KEY="$duel_key" \
+  E2E_EVM_REUSE_DEPLOYMENT="true" \
+    "$NODE_BIN" --import tsx "$setup_script" >"$seed_log" 2>&1
+
+  local chain_env_path=""
+  case "$chain_key" in
+    bsc) chain_env_path="$LOCAL_BSC_ENV_PATH" ;;
+    avax) chain_env_path="$LOCAL_AVAX_ENV_PATH" ;;
+  esac
+
+  if [[ -f "$chain_env_path" ]]; then
+    echo "[pm-local] sourcing ${chain_key} reseed env from ${chain_env_path}"
+    source_env_file_preserving_invocation_env "$chain_env_path"
+  fi
+
+  local oracle_address
+  local clob_address
+  local token_address
+  oracle_address="$(json_field "$state_path" evmOracleAddress)"
+  clob_address="$(json_field "$state_path" evmGoldClobAddress)"
+  token_address="$(json_field "$state_path" evmGoldTokenAddress)"
+
+  if [[ -z "$oracle_address" || -z "$clob_address" || -z "$token_address" ]]; then
+    echo "[pm-local] failed to read reseeded ${chain_key} contract addresses" >&2
+    tail -n 120 "$seed_log" || true
+    return 1
+  fi
+
+  case "$chain_key" in
+    bsc)
+      export BSC_RPC_URL="$rpc_url"
+      export BSC_DUEL_ORACLE_ADDRESS="$oracle_address"
+      export BSC_GOLD_CLOB_ADDRESS="$clob_address"
+      export VITE_BSC_RPC_URL="$rpc_url"
+      export VITE_BSC_CHAIN_ID="$chain_id"
+      export VITE_BSC_GOLD_CLOB_ADDRESS="$clob_address"
+      export VITE_BSC_GOLD_TOKEN_ADDRESS="$token_address"
+      ;;
+    avax)
+      export AVAX_RPC_URL="$rpc_url"
+      export AVAX_DUEL_ORACLE_ADDRESS="$oracle_address"
+      export AVAX_GOLD_CLOB_ADDRESS="$clob_address"
+      export VITE_AVAX_RPC_URL="$rpc_url"
+      export VITE_AVAX_CHAIN_ID="$chain_id"
+      export VITE_AVAX_GOLD_CLOB_ADDRESS="$clob_address"
+      export VITE_AVAX_GOLD_TOKEN_ADDRESS="$token_address"
+      ;;
+    *)
+      echo "[pm-local] unsupported local EVM chain for reseed: $chain_key" >&2
+      return 1
+      ;;
+  esac
+
+  echo "[pm-local] reseeded ${chain_key} contracts:"
+  echo "[pm-local]   oracle=${oracle_address}"
+  echo "[pm-local]   clob=${clob_address}"
+  echo "[pm-local]   token=${token_address}"
+}
+
+follow_live_evm_duel_seed() {
+  local last_duel_key="$1"
+
+  while true; do
+    local current_duel_key=""
+    current_duel_key="$(curl -fsSL "${GAME_HTTP_URL}/api/streaming/state" | json_path_from_stdin "cycle.duelKeyHex")"
+    if [[ -n "$current_duel_key" && "$current_duel_key" != "$last_duel_key" ]]; then
+      seed_local_evm_chain "bsc" "$LOCAL_BSC_CHAIN_ID" "$LOCAL_BSC_SETUP_SCRIPT" "$LOCAL_BSC_STATE_PATH" "$current_duel_key" "$LOCAL_BSC_RPC_URL" || return 1
+      seed_local_evm_chain "avax" "$LOCAL_AVAX_CHAIN_ID" "$LOCAL_AVAX_SETUP_SCRIPT" "$LOCAL_AVAX_STATE_PATH" "$current_duel_key" "$LOCAL_AVAX_RPC_URL" || return 1
+      last_duel_key="$current_duel_key"
+      echo "[pm-local] local EVM markets re-anchored to duel ${current_duel_key}"
+    fi
+    sleep 5
+  done
+}
+
 warn_missing_writer_keys() {
   local reporter="${EVM_REPORTER_PRIVATE_KEY:-${TESTNET_REPORTER_PRIVATE_KEY:-${EVM_KEEPER_PRIVATE_KEY:-${PRIVATE_KEY:-}}}}"
   local operator="${EVM_MARKET_OPERATOR_PRIVATE_KEY:-${TESTNET_MARKET_OPERATOR_PRIVATE_KEY:-${EVM_KEEPER_PRIVATE_KEY:-${PRIVATE_KEY:-}}}}"
@@ -407,9 +529,6 @@ if [[ "$PM_LOCAL_EVM_MODE" == "anvil" ]]; then
   export TESTNET_REPORTER_PRIVATE_KEY="$LOCAL_EVM_ADMIN_PRIVATE_KEY"
   export TESTNET_MARKET_OPERATOR_PRIVATE_KEY="$LOCAL_EVM_ADMIN_PRIVATE_KEY"
   export TESTNET_FINALIZER_PRIVATE_KEY="$LOCAL_EVM_ADMIN_PRIVATE_KEY"
-
-  start_local_evm_chain "bsc" "$LOCAL_BSC_CHAIN_ID" "$LOCAL_BSC_ANVIL_PORT" "$LOCAL_BSC_SETUP_SCRIPT" "$LOCAL_BSC_STATE_PATH"
-  start_local_evm_chain "avax" "$LOCAL_AVAX_CHAIN_ID" "$LOCAL_AVAX_ANVIL_PORT" "$LOCAL_AVAX_SETUP_SCRIPT" "$LOCAL_AVAX_STATE_PATH"
 fi
 
 if [[ "$PM_LOCAL_EVM_MODE" != "anvil" ]] && ! env_name_was_preset "EVM_KEEPER_PRIVATE_KEY"; then
@@ -422,6 +541,18 @@ if [[ -f "$LOCAL_EVM_UI_KEY_FILE" && -z "${VITE_HEADLESS_EVM_PRIVATE_KEY:-}" ]];
 fi
 
 warn_missing_writer_keys
+LOCAL_PM_SOLANA_KEEPER_KEYPAIR="${LOCAL_PM_SOLANA_KEEPER_KEYPAIR:-$ROOT/keys/local-pm/solana-keeper.json}"
+if [[ -z "${BOT_KEYPAIR:-}" && -z "${ORACLE_AUTHORITY_KEYPAIR:-}" && -z "${MARKET_MAKER_KEYPAIR:-}" ]]; then
+  if [[ -f "$LOCAL_PM_SOLANA_KEEPER_KEYPAIR" ]]; then
+    export BOT_KEYPAIR="$LOCAL_PM_SOLANA_KEEPER_KEYPAIR"
+    export ORACLE_AUTHORITY_KEYPAIR="$LOCAL_PM_SOLANA_KEEPER_KEYPAIR"
+    export MARKET_MAKER_KEYPAIR="$LOCAL_PM_SOLANA_KEEPER_KEYPAIR"
+    echo "[pm-local] using local PM Solana keeper keypair: $LOCAL_PM_SOLANA_KEEPER_KEYPAIR"
+  else
+    KEEPER_BOT_DEFAULT="false"
+    echo "[pm-local] local PM Solana keeper keypair not found at $LOCAL_PM_SOLANA_KEEPER_KEYPAIR; disabling keeper bot for this run"
+  fi
+fi
 ENABLE_KEEPER_BOT="${ENABLE_KEEPER_BOT:-$KEEPER_BOT_DEFAULT}"
 
 open_url() {
@@ -452,26 +583,43 @@ echo "[pm-local] starting Hyperscapes duel stack from $HYPERSCAPES_ROOT"
     PORT="$GAME_PORT" \
     DUEL_NODE_ENV="$HYPERSCAPES_DUEL_NODE_ENV" \
     JWT_SECRET="$HYPERSCAPES_JWT_SECRET" \
-    bun "${duel_args[@]}"
+    "$BUN_BIN" "${duel_args[@]}"
 ) &
 DUEL_PID=$!
 
 wait_for_http "${GAME_HTTP_URL}/api/streaming/state" "Hyperscapes streaming state"
 seed_hyperscapes_agents
 
+if [[ "$PM_LOCAL_EVM_MODE" == "anvil" ]]; then
+  if [[ -z "$LOCAL_STREAM_DUEL_KEY_HEX" ]]; then
+    echo "[pm-local] failed to capture live duel key before seeding EVM chains" >&2
+    exit 1
+  fi
+
+  export E2E_EVM_DUEL_KEY="$LOCAL_STREAM_DUEL_KEY_HEX"
+  export E2E_EVM_DUEL_ID="${E2E_EVM_DUEL_ID:-1}"
+
+  start_local_evm_chain "bsc" "$LOCAL_BSC_CHAIN_ID" "$LOCAL_BSC_ANVIL_PORT" "$LOCAL_BSC_SETUP_SCRIPT" "$LOCAL_BSC_STATE_PATH"
+  start_local_evm_chain "avax" "$LOCAL_AVAX_CHAIN_ID" "$LOCAL_AVAX_ANVIL_PORT" "$LOCAL_AVAX_SETUP_SCRIPT" "$LOCAL_AVAX_STATE_PATH"
+
+  follow_live_evm_duel_seed "$LOCAL_STREAM_DUEL_KEY_HEX" &
+  EVM_SEED_FOLLOW_PID=$!
+fi
+
 echo "[pm-local] starting Hyperbet EVM keeper service on :$KEEPER_PORT"
 (
   cd "$ROOT"
-  keeper_env=(
-    STREAM_STATE_SOURCE_URL="${GAME_HTTP_URL}/api/streaming/state"
-    PORT="$KEEPER_PORT"
-    GAME_URL="$KEEPER_URL"
-    CORS_ORIGINS="$LOCAL_CORS_ORIGINS"
-    EVM_KEEPER_DEFER_FINALIZE="$EVM_KEEPER_DEFER_FINALIZE"
-    SOLANA_CLUSTER="$SOLANA_CLUSTER"
-    EVM_KEEPER_CHAINS="$EVM_KEEPER_CHAINS"
-    ENABLE_KEEPER_BOT="$ENABLE_KEEPER_BOT"
-  )
+    keeper_env=(
+      STREAM_STATE_SOURCE_URL="${GAME_HTTP_URL}/api/streaming/state"
+      PORT="$KEEPER_PORT"
+      GAME_URL="$KEEPER_URL"
+      CORS_ORIGINS="$LOCAL_CORS_ORIGINS"
+      EVM_KEEPER_DEFER_FINALIZE="$EVM_KEEPER_DEFER_FINALIZE"
+      SOLANA_KEEPER_WRITE_ENABLED="${SOLANA_KEEPER_WRITE_ENABLED:-false}"
+      SOLANA_CLUSTER="$SOLANA_CLUSTER"
+      EVM_KEEPER_CHAINS="$EVM_KEEPER_CHAINS"
+      ENABLE_KEEPER_BOT="$ENABLE_KEEPER_BOT"
+    )
   if [[ -n "${BSC_RPC_URL:-}" ]]; then
     keeper_env+=(BSC_RPC_URL="$BSC_RPC_URL")
   fi
@@ -490,7 +638,7 @@ echo "[pm-local] starting Hyperbet EVM keeper service on :$KEEPER_PORT"
   if [[ -n "${AVAX_GOLD_CLOB_ADDRESS:-}" ]]; then
     keeper_env+=(AVAX_GOLD_CLOB_ADDRESS="$AVAX_GOLD_CLOB_ADDRESS")
   fi
-  env "${keeper_env[@]}" bun run --cwd packages/hyperbet-evm keeper:service
+  env "${keeper_env[@]}" "$BUN_BIN" --cwd "$ROOT" --bun packages/hyperbet-evm/keeper/src/service.ts
 ) &
 KEEPER_PID=$!
 
@@ -518,7 +666,7 @@ echo "[pm-local] starting Hyperbet EVM app on :$APP_PORT"
   if [[ -n "${AVAX_GOLD_CLOB_ADDRESS:-}" ]]; then
     app_env+=(VITE_AVAX_GOLD_CLOB_ADDRESS="$AVAX_GOLD_CLOB_ADDRESS")
   fi
-  env "${app_env[@]}" bun run --cwd packages/hyperbet-evm/app dev \
+  env "${app_env[@]}" "$BUN_BIN" run --cwd packages/hyperbet-evm/app dev \
     --mode "$APP_MODE" \
     --host \
     --port "$APP_PORT"
@@ -545,7 +693,8 @@ if [[ "$CAPTURE_LOCAL_UI_FLOW" == "true" ]]; then
       PM_SOAK_RECONCILE_PUBLISH_URL="${PM_SOAK_RECONCILE_PUBLISH_URL:-${KEEPER_URL}/api/streaming/state/publish}" \
       PM_SOAK_RECONCILE_PUBLISH_KEY="${PM_SOAK_RECONCILE_PUBLISH_KEY:-${STREAM_PUBLISH_KEY:-${ARENA_EXTERNAL_BET_WRITE_KEY:-${E2E_ARENA_WRITE_KEY:-}}}}" \
       PM_SOAK_SCREENSHOTS="${PM_SOAK_SCREENSHOTS:-true}" \
-      node --import tsx scripts/pm-soak-monitor.ts --mode=local --follow --duration-min="${PM_SOAK_LOCAL_DURATION_MIN:-25}" --poll-ms="${PM_SOAK_POLL_MS:-5000}"
+      BUN_BIN="$BUN_BIN" \
+      "$NODE_BIN" --import tsx scripts/pm-soak-monitor.ts --mode=local --follow --duration-min="${PM_SOAK_LOCAL_DURATION_MIN:-25}" --poll-ms="${PM_SOAK_POLL_MS:-5000}"
   ) &
   CAPTURE_PID=$!
 fi
@@ -582,6 +731,10 @@ while true; do
   fi
   if [[ -n "$APP_PID" ]] && ! kill -0 "$APP_PID" >/dev/null 2>&1; then
     wait "$APP_PID"
+    exit $?
+  fi
+  if [[ -n "$EVM_SEED_FOLLOW_PID" ]] && ! kill -0 "$EVM_SEED_FOLLOW_PID" >/dev/null 2>&1; then
+    wait "$EVM_SEED_FOLLOW_PID"
     exit $?
   fi
   sleep 2

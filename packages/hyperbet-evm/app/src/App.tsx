@@ -463,6 +463,10 @@ function PanelFallback({
 
 export function App() {
   const mockData = useMockDataOptional();
+  const searchParams = useMemo(
+    () => new URLSearchParams(window.location.search),
+    [],
+  );
   const { address: evmWalletAddress } = useAccount();
   const { activeChain, setActiveChain, availableChains } = useChain();
   const activeEvmChain =
@@ -479,8 +483,9 @@ export function App() {
   const copy = useMemo(() => getAppCopy(locale), [locale]);
   const isE2eMode = import.meta.env.MODE === "e2e";
   const isStreamUiMode = import.meta.env.MODE === "stream-ui";
-  const isE2eDebugMode =
-    isE2eMode && new URLSearchParams(window.location.search).has("debug");
+  const isE2eDebugMode = isE2eMode && searchParams.has("debug");
+  const isBettingPanelOnlyMode =
+    isE2eDebugMode && searchParams.get("panel") === "betting";
   const configuredHeadlessEvmPrivateKey = useMemo(
     () =>
       normalizePrivateKey(
@@ -528,7 +533,9 @@ export function App() {
   // Track mobile breakpoint — inline resize styles must NOT apply on mobile
   // because they override CSS media-query layout (sidebar fixed sheet, etc.)
   const isMobile = useIsMobile(768);
-  const isStackedLayout = useIsMobile(960);
+  // Stack the trading sidebar earlier so smaller desktop widths do not clip
+  // the right rail or force the betting controls off-screen.
+  const isStackedLayout = useIsMobile(1360);
 
   // Sidebar width (right column)
   const { size: sidebarWidthPx, startDrag: startSidebarDrag } = useResizePanel({
@@ -554,7 +561,9 @@ export function App() {
   const { context: duelContext } = useDuelContext();
   const liveCycle = streamingState?.cycle ?? null;
   const streamSources = STREAM_URLS;
-  const activeStreamUrl = isE2eMode ? "" : (streamSources[streamSourceIndex] ?? "");
+  // Keep the stream visible in e2e/local integration lanes when a real source
+  // URL is configured. Wallet/chain polling stays gated separately above.
+  const activeStreamUrl = streamSources[streamSourceIndex] ?? "";
 
   const handleLocaleChange = useCallback((nextLocale: UiLocale) => {
     setStoredUiLocale(nextLocale);
@@ -901,6 +910,148 @@ const [hmBottomTab, setHmBottomTab] = useState<
       setIsSidebarOpen(false);
     }
   }, [surfaceMode]);
+
+  const bettingPanelBody = (
+    <Suspense
+      fallback={<PanelFallback label={copy.loadingEvmMarket} minHeight={360} />}
+    >
+      <EvmBettingPanel
+        agent1Name={effAgent1Name}
+        agent2Name={effAgent2Name}
+        compact
+        locale={locale}
+      />
+    </Suspense>
+  );
+
+  const tradingSidebar = (
+    <aside
+      className={`hm-sidebar${isSidebarOpen ? " hm-sidebar--open" : ""}`}
+      aria-label={copy.tradingControls}
+      style={
+        isBettingPanelOnlyMode
+          ? {
+              width: "100%",
+              maxWidth: 420,
+              minWidth: 0,
+              height: "auto",
+              maxHeight: "none",
+              borderLeft: "none",
+              borderTop: "none",
+              margin: "0 auto",
+            }
+          : isStackedLayout
+            ? undefined
+            : { width: sidebarWidthPx, minWidth: sidebarWidthPx }
+      }
+    >
+      <div className="hm-matchup-header">
+        <span className="hm-matchup-label">{copy.currentMatch}</span>
+        <div className="hm-matchup-header-right">
+          <span
+            className={`hm-phase-badge hm-phase-badge--${effCycle.phase.toLowerCase()} hm-phase-badge--sm`}
+          >
+            {effPhaseLabel}
+          </span>
+          {!isBettingPanelOnlyMode ? (
+            <button
+              className="hm-sidebar-close"
+              type="button"
+              aria-label={copy.closeTradingPanel}
+              onClick={() => setIsSidebarOpen(false)}
+            >
+              ×
+            </button>
+          ) : null}
+        </div>
+      </div>
+      <div className="hm-matchup">
+        <div className="hm-matchup-agent">
+          <span className="hm-matchup-name" title={effA1.name}>
+            {effA1.name}
+          </span>
+          <span className="hm-matchup-record">
+            {copy.record(effA1.wins, effA1.losses)}
+            {effA1.combatLevel ? copy.level(effA1.combatLevel) : ""}
+          </span>
+          <span className="hm-matchup-odds hm-matchup-odds--yes">
+            {effYesPercent}%
+          </span>
+        </div>
+        <span className="hm-matchup-vs">VS</span>
+        <div className="hm-matchup-agent hm-matchup-agent--right">
+          <span className="hm-matchup-name" title={effA2.name}>
+            {effA2.name}
+          </span>
+          <span className="hm-matchup-record">
+            {copy.record(effA2.wins, effA2.losses)}
+            {effA2.combatLevel ? copy.level(effA2.combatLevel) : ""}
+          </span>
+          <span className="hm-matchup-odds hm-matchup-odds--no">
+            {effNoPercent}%
+          </span>
+        </div>
+      </div>
+
+      <div className="hm-market-panel-wrap">
+        <div className="hm-market-panel-body">
+          {bettingPanelBody}
+        </div>
+      </div>
+
+      <p className="hm-legal-text">
+        {copy.legalLead} <a href="#terms">{copy.terms}</a> &amp;{" "}
+        <a href="#privacy">{copy.privacy}</a>
+      </p>
+
+      <div className="hm-footer-socials" aria-label="Social links">
+        {FOOTER_SOCIALS.map((social) => (
+          <a
+            key={social.id}
+            className="hm-footer-social"
+            href={social.href}
+            aria-label={social.label}
+            title={social.label}
+            target={social.href.startsWith("http") ? "_blank" : undefined}
+            rel={
+              social.href.startsWith("http")
+                ? "noreferrer noopener"
+                : undefined
+            }
+          >
+            {social.icon}
+          </a>
+        ))}
+      </div>
+    </aside>
+  );
+
+  if (isBettingPanelOnlyMode) {
+    return (
+      <div className="hm-root" ref={appRootRef}>
+        <div
+          style={{
+            minHeight: "100vh",
+            padding: 24,
+            background:
+              "radial-gradient(circle at top left, rgba(229,184,74,0.08), transparent 30%), linear-gradient(180deg, rgba(8,10,14,0.98) 0%, rgba(11,12,14,1) 100%)",
+            overflow: "auto",
+            boxSizing: "border-box",
+          }}
+        >
+          <div
+            style={{
+              width: "100%",
+              maxWidth: 420,
+              margin: "0 auto",
+            }}
+          >
+            {bettingPanelBody}
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="hm-root" ref={appRootRef}>
@@ -2005,109 +2156,7 @@ const [hmBottomTab, setHmBottomTab] = useState<
             ) : null}
 
             {/* ── RIGHT SIDEBAR: Real betting or mock controls ──────────────── */}
-            <aside
-              className={`hm-sidebar${isSidebarOpen ? " hm-sidebar--open" : ""}`}
-              aria-label={copy.tradingControls}
-              style={
-                isStackedLayout
-                  ? undefined
-                  : { width: sidebarWidthPx, minWidth: sidebarWidthPx }
-              }
-            >
-              {/* Agent matchup header — close button lives here so it never floats over agent names */}
-              <div className="hm-matchup-header">
-                <span className="hm-matchup-label">{copy.currentMatch}</span>
-                <div className="hm-matchup-header-right">
-                  <span
-                    className={`hm-phase-badge hm-phase-badge--${effCycle.phase.toLowerCase()} hm-phase-badge--sm`}
-                  >
-                    {effPhaseLabel}
-                  </span>
-                  <button
-                    className="hm-sidebar-close"
-                    type="button"
-                    aria-label={copy.closeTradingPanel}
-                    onClick={() => setIsSidebarOpen(false)}
-                  >
-                    ×
-                  </button>
-                </div>
-              </div>
-              <div className="hm-matchup">
-                <div className="hm-matchup-agent">
-                  <span className="hm-matchup-name" title={effA1.name}>
-                    {effA1.name}
-                  </span>
-                  <span className="hm-matchup-record">
-                    {copy.record(effA1.wins, effA1.losses)}
-                    {effA1.combatLevel ? copy.level(effA1.combatLevel) : ""}
-                  </span>
-                  <span className="hm-matchup-odds hm-matchup-odds--yes">
-                    {effYesPercent}%
-                  </span>
-                </div>
-                <span className="hm-matchup-vs">VS</span>
-                <div className="hm-matchup-agent hm-matchup-agent--right">
-                  <span className="hm-matchup-name" title={effA2.name}>
-                    {effA2.name}
-                  </span>
-                  <span className="hm-matchup-record">
-                    {copy.record(effA2.wins, effA2.losses)}
-                    {effA2.combatLevel ? copy.level(effA2.combatLevel) : ""}
-                  </span>
-                  <span className="hm-matchup-odds hm-matchup-odds--no">
-                    {effNoPercent}%
-                  </span>
-                </div>
-              </div>
-
-              {/* Market type tabs + betting panels */}
-              <div className="hm-market-panel-wrap">
-                {/* Active market panel */}
-                <div className="hm-market-panel-body">
-                  <Suspense
-                    fallback={
-                      <PanelFallback
-                        label={copy.loadingEvmMarket}
-                        minHeight={360}
-                      />
-                    }
-                  >
-                    <EvmBettingPanel
-                      agent1Name={effAgent1Name}
-                      agent2Name={effAgent2Name}
-                      compact
-                      locale={locale}
-                    />
-                  </Suspense>
-                </div>
-              </div>
-
-              <p className="hm-legal-text">
-                {copy.legalLead} <a href="#terms">{copy.terms}</a> &amp;{" "}
-                <a href="#privacy">{copy.privacy}</a>
-              </p>
-
-              <div className="hm-footer-socials" aria-label="Social links">
-                {FOOTER_SOCIALS.map((social) => (
-                  <a
-                    key={social.id}
-                    className="hm-footer-social"
-                    href={social.href}
-                    aria-label={social.label}
-                    title={social.label}
-                    target={social.href.startsWith("http") ? "_blank" : undefined}
-                    rel={
-                      social.href.startsWith("http")
-                        ? "noreferrer noopener"
-                        : undefined
-                    }
-                  >
-                    {social.icon}
-                  </a>
-                ))}
-              </div>
-            </aside>
+            {tradingSidebar}
           </div>
 
           {/* Mobile FAB — opens the sidebar sheet */}
@@ -2149,6 +2198,7 @@ const [hmBottomTab, setHmBottomTab] = useState<
               aria-hidden="true"
             />
           )}
+
         </>
       )}
 
