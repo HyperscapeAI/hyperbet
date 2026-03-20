@@ -144,12 +144,12 @@ contract AgentPerpEngineFuzzTest is Test {
     }
 
     function _assertBalanceSheet() internal view {
-        (,,,,,,,, uint256 vaultBalance, uint256 insuranceFund,,) = engine.markets(agentId);
-        uint256 expectedBalance = _sumTrackedMargins() + insuranceFund + vaultBalance;
+        (,,,,,,,, uint256 vaultBalance, uint256 insuranceFund,,,uint256 treasuryFees, uint256 mmFees,) = engine.markets(agentId);
+        uint256 expectedBalance = _sumTrackedMargins() + insuranceFund + vaultBalance + treasuryFees + mmFees;
         assertEq(
             marginToken.balanceOf(address(engine)),
             expectedBalance,
-            "engine balance must equal tracked trader margin plus reserves"
+            "engine balance must equal tracked trader margin plus reserves plus fees"
         );
     }
 }

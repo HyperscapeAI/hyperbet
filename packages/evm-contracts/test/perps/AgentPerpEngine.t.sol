@@ -260,7 +260,7 @@ contract AgentPerpEngineTest is Test {
     // ── P1B.3: Insurance fund ──
 
     function testDepositInsuranceFundRepaysBadDebt() public {
-        (,,,,,,,,,uint256 insuranceFund,,) = engine.markets(agentId);
+        (,,,,,,,,,uint256 insuranceFund,,,,,) = engine.markets(agentId);
         assertEq(insuranceFund, 100_000 * 1e18);
     }
 
@@ -300,5 +300,185 @@ contract AgentPerpEngineTest is Test {
 
         vm.prank(alice);
         try engine.modifyPosition(agentId, int256(marginAmount), sizeDelta) {} catch {}
+    }
+
+    // ── P1B.4: Slippage protection ──
+
+    function testSlippageProtectionLongRevert() public {
+        // Get current execution price for a long
+        uint256 execPrice = engine.getExecutionPrice(agentId, 10 * 1e18);
+
+        // Set acceptablePrice below execution price — should revert
+        vm.prank(alice);
+        vm.expectRevert(
+            abi.encodeWithSelector(AgentPerpEngine.SlippageExceeded.selector, execPrice, execPrice - 1)
+        );
+        engine.modifyPosition(agentId, 10_000 * 1e18, 10 * 1e18, execPrice - 1);
+    }
+
+    function testSlippageProtectionLongPass() public {
+        uint256 execPrice = engine.getExecutionPrice(agentId, 10 * 1e18);
+
+        // Set acceptablePrice at execution price — should pass
+        vm.prank(alice);
+        engine.modifyPosition(agentId, 10_000 * 1e18, 10 * 1e18, execPrice);
+    }
+
+    function testSlippageProtectionShortRevert() public {
+        // First open a long to create skew
+        vm.prank(whale);
+        engine.modifyPosition(agentId, 500_000 * 1e18, 100_000 * 1e18);
+
+        uint256 execPrice = engine.getExecutionPrice(agentId, -10 * 1e18);
+
+        // For shorts, revert if execution price is below acceptable
+        vm.prank(alice);
+        vm.expectRevert(
+            abi.encodeWithSelector(AgentPerpEngine.SlippageExceeded.selector, execPrice, execPrice + 1)
+        );
+        engine.modifyPosition(agentId, 10_000 * 1e18, -10 * 1e18, execPrice + 1);
+    }
+
+    function testSlippageZeroDisablesCheck() public {
+        // acceptablePrice = 0 should not enforce slippage
+        vm.prank(alice);
+        engine.modifyPosition(agentId, 10_000 * 1e18, 10 * 1e18, 0);
+    }
+
+    // ── P1B.4: OI caps ──
+
+    function testOICapBlocksExcessivePosition() public {
+        // Create a market with OI cap
+        vm.prank(admin);
+        oracle.updateAgentSkill(agentB, 1500, 200);
+
+        vm.prank(operator);
+        engine.createMarket(
+            agentB,
+            1_000_000 * 1e18,  // skewScale
+            5 * 1e18,           // maxLeverage
+            1_000,              // maintenanceMarginBps
+            500,                // liquidationRewardBps
+            2 minutes,          // maxOracleDelay
+            100 * 1e18,         // maxOpenInterest = 100 units
+            0,                  // tradeTreasuryFeeBps
+            0                   // tradeMarketMakerFeeBps
+        );
+
+        vm.prank(admin);
+        engine.depositInsuranceFund(agentB, 50_000 * 1e18);
+
+        // Try to open a position exceeding OI cap
+        vm.prank(alice);
+        vm.expectRevert(AgentPerpEngine.MaxOpenInterestExceeded.selector);
+        engine.modifyPosition(agentB, 50_000 * 1e18, 200 * 1e18);
+    }
+
+    // ── P1B.4: Fee splitting ──
+
+    function testFeeSplitting() public {
+        // Create a market with fees
+        vm.prank(admin);
+        oracle.updateAgentSkill(agentB, 1500, 200);
+
+        vm.prank(operator);
+        engine.createMarket(
+            agentB,
+            1_000_000 * 1e18,
+            5 * 1e18,
+            1_000,
+            500,
+            2 minutes,
+            0,     // no OI cap
+            30,    // 0.3% treasury fee
+            20     // 0.2% market maker fee
+        );
+
+        vm.prank(admin);
+        engine.depositInsuranceFund(agentB, 50_000 * 1e18);
+
+        // Open a position
+        vm.prank(alice);
+        engine.modifyPosition(agentB, 10_000 * 1e18, 10 * 1e18);
+
+        // Check fee balances accumulated
+        (,,,,,,,,,,,,uint256 treasuryFees, uint256 mmFees,) = engine.markets(agentB);
+        assertTrue(treasuryFees > 0, "Treasury fees should accumulate");
+        assertTrue(mmFees > 0, "MM fees should accumulate");
+        assertTrue(treasuryFees > mmFees, "Treasury fee > MM fee (30bps vs 20bps)");
+    }
+
+    function testFeeWithdrawal() public {
+        vm.prank(admin);
+        oracle.updateAgentSkill(agentB, 1500, 200);
+
+        vm.prank(operator);
+        engine.createMarket(agentB, 1_000_000 * 1e18, 5 * 1e18, 1_000, 500, 2 minutes, 0, 30, 20);
+
+        vm.prank(admin);
+        engine.depositInsuranceFund(agentB, 50_000 * 1e18);
+
+        vm.prank(alice);
+        engine.modifyPosition(agentB, 10_000 * 1e18, 10 * 1e18);
+
+        (,,,,,,,,,,,,uint256 treasuryFees,,) = engine.markets(agentB);
+        uint256 recipientBefore = marginToken.balanceOf(address(0xCAFE));
+
+        // Withdraw treasury fees (bucket 0)
+        vm.prank(operator);
+        engine.withdrawFeeBalance(agentB, 0, address(0xCAFE));
+
+        uint256 recipientAfter = marginToken.balanceOf(address(0xCAFE));
+        assertEq(recipientAfter - recipientBefore, treasuryFees, "Recipient should receive treasury fees");
+
+        // Treasury balance should be zero after withdrawal
+        (,,,,,,,,,,,,uint256 treasuryFeesAfter,,) = engine.markets(agentB);
+        assertEq(treasuryFeesAfter, 0);
+    }
+
+    function testRecycleMmFees() public {
+        vm.prank(admin);
+        oracle.updateAgentSkill(agentB, 1500, 200);
+
+        vm.prank(operator);
+        engine.createMarket(agentB, 1_000_000 * 1e18, 5 * 1e18, 1_000, 500, 2 minutes, 0, 0, 50);
+
+        vm.prank(admin);
+        engine.depositInsuranceFund(agentB, 50_000 * 1e18);
+
+        vm.prank(alice);
+        engine.modifyPosition(agentB, 10_000 * 1e18, 10 * 1e18);
+
+        (,,,,,,,,,uint256 insuranceBefore,,,,uint256 mmFees,) = engine.markets(agentB);
+        assertTrue(mmFees > 0);
+
+        vm.prank(operator);
+        engine.recycleMmFees(agentB);
+
+        (,,,,,,,,,uint256 insuranceAfter,,,,uint256 mmFeesAfter,) = engine.markets(agentB);
+        assertEq(mmFeesAfter, 0);
+        assertEq(insuranceAfter, insuranceBefore + mmFees);
+    }
+
+    // ── P1B.4: Settlement price freeze ──
+
+    function testSettlementPriceFreezeOnCloseOnly() public {
+        vm.prank(alice);
+        engine.modifyPosition(agentId, 10_000 * 1e18, 10 * 1e18);
+
+        uint256 priceBeforeClose = engine.getMarkPrice(agentId);
+
+        vm.prank(operator);
+        engine.setMarketStatus(agentId, AgentPerpEngine.MarketStatus.CLOSE_ONLY);
+
+        (,,,,,,,,,,,uint256 settlementPrice,,,) = engine.markets(agentId);
+        assertTrue(settlementPrice > 0, "Settlement price should be frozen");
+
+        // Update oracle — mark price should NOT change because settlement is frozen
+        vm.prank(admin);
+        oracle.updateAgentSkill(agentId, 1800, 100);
+
+        uint256 priceAfterOracleUpdate = engine.getMarkPrice(agentId);
+        assertEq(priceAfterOracleUpdate, priceBeforeClose, "Price should be frozen at settlement");
     }
 }

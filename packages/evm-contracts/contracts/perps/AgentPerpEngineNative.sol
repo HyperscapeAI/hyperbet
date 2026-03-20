@@ -42,6 +42,8 @@ contract AgentPerpEngineNative is AccessControl, ReentrancyGuard {
     error MarketNotFound();
     error ArchivedMarket();
     error CloseOnlyMode();
+    error SlippageExceeded(uint256 executionPrice, uint256 acceptablePrice);
+    error MaxOpenInterestExceeded();
 
     enum MarketStatus {
         UNINITIALIZED,
@@ -56,6 +58,9 @@ contract AgentPerpEngineNative is AccessControl, ReentrancyGuard {
         uint256 maintenanceMarginBps;
         uint256 liquidationRewardBps;
         uint256 maxOracleDelay;
+        uint256 maxOpenInterest;
+        uint256 tradeTreasuryFeeBps;
+        uint256 tradeMarketMakerFeeBps;
         bool exists;
     }
 
@@ -69,6 +74,9 @@ contract AgentPerpEngineNative is AccessControl, ReentrancyGuard {
         uint256 lastOracleTimestamp;
         uint256 insuranceFund;
         uint256 badDebt;
+        uint256 settlementPrice;
+        uint256 treasuryFeeBalance;
+        uint256 marketMakerFeeBalance;
         MarketStatus status;
     }
 
@@ -112,6 +120,9 @@ contract AgentPerpEngineNative is AccessControl, ReentrancyGuard {
     event MarketStatusUpdated(bytes32 indexed agentId, MarketStatus indexed status);
     event TradingPauseUpdated(bool paused, address indexed actor);
     event PauserUpdated(address indexed pauser, bool enabled);
+    event FeeBalanceWithdrawn(bytes32 indexed agentId, uint8 indexed bucket, address indexed to, uint256 amount);
+    event MarketMakerFeesRecycled(bytes32 indexed agentId, uint256 amount);
+    event InsuranceFundDeposited(bytes32 indexed agentId, address indexed from, uint256 amount);
 
     constructor(
         SkillOracle _oracle,
@@ -194,6 +205,9 @@ contract AgentPerpEngineNative is AccessControl, ReentrancyGuard {
             maintenanceMarginBps: DEFAULT_MAINTENANCE_MARGIN_BPS,
             liquidationRewardBps: DEFAULT_LIQUIDATION_REWARD_BPS,
             maxOracleDelay: DEFAULT_MAX_ORACLE_DELAY,
+            maxOpenInterest: 0,
+            tradeTreasuryFeeBps: 0,
+            tradeMarketMakerFeeBps: 0,
             exists: true
         });
         markets[agentId].status = MarketStatus.ACTIVE;
@@ -204,7 +218,11 @@ contract AgentPerpEngineNative is AccessControl, ReentrancyGuard {
 
     function setMarketStatus(bytes32 agentId, MarketStatus newStatus) external onlyRole(MARKET_OPERATOR_ROLE) {
         if (!marketConfigs[agentId].exists) revert MarketNotFound();
-        markets[agentId].status = newStatus;
+        MarketState storage market = markets[agentId];
+        market.status = newStatus;
+        if (newStatus == MarketStatus.CLOSE_ONLY && market.settlementPrice == 0) {
+            market.settlementPrice = market.lastOraclePrice;
+        }
         emit MarketStatusUpdated(agentId, newStatus);
     }
 
@@ -246,7 +264,7 @@ contract AgentPerpEngineNative is AccessControl, ReentrancyGuard {
     function _getExecutionPrice(bytes32 agentId, int256 sizeDelta) internal view returns (uint256) {
         MarketState memory market = markets[agentId];
         MarketConfig memory config = marketConfigs[agentId];
-        uint256 indexPrice = market.lastOraclePrice;
+        uint256 indexPrice = (market.settlementPrice != 0) ? market.settlementPrice : market.lastOraclePrice;
         if (indexPrice == 0) revert StaleOracle();
 
         int256 localSkew = int256(market.totalLongOI) - int256(market.totalShortOI);
@@ -364,11 +382,20 @@ contract AgentPerpEngineNative is AccessControl, ReentrancyGuard {
     // ── Position management ──
 
     function modifyPosition(bytes32 agentId, int256 sizeDelta) external payable nonReentrant {
+        _modifyPosition(agentId, sizeDelta, 0);
+    }
+
+    function modifyPosition(bytes32 agentId, int256 sizeDelta, uint256 acceptablePrice) external payable nonReentrant {
+        _modifyPosition(agentId, sizeDelta, acceptablePrice);
+    }
+
+    function _modifyPosition(bytes32 agentId, int256 sizeDelta, uint256 acceptablePrice) internal {
         if (tradingPaused) revert TradingPaused();
         if (!marketConfigs[agentId].exists) revert MarketNotFound();
 
         _syncOracle(agentId);
 
+        MarketConfig memory config = marketConfigs[agentId];
         MarketState storage market = markets[agentId];
         Position storage pos = positions[agentId][msg.sender];
         int256 oldSize = pos.size;
@@ -394,10 +421,43 @@ contract AgentPerpEngineNative is AccessControl, ReentrancyGuard {
         uint256 execPrice = _getExecutionPrice(agentId, sizeDelta);
         uint256 oldEntryPrice = pos.entryPrice;
 
+        // Slippage protection
+        if (acceptablePrice != 0 && sizeDelta != 0) {
+            if (sizeDelta > 0 && execPrice > acceptablePrice) {
+                revert SlippageExceeded(execPrice, acceptablePrice);
+            }
+            if (sizeDelta < 0 && execPrice < acceptablePrice) {
+                revert SlippageExceeded(execPrice, acceptablePrice);
+            }
+        }
+
         _removeOpenInterest(market, oldSize);
         int256 realizedPnl = _applySizeDelta(pos, oldSize, oldEntryPrice, sizeDelta, execPrice);
         pos.margin += msg.value;
+
+        // Deduct trading fees
+        if (sizeDelta != 0 && (config.tradeTreasuryFeeBps + config.tradeMarketMakerFeeBps) > 0) {
+            uint256 notionalDelta = Math.mulDiv(_abs(sizeDelta), execPrice, ONE);
+            uint256 treasuryFee = Math.mulDiv(notionalDelta, config.tradeTreasuryFeeBps, BPS);
+            uint256 mmFee = Math.mulDiv(notionalDelta, config.tradeMarketMakerFeeBps, BPS);
+            uint256 totalFee = treasuryFee + mmFee;
+            if (totalFee > 0) {
+                if (pos.margin < totalFee) revert InsufficientMargin();
+                pos.margin -= totalFee;
+                market.treasuryFeeBalance += treasuryFee;
+                market.marketMakerFeeBalance += mmFee;
+            }
+        }
+
         _addOpenInterest(market, pos.size);
+
+        // OI cap check
+        if (config.maxOpenInterest > 0 && sizeDelta != 0) {
+            if (market.totalLongOI > config.maxOpenInterest || market.totalShortOI > config.maxOpenInterest) {
+                revert MaxOpenInterestExceeded();
+            }
+        }
+
         _assertLeverage(agentId, pos.size, pos.margin);
 
         if (pos.size == 0 && pos.margin > 0) {
@@ -509,11 +569,62 @@ contract AgentPerpEngineNative is AccessControl, ReentrancyGuard {
         }
     }
 
-    function withdrawInsuranceFund(address payable to, uint256 amount) external onlyRole(DEFAULT_ADMIN_ROLE) nonReentrant {
+    function depositInsuranceFund(bytes32 agentId) external payable onlyRole(DEFAULT_ADMIN_ROLE) {
+        if (!marketConfigs[agentId].exists) revert MarketNotFound();
+        if (msg.value == 0) return;
+        MarketState storage market = markets[agentId];
+        uint256 remaining = msg.value;
+        if (market.badDebt != 0) {
+            uint256 repaid = remaining > market.badDebt ? market.badDebt : remaining;
+            market.badDebt -= repaid;
+            remaining -= repaid;
+        }
+        if (remaining != 0) {
+            market.insuranceFund += remaining;
+        }
+        emit InsuranceFundDeposited(agentId, msg.sender, msg.value);
+    }
+
+    function withdrawInsuranceFund(bytes32 agentId, address payable to, uint256 amount) external onlyRole(DEFAULT_ADMIN_ROLE) nonReentrant {
+        if (!marketConfigs[agentId].exists) revert MarketNotFound();
         if (to == address(0)) revert InvalidRecipient();
-        // Global insurance across all markets for native engine
-        // (per-market isolation handled in token-based engine)
-        revert GovernanceSurfaceFrozen();
+        MarketState storage market = markets[agentId];
+        if (market.insuranceFund < amount) revert InsufficientInsuranceFund();
+        market.insuranceFund -= amount;
+        Address.sendValue(to, amount);
+    }
+
+    function withdrawFeeBalance(bytes32 agentId, uint8 bucket, address payable to)
+        external
+        onlyRole(MARKET_OPERATOR_ROLE)
+        nonReentrant
+    {
+        if (!marketConfigs[agentId].exists) revert MarketNotFound();
+        if (to == address(0)) revert InvalidRecipient();
+        MarketState storage market = markets[agentId];
+        uint256 amount;
+        if (bucket == 0) {
+            amount = market.treasuryFeeBalance;
+            market.treasuryFeeBalance = 0;
+        } else {
+            amount = market.marketMakerFeeBalance;
+            market.marketMakerFeeBalance = 0;
+        }
+        if (amount > 0) {
+            emit FeeBalanceWithdrawn(agentId, bucket, to, amount);
+            Address.sendValue(to, amount);
+        }
+    }
+
+    function recycleMmFees(bytes32 agentId) external onlyRole(MARKET_OPERATOR_ROLE) {
+        if (!marketConfigs[agentId].exists) revert MarketNotFound();
+        MarketState storage market = markets[agentId];
+        uint256 amount = market.marketMakerFeeBalance;
+        if (amount > 0) {
+            market.marketMakerFeeBalance = 0;
+            market.insuranceFund += amount;
+            emit MarketMakerFeesRecycled(agentId, amount);
+        }
     }
 
     function marketCount() external view returns (uint256) {
