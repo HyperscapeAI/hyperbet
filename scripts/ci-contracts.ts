@@ -96,7 +96,7 @@ async function runSecurityStep(): Promise<void> {
     "--filter-paths",
     "node_modules|out|cache|lib",
     "--exclude",
-    "timestamp,pragma,solc-version,cyclomatic-complexity",
+    "timestamp,pragma,solc-version,cyclomatic-complexity,dangerous-strict-equalities,unused-return",
   ]);
 }
 

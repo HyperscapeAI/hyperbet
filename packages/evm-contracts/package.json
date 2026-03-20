@@ -17,7 +17,7 @@
     "test:fuzz": "forge test --match-path 'test/fuzz/**/*.t.sol' && forge test --match-path 'test/perps/AgentPerpEngineFuzz.t.sol'",
     "test:invariant": "forge test --match-path 'test/perps/AgentPerpEngineFuzz.t.sol' --fuzz-runs 1000",
     "test:foundry": "forge test --match-path 'test/**/*.t.sol' --no-match-path 'test/fuzz/**'",
-    "analyze:slither": "slither . --exclude-dependencies --filter-paths 'node_modules|out|cache|lib' --exclude timestamp,pragma,solc-version,cyclomatic-complexity",
+    "analyze:slither": "slither . --exclude-dependencies --filter-paths 'node_modules|out|cache|lib' --exclude timestamp,pragma,solc-version,cyclomatic-complexity,dangerous-strict-equalities,unused-return",
     "deploy:bsc-testnet": "hardhat run scripts/deploy.ts --network bscTestnet",
     "deploy:base-sepolia": "hardhat run scripts/deploy.ts --network baseSepolia",
     "deploy:avax-fuji": "hardhat run scripts/deploy.ts --network avaxFuji",

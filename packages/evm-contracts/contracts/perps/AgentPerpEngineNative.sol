@@ -98,9 +98,9 @@ contract AgentPerpEngineNative is AccessControl, ReentrancyGuard {
     mapping(bytes32 => mapping(address => Position)) public positions;
     bytes32[] public marketIds;
 
-    uint256 public skewScale;
-    uint256 public fundingVelocity;
-    uint256 public maxLeverage;
+    uint256 public immutable skewScale;
+    uint256 public immutable fundingVelocity;
+    uint256 public immutable maxLeverage;
     bool public tradingPaused;
 
     event PositionOpened(
@@ -555,7 +555,7 @@ contract AgentPerpEngineNative is AccessControl, ReentrancyGuard {
         if (equity > int256(maintenanceMargin)) revert NotLiquidatable();
 
         // Determine partial vs full liquidation
-        int256 liquidationSizeDelta;
+        int256 liquidationSizeDelta = 0;
         bool isPartial = false;
         if (equity > 0 && absSize > ONE) {
             uint256 targetNotional = Math.mulDiv(uint256(equity), BPS, PARTIAL_LIQUIDATION_TARGET_MARGIN_RATIO);

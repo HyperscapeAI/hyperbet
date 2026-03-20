@@ -123,8 +123,8 @@ contract AgentPerpEngine is AccessControl, ReentrancyGuard {
     mapping(bytes32 => mapping(address => Position)) public positions;
     bytes32[] public marketIds;
 
-    uint256 public fundingVelocity;
-    uint256 public defaultSkewScale;
+    uint256 public immutable fundingVelocity;
+    uint256 public immutable defaultSkewScale;
     bool public tradingPaused;
     bool public marketCreationPaused;
 
@@ -536,7 +536,7 @@ contract AgentPerpEngine is AccessControl, ReentrancyGuard {
         if (equity > int256(maintenanceMargin)) revert NotLiquidatable();
 
         // Determine liquidation size: partial if equity > 0 and position large enough
-        int256 liquidationSizeDelta;
+        int256 liquidationSizeDelta = 0;
         bool isPartial = false;
         if (equity > 0 && absSize > ONE) {
             // Close enough to restore 2x maintenance margin ratio
