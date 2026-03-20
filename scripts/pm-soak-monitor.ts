@@ -721,14 +721,12 @@ function safeSlug(value: string): string {
 
 function localScreenshotTargets(): ScreenshotTarget[] {
   const targets: ScreenshotTarget[] = [];
-  const hyperscapes = optionalEnv("HYPERSCAPES_UI_URL");
-  const hyperbet = optionalEnv("HYPERBET_UI_URL");
-  if (hyperscapes) {
-    targets.push({ name: "hyperscapes", url: hyperscapes });
-  }
-  if (hyperbet) {
-    targets.push({ name: "hyperbet", url: hyperbet });
-  }
+  const hyperscapes =
+    optionalEnv("HYPERSCAPES_UI_URL") ?? "http://127.0.0.1:3333/stream.html";
+  const hyperbet =
+    optionalEnv("HYPERBET_UI_URL") ?? "http://127.0.0.1:4179/?debug";
+  targets.push({ name: "hyperscapes", url: hyperscapes });
+  targets.push({ name: "hyperbet", url: hyperbet });
   return targets;
 }
 

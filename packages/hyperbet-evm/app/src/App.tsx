@@ -11,6 +11,9 @@ import {
 import { useMockDataOptional } from "./lib/useMockAvaxStreamData";
 import { ConnectButton } from "@rainbow-me/rainbowkit";
 import { useAccount } from "wagmi";
+import { hexToBytes, toHex } from "viem";
+import { publicKeyToAddress } from "viem/accounts";
+import { secp256k1 } from "@noble/curves/secp256k1";
 
 import {
   formatLocaleAmount,
@@ -77,6 +80,27 @@ function formatTimeAgo(ts: number, locale: UiLocale): string {
 function truncateAddr(addr: string): string {
   if (addr.length <= 12) return addr;
   return `${addr.slice(0, 6)}...${addr.slice(-4)}`;
+}
+
+function normalizePrivateKey(value: string | undefined): `0x${string}` | null {
+  const trimmed = value?.trim() ?? "";
+  if (!trimmed) return null;
+  const withPrefix = trimmed.startsWith("0x") ? trimmed : `0x${trimmed}`;
+  if (!/^0x[0-9a-fA-F]{64}$/.test(withPrefix)) return null;
+  return withPrefix as `0x${string}`;
+}
+
+function deriveAddressFromPrivateKey(
+  privateKey: `0x${string}` | null,
+): `0x${string}` | null {
+  if (!privateKey) return null;
+  try {
+    const privateKeyBytes = hexToBytes(privateKey, { size: 32 });
+    const publicKey = toHex(secp256k1.getPublicKey(privateKeyBytes, false));
+    return publicKeyToAddress(publicKey) as `0x${string}`;
+  } catch {
+    return null;
+  }
 }
 
 const FOOTER_SOCIALS = [
@@ -457,10 +481,28 @@ export function App() {
   const isStreamUiMode = import.meta.env.MODE === "stream-ui";
   const isE2eDebugMode =
     isE2eMode && new URLSearchParams(window.location.search).has("debug");
+  const configuredHeadlessEvmPrivateKey = useMemo(
+    () =>
+      normalizePrivateKey(
+        import.meta.env.VITE_EVM_PRIVATE_KEY ||
+          import.meta.env.VITE_HEADLESS_EVM_PRIVATE_KEY ||
+          import.meta.env.VITE_E2E_EVM_PRIVATE_KEY ||
+          "",
+      ),
+    [],
+  );
+  const configuredHeadlessEvmAddress = useMemo(
+    () => deriveAddressFromPrivateKey(configuredHeadlessEvmPrivateKey),
+    [configuredHeadlessEvmPrivateKey],
+  );
+  const effectiveEvmWalletAddress =
+    evmWalletAddress ?? configuredHeadlessEvmAddress ?? null;
   // Only poll chain data when a wallet is connected (saves unnecessary RPC calls for spectators).
-  const shouldPollChainData = Boolean(!isStreamUiMode && (isE2eMode || evmWalletAddress));
+  const shouldPollChainData = Boolean(
+    !isStreamUiMode && (isE2eMode || effectiveEvmWalletAddress),
+  );
   // In stream-ui mode treat wallet as disconnected so invite/points fetches don't fire.
-  const pointsWalletAddress = isStreamUiMode ? null : (evmWalletAddress ?? null);
+  const pointsWalletAddress = isStreamUiMode ? null : effectiveEvmWalletAddress;
   const invitePlatformQuery = "evm" as const;
 
   const [surfaceMode, setSurfaceMode] = useState<"DUELS" | "MODELS">("DUELS");
@@ -1293,7 +1335,15 @@ const [hmBottomTab, setHmBottomTab] = useState<
                     mounted,
                   }) => {
                     if (!mounted || !account)
-                      return (
+                      return effectiveEvmWalletAddress ? (
+                        <button
+                          type="button"
+                          className="hm-header-mob-wallet-btn hm-header-mob-wallet-btn--linked"
+                          title={effectiveEvmWalletAddress}
+                        >
+                          ⬡ {truncateAddr(effectiveEvmWalletAddress)}
+                        </button>
+                      ) : (
                         <button
                           type="button"
                           className="hm-header-mob-wallet-btn"
@@ -1393,17 +1443,25 @@ const [hmBottomTab, setHmBottomTab] = useState<
               >
                 🏆
               </button>
-              <ConnectButton.Custom>
-                {({
-                  openConnectModal,
-                  openAccountModal,
-                  openChainModal,
+                <ConnectButton.Custom>
+                  {({
+                    openConnectModal,
+                    openAccountModal,
+                    openChainModal,
                   account,
-                  chain,
-                  mounted,
-                }) => {
-                  if (!mounted || !account)
-                    return (
+                    chain,
+                    mounted,
+                  }) => {
+                    if (!mounted || !account)
+                    return effectiveEvmWalletAddress ? (
+                      <button
+                        type="button"
+                        className="hm-wallet-btn hm-wallet-btn--linked"
+                        title={effectiveEvmWalletAddress}
+                      >
+                        {truncateAddr(effectiveEvmWalletAddress)}
+                      </button>
+                    ) : (
                       <button
                         type="button"
                         className="hm-wallet-btn"

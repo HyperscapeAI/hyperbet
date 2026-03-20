@@ -113,7 +113,12 @@ export abstract class BaseAgent {
         ctx: SimContext,
     ): Promise<string[]> {
         const logs: string[] = [];
-        for (const action of actions) {
+        const scenarioMode = ctx.scenarioProfile != null;
+        const plannedActions = scenarioMode ? actions.slice(0, 2) : actions;
+        const actionTimeoutMs = scenarioMode ? 3_000 : 10_000;
+        const receiptTimeoutMs = scenarioMode ? 3_000 : 10_000;
+        const postActionSleepMs = scenarioMode ? 1 : 25;
+        for (const action of plannedActions) {
             try {
                 if (action.type === "placeOrder" && action.side && action.price && action.amount) {
                     const valueNeeded = quoteWithFees(
@@ -134,12 +139,12 @@ export abstract class BaseAgent {
                             ORDER_FLAG_GTC,
                             { value: valueNeeded },
                         ),
-                        10_000,
+                        actionTimeoutMs,
                         `${this.config.name} placeOrder`,
                     );
                     const receipt: any = await withTimeout(
                         tx.wait(),
-                        10_000,
+                        receiptTimeoutMs,
                         `${this.config.name} placeOrder receipt`,
                     );
                     this.tradeCount++;
@@ -162,7 +167,7 @@ export abstract class BaseAgent {
                     logs.push(
                         `[${this.config.name}] ${sideLabel} @${action.price} x${action.amount} (order #${orderId})`,
                     );
-                    await sleep(25);
+                    await sleep(postActionSleepMs);
                 } else if (action.type === "cancelOrder" && action.orderId) {
                     try {
                         const tx: any = await withTimeout(
@@ -171,16 +176,16 @@ export abstract class BaseAgent {
                                 MARKET_KIND_DUEL_WINNER,
                                 action.orderId,
                             ),
-                            10_000,
+                            actionTimeoutMs,
                             `${this.config.name} cancelOrder`,
                         );
                         await withTimeout(
                             tx.wait(),
-                            10_000,
+                            receiptTimeoutMs,
                             `${this.config.name} cancelOrder receipt`,
                         );
                         logs.push(`[${this.config.name}] CANCEL order #${action.orderId}`);
-                        await sleep(25);
+                        await sleep(postActionSleepMs);
                     } catch {
                         // Order was already filled or cancelled — silently clean up
                     }

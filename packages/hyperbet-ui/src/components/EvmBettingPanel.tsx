@@ -15,9 +15,19 @@ import {
   hexToBytes,
   http,
   parseUnits,
+  toHex,
   type Address,
 } from "viem";
-import { privateKeyToAccount } from "viem/accounts";
+import {
+  publicKeyToAddress,
+  sign,
+  signAuthorization,
+  signMessage,
+  signTransaction,
+  signTypedData,
+  toAccount,
+} from "viem/accounts";
+import { secp256k1 } from "@noble/curves/secp256k1.js";
 
 import { useChain } from "../lib/ChainContext";
 import { getEvmChainConfig } from "../lib/chainConfig";
@@ -63,6 +73,36 @@ import { type Trade } from "./RecentTrades";
 type BetSide = "YES" | "NO";
 
 const MARKET_KIND_DUEL_WINNER = 0;
+
+function createStrictPrivateKeyAccount(privateKey: `0x${string}`) {
+  const privateKeyBytes = hexToBytes(privateKey, { size: 32 });
+  const publicKey = toHex(secp256k1.getPublicKey(privateKeyBytes, false));
+  const address = publicKeyToAddress(publicKey);
+  const account = toAccount({
+    address,
+    async sign({ hash }) {
+      return sign({ hash, privateKey, to: "hex" });
+    },
+    async signAuthorization(authorization) {
+      return signAuthorization({ ...authorization, privateKey });
+    },
+    async signMessage({ message }) {
+      return signMessage({ message, privateKey });
+    },
+    async signTransaction(transaction, { serializer } = {}) {
+      return signTransaction({ privateKey, transaction, serializer });
+    },
+    async signTypedData(typedData) {
+      return signTypedData({ ...typedData, privateKey });
+    },
+  });
+
+  return {
+    ...account,
+    publicKey,
+    source: "privateKey" as const,
+  };
+}
 
 function normalizePrivateKey(value: string): `0x${string}` | null {
   const trimmed = value.trim();
@@ -344,28 +384,17 @@ export function EvmBettingPanel({
     if (configuredHeadlessPrivateKey) {
       try {
         return {
-          account: privateKeyToAccount(configuredHeadlessPrivateKey),
+          account: createStrictPrivateKeyAccount(configuredHeadlessPrivateKey),
           error: null,
         };
-      } catch (stringError) {
-        try {
-          return {
-            account: privateKeyToAccount(
-              hexToBytes(
-                configuredHeadlessPrivateKey,
-              ) as unknown as `0x${string}`,
-            ),
-            error: null,
-          };
-        } catch (bytesError) {
-          const error =
-            bytesError instanceof Error
-              ? bytesError.message
-              : stringError instanceof Error
-                ? stringError.message
-                : "failed to create e2e account";
-          return { account: null, error };
-        }
+      } catch (error) {
+        return {
+          account: null,
+          error:
+            error instanceof Error
+              ? error.message
+              : "failed to create e2e account",
+        };
       }
     }
 
@@ -767,6 +796,48 @@ export function EvmBettingPanel({
   useEffect(() => {
     setOptimisticPosition(null);
   }, [activeChain, duelKeyHex, effectiveAddress]);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !import.meta.env.DEV) return;
+    (
+      window as typeof window & {
+        __hyperbetEvmPanelDebug?: Record<string, unknown>;
+      }
+    ).__hyperbetEvmPanelDebug = {
+      activeChain,
+      chainConfigReady: Boolean(chainConfig),
+      configuredHeadlessPrivateKey: Boolean(configuredHeadlessPrivateKey),
+      configuredHeadlessAddress,
+      e2eAccountAddress:
+        typeof e2eAccount === "string" ? e2eAccount : e2eAccount?.address,
+      e2eAccountError: e2eAccountResult.error,
+      e2eWalletClientReady: Boolean(e2eWalletClient),
+      wagmiAddress: address ?? null,
+      wagmiWalletClientReady: Boolean(walletClient),
+      effectiveAddress: effectiveAddress ?? null,
+      effectiveWalletClientReady: Boolean(effectiveWalletClient),
+      walletConnected,
+      duelKeyHex,
+      lifecycleStatus: effectiveLifecycleMarket?.lifecycleStatus ?? null,
+      marketStatus: marketMeta?.status ?? null,
+    };
+  }, [
+    activeChain,
+    address,
+    chainConfig,
+    configuredHeadlessAddress,
+    configuredHeadlessPrivateKey,
+    duelKeyHex,
+    e2eAccount,
+    e2eAccountResult.error,
+    e2eWalletClient,
+    effectiveAddress,
+    effectiveLifecycleMarket?.lifecycleStatus,
+    effectiveWalletClient,
+    marketMeta?.status,
+    walletClient,
+    walletConnected,
+  ]);
 
 
 

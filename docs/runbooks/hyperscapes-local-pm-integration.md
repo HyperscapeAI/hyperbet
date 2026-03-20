@@ -32,6 +32,12 @@ requirements.
 This split is required because the Hyperscapes server provides duel telemetry,
 while the keeper service provides prediction-market state.
 
+For local write-path smoke, the runner can boot fresh anvil-backed BSC and
+AVAX deployments before starting the keeper. That path seeds fresh local EVM
+contracts from the repo's local E2E setup scripts and is the preferred default
+when you want visible market movement without depending on funded testnet
+writer roles.
+
 ## Scope
 
 The truthful local integrated lifecycle today is:
@@ -133,13 +139,17 @@ Defaults:
 The script:
 
 1. starts the sibling Hyperscapes duel stack with Hyperbet disabled there
-2. starts the local Hyperbet EVM keeper service against
+2. when `PM_LOCAL_EVM_MODE=anvil` (the default), starts local anvil-backed BSC
+   and AVAX deployments by invoking the local E2E seeding scripts under
+   `packages/hyperbet-bsc/app/tests/e2e/` and
+   `packages/hyperbet-avax/app/tests/e2e/`
+3. starts the local Hyperbet EVM keeper service against
    `http://127.0.0.1:5555/api/streaming/state`
-3. starts the local Hyperbet EVM app pointed at the keeper service
-4. opens both local UIs by default:
+4. starts the local Hyperbet EVM app pointed at the keeper service
+5. opens both local UIs by default:
    - Hyperscapes stream UI: `http://127.0.0.1:3333/?page=stream`
    - Hyperbet EVM UI: `http://127.0.0.1:4179/?debug`
-5. starts the PM soak follow monitor in the background, which records JSON
+6. starts the PM soak follow monitor in the background, which records JSON
    state plus paired UI screenshots into:
    - `output/playwright/pm-soak/<timestamp>/`
 
@@ -170,6 +180,12 @@ Relevant writer env names:
 - `TESTNET_MARKET_OPERATOR_PRIVATE_KEY`
 - `TESTNET_FINALIZER_PRIVATE_KEY`
 - fallback: `EVM_KEEPER_PRIVATE_KEY`
+
+When `PM_LOCAL_EVM_MODE=anvil`, the runner overrides those writer envs with the
+default local-anvil admin key used by the local E2E EVM seeding scripts. The
+local anvil ports default to `18545` for BSC and `18546` for AVAX, and the
+runner derives the seeded oracle/CLOB addresses from each chain's local
+`state.json`.
 
 If these are missing, the integrated stack still boots, but local duel events
 cannot open and resolve deployed BSC/AVAX markets. In that case the runner

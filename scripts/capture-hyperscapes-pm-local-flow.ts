@@ -39,6 +39,12 @@ const screenshotTimeoutMs = Number.parseInt(
   process.env.CAPTURE_SCREENSHOT_TIMEOUT_MS || "30000",
   10,
 );
+const hyperscapesReadySelector =
+  process.env.CAPTURE_HYPERSCAPES_READY_SELECTOR ||
+  "body:not(:has(.loading-screen))";
+const hyperbetReadySelector =
+  process.env.CAPTURE_HYPERBET_READY_SELECTOR ||
+  "div[data-testid='current-match-id']:not(:has-text('-'))";
 
 let stopping = false;
 let captureIndex = 0;
@@ -174,7 +180,11 @@ async function fetchJson<T>(url: string): Promise<T> {
   return (await response.json()) as T;
 }
 
-async function takeScreenshot(url: string, filePath: string): Promise<void> {
+async function takeScreenshot(
+  url: string,
+  filePath: string,
+  waitForSelector?: string,
+): Promise<void> {
   const args = [
     "playwright",
     "screenshot",
@@ -185,11 +195,20 @@ async function takeScreenshot(url: string, filePath: string): Promise<void> {
     "--full-page",
     "--timeout",
     String(screenshotTimeoutMs),
-    "--wait-for-timeout",
-    String(screenshotWaitMs),
     url,
     filePath,
   ];
+
+  if (waitForSelector) {
+    args.splice(args.length - 2, 0, "--wait-for-selector", waitForSelector);
+  }
+
+  args.splice(
+    args.length - 2,
+    0,
+    "--wait-for-timeout",
+    String(screenshotWaitMs),
+  );
 
   await execFileAsync("bunx", args, {
     cwd: appCwd,
@@ -233,22 +252,26 @@ async function recordEvent(
   };
 
   await writeFile(`${prefix}.json`, JSON.stringify(eventState, null, 2));
-  await takeScreenshot(hyperscapesUiUrl, `${prefix}.hyperscapes.png`).catch(
-    (error) => {
-      console.error(
-        `[pm-local:capture] hyperscapes screenshot failed for ${rawLabel}: ${String(error)}`,
-      );
-      throw error;
-    },
-  );
-  await takeScreenshot(hyperbetUiUrl, `${prefix}.hyperbet.png`).catch(
-    (error) => {
-      console.error(
-        `[pm-local:capture] hyperbet screenshot failed for ${rawLabel}: ${String(error)}`,
-      );
-      throw error;
-    },
-  );
+  await takeScreenshot(
+    hyperscapesUiUrl,
+    `${prefix}.hyperscapes.png`,
+    hyperscapesReadySelector,
+  ).catch((error) => {
+    console.error(
+      `[pm-local:capture] hyperscapes screenshot failed for ${rawLabel}: ${String(error)}`,
+    );
+    throw error;
+  });
+  await takeScreenshot(
+    hyperbetUiUrl,
+    `${prefix}.hyperbet.png`,
+    hyperbetReadySelector,
+  ).catch((error) => {
+    console.error(
+      `[pm-local:capture] hyperbet screenshot failed for ${rawLabel}: ${String(error)}`,
+    );
+    throw error;
+  });
 
   console.log(`[pm-local:capture] captured ${rawLabel}`);
 }
@@ -279,6 +302,8 @@ async function main(): Promise<void> {
         activeMarketsUrl,
         pollMs,
         maxRuntimeMs,
+        hyperscapesReadySelector,
+        hyperbetReadySelector,
       },
       null,
       2,
@@ -300,7 +325,7 @@ async function main(): Promise<void> {
       const marketCount = (activeMarkets.markets || []).length;
 
       const eventLabels: string[] = [];
-      if (captureIndex === 0) {
+      if (captureIndex === 0 && phase !== "IDLE") {
         eventLabels.push("initial");
       }
       if (
