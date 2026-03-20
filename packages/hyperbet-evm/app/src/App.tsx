@@ -54,6 +54,7 @@ import { getEvmChainConfig } from "@hyperbet/ui/lib/chainConfig";
 import {
   normalizePredictionMarketDuelKeyHex,
   usePredictionMarketOverview,
+  usePredictionMarketSyncStatus,
 } from "@hyperbet/ui/lib/predictionMarkets";
 
 // ── Shared UI utilities ──────────────────────────────────────────────────────
@@ -612,6 +613,7 @@ export function App() {
     refresh: refreshMarketOverview,
     error: marketOverviewError,
   } = usePredictionMarketOverview(activeEvmChain);
+  const { data: syncStatus } = usePredictionMarketSyncStatus();
   const requestOverviewRefresh = useCallback(async () => {
     await refreshMarketOverview();
   }, [refreshMarketOverview]);
@@ -968,6 +970,15 @@ export function App() {
   const streamedDuelKey = normalizePredictionMarketDuelKeyHex(
     liveCycle?.duelKeyHex ?? null,
   );
+  const rendererHealth =
+    liveCycle?.rendererHealth ?? syncStatus?.rendererHealth ?? null;
+  const rendererUnhealthy = rendererHealth?.ready === false;
+  const sourceFreshnessDegraded =
+    (syncStatus?.sourceEventAgeMs ?? 0) > 15_000 ||
+    (syncStatus?.rendererHealthAgeMs ?? 0) > 15_000;
+  const sourceSyncDegraded =
+    !rendererUnhealthy &&
+    (Boolean(syncStatus?.degradedReason) || sourceFreshnessDegraded);
   const streamMarketAligned = !liveOverviewDuelKey
     ? true
     : streamedDuelKey === liveOverviewDuelKey;
@@ -985,11 +996,16 @@ export function App() {
         : recentSettlementDuel?.phase ?? copy.phaseIdle;
   const streamIssueText = !streamMarketAligned
     ? copy.streamDriftDetected
-    : streamSurfaceUnavailable
+    : rendererUnhealthy
       ? copy.rendererUnhealthy
-      : marketOverviewError
+      : sourceSyncDegraded || streamSurfaceUnavailable || marketOverviewError
         ? copy.waitingForStream
         : null;
+  const streamIssuePillText = !streamMarketAligned
+    ? copy.streamDriftDetected
+    : rendererUnhealthy
+      ? copy.rendererUnhealthy
+      : copy.waitingForStream;
   const shouldRenderTruthBlock = Boolean(
     streamIssueText || recentSettlementMarket || recentSettlementDuel,
   );
@@ -1101,7 +1117,7 @@ const [hmBottomTab, setHmBottomTab] = useState<
                 <span className="hm-truth-banner-status">{streamIssueText}</span>
               </div>
               <span className="hm-truth-pill hm-truth-pill--danger">
-                {copy.streamDriftDetected}
+                {streamIssuePillText}
               </span>
             </div>
           ) : null}

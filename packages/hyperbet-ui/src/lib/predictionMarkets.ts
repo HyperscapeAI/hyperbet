@@ -15,6 +15,7 @@ import { GAME_API_URL } from "./config";
 
 const ACTIVE_PREDICTION_MARKETS_URL = `${GAME_API_URL.replace(/\/$/, "")}/api/arena/prediction-markets/active`;
 const OVERVIEW_PREDICTION_MARKETS_URL = `${GAME_API_URL.replace(/\/$/, "")}/api/arena/prediction-markets/overview`;
+const SYNC_STATUS_URL = `${GAME_API_URL.replace(/\/$/, "")}/api/sync/status`;
 const DEFAULT_POLL_INTERVAL_MS = 5_000;
 
 export type PredictionMarketsDuelSnapshot = {
@@ -35,6 +36,29 @@ export type PredictionMarketsOverviewResponse = {
   live: PredictionMarketsResponse | null;
   recentSettlement: PredictionMarketsResponse | null;
   updatedAt: number | null;
+};
+
+export type PredictionMarketRendererHealth = {
+  ready: boolean;
+  degradedReason: string | null;
+  updatedAt: number | null;
+};
+
+export type PredictionMarketSyncStatusResponse = {
+  sourceEpoch: number | null;
+  sourceLatestSeq: number | null;
+  lastSeenSeq: number | null;
+  lastAppliedSeq: number | null;
+  applyLagMs: number | null;
+  sourceEventAgeMs: number | null;
+  replayMode: string | null;
+  degradedReason: string | null;
+  rendererHealth: PredictionMarketRendererHealth | null;
+  rendererHealthAgeMs: number | null;
+  lastEventReceivedAt: number | null;
+  lastAppliedAt: number | null;
+  connectedAt: number | null;
+  enabled: boolean;
 };
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -96,6 +120,51 @@ export function parsePredictionMarketsOverviewResponse(
   };
 }
 
+function parseRendererHealth(
+  payload: unknown,
+): PredictionMarketRendererHealth | null {
+  const candidate = asRecord(payload);
+  if (!candidate) return null;
+  return {
+    ready: candidate.ready === true,
+    degradedReason:
+      typeof candidate.degradedReason === "string"
+        ? candidate.degradedReason
+        : null,
+    updatedAt: normalizePredictionMarketTimestamp(candidate.updatedAt),
+  };
+}
+
+export function parsePredictionMarketSyncStatusResponse(
+  payload: unknown,
+): PredictionMarketSyncStatusResponse | null {
+  const candidate = asRecord(payload);
+  if (!candidate) return null;
+  return {
+    sourceEpoch: normalizePredictionMarketTimestamp(candidate.sourceEpoch),
+    sourceLatestSeq: normalizePredictionMarketTimestamp(candidate.sourceLatestSeq),
+    lastSeenSeq: normalizePredictionMarketTimestamp(candidate.lastSeenSeq),
+    lastAppliedSeq: normalizePredictionMarketTimestamp(candidate.lastAppliedSeq),
+    applyLagMs: normalizePredictionMarketTimestamp(candidate.applyLagMs),
+    sourceEventAgeMs: normalizePredictionMarketTimestamp(candidate.sourceEventAgeMs),
+    replayMode: typeof candidate.replayMode === "string" ? candidate.replayMode : null,
+    degradedReason:
+      typeof candidate.degradedReason === "string"
+        ? candidate.degradedReason
+        : null,
+    rendererHealth: parseRendererHealth(candidate.rendererHealth),
+    rendererHealthAgeMs: normalizePredictionMarketTimestamp(
+      candidate.rendererHealthAgeMs,
+    ),
+    lastEventReceivedAt: normalizePredictionMarketTimestamp(
+      candidate.lastEventReceivedAt,
+    ),
+    lastAppliedAt: normalizePredictionMarketTimestamp(candidate.lastAppliedAt),
+    connectedAt: normalizePredictionMarketTimestamp(candidate.connectedAt),
+    enabled: candidate.enabled !== false,
+  };
+}
+
 export async function fetchActivePredictionMarkets(
   signal?: AbortSignal,
 ): Promise<PredictionMarketsResponse> {
@@ -153,6 +222,14 @@ export async function fetchPredictionMarketsOverview(
     recentSettlement: null,
     updatedAt: live.updatedAt,
   };
+}
+
+export async function fetchPredictionMarketSyncStatus(
+  signal?: AbortSignal,
+): Promise<PredictionMarketSyncStatusResponse | null> {
+  const payload = await fetchJsonWithFallback<unknown>(SYNC_STATUS_URL, signal);
+  if (!payload) return null;
+  return parsePredictionMarketSyncStatusResponse(payload);
 }
 
 export function selectPredictionMarketLifecycleRecord(
@@ -329,6 +406,68 @@ export function usePredictionMarketOverview(
     liveMarket: live,
     recentSettlementMarket: recentSettlement,
     isLoading,
+    error,
+    refresh,
+  };
+}
+
+export function usePredictionMarketSyncStatus(
+  options: {
+    disabled?: boolean;
+    pollIntervalMs?: number;
+  } = {},
+) {
+  const { disabled = false, pollIntervalMs = DEFAULT_POLL_INTERVAL_MS } =
+    options;
+  const [data, setData] = useState<PredictionMarketSyncStatusResponse | null>(
+    null,
+  );
+  const [error, setError] = useState<string | null>(null);
+
+  const refresh = useCallback(
+    async (signal?: AbortSignal) => {
+      if (disabled) return null;
+      try {
+        const nextData = await fetchPredictionMarketSyncStatus(signal);
+        setData(nextData);
+        setError(null);
+        return nextData;
+      } catch (refreshError) {
+        if (!signal?.aborted) {
+          setError(
+            refreshError instanceof Error
+              ? refreshError.message
+              : "prediction market sync status refresh failed",
+          );
+        }
+        return null;
+      }
+    },
+    [disabled],
+  );
+
+  useEffect(() => {
+    if (disabled) {
+      setData(null);
+      setError(null);
+      return;
+    }
+
+    const controller = new AbortController();
+    void refresh(controller.signal);
+    const intervalId = window.setInterval(() => {
+      const pollController = new AbortController();
+      void refresh(pollController.signal);
+    }, pollIntervalMs);
+
+    return () => {
+      controller.abort();
+      window.clearInterval(intervalId);
+    };
+  }, [disabled, pollIntervalMs, refresh]);
+
+  return {
+    data,
     error,
     refresh,
   };

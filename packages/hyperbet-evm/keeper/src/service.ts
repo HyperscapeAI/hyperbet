@@ -2118,6 +2118,11 @@ function applyRecentSettlementRefresh(
 }
 
 function syncStatusPayload(): Record<string, unknown> {
+  const rendererHealth = betSyncLatestEvent?.rendererHealth ?? null;
+  const rendererDegradedReason =
+    rendererHealth && rendererHealth.ready === false
+      ? rendererHealth.degradedReason ?? "renderer_unhealthy"
+      : null;
   return {
     sourceEpoch: betSyncCheckpoint.sourceEpoch,
     sourceLatestSeq: betSyncSourceLatestSeq,
@@ -2129,8 +2134,20 @@ function syncStatusPayload(): Record<string, unknown> {
       betSyncLastAppliedAt != null
         ? Math.max(0, Date.now() - betSyncLastAppliedAt)
         : 0,
+    sourceEventAgeMs:
+      betSyncLatestEvent?.emittedAt != null
+        ? Math.max(0, Date.now() - betSyncLatestEvent.emittedAt)
+        : null,
     replayMode: betSyncReplayMode,
-    degradedReason: betSyncCheckpoint.degradedReason ?? betSyncLastError,
+    degradedReason:
+      rendererDegradedReason ??
+      betSyncCheckpoint.degradedReason ??
+      betSyncLastError,
+    rendererHealth,
+    rendererHealthAgeMs:
+      rendererHealth?.updatedAt != null
+        ? Math.max(0, Date.now() - rendererHealth.updatedAt)
+        : null,
     lastEventReceivedAt: betSyncLastEventReceivedAt,
     lastAppliedAt: betSyncLastAppliedAt,
     connectedAt: betSyncConnectedAt,
