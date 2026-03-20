@@ -1,6 +1,7 @@
 import { createRequire } from "node:module";
 
 import type {
+  AmmPositionRecord,
   ClaimBacklogInput,
   ClaimBacklogItem,
   MarketMakerStateStore,
@@ -81,6 +82,18 @@ CREATE TABLE IF NOT EXISTS outbox (
 );
 ALTER TABLE outbox ADD COLUMN IF NOT EXISTS lease_owner TEXT;
 ALTER TABLE outbox ADD COLUMN IF NOT EXISTS lease_expires_at BIGINT;
+CREATE TABLE IF NOT EXISTS amm_positions (
+  position_key TEXT PRIMARY KEY,
+  chain_key TEXT NOT NULL,
+  market_ref TEXT NOT NULL,
+  bet_id TEXT NOT NULL,
+  creator TEXT NOT NULL,
+  yes_balance TEXT NOT NULL DEFAULT '0',
+  no_balance TEXT NOT NULL DEFAULT '0',
+  cost_basis TEXT NOT NULL DEFAULT '0',
+  settled BOOLEAN NOT NULL DEFAULT FALSE,
+  updated_at BIGINT NOT NULL
+);
 `;
 
 function parseOrderRecord(row: Record<string, any>): OrderRecord {
@@ -526,6 +539,51 @@ export class PostgresMarketMakerStateStore implements MarketMakerStateStore {
          cursor_value = EXCLUDED.cursor_value,
          updated_at = EXCLUDED.updated_at`,
       [cursorKey, cursorValue, updatedAt],
+    );
+  }
+
+  async listAmmPositions(): Promise<AmmPositionRecord[]> {
+    const result = await this.pool.query(
+      `SELECT * FROM amm_positions ORDER BY updated_at DESC`,
+    );
+    return result.rows.map((row: Record<string, any>) => ({
+      positionKey: row.position_key,
+      chainKey: row.chain_key,
+      marketRef: row.market_ref,
+      betId: row.bet_id,
+      creator: row.creator,
+      yesBalance: row.yes_balance,
+      noBalance: row.no_balance,
+      costBasis: row.cost_basis,
+      settled: row.settled,
+      updatedAt: Number(row.updated_at),
+    }));
+  }
+
+  async upsertAmmPosition(record: AmmPositionRecord): Promise<void> {
+    await this.pool.query(
+      `INSERT INTO amm_positions (
+        position_key, chain_key, market_ref, bet_id, creator,
+        yes_balance, no_balance, cost_basis, settled, updated_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+      ON CONFLICT (position_key) DO UPDATE SET
+        yes_balance = EXCLUDED.yes_balance,
+        no_balance = EXCLUDED.no_balance,
+        cost_basis = EXCLUDED.cost_basis,
+        settled = EXCLUDED.settled,
+        updated_at = EXCLUDED.updated_at`,
+      [
+        record.positionKey,
+        record.chainKey,
+        record.marketRef,
+        record.betId,
+        record.creator,
+        record.yesBalance,
+        record.noBalance,
+        record.costBasis,
+        record.settled,
+        record.updatedAt,
+      ],
     );
   }
 }

@@ -3,6 +3,7 @@ import { createPostgresMarketMakerStateStore } from "./postgres.ts";
 
 export { createInMemoryMarketMakerStateStore } from "./memory.ts";
 export type {
+  AmmPositionRecord,
   ClaimBacklogItem,
   ClaimBacklogInput,
   ManagedOrderStatus,

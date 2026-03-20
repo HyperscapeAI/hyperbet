@@ -62,6 +62,18 @@ function defenseStrength(input: {
     scenarioBias = (chain.mempoolFriction + chain.mevRisk) * 0.18;
   } else if (scenario === "coordinated_resolution_push") {
     scenarioBias = (chain.oracleLagAmplifier + chain.mevRisk) * 0.14;
+  } else if (scenario === "amm_sandwich_attack") {
+    scenarioBias = chain.mevRisk * 0.22;
+  } else if (scenario === "amm_reserve_manipulation") {
+    scenarioBias = (chain.mempoolFriction + chain.mevRisk) * 0.1;
+  } else if (scenario === "amm_stale_price_arb") {
+    scenarioBias = chain.oracleLagAmplifier * 0.18;
+  } else if (scenario === "amm_slippage_griefing") {
+    scenarioBias = (chain.mevRisk + chain.mempoolFriction) * 0.12;
+  } else if (scenario === "amm_token_drain") {
+    scenarioBias = chain.mempoolFriction * 0.1;
+  } else if (scenario === "amm_expiry_race") {
+    scenarioBias = (chain.mevRisk + chain.oracleLagAmplifier) * 0.12;
   }
 
   return clamp(0.18 + guardQuality * 0.72 - chainHeadwind * 0.22 - stress * 0.08 - scenarioBias, 0.02, 0.96);
@@ -727,6 +739,135 @@ export function simulateScenario(input: {
             feeBps: chain.feeBps,
             bid,
             ask,
+          });
+        }
+      }
+    }
+
+    // --- AMM scenarios ---
+
+    if (scenario === "amm_sandwich_attack") {
+      // Front-run + back-run: adversary trades before and after MM's intended trade
+      const sandwichChance = clamp(
+        intensity * (0.3 + chain.mevRisk * 0.25 + vuln.latency * 0.15),
+        0,
+        0.7,
+      );
+      if (rng.next() < sandwichChance) {
+        const frontSide: "buy" | "sell" = truePrice > quotePrice ? "sell" : "buy";
+        const frontQty = Math.round(1 + 3 * intensity + chain.mevRisk * 1.5);
+        tryExploitFill({
+          rng, guards, chain, vuln, scenario, state, divergence, staleTicks,
+          quotePrice: frontSide === "buy" ? bid : ask,
+          truePrice, side: frontSide, qty: frontQty,
+          feeBps: chain.feeBps, bid, ask,
+        });
+        if (rng.next() < 0.5) {
+          const backSide: "buy" | "sell" = frontSide === "buy" ? "sell" : "buy";
+          const backQty = Math.round(1 + 2 * intensity);
+          tryExploitFill({
+            rng, guards, chain, vuln, scenario, state, divergence, staleTicks,
+            quotePrice: backSide === "buy" ? bid : ask,
+            truePrice, side: backSide, qty: backQty,
+            feeBps: chain.feeBps, bid, ask,
+          });
+        }
+      }
+    }
+
+    if (scenario === "amm_reserve_manipulation") {
+      // Adversary trades to skew reserves before MM acts
+      const manipChance = clamp(
+        intensity * (0.35 + vuln.inventory * 0.35 + vuln.toxic * 0.2),
+        0,
+        0.85,
+      );
+      if (rng.next() < manipChance) {
+        const skewSide: "buy" | "sell" = rng.next() > 0.5 ? "buy" : "sell";
+        const qty = Math.round(3 + 6 * intensity + vuln.inventory * 3);
+        tryExploitFill({
+          rng, guards, chain, vuln, scenario, state, divergence, staleTicks,
+          quotePrice: skewSide === "buy" ? bid : ask,
+          truePrice, side: skewSide, qty,
+          feeBps: chain.feeBps, bid, ask,
+        });
+      }
+    }
+
+    if (scenario === "amm_stale_price_arb") {
+      // Exploit stale AMM price vs true fair value (similar to stale_signal but AMM-specific)
+      const staleFactor = clamp((staleTicks - guards.staleSignalMaxTicks) / 3, 0, 1);
+      const arbChance = clamp(
+        intensity * (0.3 + staleFactor * 0.8 + chain.oracleLagAmplifier * 0.2),
+        0,
+        0.92,
+      );
+      if (rng.next() < arbChance) {
+        const buySide = truePrice > signalPrice;
+        const qty = Math.round(2 + 4 * intensity + staleFactor * 5);
+        tryExploitFill({
+          rng, guards, chain, vuln, scenario, state, divergence, staleTicks,
+          quotePrice: buySide ? ask : bid,
+          truePrice, side: buySide ? "sell" : "buy", qty,
+          feeBps: chain.feeBps, bid, ask,
+        });
+      }
+    }
+
+    if (scenario === "amm_slippage_griefing") {
+      const griefChance = clamp(
+        intensity * (0.25 + vuln.toxic * 0.2 + chain.mevRisk * 0.15),
+        0,
+        0.65,
+      );
+      if (rng.next() < griefChance) {
+        const pushSide: "buy" | "sell" = rng.next() > 0.5 ? "buy" : "sell";
+        const largeQty = Math.round(2 + 4 * intensity + vuln.inventory * 2);
+        tryExploitFill({
+          rng, guards, chain, vuln, scenario, state, divergence, staleTicks,
+          quotePrice: pushSide === "buy" ? bid : ask,
+          truePrice, side: pushSide, qty: largeQty,
+          feeBps: chain.feeBps, bid, ask,
+        });
+      }
+    }
+
+    if (scenario === "amm_token_drain") {
+      const drainSide: "buy" | "sell" = state.inventory >= 0 ? "buy" : "sell";
+      const drainChance = clamp(
+        intensity * (0.12 + vuln.inventory * 0.15),
+        0,
+        0.35,
+      );
+      if (rng.next() < drainChance) {
+        const qty = Math.max(1, Math.round(1 + intensity + vuln.inventory * 0.5));
+        tryExploitFill({
+          rng, guards, chain, vuln, scenario, state, divergence, staleTicks,
+          quotePrice: drainSide === "buy" ? bid : ask,
+          truePrice, side: drainSide, qty,
+          feeBps: chain.feeBps, bid, ask,
+        });
+      }
+    }
+
+    if (scenario === "amm_expiry_race") {
+      const expiryWindow = tick > ticks - 30;
+      const timeRemaining = Math.max(0, ticks - tick);
+      const liquidityDecay = 1 - timeRemaining / ticks;
+      if (expiryWindow) {
+        const raceChance = clamp(
+          intensity * (0.3 + liquidityDecay * 0.35 + chain.mevRisk * 0.15),
+          0,
+          0.75,
+        );
+        if (rng.next() < raceChance) {
+          const raceSide: "buy" | "sell" = truePrice > signalPrice ? "sell" : "buy";
+          const qty = Math.round(2 + 3 * intensity + liquidityDecay * 3);
+          tryExploitFill({
+            rng, guards, chain, vuln, scenario, state, divergence, staleTicks,
+            quotePrice: raceSide === "buy" ? bid : ask,
+            truePrice, side: raceSide, qty,
+            feeBps: chain.feeBps, bid, ask,
           });
         }
       }

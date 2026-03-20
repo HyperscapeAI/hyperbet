@@ -110,6 +110,19 @@ export type OutboxInput = Omit<
   lastError?: string | null;
 };
 
+export type AmmPositionRecord = {
+  positionKey: string;
+  chainKey: string;
+  marketRef: string;
+  betId: string;
+  creator: string;
+  yesBalance: string;
+  noBalance: string;
+  costBasis: string;
+  settled: boolean;
+  updatedAt: number;
+};
+
 export type MarketMakerStateStore = {
   ensureReady(): Promise<void>;
   close(): Promise<void>;
@@ -152,4 +165,6 @@ export type MarketMakerStateStore = {
   failOutbox(id: number, lastError: string, availableAt: number): Promise<void>;
   getCursor(cursorKey: string): Promise<ReconciliationCursor | null>;
   setCursor(cursorKey: string, cursorValue: string, updatedAt?: number): Promise<void>;
+  listAmmPositions(): Promise<AmmPositionRecord[]>;
+  upsertAmmPosition(record: AmmPositionRecord): Promise<void>;
 };

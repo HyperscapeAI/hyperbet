@@ -42,6 +42,7 @@ export const PREDICTION_MARKET_RESERVED_METADATA_KEYS = [
   "cancellationReason",
 ] as const;
 export type PredictionMarketWinner = "NONE" | "A" | "B";
+export type PredictionMarketType = "clob" | "amm";
 export type PredictionMarketReservedMetadataKey =
   (typeof PREDICTION_MARKET_RESERVED_METADATA_KEYS)[number];
 
@@ -91,6 +92,7 @@ export interface BettingEvmDeployment {
   duelOracleAddress: string;
   goldClobAddress: string;
   goldAmmRouterAddress: string;
+  mUsdTokenAddress: string;
   adminAddress: string;
   marketOperatorAddress: string;
   treasuryAddress: string;
@@ -160,6 +162,8 @@ export interface ResolvedBettingEvmRuntimeEnv {
   rpcUrl: string;
   duelOracleAddress: string;
   goldClobAddress: string;
+  goldAmmRouterAddress: string;
+  mUsdTokenAddress: string;
 }
 
 export interface ExternalBetRecordPayload {
@@ -193,6 +197,7 @@ export interface PredictionMarketLifecycleRecord {
   txRef: string | null;
   syncedAt: number | null;
   metadata?: PredictionMarketLifecycleMetadata;
+  marketType?: PredictionMarketType;
 }
 
 export const BETTING_SOLANA_CLUSTERS: BettingSolanaCluster[] = [
@@ -274,6 +279,7 @@ const EVM_DEPLOYMENTS: Record<BettingEvmNetwork, BettingEvmDeployment> = {
     duelOracleAddress: "0xAd13D36b02f0F6C44d508824Ae9D407931D91f91",
     goldClobAddress: "0x067335E0b1F226a8e345a289B3b93Ed5377d636e",
     goldAmmRouterAddress: "",
+    mUsdTokenAddress: "",
     adminAddress: "0x7908b93DF1A91A5e1B83a4538107Db3c9131eED8",
     marketOperatorAddress: "0x99622633cF1e476C8bD9161f5B9d4F290a1D2Ea1",
     treasuryAddress: "0x5c5A3554F12875aBB63a6b8027b9A23C423F5C84",
@@ -304,6 +310,7 @@ const EVM_DEPLOYMENTS: Record<BettingEvmNetwork, BettingEvmDeployment> = {
     duelOracleAddress: "0x8F582bc1D34Ca6dA12ac46B7c7Fdec02f2465961",
     goldClobAddress: "0x443C09B1E7bb7bA3392b02500772B185654A6F33",
     goldAmmRouterAddress: "",
+    mUsdTokenAddress: "",
     adminAddress: "0x7908b93DF1A91A5e1B83a4538107Db3c9131eED8",
     marketOperatorAddress: "0x7908b93DF1A91A5e1B83a4538107Db3c9131eED8",
     treasuryAddress: "0x0262dC245f38d614d508D8BD680c69E3B6D26F4c",
@@ -334,6 +341,7 @@ const EVM_DEPLOYMENTS: Record<BettingEvmNetwork, BettingEvmDeployment> = {
     duelOracleAddress: "",
     goldClobAddress: "",
     goldAmmRouterAddress: "",
+    mUsdTokenAddress: "",
     adminAddress: "",
     marketOperatorAddress: "",
     treasuryAddress: "",
@@ -364,6 +372,7 @@ const EVM_DEPLOYMENTS: Record<BettingEvmNetwork, BettingEvmDeployment> = {
     duelOracleAddress: "0x63BF7f48A2795832C2b5f78172A1C6BE655F3a72",
     goldClobAddress: "0xb8c66D6895Bafd1B0027F2c0865865043064437C",
     goldAmmRouterAddress: "",
+    mUsdTokenAddress: "",
     adminAddress: "0x7908b93DF1A91A5e1B83a4538107Db3c9131eED8",
     marketOperatorAddress: "0x7908b93DF1A91A5e1B83a4538107Db3c9131eED8",
     treasuryAddress: "0x0262dC245f38d614d508D8BD680c69E3B6D26F4c",
@@ -394,6 +403,7 @@ const EVM_DEPLOYMENTS: Record<BettingEvmNetwork, BettingEvmDeployment> = {
     duelOracleAddress: "0xAd13D36b02f0F6C44d508824Ae9D407931D91f91",
     goldClobAddress: "0x067335E0b1F226a8e345a289B3b93Ed5377d636e",
     goldAmmRouterAddress: "",
+    mUsdTokenAddress: "",
     adminAddress: "0x7908b93DF1A91A5e1B83a4538107Db3c9131eED8",
     marketOperatorAddress: "0x99622633cF1e476C8bD9161f5B9d4F290a1D2Ea1",
     treasuryAddress: "0x5c5A3554F12875aBB63a6b8027b9A23C423F5C84",
@@ -424,6 +434,7 @@ const EVM_DEPLOYMENTS: Record<BettingEvmNetwork, BettingEvmDeployment> = {
     duelOracleAddress: "",
     goldClobAddress: "",
     goldAmmRouterAddress: "",
+    mUsdTokenAddress: "",
     adminAddress: "",
     marketOperatorAddress: "",
     treasuryAddress: "",
@@ -622,6 +633,16 @@ export function resolveBettingEvmRuntimeEnv(
             `CLOB_CONTRACT_ADDRESS_${chainUpper}`,
             `${chainUpper}_GOLD_CLOB_ADDRESS`,
           ]) ?? deployment.goldClobAddress,
+    goldAmmRouterAddress:
+      firstNonEmptyEnvValue(env, [
+        `AMM_ROUTER_ADDRESS_${chainUpper}`,
+        `${chainUpper}_GOLD_AMM_ROUTER_ADDRESS`,
+      ]) ?? deployment.goldAmmRouterAddress,
+    mUsdTokenAddress:
+      firstNonEmptyEnvValue(env, [
+        `MUSD_TOKEN_ADDRESS_${chainUpper}`,
+        `${chainUpper}_MUSD_TOKEN_ADDRESS`,
+      ]) ?? deployment.mUsdTokenAddress,
   };
 }
 

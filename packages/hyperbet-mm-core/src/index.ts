@@ -670,3 +670,170 @@ export function evaluateQuoteDecision(
     reason: null,
   };
 }
+
+// === AMM Market-Making Logic ===
+
+export interface AmmMarketSnapshot {
+  chainKey: BettingChainKey;
+  lifecycleStatus: PredictionMarketLifecycleStatus;
+  duelKey: string | null;
+  marketRef: string | null;
+  /** YES price as probability [0, 1] */
+  ammPriceYes: number;
+  reserveYes: number;
+  reserveNo: number;
+  liquidity: number;
+  betCloseTimeMs?: number | null;
+  lastStreamAtMs?: number | null;
+  lastOracleAtMs?: number | null;
+  lastRpcAtMs?: number | null;
+  exposure: MarketExposure;
+}
+
+export interface AmmTradeDecision {
+  action: "buy_yes" | "buy_no" | "sell_yes" | "sell_no" | "hold";
+  /** Collateral amount (buy) or token amount (sell) */
+  amount: number;
+  /** Fair value probability [0, 1] */
+  fairValue: number;
+  /** Current AMM price [0, 1] */
+  ammPrice: number;
+  /** Absolute deviation in basis points */
+  deviationBps: number;
+  risk: RiskState;
+  reason: string | null;
+}
+
+export interface AmmMarketMakerConfig {
+  /** Min deviation from fair value to trigger trade (bps) */
+  deviationThresholdBps: number;
+  /** Max collateral per trade */
+  maxTradeSize: number;
+  /** Min trade size */
+  minTradeSize: number;
+  /** Max total yes+no token holdings */
+  maxPositionSize: number;
+  /** Inventory imbalance trigger for rebalancing (bps) */
+  rebalanceThresholdBps: number;
+  /** Max drawdown before halting (bps) */
+  maxDrawdownBps: number;
+  /** Stale stream threshold (ms) */
+  staleStreamAfterMs: number;
+  /** Stale oracle threshold (ms) */
+  staleOracleAfterMs: number;
+  /** Stale RPC threshold (ms) */
+  staleRpcAfterMs: number;
+  /** Guard window before bet close (ms) */
+  betCloseGuardMs: number;
+}
+
+export const DEFAULT_AMM_MARKET_MAKER_CONFIG: AmmMarketMakerConfig = {
+  deviationThresholdBps: 300,
+  maxTradeSize: 100_000,
+  minTradeSize: 10_000,
+  maxPositionSize: 500_000,
+  rebalanceThresholdBps: 1_000,
+  maxDrawdownBps: 2_000,
+  staleStreamAfterMs: 3_000,
+  staleOracleAfterMs: 5_000,
+  staleRpcAfterMs: 5_000,
+  betCloseGuardMs: 5_000,
+};
+
+export function buildAmmTradeDecision(
+  snapshot: AmmMarketSnapshot,
+  signal: Pick<FairValueInput, "signalPrice" | "signalWeight"> = {},
+  config: AmmMarketMakerConfig = DEFAULT_AMM_MARKET_MAKER_CONFIG,
+  now = Date.now(),
+): AmmTradeDecision {
+  // Build risk state using a synthetic MarketSnapshot for gate reuse
+  const syntheticSnapshot: MarketSnapshot = {
+    chainKey: snapshot.chainKey,
+    lifecycleStatus: snapshot.lifecycleStatus,
+    duelKey: snapshot.duelKey,
+    marketRef: snapshot.marketRef,
+    bestBid: null,
+    bestAsk: null,
+    betCloseTimeMs: snapshot.betCloseTimeMs,
+    lastStreamAtMs: snapshot.lastStreamAtMs,
+    lastOracleAtMs: snapshot.lastOracleAtMs,
+    lastRpcAtMs: snapshot.lastRpcAtMs,
+    exposure: snapshot.exposure,
+  };
+  const syntheticConfig: MarketMakerConfig = {
+    ...DEFAULT_MARKET_MAKER_CONFIG,
+    maxDrawdownBps: config.maxDrawdownBps,
+    staleStreamAfterMs: config.staleStreamAfterMs,
+    staleOracleAfterMs: config.staleOracleAfterMs,
+    staleRpcAfterMs: config.staleRpcAfterMs,
+    betCloseGuardMs: config.betCloseGuardMs,
+  };
+  const risk = buildRiskState(syntheticSnapshot, syntheticConfig, now);
+
+  // Compute fair value: signal in [1,999] CLOB ticks → normalize to [0,1]
+  const clobFairValue = computeFairValue({
+    signalPrice: signal.signalPrice,
+    signalWeight: signal.signalWeight,
+    fallbackPrice: 500,
+    inventorySkew: computeInventorySkew(snapshot.exposure),
+    inventorySkewBps: DEFAULT_MARKET_MAKER_CONFIG.inventorySkewBps,
+  });
+  const fairValue = clobFairValue / 1000; // [0, 1]
+
+  const ammPrice = snapshot.ammPriceYes;
+  const deviation = ammPrice - fairValue;
+  const deviationBps = Math.round(Math.abs(deviation) * 10_000);
+
+  const hold = (reason: string | null): AmmTradeDecision => ({
+    action: "hold",
+    amount: 0,
+    fairValue,
+    ammPrice,
+    deviationBps,
+    risk,
+    reason,
+  });
+
+  // Circuit breaker
+  if (risk.circuitBreaker.active) {
+    return hold(risk.circuitBreaker.reason);
+  }
+
+  // Below deviation threshold — hold
+  if (deviationBps < config.deviationThresholdBps) {
+    return hold("within-threshold");
+  }
+
+  // Position limit check
+  const totalPosition =
+    snapshot.exposure.yes + snapshot.exposure.no +
+    snapshot.exposure.openYes + snapshot.exposure.openNo;
+  if (totalPosition >= config.maxPositionSize) {
+    return hold("position-limit");
+  }
+
+  // Size proportional to deviation, clamped
+  const deviationRatio = Math.min(1, deviationBps / 10_000);
+  const headroom = Math.max(0, config.maxPositionSize - totalPosition);
+  const rawSize = Math.round(config.maxTradeSize * deviationRatio);
+  const tradeSize = Math.min(rawSize, headroom, config.maxTradeSize);
+
+  if (tradeSize < config.minTradeSize) {
+    return hold("below-min-size");
+  }
+
+  // AMM price < fair value → YES is underpriced → buy YES
+  // AMM price > fair value → YES is overpriced → buy NO
+  const action: AmmTradeDecision["action"] =
+    deviation < 0 ? "buy_yes" : "buy_no";
+
+  return {
+    action,
+    amount: tradeSize,
+    fairValue,
+    ammPrice,
+    deviationBps,
+    risk,
+    reason: `deviation-${deviationBps}bps`,
+  };
+}

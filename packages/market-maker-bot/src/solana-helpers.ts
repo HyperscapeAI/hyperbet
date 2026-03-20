@@ -95,3 +95,58 @@ export function findPriceLevelPda(
     marketProgramId,
   )[0];
 }
+
+// --- AMM (lvr_amm) PDA helpers ---
+
+function betIdToBytes(betId: bigint): Buffer {
+  const buf = Buffer.alloc(8);
+  buf.writeBigUInt64LE(betId);
+  return buf;
+}
+
+export function findAmmConfigPda(ammProgramId: PublicKey): PublicKey {
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from("amm_config")],
+    ammProgramId,
+  )[0];
+}
+
+export function findAmmAdminStatePda(ammProgramId: PublicKey): PublicKey {
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from("admin_state")],
+    ammProgramId,
+  )[0];
+}
+
+export function findAmmBetPda(
+  ammProgramId: PublicKey,
+  betId: bigint,
+  creator: PublicKey,
+): PublicKey {
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from("bet"), betIdToBytes(betId), creator.toBuffer()],
+    ammProgramId,
+  )[0];
+}
+
+export function findAmmMintYesPda(
+  ammProgramId: PublicKey,
+  betId: bigint,
+  creator: PublicKey,
+): PublicKey {
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from("mint_yes"), betIdToBytes(betId), creator.toBuffer()],
+    ammProgramId,
+  )[0];
+}
+
+export function findAmmMintNoPda(
+  ammProgramId: PublicKey,
+  betId: bigint,
+  creator: PublicKey,
+): PublicKey {
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from("mint_no"), betIdToBytes(betId), creator.toBuffer()],
+    ammProgramId,
+  )[0];
+}

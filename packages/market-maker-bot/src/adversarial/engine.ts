@@ -128,6 +128,24 @@ export function scenarioIntensity(
       (1 + chain.mempoolFriction * 0.2)
     );
   }
+  if (scenario === "amm_sandwich_attack") {
+    return 0.5 * ((vuln.latency + vuln.toxic) / 2) * chainRisk * (1 + chain.mevRisk * 0.35);
+  }
+  if (scenario === "amm_reserve_manipulation") {
+    return 0.6 * ((vuln.inventory + vuln.toxic) / 2) * chainRisk;
+  }
+  if (scenario === "amm_stale_price_arb") {
+    return 0.62 * vuln.stale * chainRisk * (1 + chain.oracleLagAmplifier * 0.4);
+  }
+  if (scenario === "amm_slippage_griefing") {
+    return 0.58 * ((vuln.toxic + vuln.inventory) / 2) * chainRisk * (1 + chain.mevRisk * 0.3);
+  }
+  if (scenario === "amm_token_drain") {
+    return 0.3 * vuln.inventory * chainRisk;
+  }
+  if (scenario === "amm_expiry_race") {
+    return 0.48 * ((vuln.stale + vuln.latency + vuln.cancel) / 3) * chainRisk * (1 + chain.mevRisk * 0.2);
+  }
   return (
     0.6 *
     ((vuln.latency + vuln.cancel) / 2) *

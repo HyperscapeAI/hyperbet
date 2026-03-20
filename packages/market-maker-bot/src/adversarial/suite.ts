@@ -105,6 +105,12 @@ const LEGACY_SCENARIO_SEED_OFFSETS: Record<ScenarioId, number> = {
   quote_stuffing_burst: 18,
   cancel_storm_griefing: 19,
   sybil_identity_churn: 20,
+  amm_sandwich_attack: 21,
+  amm_reserve_manipulation: 22,
+  amm_stale_price_arb: 23,
+  amm_slippage_griefing: 24,
+  amm_token_drain: 25,
+  amm_expiry_race: 26,
 };
 
 function scenarioSeedOffset(scenario: ScenarioId): number {
