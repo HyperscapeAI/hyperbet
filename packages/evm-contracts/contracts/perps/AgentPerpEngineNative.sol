@@ -276,7 +276,7 @@ contract AgentPerpEngineNative is AccessControl, ReentrancyGuard {
         MarketState memory market = markets[agentId];
         MarketConfig memory config = marketConfigs[agentId];
         uint256 indexPrice = (market.settlementPrice != 0) ? market.settlementPrice : market.lastOraclePrice;
-        if (indexPrice == 0) revert StaleOracle();
+        if (indexPrice < 1) revert StaleOracle();
 
         int256 localSkew = int256(market.totalLongOI) - int256(market.totalShortOI);
         int256 premium = ((localSkew + sizeDelta / 2) * int256(ONE)) / int256(config.skewScale);

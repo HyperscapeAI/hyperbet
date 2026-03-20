@@ -34,7 +34,7 @@ contract SkillOracle is AccessControl {
     uint256 public globalMeanMu;
     uint256 private totalMu;
     uint256 public immutable basePrice;
-    uint256 public maxOracleDelay;
+    uint256 public immutable maxOracleDelay;
     bool public oraclePaused;
 
     event SkillUpdated(bytes32 indexed agentId, uint256 mu, uint256 sigma);
