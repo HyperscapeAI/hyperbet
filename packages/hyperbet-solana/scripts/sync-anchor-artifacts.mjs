@@ -54,6 +54,7 @@ const programNames = [
   "fight_oracle",
   "gold_clob_market",
   "gold_perps_market",
+  "lvr_amm",
 ];
 
 for (const programName of programNames) {
