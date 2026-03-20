@@ -645,6 +645,7 @@ if [[ "$PM_LOCAL_EVM_MODE" == "anvil" ]]; then
 fi
 
 echo "[pm-local] starting Hyperbet EVM keeper service on :$KEEPER_PORT"
+close_existing_anvil_listeners "$KEEPER_PORT"
 (
   cd "$ROOT"
     keeper_env=(
@@ -687,6 +688,7 @@ KEEPER_PID=$!
 wait_for_http "${KEEPER_URL}/status" "Hyperbet keeper service"
 
 echo "[pm-local] starting Hyperbet EVM app on :$APP_PORT"
+close_existing_anvil_listeners "$APP_PORT"
 (
   cd "$ROOT"
   app_env=(
@@ -711,6 +713,7 @@ echo "[pm-local] starting Hyperbet EVM app on :$APP_PORT"
   env "${app_env[@]}" "$BUN_BIN" run --cwd packages/hyperbet-evm/app dev \
     --mode "$APP_MODE" \
     --host \
+    --strictPort \
     --port "$APP_PORT"
 ) &
 APP_PID=$!
@@ -732,6 +735,9 @@ if [[ "$CAPTURE_LOCAL_UI_FLOW" == "true" ]]; then
       HYPERBET_UI_URL="$HYPERBET_UI_URL" \
       VITE_STREAM_URL="${VITE_STREAM_URL:-$HYPERSCAPES_UI_URL}" \
       SOURCE_STREAM_STATE_URL="${SOURCE_STREAM_STATE_URL:-${GAME_HTTP_URL}/api/streaming/state}" \
+      SOURCE_BET_SYNC_STATE_URL="${SOURCE_BET_SYNC_STATE_URL:-${GAME_HTTP_URL}/api/internal/bet-sync/state}" \
+      SOURCE_BET_SYNC_BEARER_TOKEN="${SOURCE_BET_SYNC_BEARER_TOKEN:-$STREAMING_VIEWER_ACCESS_TOKEN}" \
+      SOURCE_RTMP_STATUS_URL="${SOURCE_RTMP_STATUS_URL:-${GAME_HTTP_URL}/api/streaming/rtmp/status}" \
       STREAM_STATE_URL="${STREAM_STATE_URL:-${KEEPER_URL}/api/streaming/state}" \
       ACTIVE_MARKETS_URL="${KEEPER_URL}/api/arena/prediction-markets/active" \
       OVERVIEW_MARKETS_URL="${OVERVIEW_MARKETS_URL:-${KEEPER_URL}/api/arena/prediction-markets/overview}" \
