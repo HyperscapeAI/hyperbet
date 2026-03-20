@@ -336,17 +336,17 @@ pub mod gold_perps_market {
             .ok_or(PerpsError::Overflow)?;
         let funding_pnl = calculate_funding_pnl(old_size, funding_delta)?;
 
-        let execution_price = if size_delta != 0 {
+        let exec_price = if size_delta != 0 {
             execution_price(&ctx.accounts.market, size_delta as i128)?
         } else {
             market_index_price(&ctx.accounts.market)?
         };
-        require_acceptable_price(execution_price, size_delta as i128, acceptable_price)?;
+        require_acceptable_price(exec_price, size_delta as i128, acceptable_price)?;
 
         let realized_trade_pnl = calculate_realized_trade_pnl(
             old_size,
             old_entry_price,
-            execution_price,
+            exec_price,
             size_delta as i128,
         )?;
 
@@ -370,7 +370,7 @@ pub mod gold_perps_market {
             old_entry_price,
             size_delta as i128,
             new_size,
-            execution_price,
+            exec_price,
         )?;
         let (next_long_oi, next_short_oi) =
             projected_open_interest(&ctx.accounts.market, old_size, new_size)?;

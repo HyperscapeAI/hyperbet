@@ -500,6 +500,63 @@ export type GoldPerpsMarket = {
       ]
     },
     {
+      "name": "repayBadDebt",
+      "discriminator": [
+        112,
+        144,
+        188,
+        157,
+        43,
+        106,
+        141,
+        34
+      ],
+      "accounts": [
+        {
+          "name": "market",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  97,
+                  114,
+                  107,
+                  101,
+                  116
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "marketId"
+              }
+            ]
+          }
+        },
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "systemProgram",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "marketId",
+          "type": "u64"
+        },
+        {
+          "name": "amount",
+          "type": "u64"
+        }
+      ]
+    },
+    {
       "name": "setMarketStatus",
       "discriminator": [
         101,
@@ -1083,6 +1140,16 @@ export type GoldPerpsMarket = {
       "code": 6030,
       "name": "tradingPaused",
       "msg": "Trading is paused"
+    },
+    {
+      "code": 6031,
+      "name": "maintenanceMarginViolation",
+      "msg": "Position fails maintenance margin check after accounting for unrealized PnL"
+    },
+    {
+      "code": 6032,
+      "name": "invalidBadDebtRepayment",
+      "msg": "Bad debt repayment amount is invalid"
     }
   ],
   "types": [
@@ -1249,6 +1316,10 @@ export type GoldPerpsMarket = {
           },
           {
             "name": "totalShortOi",
+            "type": "u64"
+          },
+          {
+            "name": "badDebt",
             "type": "u64"
           }
         ]

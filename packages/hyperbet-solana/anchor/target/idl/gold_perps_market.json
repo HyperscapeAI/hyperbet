@@ -494,6 +494,63 @@
       ]
     },
     {
+      "name": "repay_bad_debt",
+      "discriminator": [
+        112,
+        144,
+        188,
+        157,
+        43,
+        106,
+        141,
+        34
+      ],
+      "accounts": [
+        {
+          "name": "market",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  97,
+                  114,
+                  107,
+                  101,
+                  116
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "market_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "market_id",
+          "type": "u64"
+        },
+        {
+          "name": "amount",
+          "type": "u64"
+        }
+      ]
+    },
+    {
       "name": "set_market_status",
       "discriminator": [
         101,
@@ -1077,6 +1134,16 @@
       "code": 6030,
       "name": "TradingPaused",
       "msg": "Trading is paused"
+    },
+    {
+      "code": 6031,
+      "name": "MaintenanceMarginViolation",
+      "msg": "Position fails maintenance margin check after accounting for unrealized PnL"
+    },
+    {
+      "code": 6032,
+      "name": "InvalidBadDebtRepayment",
+      "msg": "Bad debt repayment amount is invalid"
     }
   ],
   "types": [
@@ -1243,6 +1310,10 @@
           },
           {
             "name": "total_short_oi",
+            "type": "u64"
+          },
+          {
+            "name": "bad_debt",
             "type": "u64"
           }
         ]
