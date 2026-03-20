@@ -225,11 +225,9 @@ const GOLD_AMM_ROUTER_ABI = [
 
 const LVR_MARKET_ABI = [
   "function state() view returns (uint8)",
-  "function outcome() view returns (uint256)",
-  "function deadline() view returns (uint256)",
-  "function liquidity() view returns (uint256)",
-  "function reserveYes() view returns (uint256)",
-  "function reserveNo() view returns (uint256)",
+  "function getMarketDetails() view returns (uint8, uint256, uint256, uint256, uint256, uint256, uint256, uint256)",
+  "function getPriceYes() view returns (uint256)",
+  "function getPriceNo() view returns (uint256)",
   "function yesToken() view returns (address)",
   "function noToken() view returns (address)",
   "function feeBps() view returns (uint256)",
@@ -3159,19 +3157,12 @@ export class CrossChainMarketMaker {
     if (!marketAddress) return;
 
     const lvrMarket = new ethers.Contract(marketAddress, LVR_MARKET_ABI, runtime.provider);
-    const [stateRaw, reserveYesRaw, reserveNoRaw, liqRaw, deadlineRaw, isDynamic] =
-      await Promise.all([
-        lvrMarket.state(),
-        lvrMarket.reserveYes(),
-        lvrMarket.reserveNo(),
-        lvrMarket.liquidity(),
-        lvrMarket.deadline(),
-        lvrMarket.isDynamic(),
-      ]);
+    const [stateRaw, deadlineRaw, , liqRaw, reserveYesRaw, reserveNoRaw] =
+      await lvrMarket.getMarketDetails();
 
-    // state: 0=OPEN, 1=PENDING, 2=DISPUTED, 3=RESOLVED
+    // state: 0=OPEN, 1=CLOSED, 2=PENDING, 3=DISPUTED, 4=RESOLVED
     const marketState = Number(stateRaw);
-    if (marketState === 3) {
+    if (marketState === 4) {
       await this.evmAmmRedeem(runtime, marketAddress);
       return;
     }
@@ -3188,6 +3179,7 @@ export class CrossChainMarketMaker {
     const posKey = `${runtime.chainKey}:${marketAddress}`;
     const existing = this.ammPositions.get(posKey);
 
+    const now = Date.now();
     const snapshot: AmmMarketSnapshot = {
       chainKey: runtime.chainKey,
       lifecycleStatus: market.lifecycleStatus,
@@ -3198,10 +3190,13 @@ export class CrossChainMarketMaker {
       reserveNo: Number(rn),
       liquidity: Number(l),
       betCloseTimeMs: Number(deadlineRaw) * 1000,
-      lastRpcAtMs: Date.now(),
+      lastStreamAtMs: now, // AMM uses on-chain state, no separate stream
+      lastOracleAtMs: now,
+      lastRpcAtMs: now,
       exposure: {
-        yes: Number(existing?.yesBalance ?? 0n),
-        no: Number(existing?.noBalance ?? 0n),
+        // Normalize WAD (1e18) token balances to human-readable units
+        yes: Number((existing?.yesBalance ?? 0n) / 1_000_000_000_000_000_000n),
+        no: Number((existing?.noBalance ?? 0n) / 1_000_000_000_000_000_000n),
         openYes: 0,
         openNo: 0,
       },
@@ -3214,7 +3209,7 @@ export class CrossChainMarketMaker {
 
     if (decision.action === "hold") return;
 
-    const amountBn = ethers.parseUnits(decision.amount.toString(), 6); // mUSD has 6 decimals
+    const amountBn = ethers.parseUnits(decision.amount.toString(), 18); // mUSD WAD (18 decimals)
 
     try {
       if (decision.action === "buy_yes" || decision.action === "buy_no") {
@@ -3252,6 +3247,18 @@ export class CrossChainMarketMaker {
         }
       }
 
+      // Read actual token balances after trade
+      const [yesTokenAddr, noTokenAddr] = await Promise.all([
+        lvrMarket.yesToken(),
+        lvrMarket.noToken(),
+      ]);
+      const yesToken = new ethers.Contract(yesTokenAddr, ERC20_ABI, runtime.provider);
+      const noToken = new ethers.Contract(noTokenAddr, ERC20_ABI, runtime.provider);
+      const [yesBal, noBal] = await Promise.all([
+        yesToken.balanceOf(runtime.walletAddress),
+        noToken.balanceOf(runtime.walletAddress),
+      ]);
+
       const pos: AmmPosition = existing ?? {
         chainKey: runtime.chainKey,
         marketRef: marketAddress,
@@ -3262,6 +3269,8 @@ export class CrossChainMarketMaker {
         costBasis: 0n,
         settled: false,
       };
+      pos.yesBalance = BigInt(yesBal.toString());
+      pos.noBalance = BigInt(noBal.toString());
       if (decision.action === "buy_yes" || decision.action === "buy_no") {
         pos.costBasis += BigInt(decision.amount);
       }
@@ -3322,8 +3331,9 @@ export class CrossChainMarketMaker {
       aggregate.no += exposure.no;
     }
     for (const pos of this.ammPositions.values()) {
-      aggregate.ammYes += Number(pos.yesBalance);
-      aggregate.ammNo += Number(pos.noBalance);
+      // Normalize WAD (1e18) to human-readable
+      aggregate.ammYes += Number(pos.yesBalance / 1_000_000_000_000_000_000n);
+      aggregate.ammNo += Number(pos.noBalance / 1_000_000_000_000_000_000n);
     }
     return aggregate;
   }
