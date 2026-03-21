@@ -248,6 +248,7 @@ contract DuelOutcomeOracle is AccessControl {
             if (participantBHash != duel.participantBHash) revert ParticipantHashImmutable();
             if (betOpenTs != duel.betOpenTs) revert TimingImmutable();
             if (betCloseTs != duel.betCloseTs) revert TimingImmutable();
+            if (duelStartTs != duel.duelStartTs) revert TimingImmutable();
         }
 
         duel.duelKey = duelKey;
@@ -388,14 +389,19 @@ contract DuelOutcomeOracle is AccessControl {
         duel.duelEndTs = proposal.duelEndTs;
         duel.metadataUri = metadataUri;
 
+        // L-1: Clean up stale proposal to reclaim storage
+        bytes32 proposalId = duel.activeProposalId;
+        delete proposals[proposalId];
+        duel.activeProposalId = bytes32(0);
+
         emit DuelResolved(
             duelKey,
-            proposal.id,
-            proposal.winner,
-            proposal.seed,
-            proposal.duelEndTs,
-            proposal.resultHash,
-            proposal.replayHash,
+            proposalId,
+            duel.winner,
+            duel.seed,
+            duel.duelEndTs,
+            duel.resultHash,
+            duel.replayHash,
             metadataUri
         );
     }
