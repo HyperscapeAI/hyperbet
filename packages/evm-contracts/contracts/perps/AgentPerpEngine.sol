@@ -115,6 +115,7 @@ contract AgentPerpEngine is AccessControl, ReentrancyGuard {
     error SlippageExceeded(uint256 executionPrice, uint256 acceptablePrice);
     error MaxOpenInterestExceeded();
     error OraclePriceDeltaTooLarge();
+    error InvalidFeeConfig();
     error InsufficientInsurance();
     error MarketHasOpenPositions();
 
@@ -566,7 +567,6 @@ contract AgentPerpEngine is AccessControl, ReentrancyGuard {
         uint256 closedSize = _abs(liquidationSizeDelta);
         int256 realizedPnl = _realizePnl(position.size, position.entryPrice, liquidationPrice, closedSize);
 
-        uint256 startingMargin = position.margin;
         if (realizedPnl > 0) {
             _creditMarginFromPool(market, position, uint256(realizedPnl));
         } else if (realizedPnl < 0) {
@@ -575,25 +575,32 @@ contract AgentPerpEngine is AccessControl, ReentrancyGuard {
 
         _removeOpenInterest(market, position.size);
 
-        // Reward: proportional to closed fraction
+        // Reward: proportional to closed fraction, based on POST-PnL margin (not pre-PnL)
         uint256 reward = Math.mulDiv(
-            Math.mulDiv(startingMargin, config.liquidationRewardBps, BPS),
+            Math.mulDiv(position.margin, config.liquidationRewardBps, BPS),
             closedSize,
             absSize
         );
-        uint256 availableForReward = position.margin + market.insuranceFund;
-        if (reward > availableForReward) reward = availableForReward;
-
-        uint256 rewardFromMargin = reward > position.margin ? position.margin : reward;
-        uint256 rewardFromInsurance = reward - rewardFromMargin;
-        position.margin -= rewardFromMargin;
-        if (rewardFromInsurance != 0) {
-            market.insuranceFund -= rewardFromInsurance;
-        }
+        // Cap reward at position margin only — insurance is for bad debt, not liquidator rewards
+        if (reward > position.margin) reward = position.margin;
+        position.margin -= reward;
 
         if (isPartial) {
             // Update position for partial close
             position.size += liquidationSizeDelta;
+            // Update entry price for remaining position (weighted average)
+            if (position.size != 0) {
+                uint256 newAbsSize = _abs(position.size);
+                // newEntry = (oldEntry * oldAbs - liquidationPrice * closedSize) / newAbsSize
+                // Using mulDiv to avoid overflow
+                uint256 oldNotionalAtEntry = Math.mulDiv(position.entryPrice, absSize, ONE);
+                uint256 closedNotionalAtExit = Math.mulDiv(liquidationPrice, closedSize, ONE);
+                if (oldNotionalAtEntry > closedNotionalAtExit) {
+                    position.entryPrice = Math.mulDiv(oldNotionalAtEntry - closedNotionalAtExit, ONE, newAbsSize);
+                } else {
+                    position.entryPrice = 0;
+                }
+            }
             _addOpenInterest(market, position.size);
         } else {
             // Full liquidation — insurance waterfall for remaining margin
@@ -604,8 +611,8 @@ contract AgentPerpEngine is AccessControl, ReentrancyGuard {
             market.openPositions -= 1;
 
             if (seizedMargin > 0) {
-                // Cap socialized loss per position
-                uint256 maxSocLoss = Math.mulDiv(startingMargin, MAX_SOCIALIZED_LOSS_BPS, BPS);
+                // Cap socialized loss per position (use seizedMargin as basis since position is fully closed)
+                uint256 maxSocLoss = Math.mulDiv(seizedMargin, MAX_SOCIALIZED_LOSS_BPS, BPS);
                 uint256 toInsurance = seizedMargin > maxSocLoss ? maxSocLoss : seizedMargin;
                 market.insuranceFund += toInsurance;
                 uint256 toVault = seizedMargin - toInsurance;
@@ -724,6 +731,7 @@ contract AgentPerpEngine is AccessControl, ReentrancyGuard {
     ) internal {
         if (marketConfigs[agentId].exists) revert MarketAlreadyExists();
         _validateConfig(skewScale, maxLeverage, maintenanceMarginBps, liquidationRewardBps, maxOracleDelay);
+        if (tradeTreasuryFeeBps + tradeMarketMakerFeeBps >= BPS) revert InvalidFeeConfig();
 
         marketConfigs[agentId] = MarketConfig({
             skewScale: skewScale,
@@ -916,14 +924,9 @@ contract AgentPerpEngine is AccessControl, ReentrancyGuard {
 
     function _creditMarginFromPool(MarketState storage market, Position storage position, uint256 profit) internal {
         if (profit == 0) return;
-        uint256 fromVault = profit > market.vaultBalance ? market.vaultBalance : profit;
-        uint256 remaining = profit - fromVault;
-        if (remaining > market.insuranceFund) revert InsufficientMarketLiquidity();
-
-        market.vaultBalance -= fromVault;
-        if (remaining != 0) {
-            market.insuranceFund -= remaining;
-        }
+        // Insurance fund is reserved for bad debt only — trader profits must come from vault
+        if (profit > market.vaultBalance) revert InsufficientMarketLiquidity();
+        market.vaultBalance -= profit;
         position.margin += profit;
     }
 
