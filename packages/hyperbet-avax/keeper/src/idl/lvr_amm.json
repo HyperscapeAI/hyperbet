@@ -489,6 +489,15 @@
           "type": "bool"
         },
         {
+          "name": "duel_key",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
           "name": "bet_prompt",
           "type": "string"
         },
@@ -724,6 +733,10 @@
         },
         {
           "name": "market_maker",
+          "type": "pubkey"
+        },
+        {
+          "name": "fight_oracle_program",
           "type": "pubkey"
         },
         {
@@ -1044,11 +1057,183 @@
         },
         {
           "name": "treasury_yes_ata",
-          "writable": true
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "treasury"
+              },
+              {
+                "kind": "const",
+                "value": [
+                  6,
+                  221,
+                  246,
+                  225,
+                  215,
+                  101,
+                  161,
+                  147,
+                  217,
+                  203,
+                  225,
+                  70,
+                  206,
+                  235,
+                  121,
+                  172,
+                  28,
+                  180,
+                  133,
+                  237,
+                  95,
+                  91,
+                  55,
+                  145,
+                  58,
+                  140,
+                  245,
+                  133,
+                  126,
+                  255,
+                  0,
+                  169
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint_yes"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
         },
         {
           "name": "treasury_no_ata",
-          "writable": true
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "treasury"
+              },
+              {
+                "kind": "const",
+                "value": [
+                  6,
+                  221,
+                  246,
+                  225,
+                  215,
+                  101,
+                  161,
+                  147,
+                  217,
+                  203,
+                  225,
+                  70,
+                  206,
+                  235,
+                  121,
+                  172,
+                  28,
+                  180,
+                  133,
+                  237,
+                  95,
+                  91,
+                  55,
+                  145,
+                  58,
+                  140,
+                  245,
+                  133,
+                  126,
+                  255,
+                  0,
+                  169
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint_no"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
         },
         {
           "name": "token_program",
@@ -1144,6 +1329,28 @@
           "name": "signer",
           "writable": true,
           "signer": true
+        },
+        {
+          "name": "amm_config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  109,
+                  109,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
         },
         {
           "name": "admin_state",
@@ -1673,38 +1880,68 @@
     },
     {
       "code": 6010,
+      "name": "BetNotInitialized",
+      "msg": "Bet not initialized"
+    },
+    {
+      "code": 6011,
       "name": "BetNotSettled",
       "msg": "Bet not settled"
     },
     {
-      "code": 6011,
+      "code": 6012,
       "name": "BetNotExpired",
       "msg": "Bet not expired"
     },
     {
-      "code": 6012,
+      "code": 6013,
+      "name": "InvalidOracleAccount",
+      "msg": "Invalid oracle account"
+    },
+    {
+      "code": 6014,
+      "name": "OracleBetMismatch",
+      "msg": "Oracle duel does not match bet"
+    },
+    {
+      "code": 6015,
       "name": "MathErr",
       "msg": "Overflow or Underflow"
     },
     {
-      "code": 6013,
+      "code": 6016,
       "name": "InvalidAddress",
       "msg": "Invalid address (zero/default)"
     },
     {
-      "code": 6014,
+      "code": 6017,
       "name": "FeeTooHigh",
       "msg": "Fee BPS exceeds maximum (1000 = 10%)"
     },
     {
-      "code": 6015,
+      "code": 6018,
       "name": "MarketPaused",
       "msg": "Market is paused"
     },
     {
-      "code": 6016,
+      "code": 6019,
       "name": "ConfigFrozen",
       "msg": "Config is frozen"
+    },
+    {
+      "code": 6020,
+      "name": "InvalidDuelState",
+      "msg": "Invalid duel state account"
+    },
+    {
+      "code": 6021,
+      "name": "MissingAmmConfig",
+      "msg": "AMM config account required for oracle settlement"
+    },
+    {
+      "code": 6022,
+      "name": "InvalidFightOracleProgram",
+      "msg": "Fight oracle program mismatch"
     }
   ],
   "types": [
@@ -1758,6 +1995,10 @@
             "type": "pubkey"
           },
           {
+            "name": "fight_oracle_program",
+            "type": "pubkey"
+          },
+          {
             "name": "fee_bps",
             "type": "u16"
           },
@@ -1802,6 +2043,10 @@
             "type": "pubkey"
           },
           {
+            "name": "fight_oracle_program",
+            "type": "pubkey"
+          },
+          {
             "name": "fee_bps",
             "type": "u16"
           }
@@ -1843,6 +2088,15 @@
               "array": [
                 "u64",
                 2
+              ]
+            }
+          },
+          {
+            "name": "duel_key",
+            "type": {
+              "array": [
+                "u8",
+                32
               ]
             }
           },
