@@ -137,6 +137,8 @@ type EvmRuntime = {
   goldClobAddress: string;
 };
 
+type EvmNonceRuntime = Pick<EvmRuntime, "chainKey" | "provider" | "walletAddress">;
+
 type SignableTx = Transaction | VersionedTransaction;
 type AnchorLikeWallet = Wallet & {
   payer: Keypair;
@@ -1983,7 +1985,7 @@ export class CrossChainMarketMaker {
     return null;
   }
 
-  private async nextRuntimeNonce(runtime: EvmRuntime): Promise<number> {
+  private async nextRuntimeNonce(runtime: EvmNonceRuntime): Promise<number> {
     const cached = this.nextNonceByChain.get(runtime.chainKey);
     if (cached != null) {
       return cached;
@@ -1996,14 +1998,14 @@ export class CrossChainMarketMaker {
     return fresh;
   }
 
-  private noteRuntimeNonceCommitted(runtime: EvmRuntime, nonce: number) {
+  private noteRuntimeNonceCommitted(runtime: EvmNonceRuntime, nonce: number) {
     const cached = this.nextNonceByChain.get(runtime.chainKey);
     if (cached == null || nonce >= cached) {
       this.nextNonceByChain.set(runtime.chainKey, nonce + 1);
     }
   }
 
-  private async refreshRuntimeNonce(runtime: EvmRuntime): Promise<number> {
+  private async refreshRuntimeNonce(runtime: EvmNonceRuntime): Promise<number> {
     const fresh = await runtime.provider.getTransactionCount(
       runtime.walletAddress,
       "pending",
@@ -2013,7 +2015,7 @@ export class CrossChainMarketMaker {
   }
 
   private async sendEvmTransaction<T>(
-    runtime: EvmRuntime,
+    runtime: EvmNonceRuntime,
     buildTransaction: (nonce: number) => Promise<T>,
   ): Promise<{ tx: T; nonce: number }> {
     const nonce = await this.nextRuntimeNonce(runtime);
