@@ -125,6 +125,8 @@ pub mod fight_oracle {
         status: DuelStatus,
     ) -> Result<()> {
         require!(!ctx.accounts.oracle_config.paused, ErrorCode::OraclePaused);
+        // L-7: Validate metadata_uri fits in the 200-byte allocation
+        require!(metadata_uri.len() <= 200, ErrorCode::MetadataUriTooLong);
         require!(
             status == DuelStatus::Scheduled
                 || status == DuelStatus::BettingOpen
@@ -723,4 +725,6 @@ pub enum ErrorCode {
     OraclePaused,
     #[msg("Config is permanently frozen")]
     ConfigFrozen,
+    #[msg("Metadata URI exceeds 200 byte limit")]
+    MetadataUriTooLong,
 }
