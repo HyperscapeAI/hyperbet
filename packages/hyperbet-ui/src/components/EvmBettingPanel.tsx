@@ -62,6 +62,7 @@ import {
   EMPTY_PREDICTION_MARKET_WALLET_SNAPSHOT,
   type PredictionMarketWalletSnapshot,
 } from "../lib/predictionMarketUiState";
+import { derivePredictionMarketClaimUi } from "../lib/predictionMarketClaimUi";
 import { recordPredictionMarketTrade } from "../lib/predictionMarketTracking";
 import { useStreamingState } from "../spectator/useStreamingState";
 import {
@@ -158,10 +159,12 @@ function getEvmPanelCopy(locale: UiLocale) {
       estCost: "预计成交",
       estFee: "手续费",
       estMaxPayout: "胜出返还",
-      claimReady: "可领取结算",
+      claimWinningsTitle: "领取收益",
+      claimRefundTitle: "领取退款",
       claimLocked: "暂无可领取结算",
-      claimHelp: "对局结算后，可在这里领取胜出份额或取消退款。",
-      claimCleanupReady: "清理已结算仓位",
+      claimHelp: "对局结算后，可在这里领取获胜份额。",
+      claimRefundHelp: "若本局取消，可在这里领取退回资金。",
+      claimCleanupTitle: "清理已结算仓位",
       claimCleanupHelp: "若本局已判定负方，可在这里清理残留仓位状态。",
       sideYes: "买入 A",
       sideNo: "买入 B",
@@ -176,6 +179,7 @@ function getEvmPanelCopy(locale: UiLocale) {
       quickOrderHelp: "默认把这张票作为快捷下注使用；只有想自己卡价时才需要展开限价。",
       yourShares: "你的 A / B 份额",
       claim: "领取",
+      clearPosition: "清理仓位",
     };
   }
 
@@ -213,13 +217,14 @@ function getEvmPanelCopy(locale: UiLocale) {
     estCost: "Estimated fill",
     estFee: "Fee",
     estMaxPayout: "Max payout",
-    claimReady: "Claim available",
+    claimWinningsTitle: "Claim winnings",
+    claimRefundTitle: "Claim refund",
     claimLocked: "Nothing claimable yet",
-    claimHelp:
-      "Once the duel resolves, claim winning shares or cancelled refunds here.",
-    claimCleanupReady: "Clear resolved position",
+    claimHelp: "Once the duel resolves, claim your winning shares here.",
+    claimRefundHelp: "If the duel is cancelled, claim your refund here.",
+    claimCleanupTitle: "Clear resolved position",
     claimCleanupHelp:
-      "If this market resolved against you, use this once to clear the stale position state.",
+      "If this market resolved against you, clear the stale position state here.",
     sideYes: "Buy A",
     sideNo: "Buy B",
     walletReady: "Wallet connected",
@@ -234,6 +239,7 @@ function getEvmPanelCopy(locale: UiLocale) {
       "Treat this as a quick ticket by default; only open limit price when you want exact control.",
     yourShares: "Your A / B",
     claim: "Claim",
+    clearPosition: "Clear position",
   };
 }
 
@@ -1030,20 +1036,7 @@ export function EvmBettingPanel({
     ? (effectivePosition?.aShares ?? 0n)
     : (effectivePosition?.bShares ?? 0n);
   const canClaim = uiState.canClaim;
-  const claimActionLabel =
-    uiState.claimKind === "LOSER_CLEANUP" && canClaim
-      ? copy.claimCleanupReady
-      : canClaim
-        ? copy.claimReady
-        : copy.claimLocked;
-  const claimButtonLabel =
-    uiState.claimKind === "LOSER_CLEANUP" && canClaim
-      ? copy.claimCleanupReady
-      : copy.claim;
-  const claimHelpText =
-    uiState.claimKind === "LOSER_CLEANUP" && canClaim
-      ? copy.claimCleanupHelp
-      : copy.claimHelp;
+  const claimUi = derivePredictionMarketClaimUi(copy, uiState.claimKind, canClaim);
   const claimValueText =
     canClaim && uiState.claimableAmount > 0n
       ? `${formatCompactTokenAmount(uiState.claimableAmount, nativeDecimals)} ${nativeSymbol}`
@@ -1440,7 +1433,7 @@ export function EvmBettingPanel({
                     overflowWrap: "anywhere",
                   }}
                 >
-                  {claimActionLabel}
+                  {claimUi.title}
                 </span>
                 {claimValueText ? (
                   <span
@@ -1463,7 +1456,7 @@ export function EvmBettingPanel({
                     overflowWrap: "anywhere",
                   }}
                 >
-                  {claimHelpText}
+                  {claimUi.helpText}
                 </span>
               </div>
 
@@ -1477,7 +1470,7 @@ export function EvmBettingPanel({
                   false,
                 )}
               >
-                {claimButtonLabel}
+                {claimUi.buttonLabel}
               </button>
             </div>
           ) : null}

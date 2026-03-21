@@ -58,6 +58,7 @@ import {
   EMPTY_PREDICTION_MARKET_WALLET_SNAPSHOT,
   type PredictionMarketWalletSnapshot,
 } from "../lib/predictionMarketUiState";
+import { derivePredictionMarketClaimUi } from "../lib/predictionMarketClaimUi";
 import { recordPredictionMarketTrade } from "../lib/predictionMarketTracking";
 import { useStreamingState } from "../spectator/useStreamingState";
 import {
@@ -429,12 +430,15 @@ export function SolanaClobPanel({
         connectWalletToClaim: "连接钱包后即可领取",
         claimComplete: "领取完成",
         claimFailed: (message: string) => `领取失败：${message}`,
-        claimReady: "可领取结算",
+        claimWinningsTitle: "领取收益",
+        claimRefundTitle: "领取退款",
         claimLocked: "暂无可领取结算",
-        claimHelp: "对局结算后，可在这里领取胜出份额或取消退款。",
-        claimCleanupReady: "清理已结算仓位",
+        claimHelp: "对局结算后，可在这里领取获胜份额。",
+        claimRefundHelp: "若本局取消，可在这里领取退回资金。",
+        claimCleanupTitle: "清理已结算仓位",
         claimCleanupHelp: "若本局已判定负方，可在这里清理残留仓位状态。",
         claim: "领取",
+        clearPosition: "清理仓位",
         limitPrice: "限价",
         hideAdminPanel: "隐藏管理面板",
         showAdminPanel: "显示管理面板",
@@ -473,14 +477,16 @@ export function SolanaClobPanel({
         connectWalletToClaim: "Connect wallet to claim",
         claimComplete: "Claim complete",
         claimFailed: (message: string) => `Claim failed: ${message}`,
-        claimReady: "Claim available",
+        claimWinningsTitle: "Claim winnings",
+        claimRefundTitle: "Claim refund",
         claimLocked: "Nothing claimable yet",
-        claimHelp:
-          "Once the duel resolves, claim winning shares or cancelled refunds here.",
-        claimCleanupReady: "Clear resolved position",
+        claimHelp: "Once the duel resolves, claim your winning shares here.",
+        claimRefundHelp: "If the duel is cancelled, claim your refund here.",
+        claimCleanupTitle: "Clear resolved position",
         claimCleanupHelp:
-          "If this market resolved against you, use this once to clear the stale position state.",
+          "If this market resolved against you, clear the stale position state here.",
         claim: "Claim",
+        clearPosition: "Clear position",
         limitPrice: "Limit price",
         hideAdminPanel: "Hide Admin Panel",
         showAdminPanel: "Show Admin Panel",
@@ -1303,20 +1309,7 @@ export function SolanaClobPanel({
     yesPool + noPool > 0n ? Number((yesPool * 100n) / (yesPool + noPool)) : 50;
   const noPercent = 100 - yesPercent;
   const canClaim = uiState.canClaim;
-  const claimActionLabel =
-    uiState.claimKind === "LOSER_CLEANUP" && canClaim
-      ? copy.claimCleanupReady
-      : canClaim
-        ? copy.claimReady
-        : copy.claimLocked;
-  const claimButtonLabel =
-    uiState.claimKind === "LOSER_CLEANUP" && canClaim
-      ? copy.claimCleanupReady
-      : copy.claim;
-  const claimHelpText =
-    uiState.claimKind === "LOSER_CLEANUP" && canClaim
-      ? copy.claimCleanupHelp
-      : copy.claimHelp;
+  const claimUi = derivePredictionMarketClaimUi(copy, uiState.claimKind, canClaim);
   const claimValueText =
     canClaim && uiState.claimableAmount > 0n
       ? `${fmtAmount(uiState.claimableAmount).toFixed(3)} SOL`
@@ -1448,7 +1441,7 @@ export function SolanaClobPanel({
                     overflowWrap: "anywhere",
                   }}
                 >
-                  {claimActionLabel}
+                  {claimUi.title}
                 </span>
                 {claimValueText ? (
                   <span
@@ -1471,7 +1464,7 @@ export function SolanaClobPanel({
                     overflowWrap: "anywhere",
                   }}
                 >
-                  {claimHelpText}
+                  {claimUi.helpText}
                 </span>
               </div>
 
@@ -1481,7 +1474,7 @@ export function SolanaClobPanel({
                 onClick={() => void handleClaim()}
                 style={buttonStyle("#0f3f2b", "rgba(34,197,94,0.35)", false)}
               >
-                {claimButtonLabel}
+                {claimUi.buttonLabel}
               </button>
             </div>
           ) : null}
