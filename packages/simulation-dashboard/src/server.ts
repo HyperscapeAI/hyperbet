@@ -214,8 +214,14 @@ const ATTACKER_STRATEGIES = new Set([
     "stress_test",
     "cancel_replace",
 ]);
-const MARKET_STATUS_RESOLVED = 3;
-const MARKET_STATUS_CANCELLED = 4;
+// GoldClob (CLOB) enum: NULL=0, OPEN=1, LOCKED=2, RESOLVED=3, CANCELLED=4
+// LvrMarket (AMM) enum: OPEN=0, CLOSED=1, PENDING=2, DISPUTED=3, RESOLVED=4
+const CLOB_STATUS = { RESOLVED: 3, CANCELLED: 4 } as const;
+const AMM_STATUS = { RESOLVED: 4, CANCELLED: undefined } as const;
+
+// Default to CLOB for current sim (anvil runs GoldClob)
+const MARKET_STATUS_RESOLVED = CLOB_STATUS.RESOLVED;
+const MARKET_STATUS_CANCELLED = CLOB_STATUS.CANCELLED;
 let peakInventorySeen = 0;
 let worstMarketMakerPnl = 0;
 let bestAttackerPnlSeen = 0;
@@ -309,7 +315,7 @@ function buildStreamingStateUpdate(): Record<string, any> {
                 damageDealtThisFight: 100 - hp1,
             },
             duelId,
-            duelKeyHex: currentDuelKey || null,
+            duelKeyHex: currentDuelKey ? currentDuelKey.replace(/^0x/, "") : null,
             betOpenTime: duelOpenedAtMs,
             betCloseTime: betCloseMs,
             fightStartTime: duelOpenedAtMs,
