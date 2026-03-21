@@ -225,6 +225,10 @@ function getAppCopy(locale: UiLocale) {
       muteStream: "静音",
       source: "信源",
       waitingForStream: "等待直播流…",
+      refreshingLiveState: "正在刷新直播状态…",
+      refreshingShort: "刷新中",
+      syncAttention: "注意",
+      outOfSyncShort: "不同步",
       streamReady: "直播流已就绪",
       rendererUnhealthy: "渲染器异常",
       streamDriftDetected: "直播流与市场状态不同步",
@@ -320,6 +324,10 @@ function getAppCopy(locale: UiLocale) {
     muteStream: "Mute stream",
     source: "Source",
     waitingForStream: "Waiting for stream…",
+    refreshingLiveState: "Refreshing live state…",
+    refreshingShort: "Refreshing",
+    syncAttention: "Attention",
+    outOfSyncShort: "Out of sync",
     streamReady: "Stream ready",
     rendererUnhealthy: "Renderer unhealthy",
     streamDriftDetected: "Stream and market state are out of sync",
@@ -467,32 +475,41 @@ function PanelFallback({
   );
 }
 
-function MarketSurfaceCard({
+function TruthRailItem({
   label,
-  status,
   title,
   detail,
+  pill,
   tone,
+  loading = false,
 }: {
   label: string;
-  status: string;
   title: string;
-  detail: string;
-  tone: "live" | "settlement" | "idle";
+  detail?: string | null;
+  pill: string;
+  tone: "settlement" | "refresh" | "danger";
+  loading?: boolean;
 }) {
   return (
-    <div className="hm-truth-card">
-      <div className="hm-truth-card-header">
-        <span className="hm-matchup-label">{label}</span>
+    <div className={`hm-truth-rail-item hm-truth-rail-item--${tone}`}>
+      <div className="hm-truth-rail-copy">
+        <div className="hm-truth-rail-label-row">
+          {loading ? <span className="hm-truth-rail-spinner" aria-hidden="true" /> : null}
+          <span className="hm-matchup-label">{label}</span>
+        </div>
+        <div className="hm-truth-rail-title">
+          {title}
+        </div>
+        {detail ? (
+          <div className="hm-truth-rail-detail">
+            {detail}
+          </div>
+        ) : null}
+      </div>
+      <div className="hm-truth-rail-side">
         <span className={`hm-truth-pill hm-truth-pill--${tone}`}>
-          {status}
+          {pill}
         </span>
-      </div>
-      <div className="hm-truth-card-title">
-        {title}
-      </div>
-      <div className="hm-truth-card-meta">
-        {detail}
       </div>
     </div>
   );
@@ -967,9 +984,6 @@ export function App() {
   const streamMarketAligned = !liveOverviewDuelKey
     ? true
     : streamedDuelKey === liveOverviewDuelKey;
-  const recentSurfaceStatus = recentSettlementMarket
-    ? copy.claimOnly
-    : copy.phaseIdle;
   const recentSurfaceMeta = recentSettlementMarket
     ? getMarketStatusLabel(recentSettlementMarket.lifecycleStatus, copy)
     : copy.statusPending;
@@ -978,20 +992,15 @@ export function App() {
     fallbackLabel: copy.latestSettlement,
     idleLabel: copy.phaseIdle,
   });
-  const streamIssueText = !streamMarketAligned
-    ? copy.streamDriftDetected
+  const streamSyncState = !streamMarketAligned
+    ? "drift"
     : rendererUnhealthy
-      ? copy.rendererUnhealthy
+      ? "degraded"
       : sourceSyncDegraded || streamSurfaceUnavailable || marketOverviewError
-        ? copy.waitingForStream
-        : null;
-  const streamIssuePillText = !streamMarketAligned
-    ? copy.streamDriftDetected
-    : rendererUnhealthy
-      ? copy.rendererUnhealthy
-      : copy.waitingForStream;
+        ? "refreshing"
+        : "synced";
   const shouldRenderTruthBlock = Boolean(
-    streamIssueText || recentSettlementMarket || recentSettlementDuel,
+    streamSyncState !== "synced" || recentSettlementMarket || recentSettlementDuel,
   );
 
   // Sidebar bet state
@@ -1094,33 +1103,47 @@ const [hmBottomTab, setHmBottomTab] = useState<
 
       {shouldRenderTruthBlock ? (
         <div className="hm-truth-block">
-          {streamIssueText ? (
-            <div className="hm-truth-banner hm-truth-banner--drift">
-              <div className="hm-truth-banner-copy">
-                <span className="hm-matchup-label">{copy.source}</span>
-                <span className="hm-truth-banner-status">{streamIssueText}</span>
-              </div>
-              <span className="hm-truth-pill hm-truth-pill--danger">
-                {streamIssuePillText}
-              </span>
-            </div>
-          ) : null}
-
-          {recentSettlementMarket || recentSettlementDuel ? (
-            <div className="hm-truth-grid">
-              <MarketSurfaceCard
-                label={copy.latestSettlement}
-                status={recentSurfaceStatus}
-                title={recentSurfaceTitle}
-                detail={
-                  recentSettlementMarket
-                    ? `${recentSurfaceMeta} · ${copy.claimOnly}`
-                    : copy.statusPending
-                }
-                tone={recentSettlementMarket ? "settlement" : "idle"}
+          <div className="hm-truth-rail">
+            {streamSyncState === "refreshing" ? (
+              <TruthRailItem
+                label={copy.source}
+                title={copy.refreshingLiveState}
+                pill={copy.refreshingShort}
+                tone="refresh"
+                loading
               />
-            </div>
-          ) : null}
+            ) : null}
+
+            {streamSyncState === "degraded" ? (
+              <TruthRailItem
+                label={copy.source}
+                title={copy.rendererUnhealthy}
+                detail={copy.refreshingLiveState}
+                pill={copy.syncAttention}
+                tone="danger"
+              />
+            ) : null}
+
+            {streamSyncState === "drift" ? (
+              <TruthRailItem
+                label={copy.source}
+                title={copy.streamDriftDetected}
+                detail={copy.refreshingLiveState}
+                pill={copy.outOfSyncShort}
+                tone="danger"
+              />
+            ) : null}
+
+            {recentSettlementMarket || recentSettlementDuel ? (
+              <TruthRailItem
+                label={copy.latestSettlement}
+                title={recentSurfaceTitle}
+                detail={recentSettlementMarket ? recentSurfaceMeta : copy.statusPending}
+                pill={recentSurfaceMeta}
+                tone="settlement"
+              />
+            ) : null}
+          </div>
         </div>
       ) : null}
 

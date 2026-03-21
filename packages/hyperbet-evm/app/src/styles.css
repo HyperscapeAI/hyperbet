@@ -4094,40 +4094,51 @@ select:focus-visible {
 }
 
 .hm-truth-block {
-  display: grid;
-  gap: 6px;
+  display: flex;
+  flex-direction: column;
   padding: 0 12px 10px;
   border-bottom: 1px solid var(--hm-border);
 }
 
-.hm-truth-banner,
-.hm-truth-card {
+.hm-truth-rail {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.hm-truth-rail-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
   min-width: 0;
+  flex: 1 1 240px;
+  padding: 8px 10px;
   border: 1px solid var(--hm-panel-card-border, var(--hm-border));
   border-radius: var(--hm-radius);
   background: var(--hm-panel-card-bg, var(--hm-surface-raised));
   box-shadow: inset 0 1px 0 var(--hm-panel-card-highlight, rgba(255, 255, 255, 0.08));
 }
 
-.hm-truth-banner {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 8px;
-  padding: 8px 10px;
-}
-
-.hm-truth-banner--aligned {
-  border-color: rgba(34, 197, 94, 0.22);
+.hm-truth-rail-item--refresh {
+  border-color: rgba(110, 168, 254, 0.24);
   background: linear-gradient(
     180deg,
-    rgba(34, 197, 94, 0.08) 0%,
+    rgba(110, 168, 254, 0.08) 0%,
     rgba(18, 20, 23, 0.98) 100%
   );
 }
 
-.hm-truth-banner--drift {
+.hm-truth-rail-item--settlement {
+  border-color: rgba(250, 204, 21, 0.22);
+  background: linear-gradient(
+    180deg,
+    rgba(250, 204, 21, 0.08) 0%,
+    rgba(18, 20, 23, 0.98) 100%
+  );
+}
+
+.hm-truth-rail-item--danger {
   border-color: rgba(232, 65, 66, 0.24);
   background: linear-gradient(
     180deg,
@@ -4136,14 +4147,21 @@ select:focus-visible {
   );
 }
 
-.hm-truth-banner-copy {
+.hm-truth-rail-copy {
   display: grid;
-  gap: 2px;
+  gap: 3px;
   min-width: 0;
-  flex: 1 1 160px;
+  flex: 1 1 auto;
 }
 
-.hm-truth-banner-status {
+.hm-truth-rail-label-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.hm-truth-rail-title {
   font-size: 11px;
   font-weight: 600;
   color: var(--hm-text);
@@ -4151,42 +4169,31 @@ select:focus-visible {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
-.hm-truth-grid {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 6px;
-}
-
-.hm-truth-card {
-  display: grid;
-  gap: 4px;
-  padding: 8px 10px;
-}
-
-.hm-truth-card-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  min-width: 0;
-}
-
-.hm-truth-card-title {
-  font-size: 11px;
-  font-weight: 700;
-  color: var(--hm-text);
-  line-height: 1.35;
-  overflow-wrap: anywhere;
-}
-
-.hm-truth-card-meta {
+.hm-truth-rail-detail {
   font-size: 10px;
   color: var(--hm-panel-subtle-text, var(--hm-text-muted));
   line-height: 1.35;
-  overflow-wrap: anywhere;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hm-truth-rail-side {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.hm-truth-rail-spinner {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(110, 168, 254, 0.95);
+  box-shadow: 0 0 0 0 rgba(110, 168, 254, 0.35);
+  animation: hm-truth-rail-pulse 1.4s ease-in-out infinite;
 }
 
 .hm-truth-pill {
@@ -4206,28 +4213,33 @@ select:focus-visible {
   flex-shrink: 0;
 }
 
-.hm-truth-pill--live {
-  background: rgba(34, 197, 94, 0.12);
-  border-color: rgba(34, 197, 94, 0.34);
-  color: var(--hm-accent-green);
-}
-
 .hm-truth-pill--settlement {
   background: var(--hm-gold-glow-subtle);
   border-color: var(--hm-gold-border-light);
   color: var(--hm-accent-gold);
 }
 
-.hm-truth-pill--idle {
-  background: rgba(255, 255, 255, 0.04);
-  border-color: var(--hm-stone-mid);
-  color: var(--hm-text-muted);
+.hm-truth-pill--refresh {
+  background: rgba(110, 168, 254, 0.12);
+  border-color: rgba(110, 168, 254, 0.34);
+  color: #bcd4ff;
 }
 
 .hm-truth-pill--danger {
   background: rgba(232, 65, 66, 0.12);
   border-color: rgba(232, 65, 66, 0.34);
   color: var(--hm-accent-red);
+}
+
+@keyframes hm-truth-rail-pulse {
+  0%, 100% {
+    opacity: 0.65;
+    box-shadow: 0 0 0 0 rgba(110, 168, 254, 0.18);
+  }
+  50% {
+    opacity: 1;
+    box-shadow: 0 0 0 5px rgba(110, 168, 254, 0);
+  }
 }
 
 /* ================================================================
@@ -6005,12 +6017,11 @@ select:focus-visible {
   padding: 0 16px 14px;
 }
 
-.hm-truth-grid {
+.hm-truth-rail {
   gap: 8px;
 }
 
-.hm-truth-card,
-.hm-truth-banner {
+.hm-truth-rail-item {
   padding: 10px 12px;
 }
 
