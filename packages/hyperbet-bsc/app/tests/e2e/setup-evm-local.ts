@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -77,8 +78,8 @@ function ensureHex32(value: string, label: string): `0x${string}` {
   return `0x${normalized}`;
 }
 
-function hashLabel(label: string): `0x${string}` {
-  return keccak256(stringToHex(label));
+function hashParticipantLabel(label: string): `0x${string}` {
+  return `0x${createHash("sha256").update(label).digest("hex")}`;
 }
 
 function parseTimestampMsEnv(name: string): bigint | null {
@@ -183,10 +184,7 @@ async function main(): Promise<void> {
         accountIndex: 0,
         addressIndex: 1,
       });
-  const finalizerAccount = mnemonicToAccount(DEFAULT_ANVIL_MNEMONIC, {
-    accountIndex: 0,
-    addressIndex: 2,
-  });
+  const finalizerAccount = adminAccount;
   const challengerAccount = mnemonicToAccount(DEFAULT_ANVIL_MNEMONIC, {
     accountIndex: 0,
     addressIndex: 3,
@@ -238,6 +236,10 @@ async function main(): Promise<void> {
     process.env.E2E_EVM_DUEL_ID ||
     existingState.evmDuelId ||
     String(existingState.evmMatchId ?? 1);
+  const participantAId =
+    process.env.E2E_EVM_AGENT1_ID?.trim() || "e2e-evm-agent-a";
+  const participantBId =
+    process.env.E2E_EVM_AGENT2_ID?.trim() || "e2e-evm-agent-b";
   const duelBetOpenTs =
     parseTimestampMsEnv("E2E_EVM_BET_OPEN_TIME_MS") ??
     latestBlock.timestamp - 15n;
@@ -343,8 +345,8 @@ async function main(): Promise<void> {
     functionName: "upsertDuel",
     args: [
       duelKey,
-      hashLabel("e2e-evm-agent-a"),
-      hashLabel("e2e-evm-agent-b"),
+      hashParticipantLabel(participantAId),
+      hashParticipantLabel(participantBId),
       duelBetOpenTs,
       duelBetCloseTs,
       duelStartTs,
@@ -449,7 +451,7 @@ async function main(): Promise<void> {
     evmMarketKey: marketKey,
     evmOracleAddress: oracleAddress,
     evmAdminPrivateKey: adminPrivateKey,
-    evmFinalizerPrivateKey: finalizerAccount.getHdKey().privateKey,
+    evmFinalizerPrivateKey: adminPrivateKey,
     evmSeedNoPrice: seedNoOrderPrice,
     evmSeedYesPrice: seedYesOrderPrice,
     evmSeedOrderAmount: seedOrderAmountUi,
