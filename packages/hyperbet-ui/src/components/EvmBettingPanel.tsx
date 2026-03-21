@@ -435,6 +435,7 @@ export function EvmBettingPanel({
     null,
   );
   const [nativeBalance, setNativeBalance] = useState<bigint>(0n);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [tradeFeeBps, setTradeFeeBps] = useState(200);
   const [recentTrades, setRecentTrades] = useState<Trade[]>([]);
   const [bids, setBids] = useState<OrderLevel[]>([]);
@@ -848,6 +849,7 @@ export function EvmBettingPanel({
 
 
   const handlePlaceOrder = useCallback(async () => {
+    if (isSubmitting) return;
     if (
       !effectiveWalletClient ||
       !effectiveAddress ||
@@ -857,7 +859,7 @@ export function EvmBettingPanel({
       setStatus(copy.walletNotConnected);
       return;
     }
-
+    setIsSubmitting(true);
     try {
       const amount = parseUnits(amountInput, nativeDecimals);
       if (amount <= 0n) {
@@ -927,8 +929,11 @@ export function EvmBettingPanel({
       await refreshData();
     } catch (error) {
       setStatus(copy.orderFailed((error as Error).message));
+    } finally {
+      setIsSubmitting(false);
     }
   }, [
+    isSubmitting,
     amountInput,
     chainConfig,
     copy,
@@ -1031,15 +1036,25 @@ export function EvmBettingPanel({
       : canClaim
         ? copy.claimReady
         : copy.claimLocked;
+  const claimButtonLabel =
+    uiState.claimKind === "LOSER_CLEANUP" && canClaim
+      ? copy.claimCleanupReady
+      : copy.claim;
   const claimHelpText =
     uiState.claimKind === "LOSER_CLEANUP" && canClaim
       ? copy.claimCleanupHelp
       : copy.claimHelp;
+  const claimValueText =
+    canClaim && uiState.claimableAmount > 0n
+      ? `${formatCompactTokenAmount(uiState.claimableAmount, nativeDecimals)} ${nativeSymbol}`
+      : null;
   const programsReady = Boolean(
     chainConfig && duelKeyHex && uiState.canTrade && !streamDriftDetected,
   );
-  const shouldShowStatusBanner =
-    streamDriftDetected || lastRefreshError != null;
+  const panelStatusNote =
+    !streamDriftDetected && lastRefreshError != null
+      ? copy.refreshFailed(lastRefreshError ?? "unknown")
+      : null;
   const e2eWalletDebug = isE2eMode
     ? [
       `key=${configuredHeadlessPrivateKey ? "yes" : "no"}`,
@@ -1133,51 +1148,19 @@ export function EvmBettingPanel({
               value={`${formatCompactTokenAmount(selectedShares, nativeDecimals)} / ${formatCompactTokenAmount(selectedStake, nativeDecimals)} ${nativeSymbol}`}
             />
         </div>
-        {shouldShowStatusBanner && (
+        {panelStatusNote ? (
           <div
             style={{
-              display: "grid",
-              gap: 4,
-              padding: "10px 12px",
-              borderRadius: "var(--hm-radius)",
-              border: streamDriftDetected
-                ? "1px solid color-mix(in srgb, var(--hm-sell) 34%, transparent)"
-                : "1px solid var(--hm-panel-card-border, rgba(255,255,255,0.08))",
-              background: streamDriftDetected
-                ? "color-mix(in srgb, var(--hm-sell) 10%, transparent)"
-                : "var(--hm-panel-card-bg, linear-gradient(180deg, rgba(255,255,255,0.04) 0%, rgba(255,255,255,0.02) 100%))",
-              color: "var(--hm-text, #f8fafc)",
-              width: "100%",
-              boxSizing: "border-box",
+              fontSize: 10,
+              color: "var(--hm-panel-subtle-text, rgba(255,255,255,0.52))",
+              lineHeight: 1.45,
+              minWidth: 0,
+              overflowWrap: "anywhere",
             }}
           >
-            <span
-              style={{
-                fontSize: 9,
-                fontWeight: 800,
-                letterSpacing: 1,
-                textTransform: "uppercase",
-                color: "rgba(255,255,255,0.58)",
-                fontFamily: "var(--hm-font-display)",
-              }}
-            >
-              {streamDriftDetected ? copy.streamDriftDetected : "Status"}
-            </span>
-            <span
-              style={{
-                fontSize: compact ? 11 : 12,
-                fontWeight: 700,
-                lineHeight: 1.4,
-                overflowWrap: "anywhere",
-                minWidth: 0,
-              }}
-            >
-              {streamDriftDetected
-                ? copy.streamDriftDetected
-                : copy.refreshFailed(lastRefreshError ?? "unknown")}
-            </span>
+            {panelStatusNote}
           </div>
-        )}
+        ) : null}
 
           <div
             style={{
@@ -1411,36 +1394,93 @@ export function EvmBettingPanel({
             </div>
           </div>
 
-          <button
-            data-testid={isE2eMode ? "evm-claim-payout" : undefined}
-            type="button"
-            onClick={() => void handleClaim()}
-            disabled={!canClaim}
-            style={buttonStyle(
-              canClaim
-                ? "linear-gradient(180deg, rgba(16,92,53,0.95) 0%, rgba(12,67,39,0.98) 100%)"
-                : "var(--hm-panel-claim-idle-bg, linear-gradient(180deg, rgba(255,255,255,0.05) 0%, rgba(255,255,255,0.02) 100%))",
-              canClaim
-                ? "rgba(52,211,153,0.4)"
-                : "var(--hm-panel-claim-idle-border, rgba(255,255,255,0.08))",
-              !canClaim,
-            )}
-          >
-            {claimActionLabel}
-          </button>
-          <div
-            style={{
-              fontSize: 11,
-              color: "var(--hm-panel-subtle-text, rgba(255,255,255,0.48))",
-              lineHeight: 1.45,
-              minWidth: 0,
-              overflowWrap: "anywhere",
-              width: "100%",
-              boxSizing: "border-box",
-            }}
-          >
-            {claimHelpText}
-          </div>
+          {canClaim ? (
+            <div
+              style={{
+                display: "grid",
+                gap: 8,
+                padding: "12px",
+                borderRadius: "var(--hm-radius)",
+                border: "1px solid rgba(52,211,153,0.26)",
+                background:
+                  "linear-gradient(180deg, rgba(16,92,53,0.14) 0%, rgba(12,67,39,0.08) 100%)",
+                boxShadow:
+                  "inset 0 1px 0 rgba(255,255,255,0.05), 0 10px 22px rgba(0,0,0,0.14)",
+                width: "100%",
+                minWidth: 0,
+                boxSizing: "border-box",
+              }}
+            >
+              <div
+                style={{
+                  display: "grid",
+                  gap: 4,
+                  minWidth: 0,
+                }}
+              >
+                <span
+                  style={{
+                    fontSize: 9,
+                    fontWeight: 800,
+                    letterSpacing: 1,
+                    textTransform: "uppercase",
+                    color: "rgba(167,243,208,0.82)",
+                    fontFamily: "var(--hm-font-display)",
+                  }}
+                >
+                  {copy.marketStatus}
+                </span>
+                <span
+                  style={{
+                    fontSize: compact ? 12 : 13,
+                    fontWeight: 700,
+                    color: "var(--hm-text, #f8fafc)",
+                    lineHeight: 1.4,
+                    minWidth: 0,
+                    overflowWrap: "anywhere",
+                  }}
+                >
+                  {claimActionLabel}
+                </span>
+                {claimValueText ? (
+                  <span
+                    style={{
+                      fontSize: 11,
+                      fontWeight: 700,
+                      color: "rgba(167,243,208,0.88)",
+                      fontFamily: "var(--hm-font-mono)",
+                    }}
+                  >
+                    {claimValueText}
+                  </span>
+                ) : null}
+                <span
+                  style={{
+                    fontSize: 11,
+                    color: "var(--hm-panel-subtle-text, rgba(255,255,255,0.52))",
+                    lineHeight: 1.45,
+                    minWidth: 0,
+                    overflowWrap: "anywhere",
+                  }}
+                >
+                  {claimHelpText}
+                </span>
+              </div>
+
+              <button
+                data-testid={isE2eMode ? "evm-claim-payout" : undefined}
+                type="button"
+                onClick={() => void handleClaim()}
+                style={buttonStyle(
+                  "linear-gradient(180deg, rgba(16,92,53,0.95) 0%, rgba(12,67,39,0.98) 100%)",
+                  "rgba(52,211,153,0.4)",
+                  false,
+                )}
+              >
+                {claimButtonLabel}
+              </button>
+            </div>
+          ) : null}
           {isE2eMode ? (
             <pre
               data-testid="evm-wallet-debug"

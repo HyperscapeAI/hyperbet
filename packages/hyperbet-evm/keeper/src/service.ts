@@ -1881,7 +1881,11 @@ function requireWriteAuth(
   req: Request,
   fallbackKey = ARENA_WRITE_KEY,
 ): boolean {
-  if (!fallbackKey) return true;
+  // C-7: Reject all writes when auth key is unconfigured (empty string).
+  if (!fallbackKey) {
+    console.warn("[requireWriteAuth] ARENA_WRITE_KEY is not configured — rejecting write");
+    return false;
+  }
   const provided = req.headers.get("x-arena-write-key")?.trim() || "";
   return provided === fallbackKey;
 }

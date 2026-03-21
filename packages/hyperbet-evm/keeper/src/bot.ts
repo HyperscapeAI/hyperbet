@@ -2061,6 +2061,20 @@ function markRpcSuccess(trackedMatch?: ActiveClobMatch | null): number {
   return now;
 }
 
+// H-10: Oracle liveness monitoring
+const LIVENESS_THRESHOLD_MS = 5 * 60 * 1000; // 5 minutes
+
+function checkLiveness(): void {
+  if (lastStreamEventAtMs == null) return;
+  const staleMs = Date.now() - lastStreamEventAtMs;
+  if (staleMs > LIVENESS_THRESHOLD_MS) {
+    console.error(
+      `[bot] CRITICAL: No lifecycle event received for ${Math.round(staleMs / 1000)}s. ` +
+      `Game server may be down. Last event: ${new Date(lastStreamEventAtMs).toISOString()}`
+    );
+  }
+}
+
 function markStreamEvent(trackedMatch?: ActiveClobMatch | null): number {
   const now = Date.now();
   lastStreamEventAtMs = now;
@@ -3557,6 +3571,7 @@ async function runLiquidatorLoop(): Promise<void> {
 }
 
 for (;;) {
+  checkLiveness();
   try {
     await runMaintenance();
   } catch (error) {

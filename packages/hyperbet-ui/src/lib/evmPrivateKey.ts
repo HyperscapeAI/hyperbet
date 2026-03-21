@@ -11,6 +11,13 @@ export function normalizeEvmPrivateKey(
 export function selectConfiguredEvmPrivateKey(
   env: Record<string, string | boolean | undefined>,
 ): `0x${string}` | null {
+  // C-6: Only read private keys in e2e mode. Vite bakes VITE_* env vars
+  // into the JS bundle at build time — a misconfigured CI could ship a
+  // private key in a production bundle.
+  const mode = (env.MODE as string | undefined) ?? "";
+  if (mode !== "e2e" && mode !== "development" && mode !== "test") {
+    return null;
+  }
   return normalizeEvmPrivateKey(
     (env.VITE_EVM_PRIVATE_KEY as string | undefined) ??
       (env.VITE_HEADLESS_EVM_PRIVATE_KEY as string | undefined) ??
