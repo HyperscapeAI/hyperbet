@@ -30,6 +30,7 @@ library Math {
 
     function calcLiquidity(uint256 liquidity, uint256 deadline, uint256 currentTime) public pure returns(uint256) {
         // liquidity = L * (T - t)^0.5
+        if (currentTime >= deadline) return 0;
         uint256 deltaTime = deadline - currentTime;
         uint256 sqrtDeltaTimeWad = FixedPointMathLib.sqrt(deltaTime) * 1e9;
         return FixedPointMathLib.mulWad(liquidity, sqrtDeltaTimeWad);
