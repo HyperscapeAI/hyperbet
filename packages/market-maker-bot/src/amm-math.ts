@@ -32,8 +32,8 @@ function qToU64(val: bigint): bigint {
 }
 
 function qMul(a: bigint, b: bigint): bigint {
-  // Approximate: shift each down 32 then multiply (avoids 256-bit overflow)
-  return (a >> 32n) * (b >> 32n);
+  // JS bigint has no overflow — exact Q64.64 multiply
+  return (a * b) >> FRAC_BITS;
 }
 
 function qDiv(a: bigint, b: bigint): bigint {

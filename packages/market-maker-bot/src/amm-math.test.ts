@@ -12,9 +12,9 @@ describe("amm-math", () => {
   describe("calcPrice", () => {
     it("returns ~500_000 for equal reserves (z=0 → CDF(0) = 0.5)", () => {
       const price = calcPrice(1_000_000n, 1_000_000n, 1_000_000n);
-      // Allow ±1% tolerance (matches Rust test)
-      expect(Number(price)).toBeGreaterThanOrEqual(490_000);
-      expect(Number(price)).toBeLessThanOrEqual(510_000);
+      // With exact qMul precision, tolerance is tight (±0.1%)
+      expect(Number(price)).toBeGreaterThanOrEqual(499_000);
+      expect(Number(price)).toBeLessThanOrEqual(501_000);
     });
 
     it("returns 500_000 when liquidity is zero", () => {
