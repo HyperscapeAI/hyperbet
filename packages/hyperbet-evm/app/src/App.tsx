@@ -29,6 +29,7 @@ import {
   getFixedMatchId,
   STREAM_URLS,
 } from "./lib/config";
+import { getRecentSettlementTitle } from "./lib/recentSettlement";
 import {
   captureInviteCodeFromLocation,
   getStoredInviteCode,
@@ -618,7 +619,7 @@ export function App() {
   // Keep the stream visible in e2e/local integration lanes when a real source
   // URL is configured. Wallet/chain polling stays gated separately above.
   const activeStreamUrl = streamSources[streamSourceIndex] ?? "";
-  const [streamSurfaceReady, setStreamSurfaceReady] = useState(false);
+  const [_streamSurfaceReady, setStreamSurfaceReady] = useState(false);
   const [streamSurfaceUnavailable, setStreamSurfaceUnavailable] =
     useState(false);
 
@@ -984,12 +985,11 @@ export function App() {
   const recentSurfaceMeta = recentSettlementMarket
     ? getMarketStatusLabel(recentSettlementMarket.lifecycleStatus, copy)
     : copy.statusPending;
-  const recentSurfaceTitle =
-    recentSettlementDuel?.winner === "A"
-      ? effA1.name
-      : recentSettlementDuel?.winner === "B"
-        ? effA2.name
-        : recentSettlementDuel?.phase ?? copy.phaseIdle;
+  const recentSurfaceTitle = getRecentSettlementTitle({
+    duel: recentSettlementDuel,
+    fallbackLabel: copy.latestSettlement,
+    idleLabel: copy.phaseIdle,
+  });
   const streamIssueText = !streamMarketAligned
     ? copy.streamDriftDetected
     : rendererUnhealthy
