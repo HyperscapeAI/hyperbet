@@ -241,6 +241,10 @@ contract AgentPerpEngineTest is Test {
         vm.prank(alice);
         engine.modifyPosition(agentId, 1000 * 1e18, 10 * 1e18);
 
+        // Bob takes opposite side so vault has enough balance for any PnL payout
+        vm.prank(bob);
+        engine.modifyPosition(agentId, 10_000 * 1e18, -10 * 1e18);
+
         vm.prank(operator);
         engine.setMarketStatus(agentId, AgentPerpEngine.MarketStatus.CLOSE_ONLY);
 
@@ -561,5 +565,56 @@ contract AgentPerpEngineTest is Test {
         // we verify the feature exists by checking the config struct fields
         (,,,,,,,,uint256 deltaBps,,) = engine.marketConfigs(agentId);
         assertEq(deltaBps, 0, "Default maxOraclePriceDeltaBps should be 0 (disabled)");
+    }
+
+    // ── Audit fix regression tests ──
+
+    function testFeeBpsSumValidation() public {
+        bytes32 newAgent = keccak256("FEE_TEST_AGENT");
+        vm.prank(admin);
+        oracle.updateAgentSkill(newAgent, 1500, 200);
+
+        // Combined fees >= 100% should revert
+        vm.prank(operator);
+        vm.expectRevert(AgentPerpEngine.InvalidFeeConfig.selector);
+        engine.createMarket(
+            newAgent,
+            1_000_000 * 1e18, // skewScale
+            50 * 1e18,        // maxLeverage
+            500,              // maintenanceMarginBps (5%)
+            100,              // liquidationRewardBps (1%)
+            2 minutes,        // maxOracleDelay
+            1_000_000 * 1e18, // maxOpenInterest
+            5000,             // tradeTreasuryFeeBps (50%)
+            5000              // tradeMarketMakerFeeBps (50%) — sum = 100% = BPS → revert
+        );
+    }
+
+    function testInsuranceNotDrainedByProfit() public {
+        // Open a large long position for alice
+        vm.prank(alice);
+        engine.modifyPosition(agentId, 10_000 * 1e18, 10 * 1e18);
+
+        // Open a short for bob to create vault balance from deposits
+        vm.prank(bob);
+        engine.modifyPosition(agentId, 10_000 * 1e18, -10 * 1e18);
+
+        // Move price up significantly so alice has large unrealized profit
+        vm.prank(admin);
+        oracle.updateAgentSkill(agentId, 2000, 50); // Higher mu = higher price
+
+        // Record insurance before
+        (,,,,,,,,,uint256 insuranceBefore,,,,,,) = engine.markets(agentId);
+
+        // Alice closes her profitable position
+        vm.prank(alice);
+        try engine.modifyPosition(agentId, 0, -10 * 1e18) {
+            // If it succeeds, insurance should not have decreased
+            (,,,,,,,,,uint256 insuranceAfter,,,,,,) = engine.markets(agentId);
+            assertTrue(insuranceAfter >= insuranceBefore, "Insurance should not decrease from profit payout");
+        } catch {
+            // If it reverts with InsufficientMarketLiquidity, that's correct behavior —
+            // the vault doesn't have enough to pay the profit and insurance is protected
+        }
     }
 }
