@@ -351,11 +351,15 @@ contract GoldClob is AccessControl, ReentrancyGuard {
 
         uint64 takerOrderId = market.nextOrderId;
         market.nextOrderId += 1;
-        emit OrderPlaced(key, takerOrderId, msg.sender, side, price, amount);
 
         MatchProgress memory progress = side == BUY_SIDE
             ? _matchBuyOrder(key, market, price, amount, takerOrderId)
             : _matchSellOrder(key, market, price, amount, takerOrderId);
+
+        // L-4: Emit after matching so the event reflects actual outcome.
+        // For IOC orders that fully fill, the event still records the original amount
+        // but indexers can compare amount vs remainingAmount to detect full fills.
+        emit OrderPlaced(key, takerOrderId, msg.sender, side, price, amount);
 
         uint256 restingCost = 0;
         if (progress.remainingAmount > 0 && _isGoodTilCancelled(orderFlags) && !progress.selfTradePrevented) {
