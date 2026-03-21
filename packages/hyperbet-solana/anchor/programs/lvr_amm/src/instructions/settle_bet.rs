@@ -1,9 +1,17 @@
 use anchor_lang::prelude::*;
+use core::str::FromStr;
 
 use crate::{
     error::PredictionMarketError,
     state::{admin::Admin, bet::Bet},
 };
+
+const DUEL_STATE_DISCRIMINATOR: [u8; 8] = [0x95, 0xd5, 0x3b, 0xa5, 0x7c, 0x74, 0x91, 0x78];
+const DUEL_KEY_OFFSET: usize = 8;
+const DUEL_KEY_END: usize = DUEL_KEY_OFFSET + 32;
+const STATUS_OFFSET: usize = 104;
+const WINNER_OFFSET: usize = 105;
+const MIN_DUEL_STATE_LEN: usize = 106;
 
 /// Oracle DuelStatus — mirrored from fight_oracle for deserialization.
 /// Must stay in sync with fight_oracle::DuelStatus discriminant order.
@@ -34,20 +42,49 @@ fn read_oracle_duel(data: &[u8]) -> Result<(OracleDuelStatus, OracleMarketSide)>
     //   participant_b_hash: [u8; 32]   offset 72..104
     //   status: u8 (enum)              offset 104
     //   winner: u8 (enum)              offset 105
-    require!(data.len() >= 106, PredictionMarketError::MathErr);
+    require!(data.len() >= MIN_DUEL_STATE_LEN, PredictionMarketError::InvalidOracleAccount);
+    require!(
+        data[..8] == DUEL_STATE_DISCRIMINATOR,
+        PredictionMarketError::InvalidOracleAccount
+    );
 
-    let status = OracleDuelStatus::try_from_slice(&data[104..105])
-        .map_err(|_| error!(PredictionMarketError::MathErr))?;
-    let winner = OracleMarketSide::try_from_slice(&data[105..106])
-        .map_err(|_| error!(PredictionMarketError::MathErr))?;
+    let status = OracleDuelStatus::try_from_slice(&data[STATUS_OFFSET..STATUS_OFFSET + 1])
+        .map_err(|_| error!(PredictionMarketError::InvalidOracleAccount))?;
+    let winner = OracleMarketSide::try_from_slice(&data[WINNER_OFFSET..WINNER_OFFSET + 1])
+        .map_err(|_| error!(PredictionMarketError::InvalidOracleAccount))?;
 
     Ok((status, winner))
 }
 
+fn read_oracle_duel_key(data: &[u8]) -> Result<[u8; 32]> {
+    require!(data.len() >= DUEL_KEY_END, PredictionMarketError::InvalidOracleAccount);
+    let mut duel_key = [0_u8; 32];
+    duel_key.copy_from_slice(&data[DUEL_KEY_OFFSET..DUEL_KEY_END]);
+    Ok(duel_key)
+}
+
 pub fn settle_bet_instruction(ctx: Context<SettleBet>, _bet_id: u64, side_won: u8) -> Result<()> {
+    require!(
+        ctx.accounts.bet.is_initialized,
+        PredictionMarketError::BetNotInitialized
+    );
+
     // If an oracle duel_state is provided, read winner from oracle (trustless path)
     let final_side_won = if let Some(duel_account) = &ctx.accounts.duel_state {
+        let fight_oracle_program_id = Pubkey::from_str("B5mRCRDJk9BrnH7regMWW5mpTQ8QG1CcCGSnDxMt8hmo")
+            .map_err(|_| error!(PredictionMarketError::InvalidOracleAccount))?;
+        require_keys_eq!(
+            *duel_account.owner,
+            fight_oracle_program_id,
+            PredictionMarketError::InvalidOracleAccount
+        );
+
         let data = duel_account.try_borrow_data()?;
+        let duel_key = read_oracle_duel_key(&data)?;
+        require!(
+            duel_key[..8] == ctx.accounts.bet.bet_id.to_le_bytes(),
+            PredictionMarketError::OracleBetMismatch
+        );
         let (status, winner) = read_oracle_duel(&data)?;
 
         require!(
@@ -62,7 +99,7 @@ pub fn settle_bet_instruction(ctx: Context<SettleBet>, _bet_id: u64, side_won: u
             match winner {
                 OracleMarketSide::A => 0u8,
                 OracleMarketSide::B => 1u8,
-                OracleMarketSide::None => return err!(PredictionMarketError::MathErr),
+                OracleMarketSide::None => return err!(PredictionMarketError::InvalidOracleAccount),
             }
         }
     } else {

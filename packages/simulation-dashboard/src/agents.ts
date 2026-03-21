@@ -7,7 +7,7 @@ import {
     type MarketSnapshot,
     type QuotePlan,
 } from "@hyperbet/mm-core";
-import type { ScenarioRuntimeProfile } from "./scenario-catalog.js";
+import type { ScenarioChainKey, ScenarioRuntimeProfile } from "./scenario-catalog.js";
 import {
     BUY_SIDE,
     SELL_SIDE,
@@ -39,6 +39,7 @@ export type AgentAction = {
 };
 
 export type SimContext = {
+    chainKey: ScenarioChainKey;
     duelKey: string;
     marketKey: string;
     bestBid: number;
@@ -54,6 +55,10 @@ export type SimContext = {
     scenarioProfile: ScenarioRuntimeProfile | null;
     agentPosition: { aShares: bigint; bShares: bigint; aStake: bigint; bStake: bigint };
 };
+
+function toSnapshotChainKey(chainKey: ScenarioChainKey): MarketSnapshot["chainKey"] {
+    return chainKey === "anvil" ? "bsc" : chainKey;
+}
 
 type ManagedQuoteRef = ManagedQuoteState & {
     orderId: number;
@@ -273,7 +278,7 @@ export class MarketMakerAgent extends BaseAgent {
             .map((quote) => Math.max(0, nowMs - quote.placedAtMs));
 
         const snapshot: MarketSnapshot = {
-            chainKey: "bsc",
+            chainKey: toSnapshotChainKey(ctx.chainKey),
             lifecycleStatus: "OPEN",
             duelKey: ctx.duelKey,
             marketRef: ctx.marketKey,

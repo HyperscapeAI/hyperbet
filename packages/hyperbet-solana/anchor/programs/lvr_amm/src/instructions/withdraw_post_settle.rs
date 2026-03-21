@@ -13,6 +13,7 @@ pub fn withdraw_post_settle_instruction(
 ) -> Result<()> {
     let bet = &ctx.accounts.bet;
 
+    require!(bet.is_initialized, PredictionMarketError::BetNotInitialized);
     require!(bet.side_won.is_some(), PredictionMarketError::BetNotSettled);
     require!(
         outcome == 0 || outcome == 1,
@@ -49,7 +50,8 @@ pub fn withdraw_post_settle_instruction(
 
     // Only pay if the user holds the winning shares
     // In LvrAMM (and PMs generally), winning shares redeem 1:1 for Collateral (Lamports here)
-    if bet.side_won.unwrap() == outcome {
+    let resolved_side = bet.side_won.unwrap();
+    if resolved_side == 2 || resolved_side == outcome {
         let rent_balance = Rent::get()?.minimum_balance(bet.to_account_info().data_len());
         let bet_sol_balance = **bet.to_account_info().lamports.borrow() - rent_balance;
 

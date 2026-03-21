@@ -2,6 +2,7 @@
 pragma solidity ^0.8.13;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {YesToken, NoToken} from "./Token.sol";
@@ -45,7 +46,6 @@ contract LvrMarket is ReentrancyGuard {
     }
 
     uint256 constant DISPUTE_WINDOW = 5 minutes; // 5 mins
-    uint256 constant BOND_VALUE = 50;
     MarketState public state;
     uint256 private resolutionTimestamp;
     uint256 private outcome;
@@ -57,6 +57,9 @@ contract LvrMarket is ReentrancyGuard {
     address public immutable adminAddress;
     address public immutable routerAddress;
     address public immutable collateralToken;
+    DuelOutcomeOracle public immutable duelOracle;
+    bytes32 public immutable duelKey;
+    uint256 public immutable bondValue;
     uint256 private liquidity;
 
     bool private liquidityInitialized;
@@ -67,6 +70,8 @@ contract LvrMarket is ReentrancyGuard {
 
     constructor(
         address router_,
+        bytes32 duelKey_,
+        address oracle_,
         bool marketType_,
         uint256 duration,
         address collateral_,
@@ -75,16 +80,21 @@ contract LvrMarket is ReentrancyGuard {
         uint256 feeBps_
     ) {
         require(router_ != address(0), "invalid router");
+        require(duelKey_ != bytes32(0), "invalid duel key");
+        require(oracle_ != address(0), "invalid oracle");
         require(collateral_ != address(0), "invalid collateral");
         require(admin_ != address(0), "invalid admin");
         require(treasury_ != address(0) || feeBps_ == 0, "invalid treasury");
 
         routerAddress = router_;
+        duelKey = duelKey_;
+        duelOracle = DuelOutcomeOracle(oracle_);
         isDynamic = marketType_;
         collateralToken = collateral_;
         adminAddress = admin_;
         treasuryAddress = treasury_;
         feeBps = feeBps_;
+        bondValue = 50 * (10 ** IERC20Metadata(collateral_).decimals());
 
         deadline = block.timestamp + duration;
         state = MarketState.OPEN;
@@ -106,8 +116,8 @@ contract LvrMarket is ReentrancyGuard {
         IERC20 collateral = IERC20(collateralToken);
         uint256 balanceBefore = collateral.balanceOf(address(this));
         bytes memory data = abi.encode(collateralToken, proposerAddress);
-        IMarketBondCallback(msg.sender).marketBondCallback(BOND_VALUE, data);
-        require(collateral.balanceOf(address(this)) >= balanceBefore + BOND_VALUE);
+        IMarketBondCallback(msg.sender).marketBondCallback(bondValue, data);
+        require(collateral.balanceOf(address(this)) >= balanceBefore + bondValue);
 
         outcome = outcomeValue;
         state = MarketState.PENDING;
@@ -127,18 +137,19 @@ contract LvrMarket is ReentrancyGuard {
     }
 
     function settleMarket() external isRouter nonReentrant {
+        require(state == MarketState.PENDING, "Invalid Market State");
         require(block.timestamp >= resolutionTimestamp, "Challenge Window Open");
         // Return bond to proposer with Reward collected through market fees
         state = MarketState.RESOLVED;
-        IERC20(collateralToken).safeTransfer(proposer, BOND_VALUE); // Add fees and then reward the proposer
+        IERC20(collateralToken).safeTransfer(proposer, bondValue); // Add fees and then reward the proposer
 
-        emit MarketSettled(outcome, proposer, BOND_VALUE);
+        emit MarketSettled(outcome, proposer, bondValue);
     }
 
     function adminResolve(uint256 outcomeValue) external nonReentrant {
         require(msg.sender == adminAddress, "Only Admin can call this method");
         require(block.timestamp >= deadline, "Market not finished");
-        require(outcomeValue == 0 || outcomeValue == 1, "Invalid outcome");
+        require(outcomeValue <= 2, "Invalid outcome");
         require(state == MarketState.DISPUTED || state == MarketState.OPEN, "Invalid Market State");
 
         outcome = outcomeValue;
@@ -146,16 +157,16 @@ contract LvrMarket is ReentrancyGuard {
 
         // If proposer is intialized then return the bond
         if (proposer != address(0)) {
-            IERC20(collateralToken).safeTransfer(proposer, BOND_VALUE);
+            IERC20(collateralToken).safeTransfer(proposer, bondValue);
         }
 
         emit MarketResolvedByAdmin(outcomeValue, msg.sender);
     }
 
-    function settleFromOracle(address oracle, bytes32 duelKey) external isRouter nonReentrant {
+    function settleFromOracle() external isRouter nonReentrant {
         require(state == MarketState.OPEN || state == MarketState.PENDING || state == MarketState.DISPUTED, "Invalid Market State");
 
-        DuelOutcomeOracle.DuelState memory duel = DuelOutcomeOracle(oracle).getDuel(duelKey);
+        DuelOutcomeOracle.DuelState memory duel = duelOracle.getDuel(duelKey);
         require(
             duel.status == DuelOutcomeOracle.DuelStatus.RESOLVED || duel.status == DuelOutcomeOracle.DuelStatus.CANCELLED,
             "Oracle duel not resolved"
@@ -171,10 +182,12 @@ contract LvrMarket is ReentrancyGuard {
         }
 
         state = MarketState.RESOLVED;
+        uint256 returnedBond = 0;
         if (proposer != address(0)) {
-            IERC20(collateralToken).safeTransfer(proposer, BOND_VALUE);
+            IERC20(collateralToken).safeTransfer(proposer, bondValue);
+            returnedBond = bondValue;
         }
-        emit MarketSettled(outcome, msg.sender, 0);
+        emit MarketSettled(outcome, proposer, returnedBond);
     }
 
     function redeemCollateralWithToken(
@@ -191,12 +204,17 @@ contract LvrMarket is ReentrancyGuard {
         if(amountNoIn > 0) noToken.burn(address(this), amountNoIn);
 
         uint256 payout = 0;
-        if (outcome == 1) {
+        if (outcome == 0) {
             payout = amountYesIn;
             IERC20(collateralToken).safeTransfer(redeemer, amountYesIn);
-        } else {
+        } else if (outcome == 1) {
             payout = amountNoIn;
             IERC20(collateralToken).safeTransfer(redeemer, amountNoIn);
+        } else if (outcome == 2) {
+            payout = amountYesIn + amountNoIn;
+            IERC20(collateralToken).safeTransfer(redeemer, payout);
+        } else {
+            revert("Invalid outcome");
         }
 
         emit CollateralRedeemed(redeemer, amountYesIn, amountNoIn, payout);

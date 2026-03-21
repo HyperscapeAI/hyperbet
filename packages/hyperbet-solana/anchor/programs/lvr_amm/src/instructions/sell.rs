@@ -23,6 +23,7 @@ pub fn sell_instruction(ctx: Context<Sell>, bet_id: u64, outcome: u8, amount_in:
     require!(user_share_balance >= amount_in, PredictionMarketError::SignerDoesntHaveEnoughTokens);
 
     let bet = &mut ctx.accounts.bet;
+    require!(bet.is_initialized, PredictionMarketError::BetNotInitialized);
     require!(bet.side_won.is_none(), PredictionMarketError::BetAlreadySettled);
 
     let is_sell_yes = outcome == 0;
@@ -182,13 +183,21 @@ pub struct Sell<'info> {
     #[account(mut, address = bet.treasury)]
     pub treasury: UncheckedAccount<'info>,
 
-    /// CHECK: Manual validation in instruction
-    #[account(mut)]
-    pub treasury_yes_ata: UncheckedAccount<'info>,
+    #[account(
+        init_if_needed,
+        payer = signer,
+        associated_token::mint = mint_yes,
+        associated_token::authority = treasury,
+    )]
+    pub treasury_yes_ata: Box<Account<'info, TokenAccount>>,
 
-    /// CHECK: Manual validation in instruction
-    #[account(mut)]
-    pub treasury_no_ata: UncheckedAccount<'info>,
+    #[account(
+        init_if_needed,
+        payer = signer,
+        associated_token::mint = mint_no,
+        associated_token::authority = treasury,
+    )]
+    pub treasury_no_ata: Box<Account<'info, TokenAccount>>,
 
     pub token_program: Program<'info, Token>,
     pub system_program: Program<'info, System>,

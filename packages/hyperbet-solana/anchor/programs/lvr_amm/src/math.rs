@@ -4,13 +4,13 @@
 /// but public API uses u64 scaled by 1e6 (SPL convention).
 ///
 /// Replaces f64 to ensure deterministic consensus across validators.
+use ethnum::I256;
 
 const SCALE: u64 = 1_000_000; // SPL 6-decimal scale
 const FRAC_BITS: u32 = 64;
 
 // Q64.64 constants
 const Q_ONE: i128 = 1i128 << FRAC_BITS;            // 1.0
-const Q_HALF: i128 = 1i128 << (FRAC_BITS - 1);     // 0.5
 const Q_SQRT_2PI: i128 = 46_174_166_757_360_756_275; // sqrt(2*pi) in Q64.64 ≈ 2.5066
 const Q_SQRT_2: i128 = 26_087_635_650_665_564_424;   // sqrt(2) in Q64.64 ≈ 1.4142
 const Q_MIN_RESERVE: i128 = 18_446_744_073_709;      // 0.001 in Q64.64
@@ -18,11 +18,6 @@ const Q_MIN_DERIVATIVE: i128 = 1_844_674_407_370;     // 0.0001 in Q64.64
 const Q_APPROX: i128 = 18_446_744_073_709;           // 0.001 convergence threshold
 
 const MAX_NEWTON_ITERS: u32 = 50;
-
-/// Convert u64 (scaled by 1e6) to Q64.64
-fn to_q(val: u64) -> i128 {
-    ((val as i128) << FRAC_BITS) / (SCALE as i128)
-}
 
 /// More precise: multiply first then divide to avoid truncation
 fn u64_to_q(val: u64) -> i128 {
@@ -37,17 +32,25 @@ fn q_to_u64(val: i128) -> u64 {
 
 /// Q64.64 multiply: (a * b) >> 64
 fn q_mul(a: i128, b: i128) -> i128 {
-    // Use i128 which gives us 128-bit precision; for the multiply we need
-    // to be careful about overflow. Since our values are bounded (reserves
-    // are at most ~1e12 in Q64.64), this is safe.
-    (a >> 32) * (b >> 32) // Approximate: lose some precision but avoid overflow
+    i256_to_i128((I256::new(a) * I256::new(b)) >> FRAC_BITS)
 }
 
 /// Q64.64 divide: (a << 64) / b
 fn q_div(a: i128, b: i128) -> i128 {
     if b == 0 { return 0; }
-    // Shift a up as much as safely possible
-    ((a >> 0) << FRAC_BITS) / b
+    i256_to_i128((I256::new(a) << FRAC_BITS) / I256::new(b))
+}
+
+fn i256_to_i128(value: I256) -> i128 {
+    let min = I256::new(i128::MIN);
+    let max = I256::new(i128::MAX);
+    if value < min {
+        i128::MIN
+    } else if value > max {
+        i128::MAX
+    } else {
+        value.as_i128()
+    }
 }
 
 fn q_abs(val: i128) -> i128 {
@@ -228,7 +231,7 @@ pub fn calc_price(x: u64, y: u64, l: u64) -> u64 {
 }
 
 pub fn calc_liquidity(liquidity: u64, deadline: i64, current_time: i64) -> u64 {
-    let mut delta_time = deadline - current_time;
+    let delta_time = deadline - current_time;
     if delta_time <= 0 { return 0; }
 
     // Integer sqrt using Newton's method
@@ -321,5 +324,24 @@ mod tests {
         let _ = calc_price(1_000_000, 1_000_000, 1_000_000);
         let _ = calc_initial_liquidity(1_000_000);
         let _ = calc_liquidity(1_000_000, 100, 0);
+    }
+
+    #[test]
+    fn test_q_mul_keeps_fractional_bits() {
+        let a = (123_i128 << 32) + (1_i128 << 31);
+        let b = (456_i128 << 32) + (1_i128 << 31);
+        let expected = (a * b) >> FRAC_BITS;
+
+        assert_eq!(q_mul(a, b), expected);
+        assert_ne!((a >> 32) * (b >> 32), expected);
+    }
+
+    #[test]
+    fn test_q_div_matches_exact_shifted_division() {
+        let numerator = (123_i128 << 32) + (1_i128 << 31);
+        let denominator = (7_i128 << 32) + (1_i128 << 31);
+        let expected = (numerator << FRAC_BITS) / denominator;
+
+        assert_eq!(q_div(numerator, denominator), expected);
     }
 }

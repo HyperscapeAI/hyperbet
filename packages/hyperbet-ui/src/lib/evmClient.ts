@@ -109,7 +109,7 @@ const SIDE_MAP: Record<number, Side> = {
 };
 
 export function toDuelKeyHex(duelKeyHex: string): Hex {
-  const normalized = duelKeyHex.trim().toLowerCase();
+  const normalized = duelKeyHex.trim().toLowerCase().replace(/^0x/, "");
   if (!/^[0-9a-f]{64}$/.test(normalized)) {
     throw new Error("duelKeyHex must be a 32-byte hex string");
   }

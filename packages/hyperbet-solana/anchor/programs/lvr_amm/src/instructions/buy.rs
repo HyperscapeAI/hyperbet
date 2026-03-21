@@ -20,6 +20,7 @@ pub fn buy_instruction(ctx: Context<Buy>, bet_id: u64, outcome: u8, amount_in: u
 
     let bet = &mut ctx.accounts.bet;
 
+    require!(bet.is_initialized, PredictionMarketError::BetNotInitialized);
     require!(
         bet.side_won.is_none(),
         PredictionMarketError::BetAlreadySettled

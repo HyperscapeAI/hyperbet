@@ -4,6 +4,7 @@ pragma solidity ^0.8.13;
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import {DuelOutcomeOracle} from "../DuelOutcomeOracle.sol";
 import {LvrMarket} from "./LvrMarket.sol";
 import {IMarketBuyCallback} from "./interfaces/IMarketBuyCallback.sol";
 import {IMarketSellCallback} from "./interfaces/IMarketSellCallback.sol";
@@ -11,6 +12,8 @@ import {IMarketRedeemCallback} from "./interfaces/IMarketRedeemCallback.sol";
 import {IMarketBondCallback} from "./interfaces/IMarketBondCallback.sol";
 
 contract Router is AccessControl, ReentrancyGuard, IMarketBuyCallback, IMarketSellCallback, IMarketRedeemCallback, IMarketBondCallback{
+    bytes32 public constant MARKET_OPERATOR_ROLE = keccak256("MARKET_OPERATOR_ROLE");
+
     // Enhanced event with full metadata for frontend indexing
     event MarketCreated(
         bytes32 indexed marketId, 
@@ -42,6 +45,7 @@ contract Router is AccessControl, ReentrancyGuard, IMarketBuyCallback, IMarketSe
     uint256 public constant MAX_FEE_BPS = 1000; // 10% cap
 
     IERC20 public immutable mUSD; // Collateral Token
+    DuelOutcomeOracle public immutable duelOracle;
     address public treasury;     // Protocol Treasury
     uint256 public feeBps;       // Global Swap Fee Bps
 
@@ -53,12 +57,14 @@ contract Router is AccessControl, ReentrancyGuard, IMarketBuyCallback, IMarketSe
 
     event FeeConfigUpdated(address indexed treasury, uint256 feeBps);
 
-    constructor(address _mUSD, address _treasury, uint256 _feeBps, address admin){
+    constructor(address _mUSD, address _oracle, address _treasury, uint256 _feeBps, address admin){
         require(_feeBps <= MAX_FEE_BPS, "Fee too high");
         mUSD = IERC20(_mUSD);
+        duelOracle = DuelOutcomeOracle(_oracle);
         treasury = _treasury;
         feeBps = _feeBps;
         _grantRole(DEFAULT_ADMIN_ROLE, admin);
+        _grantRole(MARKET_OPERATOR_ROLE, admin);
     }
 
     modifier onlyAllowedMarket() {
@@ -76,15 +82,17 @@ contract Router is AccessControl, ReentrancyGuard, IMarketBuyCallback, IMarketSe
         string memory title, 
         string memory description,
         string memory resolutionSource,
+        bytes32 duelKey,
         bool isDynamic, 
         uint256 duration, 
         uint256 collateralIn
-    ) public {
+    ) public onlyRole(MARKET_OPERATOR_ROLE) {
         // A new market is deployed
         bytes32 marketId = keccak256(abi.encodePacked(title, msg.sender, block.timestamp));
         require(!markets[marketId].initialized, "Market Already Exists");
 
-        LvrMarket market = new LvrMarket(address(this), isDynamic, duration, address(mUSD), msg.sender, treasury, feeBps);
+        LvrMarket market =
+            new LvrMarket(address(this), duelKey, address(duelOracle), isDynamic, duration, address(mUSD), msg.sender, treasury, feeBps);
         allowedMarkets[address(market)] = true;
 
         // Transfer USD token to market contract
@@ -185,9 +193,9 @@ contract Router is AccessControl, ReentrancyGuard, IMarketBuyCallback, IMarketSe
         LvrMarket(market).settleMarket();
     }
 
-    function settleFromOracle(address market, address oracle, bytes32 duelKey) public {
+    function settleFromOracle(address market) public {
         if (!allowedMarkets[market]) revert MarketNotAllowed();
-        LvrMarket(market).settleFromOracle(oracle, duelKey);
+        LvrMarket(market).settleFromOracle();
     }
 
     function redeem(address market, uint256 amountYes, uint256 amountNo) public {

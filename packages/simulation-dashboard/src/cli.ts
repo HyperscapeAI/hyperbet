@@ -2,7 +2,7 @@ type ScenarioRunRecord = {
     runId: string;
     scenarioId: string;
     scenarioName: string;
-    chainKey: "bsc" | "solana";
+    chainKey: "anvil" | "solana";
     seed: string;
     ticks: number;
     winner: "A" | "B";
@@ -23,7 +23,7 @@ type ScenarioRunRecord = {
 
 type ScenarioPreset = {
     id: string;
-    chainKey: "bsc" | "solana";
+    chainKey: "anvil" | "solana";
     name: string;
     family: string;
     canonicalSeed: string;

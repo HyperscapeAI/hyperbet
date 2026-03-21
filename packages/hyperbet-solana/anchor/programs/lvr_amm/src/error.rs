@@ -32,11 +32,20 @@ pub enum PredictionMarketError {
     #[msg("Bet already settled")]
     BetAlreadySettled,
 
+    #[msg("Bet not initialized")]
+    BetNotInitialized,
+
     #[msg("Bet not settled")]
     BetNotSettled,
 
     #[msg("Bet not expired")]
     BetNotExpired,
+
+    #[msg("Invalid oracle account")]
+    InvalidOracleAccount,
+
+    #[msg("Oracle duel does not match bet")]
+    OracleBetMismatch,
 
     #[msg("Overflow or Underflow")]
     MathErr,
