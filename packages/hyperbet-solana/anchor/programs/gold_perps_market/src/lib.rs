@@ -118,6 +118,7 @@ pub mod gold_perps_market {
             ctx.accounts.authority.key() == ctx.accounts.config.authority,
             PerpsError::InvalidAuthority
         );
+        require!(!ctx.accounts.config.config_frozen, PerpsError::ConfigFrozen);
         ctx.accounts.config.paused = paused;
         Ok(())
     }
@@ -575,7 +576,9 @@ pub mod gold_perps_market {
             exit_price,
             close_size_delta,
         )?;
-        let funding_pnl = calculate_funding_pnl(old_size, funding_delta)?;
+        // Use close_size_delta so partial liquidations only realize funding
+        // proportional to the closed portion, not the entire position.
+        let funding_pnl = calculate_funding_pnl(close_size_delta.into(), funding_delta)?;
         let next_margin = (position.margin as i128)
             .checked_add(funding_pnl)
             .and_then(|v| v.checked_add(realized_pnl))
@@ -773,6 +776,11 @@ pub mod gold_perps_market {
                 market.last_funding_time = now;
             }
             MARKET_STATUS_CLOSE_ONLY => {
+                // Reject if already CLOSE_ONLY — settlement price must not be overwritten
+                require!(
+                    market.status != MARKET_STATUS_CLOSE_ONLY,
+                    PerpsError::InvalidMarketStatus
+                );
                 let frozen_price = if settlement_spot_index > 0 {
                     settlement_spot_index
                 } else {
@@ -1482,11 +1490,12 @@ pub struct LiquidatePosition<'info> {
     pub market: Account<'info, MarketState>,
     #[account(
         mut,
+        seeds = [b"position", owner.key().as_ref(), market_id.to_le_bytes().as_ref()],
+        bump,
         constraint = position.initialized @ PerpsError::NoOpenPosition,
-        constraint = position.market_id == market_id @ PerpsError::InvalidMarket,
-        constraint = position.owner == owner.key() @ PerpsError::InvalidPositionOwner
     )]
     pub position: Account<'info, PositionState>,
+    /// CHECK: Position owner derived from PDA seeds; receives lamports on full liquidation.
     #[account(mut)]
     pub owner: SystemAccount<'info>,
     #[account(mut)]
