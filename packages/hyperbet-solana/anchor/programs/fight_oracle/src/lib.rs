@@ -499,7 +499,8 @@ pub struct CancelDuel<'info> {
     #[account(
         seeds = [ORACLE_CONFIG_SEED],
         bump = oracle_config.bump,
-        constraint = oracle_config.authority == authority.key() @ ErrorCode::Unauthorized,
+        // M-4: Allow authority OR reporter to cancel (parity with EVM PAUSER_ROLE)
+        constraint = (oracle_config.authority == authority.key() || oracle_config.reporter == authority.key()) @ ErrorCode::Unauthorized,
     )]
     pub oracle_config: Account<'info, OracleConfig>,
     #[account(mut, seeds = [DUEL_SEED, duel_key.as_ref()], bump = duel_state.bump)]
