@@ -1004,6 +1004,47 @@
       ]
     }
   ],
+  "events": [
+    {
+      "name": "OracleSynced",
+      "discriminator": [
+        58,
+        165,
+        29,
+        1,
+        137,
+        95,
+        121,
+        67
+      ]
+    },
+    {
+      "name": "PositionLiquidated",
+      "discriminator": [
+        40,
+        107,
+        90,
+        214,
+        96,
+        30,
+        61,
+        128
+      ]
+    },
+    {
+      "name": "PositionModified",
+      "discriminator": [
+        2,
+        251,
+        140,
+        65,
+        176,
+        78,
+        250,
+        126
+      ]
+    }
+  ],
   "errors": [
     {
       "code": 6000,
@@ -1339,6 +1380,98 @@
           },
           {
             "name": "bad_debt",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "OracleSynced",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "market_id",
+            "type": "u64"
+          },
+          {
+            "name": "spot_index",
+            "type": "u64"
+          },
+          {
+            "name": "timestamp",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PositionLiquidated",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "market_id",
+            "type": "u64"
+          },
+          {
+            "name": "trader",
+            "type": "pubkey"
+          },
+          {
+            "name": "liquidator",
+            "type": "pubkey"
+          },
+          {
+            "name": "closed_size",
+            "type": "i64"
+          },
+          {
+            "name": "remaining_size",
+            "type": "i64"
+          },
+          {
+            "name": "liquidation_fee",
+            "type": "u64"
+          },
+          {
+            "name": "exit_price",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PositionModified",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "market_id",
+            "type": "u64"
+          },
+          {
+            "name": "trader",
+            "type": "pubkey"
+          },
+          {
+            "name": "size_delta",
+            "type": "i64"
+          },
+          {
+            "name": "margin_delta",
+            "type": "i64"
+          },
+          {
+            "name": "new_size",
+            "type": "i64"
+          },
+          {
+            "name": "new_margin",
+            "type": "u64"
+          },
+          {
+            "name": "execution_price",
             "type": "u64"
           }
         ]
