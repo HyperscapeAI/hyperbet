@@ -77,21 +77,15 @@ pub fn sell_instruction(ctx: Context<Sell>, bet_id: u64, outcome: u8, amount_in:
     let cpi_context_burn = CpiContext::new(cpi_program.clone(), cpi_accounts_burn);
     token::burn(cpi_context_burn, net_amount_in)?;
 
-    // Transfer fee to treasury ATA
+    // Burn fee tokens to maintain solvency (outstanding tokens must not exceed collateral)
     if fee_amount > 0 {
-        let treasury_ata = if outcome == 0 {
-            ctx.accounts.treasury_yes_ata.to_account_info()
-        } else {
-            ctx.accounts.treasury_no_ata.to_account_info()
-        };
-
-        let cpi_accounts_transfer = token::Transfer {
-            from: burn_destination,
-            to: treasury_ata,
+        let cpi_accounts_fee_burn = Burn {
+            mint: burn_mint.clone(),
+            from: burn_destination.clone(),
             authority: ctx.accounts.signer.to_account_info(),
         };
-        let cpi_context_transfer = CpiContext::new(cpi_program.clone(), cpi_accounts_transfer);
-        token::transfer(cpi_context_transfer, fee_amount)?;
+        let cpi_context_fee_burn = CpiContext::new(cpi_program.clone(), cpi_accounts_fee_burn);
+        token::burn(cpi_context_fee_burn, fee_amount)?;
     }
 
     // mint the received tokens
@@ -178,26 +172,6 @@ pub struct Sell<'info> {
         associated_token::authority = signer,
     )]
     pub destination_no: Box<Account<'info, TokenAccount>>,
-
-    /// CHECK: Validate treasury matched bet state
-    #[account(mut, address = bet.treasury)]
-    pub treasury: UncheckedAccount<'info>,
-
-    #[account(
-        init_if_needed,
-        payer = signer,
-        associated_token::mint = mint_yes,
-        associated_token::authority = treasury,
-    )]
-    pub treasury_yes_ata: Box<Account<'info, TokenAccount>>,
-
-    #[account(
-        init_if_needed,
-        payer = signer,
-        associated_token::mint = mint_no,
-        associated_token::authority = treasury,
-    )]
-    pub treasury_no_ata: Box<Account<'info, TokenAccount>>,
 
     pub token_program: Program<'info, Token>,
     pub system_program: Program<'info, System>,
