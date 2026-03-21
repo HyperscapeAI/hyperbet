@@ -298,7 +298,32 @@ export type GoldPerpsMarket = {
         },
         {
           "name": "position",
-          "writable": true
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  115,
+                  105,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              },
+              {
+                "kind": "arg",
+                "path": "marketId"
+              }
+            ]
+          }
         },
         {
           "name": "owner",
