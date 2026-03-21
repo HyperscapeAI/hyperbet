@@ -135,12 +135,19 @@ function buildResultHash(
   );
 }
 
-function normalizeHex32(value: string): Hex {
+function normalizeHex32Raw(value: string): string {
   const normalized = value.trim().toLowerCase();
-  if (!/^[0-9a-f]{64}$/.test(normalized)) {
+  const withoutPrefix = normalized.startsWith("0x")
+    ? normalized.slice(2)
+    : normalized;
+  if (!/^[0-9a-f]{64}$/.test(withoutPrefix)) {
     throw new Error("expected 32-byte hex");
   }
-  return `0x${normalized}`;
+  return withoutPrefix;
+}
+
+function normalizeHex32(value: string): Hex {
+  return `0x${normalizeHex32Raw(value)}`;
 }
 
 function participantHashHex(agent: { id?: string; name?: string } | null): Hex {
@@ -3121,8 +3128,10 @@ async function reportRoundResult(data: DuelLifecycleEvent): Promise<void> {
     return;
   }
 
-  const replayHashHex = data.replayHash.trim().toLowerCase();
-  if (!/^[0-9a-f]{64}$/.test(replayHashHex)) {
+  let replayHashHex: string;
+  try {
+    replayHashHex = normalizeHex32Raw(data.replayHash);
+  } catch {
     console.warn(
       `[Keeper] duel:completed for ${data.duelId} supplied an invalid replayHash; refusing to post oracle result.`,
     );

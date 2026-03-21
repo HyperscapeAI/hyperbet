@@ -32,6 +32,8 @@ export type BetSyncEvent = {
   winnerId: string | null;
   winnerName: string | null;
   winReason: string | null;
+  seed: string | null;
+  replayHash: string | null;
   agent1: JsonRecord | null;
   agent2: JsonRecord | null;
   arenaPositions: JsonRecord | null;
@@ -228,6 +230,8 @@ export function parseBetSyncEvent(payload: unknown): BetSyncEvent | null {
     winnerId: asString(candidate.winnerId),
     winnerName: asString(candidate.winnerName),
     winReason: asString(candidate.winReason),
+    seed: asString(candidate.seed),
+    replayHash: asString(candidate.replayHash),
     agent1: asRecord(candidate.agent1),
     agent2: asRecord(candidate.agent2),
     arenaPositions: asRecord(candidate.arenaPositions),
@@ -287,6 +291,8 @@ export function toStreamStateFromBetSyncEvent(event: BetSyncEvent): StreamState 
       winnerId: event.winnerId,
       winnerName: event.winnerName,
       winReason: event.winReason,
+      seed: event.seed,
+      replayHash: event.replayHash,
       agent1: event.agent1,
       agent2: event.agent2,
       arenaPositions: event.arenaPositions,

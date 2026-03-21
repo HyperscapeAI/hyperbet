@@ -31,6 +31,8 @@ describe("bet-sync helpers", () => {
       winnerId: null,
       winnerName: null,
       winReason: null,
+      seed: "777",
+      replayHash: "cd".repeat(32),
       agent1: { id: "a" },
       agent2: { id: "b" },
       arenaPositions: { agent1: [0, 0, 0], agent2: [1, 0, 0] },
@@ -50,6 +52,8 @@ describe("bet-sync helpers", () => {
         duelKeyHex: `0x${duelKey}`,
         phase: "FIGHTING",
         phaseVersion: 3,
+        seed: "777",
+        replayHash: "cd".repeat(32),
       },
     });
   });
