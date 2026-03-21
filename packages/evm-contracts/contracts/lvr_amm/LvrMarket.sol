@@ -328,8 +328,8 @@ contract LvrMarket is ReentrancyGuard {
     }
 
     function getPriceYes() public view returns(uint256) {
+        if (isDynamic && block.timestamp >= deadline) return 0.5e18; // neutral price after deadline
         uint256 liq = isDynamic ? Math.calcLiquidity(liquidity, deadline, block.timestamp) : liquidity;
-        if (liq == 0) return 0.5e18; // neutral price after deadline
         return Math.calcPrice(yesToken.balanceOf(address(this)), noToken.balanceOf(address(this)), liq);
     }
 

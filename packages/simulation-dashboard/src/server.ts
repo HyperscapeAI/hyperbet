@@ -56,6 +56,7 @@ import {
     GATE_SCENARIOS,
     SCENARIO_PRESETS,
     getScenarioPresetByIdOrName,
+    type ScenarioChainKey,
     type ScenarioPreset,
     type ScenarioSettlementMode,
     type ScenarioSettlementStatus,
@@ -108,6 +109,10 @@ type PersistedScenarioState = {
     history: ScenarioResult[];
     runs: ScenarioRunRecord[];
 };
+
+function toRegistryChainKey(chainKey: ScenarioChainKey): ScenarioResult["chainKey"] {
+    return chainKey === "anvil" ? "bsc" : chainKey;
+}
 
 type CachedPosition = {
     aShares: bigint;
@@ -1951,7 +1956,9 @@ async function runSimLoop(): Promise<void> {
 }
 
 function buildScenarioTraces(limit = 80): AgentActionTrace[] {
-    const chainKey = getScenarioPresetByIdOrName(currentScenarioId)?.chainKey ?? "anvil";
+    const chainKey = toRegistryChainKey(
+        getScenarioPresetByIdOrName(currentScenarioId)?.chainKey ?? "anvil",
+    );
     return eventLog.slice(-limit).map((entry) => ({
         actor: String(entry.args?.maker ?? "protocol"),
         action: String(entry.event ?? "unknown"),
@@ -2005,7 +2012,7 @@ function buildScenarioResult(
             name: preset.name,
             family: preset.family,
             seed,
-            chainKey: preset.chainKey,
+            chainKey: toRegistryChainKey(preset.chainKey),
             attackerPnl: bestAttackerPnlSeen,
             marketMakerPnl,
             maxDrawdownBps: Math.round(
@@ -2060,7 +2067,7 @@ function buildScenarioResult(
         name: preset.name,
         family: preset.family,
         seed,
-        chainKey: preset.chainKey,
+        chainKey: toRegistryChainKey(preset.chainKey),
         attackerPnl: bestAttackerPnlSeen,
         marketMakerPnl,
         maxDrawdownBps,
@@ -2336,7 +2343,7 @@ function buildSolanaDegradedScenarioArtifacts(
         name: preset.name,
         family: preset.family,
         seed: run.seed,
-        chainKey: preset.chainKey,
+        chainKey: toRegistryChainKey(preset.chainKey),
         attackerPnl: 0,
         marketMakerPnl: 0,
         maxDrawdownBps: 0,
