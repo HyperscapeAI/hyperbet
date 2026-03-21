@@ -563,7 +563,7 @@ contract AgentPerpEngineTest is Test {
         // Use the 9-arg createMarket which passes 0,0 for the new fields
         // For this test we need the new overload — but since governance is frozen,
         // we verify the feature exists by checking the config struct fields
-        (,,,,,,,,uint256 deltaBps,,) = engine.marketConfigs(agentId);
+        (,,,,,,,,uint256 deltaBps,,,) = engine.marketConfigs(agentId);
         assertEq(deltaBps, 0, "Default maxOraclePriceDeltaBps should be 0 (disabled)");
     }
 

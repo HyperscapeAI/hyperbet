@@ -4,13 +4,11 @@
 use anchor_lang::prelude::*;
 use anchor_lang::system_program;
 use std::cmp;
-use std::str::FromStr;
 
 declare_id!("EoZdHN8U3qWQje48ToxB1SLWjucsFGqcWaRUJQYX3eoT");
 
 const FUNDING_RATE_PRECISION: i128 = 1_000_000_000;
 const BPS_DENOMINATOR: u64 = 10_000;
-const DEFAULT_BOOTSTRAP_AUTHORITY: &str = "DfEnrzh4cgnHxfuZRxLGX69fnLd9DP41XxGuE4gtyJpn";
 const MARKET_STATUS_ACTIVE: u8 = 0;
 const MARKET_STATUS_CLOSE_ONLY: u8 = 1;
 const MARKET_STATUS_ARCHIVED: u8 = 2;
@@ -18,14 +16,6 @@ const FEE_BUCKET_TREASURY: u8 = 0;
 const FEE_BUCKET_MARKET_MAKER: u8 = 1;
 const MAX_SOCIALIZED_LOSS_BPS: u64 = 50; // 0.5% of notional per position
 const MIN_LIQUIDATION_CLOSE_BPS: u64 = 1_000; // 10% minimum close
-
-fn bootstrap_authority() -> Pubkey {
-    if let Some(value) = option_env!("HYPERSCAPE_BOOTSTRAP_AUTHORITY") {
-        Pubkey::from_str(value).expect("invalid HYPERSCAPE_BOOTSTRAP_AUTHORITY")
-    } else {
-        Pubkey::from_str(DEFAULT_BOOTSTRAP_AUTHORITY).expect("invalid default bootstrap authority")
-    }
-}
 
 /// Native-SOL isolated perpetual markets for model ranking derivatives.
 ///
@@ -79,6 +69,10 @@ pub mod gold_perps_market {
         )?;
 
         let config = &mut ctx.accounts.config;
+        require!(
+            config.authority == Pubkey::default(),
+            PerpsError::AlreadyInitialized
+        );
         config.authority = ctx.accounts.authority.key();
         config.keeper_authority = keeper_authority;
         config.treasury_authority = treasury_authority;
@@ -1458,10 +1452,7 @@ pub struct InitializeConfig<'info> {
     )]
     pub program: Program<'info, crate::program::GoldPerpsMarket>,
     #[account(
-        constraint = program_data.upgrade_authority_address == Some(authority.key())
-            || ((program_data.upgrade_authority_address.is_none()
-                || program_data.upgrade_authority_address == Some(Pubkey::default()))
-                && authority.key() == bootstrap_authority()) @ PerpsError::UnauthorizedInitializer
+        constraint = program_data.upgrade_authority_address == Some(authority.key()) @ PerpsError::UnauthorizedInitializer
     )]
     pub program_data: Account<'info, ProgramData>,
     pub system_program: Program<'info, System>,
@@ -1680,8 +1671,10 @@ impl PositionState {
 pub enum PerpsError {
     #[msg("Operator is not authorized to manage perps markets")]
     InvalidAuthority,
-    #[msg("Only the configured bootstrap authority can initialize the config")]
+    #[msg("Only the program upgrade authority can initialize the config")]
     UnauthorizedInitializer,
+    #[msg("Config has already been initialized")]
+    AlreadyInitialized,
     #[msg("Risk configuration is invalid")]
     InvalidRiskConfig,
     #[msg("Market does not exist or does not match the requested id")]

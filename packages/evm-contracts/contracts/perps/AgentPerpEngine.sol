@@ -44,6 +44,7 @@ contract AgentPerpEngine is AccessControl, ReentrancyGuard {
         uint256 tradeMarketMakerFeeBps;
         uint256 maxOraclePriceDeltaBps;
         uint256 minInsuranceFund;
+        uint256 minPositionSize;
         bool exists;
     }
 
@@ -107,6 +108,7 @@ contract AgentPerpEngine is AccessControl, ReentrancyGuard {
     error InsufficientMargin();
     error NoPosition();
     error NotLiquidatable();
+    error PositionTooSmall();
     error InvalidRecipient();
     error InsufficientInsuranceFund();
     error InsufficientMarketLiquidity();
@@ -128,6 +130,7 @@ contract AgentPerpEngine is AccessControl, ReentrancyGuard {
     uint256 public immutable defaultSkewScale;
     bool public tradingPaused;
     bool public marketCreationPaused;
+    bool private _isLiquidationContext;
 
     event MarketCreated(
         bytes32 indexed agentId,
@@ -434,6 +437,9 @@ contract AgentPerpEngine is AccessControl, ReentrancyGuard {
 
         _addOpenInterest(market, position.size);
 
+        // H-4: Enforce minimum position size to prevent dust positions
+        if (position.size != 0 && _abs(position.size) < config.minPositionSize) revert PositionTooSmall();
+
         // OI cap check
         if (config.maxOpenInterest > 0 && sizeDelta != 0) {
             if (market.totalLongOI > config.maxOpenInterest || market.totalShortOI > config.maxOpenInterest) {
@@ -525,7 +531,9 @@ contract AgentPerpEngine is AccessControl, ReentrancyGuard {
         Position storage position = positions[agentId][trader];
         if (position.size == 0) revert NoPosition();
 
+        _isLiquidationContext = true;
         _syncOracle(agentId);
+        _isLiquidationContext = false;
         int256 fundingPayment = _settleFunding(position, market, true);
 
         uint256 markPrice = _markPrice(market, config);
@@ -744,6 +752,7 @@ contract AgentPerpEngine is AccessControl, ReentrancyGuard {
             tradeMarketMakerFeeBps: tradeMarketMakerFeeBps,
             maxOraclePriceDeltaBps: maxOraclePriceDeltaBps,
             minInsuranceFund: minInsuranceFund,
+            minPositionSize: 1e18,
             exists: true
         });
 
@@ -783,7 +792,7 @@ contract AgentPerpEngine is AccessControl, ReentrancyGuard {
 
         (uint256 mu, uint256 sigma, uint256 lastUpdate) = oracle.agentSkills(agentId);
         if (lastUpdate == 0) revert UnknownOracleAgent();
-        if (block.timestamp - lastUpdate > config.maxOracleDelay) revert StaleOracle();
+        if (!_isLiquidationContext && block.timestamp - lastUpdate > config.maxOracleDelay) revert StaleOracle();
 
         _accrueFunding(market, config);
 

@@ -103,6 +103,9 @@ contract SkillOracle is AccessControl {
 
     function updateAgentSkill(bytes32 agentId, uint256 mu, uint256 sigma) external onlyRole(REPORTER_ROLE) {
         if (oraclePaused) revert OraclePaused();
+        // H-3: Prevent int256 overflow in getConservativeSkill: int256(mu) and int256(Z_SCORE * sigma)
+        require(mu <= uint256(type(int256).max) / 2, "Mu too large for int256 cast");
+        require(sigma <= uint256(type(int256).max) / (2 * Z_SCORE), "Sigma too large for int256 cast");
 
         AgentSkill storage existing = agentSkills[agentId];
         if (existing.lastUpdate == 0) {
