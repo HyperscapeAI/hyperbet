@@ -29,6 +29,7 @@ contract SkillOracle is AccessControl {
     }
 
     mapping(bytes32 => AgentSkill) public agentSkills;
+    mapping(bytes32 => uint256) private activeAgentIndexPlusOne;
     bytes32[] public activeAgents;
 
     uint256 public globalMeanMu;
@@ -106,6 +107,7 @@ contract SkillOracle is AccessControl {
         AgentSkill storage existing = agentSkills[agentId];
         if (existing.lastUpdate == 0) {
             activeAgents.push(agentId);
+            activeAgentIndexPlusOne[agentId] = activeAgents.length;
             totalMu += mu;
         } else {
             uint256 muDelta = mu > existing.mu ? mu - existing.mu : existing.mu - mu;
@@ -125,13 +127,17 @@ contract SkillOracle is AccessControl {
         require(skill.lastUpdate != 0, "Agent not found");
         totalMu -= skill.mu;
         delete agentSkills[agentId];
-        // Swap-and-pop from activeAgents array
-        for (uint256 i = 0; i < activeAgents.length; i++) {
-            if (activeAgents[i] == agentId) {
-                activeAgents[i] = activeAgents[activeAgents.length - 1];
-                activeAgents.pop();
-                break;
+        uint256 indexPlusOne = activeAgentIndexPlusOne[agentId];
+        if (indexPlusOne != 0) {
+            uint256 removeIndex = indexPlusOne - 1;
+            uint256 lastIndex = activeAgents.length - 1;
+            if (removeIndex != lastIndex) {
+                bytes32 lastAgentId = activeAgents[lastIndex];
+                activeAgents[removeIndex] = lastAgentId;
+                activeAgentIndexPlusOne[lastAgentId] = indexPlusOne;
             }
+            activeAgents.pop();
+            delete activeAgentIndexPlusOne[agentId];
         }
         if (activeAgents.length > 0) {
             globalMeanMu = totalMu / activeAgents.length;
