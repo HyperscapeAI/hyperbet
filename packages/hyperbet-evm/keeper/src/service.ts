@@ -68,9 +68,13 @@ import {
   parseBetSyncBootstrapState,
   parseBetSyncEvent,
   parsePredictionMarketsOverview,
+  resolveBetSyncReplayMode,
   rollPredictionMarketsOverview,
+  selectBetSyncReplayUntilSeq,
+  selectBetSyncResumeSeq,
   sameDuelIdentity,
   toStreamStateFromBetSyncEvent,
+  type BetSyncReplayMode,
   type BetSyncBootstrapState,
   type BetSyncEvent,
   type PredictionMarketsOverviewResponse,
@@ -560,7 +564,10 @@ let betSyncLastAppliedAt: number | null = null;
 let betSyncLastError: string | null = null;
 let betSyncConnectedAt: number | null = null;
 let betSyncConsumerRunning = false;
-let betSyncReplayMode = betSyncCheckpoint.replayMode;
+let betSyncReplayMode: BetSyncReplayMode =
+  (betSyncCheckpoint.replayMode as BetSyncReplayMode | null) ??
+  (betSyncCheckpoint.lastAppliedSeq > 0 ? "live" : "bootstrap");
+let betSyncReplayUntilSeq: number | null = null;
 
 const parsers: {
   solana: ParserState;
@@ -1333,6 +1340,13 @@ function currentBetCloseTime(): number | null {
   return typeof raw === "number" && Number.isFinite(raw) ? raw : null;
 }
 
+function currentAgentNameFromCycle(slot: "agent1" | "agent2"): string | null {
+  const agent = streamState.cycle?.[slot] as { name?: unknown } | null | undefined;
+  return typeof agent?.name === "string" && agent.name.trim().length > 0
+    ? agent.name.trim()
+    : null;
+}
+
 function currentWinnerFromCycle(): PredictionMarketWinner {
   const cycleAgent1 = streamState.cycle?.agent1 as { id?: unknown } | null | undefined;
   const cycleAgent2 = streamState.cycle?.agent2 as { id?: unknown } | null | undefined;
@@ -1534,6 +1548,8 @@ function currentDuelSnapshot(): PredictionMarketsSurface["duel"] {
       typeof streamState.cycle?.phase === "string" ? streamState.cycle.phase : null,
     winner: currentWinnerFromCycle(),
     betCloseTime: currentBetCloseTime(),
+    agent1Name: currentAgentNameFromCycle("agent1"),
+    agent2Name: currentAgentNameFromCycle("agent2"),
   };
 }
 
@@ -1609,6 +1625,14 @@ function buildLivePredictionMarketsSurface(
           ? cycleWinner
           : (fallbackMarket?.winner ?? "NONE"),
       betCloseTime: currentBetCloseTime() ?? fallbackMarket?.betCloseTime ?? null,
+      agent1Name:
+        currentAgentNameFromCycle("agent1") ??
+        previousLive?.duel.agent1Name ??
+        null,
+      agent2Name:
+        currentAgentNameFromCycle("agent2") ??
+        previousLive?.duel.agent2Name ??
+        null,
     },
     markets,
     updatedAt: Date.now(),
@@ -1969,7 +1993,9 @@ function persistBetSyncCheckpointState(
     ...next,
     updatedAt: Date.now(),
   };
-  betSyncReplayMode = betSyncCheckpoint.replayMode;
+  betSyncReplayMode =
+    (betSyncCheckpoint.replayMode as BetSyncReplayMode | null) ??
+    (betSyncCheckpoint.lastAppliedSeq > 0 ? "live" : "bootstrap");
   saveBetSyncCheckpoint(betSyncCheckpoint);
 }
 
@@ -2168,21 +2194,19 @@ async function applyBetSyncEvent(
   betSyncSourceLatestSeq = Math.max(betSyncSourceLatestSeq, event.seq);
   betSyncLatestEvent = event;
   betSyncLastEventReceivedAt = Date.now();
+  const sourceEpochChanged = event.sourceEpoch !== betSyncCheckpoint.sourceEpoch;
 
-  if (event.sourceEpoch !== betSyncCheckpoint.sourceEpoch) {
+  if (sourceEpochChanged) {
+    betSyncReplayUntilSeq = null;
     persistBetSyncCheckpointState({
       sourceEpoch: event.sourceEpoch,
       lastSeenSeq: 0,
       lastAppliedSeq: 0,
-      replayMode: betSyncReplayMode,
+      replayMode: "reset",
       degradedReason: null,
     });
   }
-
-  persistBetSyncCheckpointState({
-    lastSeenSeq: Math.max(betSyncCheckpoint.lastSeenSeq, event.seq),
-    degradedReason: null,
-  });
+  const nextSeenSeq = Math.max(betSyncCheckpoint.lastSeenSeq, event.seq);
 
   const inserted = appendBetSyncApplyLogEntry({
     sourceEpoch: event.sourceEpoch,
@@ -2199,6 +2223,10 @@ async function applyBetSyncEvent(
   });
 
   if (!inserted && event.seq <= betSyncCheckpoint.lastAppliedSeq) {
+    persistBetSyncCheckpointState({
+      lastSeenSeq: nextSeenSeq,
+      degradedReason: null,
+    });
     return;
   }
 
@@ -2206,6 +2234,7 @@ async function applyBetSyncEvent(
   betSyncLastAppliedAt = Date.now();
   persistBetSyncCheckpointState({
     lastAppliedSeq: Math.max(betSyncCheckpoint.lastAppliedSeq, event.seq),
+    lastSeenSeq: nextSeenSeq,
     degradedReason: null,
   });
   persistPredictionMarketsOverview(
@@ -2239,8 +2268,34 @@ async function bootstrapBetSyncState(): Promise<BetSyncBootstrapState | null> {
     }
     betSyncSourceLatestSeq = state.latestSeq;
     betSyncOldestReplaySeq = state.oldestReplaySeq;
-    if (state.latestEvent) {
+    betSyncReplayUntilSeq = selectBetSyncReplayUntilSeq({
+      resumeSeq: selectBetSyncResumeSeq({
+        lastAppliedSeq: betSyncCheckpoint.lastAppliedSeq,
+      }),
+      latestSeq: state.latestSeq,
+    });
+    if (betSyncCheckpoint.lastAppliedSeq === 0) {
+      persistBetSyncCheckpointState({
+        replayMode: "bootstrap",
+        degradedReason: null,
+      });
+    } else if (betSyncReplayUntilSeq != null) {
+      persistBetSyncCheckpointState({
+        replayMode: "replay",
+        degradedReason: null,
+      });
+    } else {
+      persistBetSyncCheckpointState({
+        replayMode: "live",
+        degradedReason: null,
+      });
+    }
+    if (state.latestEvent && betSyncReplayUntilSeq == null) {
       await applyBetSyncEvent(state.latestEvent, "bet-sync-bootstrap");
+      persistBetSyncCheckpointState({
+        replayMode: "live",
+        degradedReason: null,
+      });
     }
     return state;
   } finally {
@@ -2250,14 +2305,17 @@ async function bootstrapBetSyncState(): Promise<BetSyncBootstrapState | null> {
 
 async function consumeBetSyncEventsOnce(): Promise<void> {
   const url = new URL(BET_SYNC_SOURCE_EVENTS_URL);
-  if (betSyncCheckpoint.lastSeenSeq > 0) {
-    url.searchParams.set("since", String(betSyncCheckpoint.lastSeenSeq));
+  const resumeSeq = selectBetSyncResumeSeq({
+    lastAppliedSeq: betSyncCheckpoint.lastAppliedSeq,
+  });
+  if (resumeSeq > 0) {
+    url.searchParams.set("since", String(resumeSeq));
   }
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), BET_SYNC_CONNECT_TIMEOUT_MS);
   const response = await fetch(url, {
     cache: "no-store",
-    headers: buildBetSyncHeaders(betSyncCheckpoint.lastSeenSeq),
+    headers: buildBetSyncHeaders(resumeSeq),
     signal: controller.signal,
   });
   clearTimeout(timeoutId);
@@ -2308,13 +2366,16 @@ async function consumeBetSyncEventsOnce(): Promise<void> {
         continue;
       }
 
+      const replayDecision = resolveBetSyncReplayMode({
+        eventName,
+        eventSeq: parsed.seq,
+        replayUntilSeq: betSyncReplayUntilSeq,
+        sourceEpochChanged: parsed.sourceEpoch !== betSyncCheckpoint.sourceEpoch,
+      });
+      betSyncReplayMode = replayDecision.replayMode;
+      betSyncReplayUntilSeq = replayDecision.replayUntilSeq;
       if (eventName === "reset") {
-        betSyncReplayMode = "reset";
         betSyncOldestReplaySeq = parsed.seq;
-      } else if (betSyncCheckpoint.lastSeenSeq > 0) {
-        betSyncReplayMode = "replay";
-      } else {
-        betSyncReplayMode = "live";
       }
       persistBetSyncCheckpointState({
         replayMode: betSyncReplayMode,

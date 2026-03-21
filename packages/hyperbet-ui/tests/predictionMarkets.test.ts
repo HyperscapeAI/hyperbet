@@ -30,6 +30,8 @@ describe("prediction market lifecycle helpers", () => {
         phase: "ANNOUNCEMENT",
         winner: "NONE",
         betCloseTime: 12345,
+        agent1Name: "Alpha",
+        agent2Name: "Beta",
       },
       markets: [
         {
@@ -72,6 +74,8 @@ describe("prediction market lifecycle helpers", () => {
 
     expect(parsed).not.toBeNull();
     expect(parsed?.duel.duelKey).toBe(duelKey);
+    expect(parsed?.duel.agent1Name).toBe("Alpha");
+    expect(parsed?.duel.agent2Name).toBe("Beta");
     expect(parsed?.markets).toHaveLength(2);
     expect(parsed?.markets[0]?.duelKey).toBe(duelKey);
     expect(parsed?.markets[1]?.duelKey).toBeNull();
@@ -137,6 +141,8 @@ describe("prediction market lifecycle helpers", () => {
           phase: "FIGHTING",
           winner: "NONE",
           betCloseTime: 111,
+          agent1Name: "Live Alpha",
+          agent2Name: "Live Beta",
         },
         markets: [
           {
@@ -163,6 +169,8 @@ describe("prediction market lifecycle helpers", () => {
           phase: "RESOLUTION",
           winner: "A",
           betCloseTime: 222,
+          agent1Name: "Settled Alpha",
+          agent2Name: "Settled Beta",
         },
         markets: [],
         updatedAt: 90,
@@ -173,6 +181,8 @@ describe("prediction market lifecycle helpers", () => {
     expect(parsed).not.toBeNull();
     expect(parsed?.live?.duel.duelId).toBe("duel-live");
     expect(parsed?.recentSettlement?.duel.duelId).toBe("duel-previous");
+    expect(parsed?.recentSettlement?.duel.agent1Name).toBe("Settled Alpha");
+    expect(parsed?.recentSettlement?.duel.agent2Name).toBe("Settled Beta");
     expect(selectPredictionMarketOverviewRecord(parsed, "bsc", "live")?.marketRef).toBe(
       "market-live",
     );

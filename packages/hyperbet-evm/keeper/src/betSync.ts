@@ -62,6 +62,8 @@ export type PredictionMarketsDuelSnapshot = {
   phase: string | null;
   winner: PredictionMarketWinner;
   betCloseTime: number | null;
+  agent1Name: string | null;
+  agent2Name: string | null;
 };
 
 export type PredictionMarketsSurface = {
@@ -75,6 +77,8 @@ export type PredictionMarketsOverviewResponse = {
   live: PredictionMarketsSurface | null;
   recentSettlement: PredictionMarketsSurface | null;
 };
+
+export type BetSyncReplayMode = "bootstrap" | "replay" | "reset" | "live";
 
 function asRecord(value: unknown): JsonRecord | null {
   return value && typeof value === "object"
@@ -181,6 +185,8 @@ function mergeDuelSnapshot(
     phase: nextPhase,
     winner: next.winner !== "NONE" ? next.winner : previous.winner,
     betCloseTime: next.betCloseTime ?? previous.betCloseTime ?? null,
+    agent1Name: next.agent1Name ?? previous.agent1Name ?? null,
+    agent2Name: next.agent2Name ?? previous.agent2Name ?? null,
   };
 }
 
@@ -309,6 +315,8 @@ export function parsePredictionMarketsSurface(
       phase: asString(duel.phase),
       winner: normalizePredictionMarketWinner(duel.winner),
       betCloseTime: normalizePredictionMarketTimestamp(duel.betCloseTime),
+      agent1Name: asString(duel.agent1Name),
+      agent2Name: asString(duel.agent2Name),
     },
     markets: candidate.markets.filter(
       (market): market is PredictionMarketLifecycleRecord =>
@@ -397,5 +405,57 @@ export function rollPredictionMarketsOverview(
     updatedAt,
     live: nextLive,
     recentSettlement,
+  };
+}
+
+export function selectBetSyncResumeSeq(params: {
+  lastAppliedSeq: number;
+}): number {
+  return Math.max(0, params.lastAppliedSeq);
+}
+
+export function selectBetSyncReplayUntilSeq(params: {
+  resumeSeq: number;
+  latestSeq: number | null;
+}): number | null {
+  const resumeSeq = Math.max(0, params.resumeSeq);
+  if (resumeSeq <= 0 || params.latestSeq == null) {
+    return null;
+  }
+  return params.latestSeq > resumeSeq ? params.latestSeq : null;
+}
+
+export function resolveBetSyncReplayMode(params: {
+  eventName: string;
+  eventSeq: number;
+  replayUntilSeq: number | null;
+  sourceEpochChanged: boolean;
+}): {
+  replayMode: BetSyncReplayMode;
+  replayUntilSeq: number | null;
+} {
+  if (params.sourceEpochChanged || params.eventName === "reset") {
+    return {
+      replayMode: "reset",
+      replayUntilSeq: null,
+    };
+  }
+
+  if (params.replayUntilSeq != null) {
+    if (params.eventSeq < params.replayUntilSeq) {
+      return {
+        replayMode: "replay",
+        replayUntilSeq: params.replayUntilSeq,
+      };
+    }
+    return {
+      replayMode: "live",
+      replayUntilSeq: null,
+    };
+  }
+
+  return {
+    replayMode: "live",
+    replayUntilSeq: null,
   };
 }

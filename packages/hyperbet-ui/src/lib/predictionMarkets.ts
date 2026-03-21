@@ -24,6 +24,8 @@ export type PredictionMarketsDuelSnapshot = {
   phase: string | null;
   winner: PredictionMarketWinner;
   betCloseTime: number | null;
+  agent1Name: string | null;
+  agent2Name: string | null;
 };
 
 export type PredictionMarketsResponse = {
@@ -88,6 +90,8 @@ export function parsePredictionMarketsResponse(
       phase: typeof duel.phase === "string" ? duel.phase : null,
       winner: normalizePredictionMarketWinner(duel.winner),
       betCloseTime: normalizePredictionMarketTimestamp(duel.betCloseTime),
+      agent1Name: typeof duel.agent1Name === "string" ? duel.agent1Name : null,
+      agent2Name: typeof duel.agent2Name === "string" ? duel.agent2Name : null,
     },
     markets: candidate.markets
       .map((market) => normalizePredictionMarketLifecycleRecord(market))

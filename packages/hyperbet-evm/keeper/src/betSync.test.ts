@@ -5,7 +5,10 @@ import {
   parseBetSyncBootstrapState,
   parseBetSyncEvent,
   parsePredictionMarketsOverview,
+  resolveBetSyncReplayMode,
   rollPredictionMarketsOverview,
+  selectBetSyncReplayUntilSeq,
+  selectBetSyncResumeSeq,
   toStreamStateFromBetSyncEvent,
 } from "./betSync";
 
@@ -88,6 +91,8 @@ describe("bet-sync helpers", () => {
           phase: "FIGHTING",
           winner: "NONE",
           betCloseTime: 123,
+          agent1Name: "Alpha",
+          agent2Name: "Beta",
         },
         markets: [],
         updatedAt: 10,
@@ -104,6 +109,8 @@ describe("bet-sync helpers", () => {
           phase: "ANNOUNCEMENT",
           winner: "NONE",
           betCloseTime: 456,
+          agent1Name: "Gamma",
+          agent2Name: "Delta",
         },
         markets: [],
         updatedAt: 11,
@@ -125,6 +132,8 @@ describe("bet-sync helpers", () => {
           phase: "RESOLUTION",
           winner: "A",
           betCloseTime: 999,
+          agent1Name: "Alpha",
+          agent2Name: "Beta",
         },
         markets: [
           {
@@ -152,6 +161,8 @@ describe("bet-sync helpers", () => {
           phase: "IDLE",
           winner: "NONE",
           betCloseTime: null,
+          agent1Name: null,
+          agent2Name: null,
         },
         markets: [
           {
@@ -182,6 +193,58 @@ describe("bet-sync helpers", () => {
       winner: "A",
       txRef: "0xabc",
       metadata: { proposalId: "p1" },
+    });
+    expect(merged?.duel.agent1Name).toBe("Alpha");
+    expect(merged?.duel.agent2Name).toBe("Beta");
+  });
+
+  test("selects the durable resume cursor from the last applied sequence", () => {
+    expect(selectBetSyncResumeSeq({ lastAppliedSeq: 0 })).toBe(0);
+    expect(selectBetSyncResumeSeq({ lastAppliedSeq: 17 })).toBe(17);
+  });
+
+  test("treats replay catch-up as a bounded phase and returns to live", () => {
+    const replayUntilSeq = selectBetSyncReplayUntilSeq({
+      resumeSeq: 12,
+      latestSeq: 15,
+    });
+
+    expect(replayUntilSeq).toBe(15);
+    expect(
+      resolveBetSyncReplayMode({
+        eventName: "betting",
+        eventSeq: 13,
+        replayUntilSeq,
+        sourceEpochChanged: false,
+      }),
+    ).toMatchObject({
+      replayMode: "replay",
+      replayUntilSeq: 15,
+    });
+    expect(
+      resolveBetSyncReplayMode({
+        eventName: "betting",
+        eventSeq: 15,
+        replayUntilSeq,
+        sourceEpochChanged: false,
+      }),
+    ).toMatchObject({
+      replayMode: "live",
+      replayUntilSeq: null,
+    });
+  });
+
+  test("marks explicit source resets separately from replay", () => {
+    expect(
+      resolveBetSyncReplayMode({
+        eventName: "reset",
+        eventSeq: 44,
+        replayUntilSeq: 50,
+        sourceEpochChanged: false,
+      }),
+    ).toMatchObject({
+      replayMode: "reset",
+      replayUntilSeq: null,
     });
   });
 });
