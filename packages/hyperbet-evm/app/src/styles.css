@@ -4093,34 +4093,26 @@ select:focus-visible {
   max-width: 240px;
 }
 
-.hm-truth-block {
-  display: flex;
-  flex-direction: column;
-  padding: 0 12px 10px;
-  border-bottom: 1px solid var(--hm-border);
-}
-
-.hm-truth-rail {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.hm-truth-rail-item {
+.hm-stream-status-row {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 10px;
+  padding: 0 12px 10px;
+}
+
+.hm-stream-status-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   min-width: 0;
-  flex: 1 1 240px;
-  padding: 8px 10px;
+  max-width: 100%;
+  padding: 6px 10px;
+  border-radius: 999px;
   border: 1px solid var(--hm-panel-card-border, var(--hm-border));
-  border-radius: var(--hm-radius);
   background: var(--hm-panel-card-bg, var(--hm-surface-raised));
   box-shadow: inset 0 1px 0 var(--hm-panel-card-highlight, rgba(255, 255, 255, 0.08));
 }
 
-.hm-truth-rail-item--refresh {
+.hm-stream-status-chip--refreshing {
   border-color: rgba(110, 168, 254, 0.24);
   background: linear-gradient(
     180deg,
@@ -4129,8 +4121,8 @@ select:focus-visible {
   );
 }
 
-.hm-truth-rail-item--settlement {
-  border-color: rgba(250, 204, 21, 0.22);
+.hm-stream-status-chip--degraded {
+  border-color: rgba(250, 204, 21, 0.24);
   background: linear-gradient(
     180deg,
     rgba(250, 204, 21, 0.08) 0%,
@@ -4138,7 +4130,7 @@ select:focus-visible {
   );
 }
 
-.hm-truth-rail-item--danger {
+.hm-stream-status-chip--drift {
   border-color: rgba(232, 65, 66, 0.24);
   background: linear-gradient(
     180deg,
@@ -4147,91 +4139,26 @@ select:focus-visible {
   );
 }
 
-.hm-truth-rail-copy {
-  display: grid;
-  gap: 3px;
-  min-width: 0;
-  flex: 1 1 auto;
-}
-
-.hm-truth-rail-label-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-}
-
-.hm-truth-rail-title {
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--hm-text);
-  line-height: 1.35;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.hm-truth-rail-detail {
-  font-size: 10px;
-  color: var(--hm-panel-subtle-text, var(--hm-text-muted));
-  line-height: 1.35;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.hm-truth-rail-side {
-  display: flex;
-  align-items: center;
-  flex-shrink: 0;
-}
-
-.hm-truth-rail-spinner {
+.hm-stream-status-spinner {
   width: 8px;
   height: 8px;
   border-radius: 999px;
   background: rgba(110, 168, 254, 0.95);
   box-shadow: 0 0 0 0 rgba(110, 168, 254, 0.35);
-  animation: hm-truth-rail-pulse 1.4s ease-in-out infinite;
+  animation: hm-stream-status-pulse 1.4s ease-in-out infinite;
 }
 
-.hm-truth-pill {
-  display: inline-flex;
-  align-items: center;
-  min-height: 20px;
-  padding: 0 8px;
-  border-radius: var(--hm-radius);
-  border: 1px solid var(--hm-stone-dark);
-  background: var(--hm-surface-raised);
-  color: var(--hm-text-dim);
-  font-size: 9px;
-  font-weight: 800;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+.hm-stream-status-text {
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--hm-text);
   white-space: nowrap;
-  flex-shrink: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.hm-truth-pill--settlement {
-  background: var(--hm-gold-glow-subtle);
-  border-color: var(--hm-gold-border-light);
-  color: var(--hm-accent-gold);
-}
-
-.hm-truth-pill--refresh {
-  background: rgba(110, 168, 254, 0.12);
-  border-color: rgba(110, 168, 254, 0.34);
-  color: #bcd4ff;
-}
-
-.hm-truth-pill--danger {
-  background: rgba(232, 65, 66, 0.12);
-  border-color: rgba(232, 65, 66, 0.34);
-  color: var(--hm-accent-red);
-}
-
-@keyframes hm-truth-rail-pulse {
+@keyframes hm-stream-status-pulse {
   0%, 100% {
     opacity: 0.65;
     box-shadow: 0 0 0 0 rgba(110, 168, 254, 0.18);
@@ -6012,17 +5939,8 @@ select:focus-visible {
   background: transparent;
 }
 
-.hm-truth-block {
-  gap: 8px;
+.hm-stream-status-row {
   padding: 0 16px 14px;
-}
-
-.hm-truth-rail {
-  gap: 8px;
-}
-
-.hm-truth-rail-item {
-  padding: 10px 12px;
 }
 
 .hm-theme-toggle {

@@ -30,7 +30,11 @@ import {
   STREAM_URLS,
 } from "./lib/config";
 import { POINTS_DRAWER_OVERLAY_STYLE } from "./lib/pointsDrawer";
-import { getRecentSettlementTitle } from "./lib/recentSettlement";
+import {
+  advanceStreamSyncUiState,
+  INITIAL_STREAM_SYNC_UI_SNAPSHOT,
+  type StreamSyncUiState,
+} from "./lib/streamSyncUi";
 import {
   captureInviteCodeFromLocation,
   getStoredInviteCode,
@@ -217,8 +221,6 @@ function getAppCopy(locale: UiLocale) {
       models: "模型",
       modelMarkets: "模型市场",
       leaderboardAndStats: "排行榜与统计",
-      latestSettlement: "最近结算",
-      claimOnly: "仅可领取",
       addEvmWallet: "添加 EVM 钱包",
       switchNetwork: "切换网络",
       unmuteStream: "开启声音",
@@ -226,12 +228,10 @@ function getAppCopy(locale: UiLocale) {
       source: "信源",
       waitingForStream: "等待直播流…",
       refreshingLiveState: "正在刷新直播状态…",
-      refreshingShort: "刷新中",
-      syncAttention: "注意",
-      outOfSyncShort: "不同步",
       streamReady: "直播流已就绪",
-      rendererUnhealthy: "渲染器异常",
-      streamDriftDetected: "直播流与市场状态不同步",
+      reconnectingStream: "正在重新连接直播流",
+      resyncingMarketState: "正在重新同步市场状态",
+      outOfSync: "直播与市场不同步",
       trades: "成交",
       orderBook: "订单簿",
       matchLog: "对局日志",
@@ -316,8 +316,6 @@ function getAppCopy(locale: UiLocale) {
     models: "Models",
     modelMarkets: "Model Markets",
     leaderboardAndStats: "Leaderboard & Stats",
-    latestSettlement: "Latest settlement",
-    claimOnly: "Claim only",
     addEvmWallet: "Add EVM Wallet",
     switchNetwork: "Switch Network",
     unmuteStream: "Unmute stream",
@@ -325,12 +323,10 @@ function getAppCopy(locale: UiLocale) {
     source: "Source",
     waitingForStream: "Waiting for stream…",
     refreshingLiveState: "Refreshing live state…",
-    refreshingShort: "Refreshing",
-    syncAttention: "Attention",
-    outOfSyncShort: "Out of sync",
     streamReady: "Stream ready",
-    rendererUnhealthy: "Renderer unhealthy",
-    streamDriftDetected: "Stream and market state are out of sync",
+    reconnectingStream: "Reconnecting stream",
+    resyncingMarketState: "Resyncing market state",
+    outOfSync: "Out of sync",
     trades: "Trades",
     orderBook: "Order Book",
     matchLog: "Match Log",
@@ -475,42 +471,24 @@ function PanelFallback({
   );
 }
 
-function TruthRailItem({
-  label,
+function StreamStatusChip({
   title,
   detail,
-  pill,
-  tone,
+  state,
   loading = false,
 }: {
-  label: string;
   title: string;
   detail?: string | null;
-  pill: string;
-  tone: "settlement" | "refresh" | "danger";
+  state: Exclude<StreamSyncUiState, "hidden">;
   loading?: boolean;
 }) {
   return (
-    <div className={`hm-truth-rail-item hm-truth-rail-item--${tone}`}>
-      <div className="hm-truth-rail-copy">
-        <div className="hm-truth-rail-label-row">
-          {loading ? <span className="hm-truth-rail-spinner" aria-hidden="true" /> : null}
-          <span className="hm-matchup-label">{label}</span>
-        </div>
-        <div className="hm-truth-rail-title">
-          {title}
-        </div>
-        {detail ? (
-          <div className="hm-truth-rail-detail">
-            {detail}
-          </div>
-        ) : null}
-      </div>
-      <div className="hm-truth-rail-side">
-        <span className={`hm-truth-pill hm-truth-pill--${tone}`}>
-          {pill}
-        </span>
-      </div>
+    <div
+      className={`hm-stream-status-chip hm-stream-status-chip--${state}`}
+      title={detail ?? title}
+    >
+      {loading ? <span className="hm-stream-status-spinner" aria-hidden="true" /> : null}
+      <span className="hm-stream-status-text">{title}</span>
     </div>
   );
 }
@@ -609,9 +587,7 @@ export function App() {
   const { context: duelContext } = useDuelContext();
   const {
     live: liveOverviewMarket,
-    recentSettlement: recentSettlementMarket,
     liveDuel: liveOverviewDuel,
-    recentSettlementDuel,
     refresh: refreshMarketOverview,
     error: marketOverviewError,
   } = usePredictionMarketOverview(activeEvmChain);
@@ -624,7 +600,7 @@ export function App() {
   // Keep the stream visible in e2e/local integration lanes when a real source
   // URL is configured. Wallet/chain polling stays gated separately above.
   const activeStreamUrl = streamSources[streamSourceIndex] ?? "";
-  const [_streamSurfaceReady, setStreamSurfaceReady] = useState(false);
+  const [streamSurfaceReady, setStreamSurfaceReady] = useState(false);
   const [streamSurfaceUnavailable, setStreamSurfaceUnavailable] =
     useState(false);
 
@@ -974,38 +950,36 @@ export function App() {
   );
   const rendererHealth =
     liveCycle?.rendererHealth ?? syncStatus?.rendererHealth ?? null;
-  const rendererUnhealthy = rendererHealth?.ready === false;
-  const sourceFreshnessDegraded =
-    (syncStatus?.sourceEventAgeMs ?? 0) > 15_000 ||
-    (syncStatus?.rendererHealthAgeMs ?? 0) > 15_000;
-  const sourceSyncDegraded =
-    !rendererUnhealthy &&
-    (Boolean(syncStatus?.degradedReason) || sourceFreshnessDegraded);
   const streamMarketAligned = !liveOverviewDuelKey
     ? true
     : streamedDuelKey === liveOverviewDuelKey;
-  const recentSurfaceMeta = recentSettlementMarket
-    ? getMarketStatusLabel(recentSettlementMarket.lifecycleStatus, copy)
-    : copy.statusPending;
-  const recentSurfaceTitle = getRecentSettlementTitle({
-    duel: recentSettlementDuel,
-    fallbackLabel: copy.latestSettlement,
-    idleLabel: copy.phaseIdle,
-  });
-  const streamSyncState = !streamMarketAligned
-    ? "drift"
-    : rendererUnhealthy
-      ? "degraded"
-      : sourceSyncDegraded || streamSurfaceUnavailable || marketOverviewError
-        ? "refreshing"
-        : "synced";
-  const shouldRenderTruthBlock = Boolean(
-    streamSyncState !== "synced" || recentSettlementMarket || recentSettlementDuel,
+  const [streamSyncUi, setStreamSyncUi] = useState(
+    INITIAL_STREAM_SYNC_UI_SNAPSHOT,
   );
+
+  useEffect(() => {
+    setStreamSyncUi((previous) =>
+      advanceStreamSyncUiState(previous, {
+        marketAligned: streamMarketAligned,
+        syncStatus,
+        rendererReady: rendererHealth?.ready ?? null,
+        streamSurfaceReady,
+        streamSurfaceUnavailable,
+        marketOverviewErrorPresent: Boolean(marketOverviewError),
+      }),
+    );
+  }, [
+    marketOverviewError,
+    rendererHealth?.ready,
+    streamMarketAligned,
+    streamSurfaceReady,
+    streamSurfaceUnavailable,
+    syncStatus,
+  ]);
 
   // Sidebar bet state
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-const [hmBottomTab, setHmBottomTab] = useState<
+  const [hmBottomTab, setHmBottomTab] = useState<
     "positions" | "orders" | "trades" | "topTraders" | "holders" | "news"
   >("trades");
   const [hmMuted, setHmMuted] = useState(true);
@@ -1073,6 +1047,33 @@ const [hmBottomTab, setHmBottomTab] = useState<
           ) : null}
         </div>
       </div>
+      {streamSyncUi.state !== "hidden" ? (
+        <div className="hm-stream-status-row">
+          {streamSyncUi.state === "refreshing" ? (
+            <StreamStatusChip
+              state="refreshing"
+              title={copy.refreshingLiveState}
+              loading
+            />
+          ) : null}
+
+          {streamSyncUi.state === "degraded" ? (
+            <StreamStatusChip
+              state="degraded"
+              title={copy.reconnectingStream}
+              detail={copy.refreshingLiveState}
+            />
+          ) : null}
+
+          {streamSyncUi.state === "drift" ? (
+            <StreamStatusChip
+              state="drift"
+              title={copy.outOfSync}
+              detail={copy.resyncingMarketState}
+            />
+          ) : null}
+        </div>
+      ) : null}
       <div className="hm-matchup">
         <div className="hm-matchup-agent">
           <span className="hm-matchup-name" title={effA1.name}>
@@ -1100,52 +1101,6 @@ const [hmBottomTab, setHmBottomTab] = useState<
           </span>
         </div>
       </div>
-
-      {shouldRenderTruthBlock ? (
-        <div className="hm-truth-block">
-          <div className="hm-truth-rail">
-            {streamSyncState === "refreshing" ? (
-              <TruthRailItem
-                label={copy.source}
-                title={copy.refreshingLiveState}
-                pill={copy.refreshingShort}
-                tone="refresh"
-                loading
-              />
-            ) : null}
-
-            {streamSyncState === "degraded" ? (
-              <TruthRailItem
-                label={copy.source}
-                title={copy.rendererUnhealthy}
-                detail={copy.refreshingLiveState}
-                pill={copy.syncAttention}
-                tone="danger"
-              />
-            ) : null}
-
-            {streamSyncState === "drift" ? (
-              <TruthRailItem
-                label={copy.source}
-                title={copy.streamDriftDetected}
-                detail={copy.refreshingLiveState}
-                pill={copy.outOfSyncShort}
-                tone="danger"
-              />
-            ) : null}
-
-            {recentSettlementMarket || recentSettlementDuel ? (
-              <TruthRailItem
-                label={copy.latestSettlement}
-                title={recentSurfaceTitle}
-                detail={recentSettlementMarket ? recentSurfaceMeta : copy.statusPending}
-                pill={recentSurfaceMeta}
-                tone="settlement"
-              />
-            ) : null}
-          </div>
-        </div>
-      ) : null}
 
       <div className="hm-market-panel-wrap">
         <div className="hm-market-panel-body">
