@@ -725,6 +725,8 @@ export interface AmmMarketMakerConfig {
   staleRpcAfterMs: number;
   /** Guard window before bet close (ms) */
   betCloseGuardMs: number;
+  /** Max slippage tolerance for AMM trades (bps, default 200 = 2%) */
+  maxSlippageBps: number;
 }
 
 export const DEFAULT_AMM_MARKET_MAKER_CONFIG: AmmMarketMakerConfig = {
@@ -738,6 +740,7 @@ export const DEFAULT_AMM_MARKET_MAKER_CONFIG: AmmMarketMakerConfig = {
   staleOracleAfterMs: 5_000,
   staleRpcAfterMs: 5_000,
   betCloseGuardMs: 5_000,
+  maxSlippageBps: 200,
 };
 
 export function buildAmmTradeDecision(

@@ -59,7 +59,7 @@ import {
   findAmmMintYesPda,
   findAmmMintNoPda,
 } from "./solana-helpers.ts";
-import { calcAmmPrice, calcDynamicLiquidity } from "./amm-math.ts";
+import { calcAmmPrice, calcDynamicLiquidity, estimateSlippage } from "./amm-math.ts";
 import {
   createDefaultMarketMakerStateStore,
   type ClaimBacklogInput,
@@ -3024,6 +3024,8 @@ export class CrossChainMarketMaker {
       betCloseTimeMs: betAccount.expirationAt
         ? Number(betAccount.expirationAt) * 1000
         : null,
+      lastStreamAtMs: Date.now(),
+      lastOracleAtMs: Date.now(),
       lastRpcAtMs: Date.now(),
       exposure: {
         yes: Number(existing?.yesBalance ?? 0n),
@@ -3096,7 +3098,16 @@ export class CrossChainMarketMaker {
           .rpc();
       }
 
-      // Update position tracking
+      // Read actual token balances after trade for accurate position tracking
+      const [yesBalResp, noBalResp] = await Promise.all([
+        runtime.connection.getTokenAccountBalance(destinationYes).catch(() => ({
+          value: { amount: "0" },
+        })),
+        runtime.connection.getTokenAccountBalance(destinationNo).catch(() => ({
+          value: { amount: "0" },
+        })),
+      ]);
+
       const pos: AmmPosition = existing ?? {
         chainKey: "solana",
         marketRef: betPda.toBase58(),
@@ -3107,6 +3118,8 @@ export class CrossChainMarketMaker {
         costBasis: 0n,
         settled: false,
       };
+      pos.yesBalance = BigInt(yesBalResp.value.amount);
+      pos.noBalance = BigInt(noBalResp.value.amount);
       if (isBuy) {
         pos.costBasis += BigInt(decision.amount);
       }
@@ -3283,22 +3296,39 @@ export class CrossChainMarketMaker {
 
     const amountBn = ethers.parseUnits(decision.amount.toString(), 18); // mUSD WAD (18 decimals)
 
+    // Compute slippage-protected minAmountOut (2% tolerance)
+    const isBuyAction = decision.action === "buy_yes" || decision.action === "buy_no";
+    const isBuyYesAction = decision.action === "buy_yes" || decision.action === "sell_no";
+    const { amountOut: expectedOut } = estimateSlippage(
+      isBuyYesAction, BigInt(ry.toString()), BigInt(rn.toString()), BigInt(l.toString()),
+      BigInt(amountBn.toString()) / 1_000_000_000_000n, // scale WAD to u64 1e6
+    );
+    const slippageBps = BigInt(this.ammConfig.maxSlippageBps ?? 200);
+    // Scale minAmountOut back to WAD for the router
+    const minAmountOut = (expectedOut * (10000n - slippageBps) / 10000n) * 1_000_000_000_000n;
+
     try {
-      if (decision.action === "buy_yes" || decision.action === "buy_no") {
-        // Ensure mUSD approval
+      if (isBuyAction) {
+        // Ensure mUSD approval (use nonce tracker for all EVM txs)
         if (runtime.mUsd) {
           const allowance = await runtime.mUsd.allowance(
             runtime.walletAddress,
             runtime.routerAddress,
           );
           if (BigInt(allowance.toString()) < BigInt(amountBn.toString())) {
-            await runtime.mUsd.approve(runtime.routerAddress, ethers.MaxUint256);
+            await this.sendEvmTransaction(runtime, (nonce) =>
+              runtime.mUsd!.approve(runtime.routerAddress, ethers.MaxUint256, { nonce }),
+            );
           }
         }
         if (decision.action === "buy_yes") {
-          await runtime.router.buyYes(marketAddress, amountBn, 0);
+          await this.sendEvmTransaction(runtime, (nonce) =>
+            runtime.router.buyYes(marketAddress, amountBn, minAmountOut, { nonce }),
+          );
         } else {
-          await runtime.router.buyNo(marketAddress, amountBn, 0);
+          await this.sendEvmTransaction(runtime, (nonce) =>
+            runtime.router.buyNo(marketAddress, amountBn, minAmountOut, { nonce }),
+          );
         }
       } else {
         // Sell: need token approval
@@ -3310,12 +3340,18 @@ export class CrossChainMarketMaker {
         const token = new ethers.Contract(tokenAddr, ERC20_ABI, runtime.wallet);
         const allowance = await token.allowance(runtime.walletAddress, runtime.routerAddress);
         if (BigInt(allowance.toString()) < BigInt(amountBn.toString())) {
-          await token.approve(runtime.routerAddress, ethers.MaxUint256);
+          await this.sendEvmTransaction(runtime, (nonce) =>
+            token.approve(runtime.routerAddress, ethers.MaxUint256, { nonce }),
+          );
         }
         if (decision.action === "sell_yes") {
-          await runtime.router.sellYes(marketAddress, amountBn, 0);
+          await this.sendEvmTransaction(runtime, (nonce) =>
+            runtime.router.sellYes(marketAddress, amountBn, minAmountOut, { nonce }),
+          );
         } else {
-          await runtime.router.sellNo(marketAddress, amountBn, 0);
+          await this.sendEvmTransaction(runtime, (nonce) =>
+            runtime.router.sellNo(marketAddress, amountBn, minAmountOut, { nonce }),
+          );
         }
       }
 
