@@ -171,6 +171,9 @@ contract LvrMarket is ReentrancyGuard {
     function settleFromOracle() external isRouter nonReentrant {
         require(state == MarketState.OPEN || state == MarketState.PENDING || state == MarketState.DISPUTED, "Invalid Market State");
 
+        // Capture proposer's outcome before overwriting (for bond slashing)
+        uint256 proposedOutcome = outcome;
+
         DuelOutcomeOracle.DuelState memory duel = duelOracle.getDuel(duelKey);
         require(
             duel.status == DuelOutcomeOracle.DuelStatus.RESOLVED || duel.status == DuelOutcomeOracle.DuelStatus.CANCELLED,
@@ -178,20 +181,24 @@ contract LvrMarket is ReentrancyGuard {
         );
 
         if (duel.status == DuelOutcomeOracle.DuelStatus.CANCELLED) {
-            // Cancelled duels resolve as draw — outcome doesn't matter, both tokens redeemable 1:1
-            outcome = 2; // sentinel: no winner
+            outcome = 2; // sentinel: no winner, both tokens redeemable 1:1
         } else {
-            // Side.A (1) → outcome 0 (YES wins), Side.B (2) → outcome 1 (NO wins)
             require(duel.winner == DuelOutcomeOracle.Side.A || duel.winner == DuelOutcomeOracle.Side.B, "Invalid winner");
             outcome = duel.winner == DuelOutcomeOracle.Side.A ? 0 : 1;
         }
 
-        state = MarketState.RESOLVED;
+        // Settle bond: slash if proposer was wrong or market was cancelled
         uint256 returnedBond = 0;
         if (proposer != address(0)) {
-            IERC20(collateralToken).safeTransfer(proposer, bondValue);
-            returnedBond = bondValue;
+            if (state == MarketState.PENDING && outcome == proposedOutcome) {
+                IERC20(collateralToken).safeTransfer(proposer, bondValue);
+                returnedBond = bondValue;
+            } else {
+                IERC20(collateralToken).safeTransfer(treasuryAddress, bondValue);
+            }
         }
+
+        state = MarketState.RESOLVED;
         emit MarketSettled(outcome, proposer, returnedBond);
     }
 

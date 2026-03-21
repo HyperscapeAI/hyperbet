@@ -182,14 +182,17 @@ contract Router is AccessControl, ReentrancyGuard, IMarketBuyCallback, IMarketSe
     }
 
     function proposerOutcome(address market, uint256 _outcome) public {
+        if (!allowedMarkets[market]) revert MarketNotAllowed();
         LvrMarket(market).proposeOutcome(_outcome, msg.sender);
     }
 
     function dispute(address market) public {
+        if (!allowedMarkets[market]) revert MarketNotAllowed();
         LvrMarket(market).dispute();
     }
 
     function settleMarket(address market) public {
+        if (!allowedMarkets[market]) revert MarketNotAllowed();
         LvrMarket(market).settleMarket();
     }
 

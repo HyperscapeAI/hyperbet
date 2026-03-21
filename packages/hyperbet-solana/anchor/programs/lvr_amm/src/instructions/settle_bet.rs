@@ -81,10 +81,18 @@ pub fn settle_bet_instruction(ctx: Context<SettleBet>, _bet_id: u64, side_won: u
 
         let data = duel_account.try_borrow_data()?;
         let duel_key = read_oracle_duel_key(&data)?;
-        require!(
-            duel_key[..8] == ctx.accounts.bet.bet_id.to_le_bytes(),
-            PredictionMarketError::OracleBetMismatch
-        );
+        // Compare full 32-byte duel key if set, otherwise fall back to first 8 bytes (bet_id)
+        if ctx.accounts.bet.duel_key != [0u8; 32] {
+            require!(
+                duel_key == ctx.accounts.bet.duel_key,
+                PredictionMarketError::OracleBetMismatch
+            );
+        } else {
+            require!(
+                duel_key[..8] == ctx.accounts.bet.bet_id.to_le_bytes(),
+                PredictionMarketError::OracleBetMismatch
+            );
+        }
         let (status, winner) = read_oracle_duel(&data)?;
 
         require!(

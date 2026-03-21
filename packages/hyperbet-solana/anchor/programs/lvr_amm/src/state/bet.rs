@@ -15,4 +15,6 @@ pub struct Bet {
     pub creator: Pubkey,
     pub treasury: Pubkey,
     pub fee_bps: u16,
+    /// Full 32-byte duel key for oracle cross-reference (0 if not set)
+    pub duel_key: [u8; 32],
 }

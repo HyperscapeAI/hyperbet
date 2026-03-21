@@ -13,6 +13,7 @@ pub fn create_bet(
     is_dynamic: bool,
     bet_prompt: String,
     expiration: i64,
+    duel_key: [u8; 32],
 ) -> Result<()> {
     let config = &ctx.accounts.amm_config;
     require!(!config.paused, PredictionMarketError::MarketPaused);
@@ -40,6 +41,7 @@ pub fn create_bet(
     // Read fee/treasury from protocol config — not caller inputs
     bet.treasury = config.treasury;
     bet.fee_bps = config.fee_bps;
+    bet.duel_key = duel_key;
 
     Ok(())
 }
@@ -59,7 +61,7 @@ pub struct CreateBet<'info> {
     #[account(
         init,
         payer = signer,
-        space = size_of::<Bet>() + 8 + 128,
+        space = size_of::<Bet>() + 8 + 128 + 32,
         seeds = [b"bet".as_ref(), bet_id.to_le_bytes().as_ref(), signer.key().as_ref()],
         bump
     )]

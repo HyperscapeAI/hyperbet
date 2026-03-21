@@ -42,8 +42,9 @@ pub mod lvr_amm {
         is_dynamic: bool,
         bet_prompt: String,
         expiration_at: i64,
+        duel_key: [u8; 32],
     ) -> Result<()> {
-        create_bet(ctx, bet_id, initial_liq, is_dynamic, bet_prompt, expiration_at)
+        create_bet(ctx, bet_id, initial_liq, is_dynamic, bet_prompt, expiration_at, duel_key)
     }
 
     pub fn init_bet_account(ctx: Context<InitBet>, bet_id: u64) -> Result<()> {
