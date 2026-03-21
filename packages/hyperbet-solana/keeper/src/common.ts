@@ -109,6 +109,17 @@ export function getSenderUrl(): string | null {
   return null;
 }
 
+/** C-8: Redact API keys from RPC URLs before logging. */
+export function redactUrl(url: string): string {
+  return url.replace(/api-key=[^&]+/g, "api-key=***");
+}
+
+/** Sanitize an error message to remove embedded API keys before logging. */
+export function sanitizeErrorMessage(err: unknown): string {
+  const msg = err instanceof Error ? err.message : String(err);
+  return redactUrl(msg);
+}
+
 export function readKeypair(keypairRef: string): Keypair {
   const trimmed = keypairRef.trim();
 

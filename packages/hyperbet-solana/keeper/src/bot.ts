@@ -39,6 +39,7 @@ import {
   SIDE_BID,
   readKeypair,
   requireEnv,
+  sanitizeErrorMessage,
 } from "./common";
 import type { PredictionMarketWinner } from "@hyperbet/chain-registry";
 import { buildResultHash } from "./resultHash";
@@ -3105,7 +3106,7 @@ for (;;) {
     if (isFundingError(error)) {
       fundingBlockedUntil = Date.now() + fundingBackoffMs;
     }
-    console.error(`[bot] cycle failed: ${(error as Error).message}`);
+    console.error(`[bot] cycle failed: ${sanitizeErrorMessage(error)}`);
   } finally {
     writeBotHealthSnapshot();
   }

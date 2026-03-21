@@ -217,9 +217,9 @@ function buildEvmConfig(
     baseGoldTokenAddress: defaults.base.goldTokenAddress,
     avaxRpcUrl: defaultAvaxRpcUrlForEnvironment(environment),
     avaxChainId: defaultAvaxChainIdForEnvironment(environment),
-    avaxGoldClobAddress: "",
-    avaxGoldAmmRouterAddress: "",
-    avaxGoldTokenAddress: "",
+    avaxGoldClobAddress: defaults.avax.goldClobAddress,
+    avaxGoldAmmRouterAddress: defaults.avax.goldAmmRouterAddress,
+    avaxGoldTokenAddress: defaults.avax.goldTokenAddress,
   };
 }
 
