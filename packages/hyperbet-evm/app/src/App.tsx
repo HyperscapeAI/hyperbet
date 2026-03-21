@@ -29,6 +29,7 @@ import {
   getFixedMatchId,
   STREAM_URLS,
 } from "./lib/config";
+import { POINTS_DRAWER_OVERLAY_STYLE } from "./lib/pointsDrawer";
 import { getRecentSettlementTitle } from "./lib/recentSettlement";
 import {
   captureInviteCodeFromLocation,
@@ -37,6 +38,7 @@ import {
 import { StreamPlayer } from "@hyperbet/ui/components/StreamPlayer";
 import { ChainSelector } from "@hyperbet/ui/components/ChainSelector";
 import { ThemeSelector } from "@hyperbet/ui/components/ThemeSelector";
+import { selectConfiguredEvmPrivateKey } from "@hyperbet/ui/lib/evmPrivateKey";
 
 import { useChain } from "./lib/ChainContext";
 import { useStreamingState } from "@hyperbet/ui/spectator/useStreamingState";
@@ -84,14 +86,6 @@ function formatTimeAgo(ts: number, locale: UiLocale): string {
 function truncateAddr(addr: string): string {
   if (addr.length <= 12) return addr;
   return `${addr.slice(0, 6)}...${addr.slice(-4)}`;
-}
-
-function normalizePrivateKey(value: string | undefined): `0x${string}` | null {
-  const trimmed = value?.trim() ?? "";
-  if (!trimmed) return null;
-  const withPrefix = trimmed.startsWith("0x") ? trimmed : `0x${trimmed}`;
-  if (!/^0x[0-9a-fA-F]{64}$/.test(withPrefix)) return null;
-  return withPrefix as `0x${string}`;
 }
 
 function deriveAddressFromPrivateKey(
@@ -530,13 +524,7 @@ export function App() {
   const isBettingPanelOnlyMode =
     isE2eDebugMode && searchParams.get("panel") === "betting";
   const configuredHeadlessEvmPrivateKey = useMemo(
-    () =>
-      normalizePrivateKey(
-        import.meta.env.VITE_EVM_PRIVATE_KEY ||
-          import.meta.env.VITE_HEADLESS_EVM_PRIVATE_KEY ||
-          import.meta.env.VITE_E2E_EVM_PRIVATE_KEY ||
-          "",
-      ),
+    () => selectConfiguredEvmPrivateKey(import.meta.env),
     [],
   );
   const configuredHeadlessEvmAddress = useMemo(
@@ -1202,21 +1190,7 @@ const [hmBottomTab, setHmBottomTab] = useState<
       {showPointsDrawer && (
         <div
           data-testid="points-drawer-overlay"
-          style={{
-            position: "absolute",
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            background: "rgba(0,0,0,0.5)",
-            backdropFilter: "blur(8px)",
-            WebkitBackdropFilter: "blur(8px)",
-            zIndex: 100,
-            display: "flex",
-            justifyContent: "center",
-            alignItems: "center",
-            padding: 16,
-          }}
+          style={POINTS_DRAWER_OVERLAY_STYLE}
           onClick={() => setShowPointsDrawer(false)}
         >
           <div

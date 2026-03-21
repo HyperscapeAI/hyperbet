@@ -4,6 +4,7 @@ import {
   normalizePredictionMarketDuelKeyHex,
   parsePredictionMarketsOverviewResponse,
   parsePredictionMarketsResponse,
+  parsePredictionMarketSyncStatusResponse,
   selectPredictionMarketOverviewRecord,
   selectPredictionMarketLifecycleRecord,
 } from "../src/lib/predictionMarkets";
@@ -189,6 +190,37 @@ describe("prediction market lifecycle helpers", () => {
     expect(
       selectPredictionMarketOverviewRecord(parsed, "bsc", "recentSettlement"),
     ).toBeNull();
+  });
+
+  it("parses sync status sequence fields as integers", () => {
+    const parsed = parsePredictionMarketSyncStatusResponse({
+      sourceEpoch: 7.9,
+      sourceLatestSeq: 101.8,
+      lastSeenSeq: 99.2,
+      lastAppliedSeq: 98.7,
+      applyLagMs: 1500,
+      sourceEventAgeMs: 2500,
+      replayMode: "replay",
+      degradedReason: null,
+      rendererHealth: {
+        ready: true,
+        degradedReason: null,
+        updatedAt: 1234,
+      },
+      rendererHealthAgeMs: 15,
+      lastEventReceivedAt: 2345,
+      lastAppliedAt: 3456,
+      connectedAt: 4567,
+      enabled: true,
+    });
+
+    expect(parsed).toMatchObject({
+      sourceEpoch: 7,
+      sourceLatestSeq: 101,
+      lastSeenSeq: 99,
+      lastAppliedSeq: 98,
+      replayMode: "replay",
+    });
   });
 });
 

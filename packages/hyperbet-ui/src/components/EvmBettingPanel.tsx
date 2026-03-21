@@ -56,6 +56,7 @@ import {
   normalizePredictionMarketDuelKeyHex,
   usePredictionMarketLifecycle,
 } from "../lib/predictionMarkets";
+import { selectConfiguredEvmPrivateKey } from "../lib/evmPrivateKey";
 import {
   derivePredictionMarketUiState,
   EMPTY_PREDICTION_MARKET_WALLET_SNAPSHOT,
@@ -103,14 +104,6 @@ function createStrictPrivateKeyAccount(privateKey: `0x${string}`) {
     publicKey,
     source: "privateKey" as const,
   };
-}
-
-function normalizePrivateKey(value: string): `0x${string}` | null {
-  const trimmed = value.trim();
-  if (!trimmed) return null;
-  const withPrefix = trimmed.startsWith("0x") ? trimmed : `0x${trimmed}`;
-  if (!/^0x[0-9a-fA-F]{64}$/.test(withPrefix)) return null;
-  return withPrefix as `0x${string}`;
 }
 
 function normalizeAddress(value: string): Address | null {
@@ -363,16 +356,18 @@ export function EvmBettingPanel({
     [activeChain],
   );
 
-  const configuredHeadlessPrivateKey = normalizePrivateKey(
-    (import.meta.env.VITE_EVM_PRIVATE_KEY as string | undefined) ??
-    (import.meta.env.VITE_HEADLESS_EVM_PRIVATE_KEY as string | undefined) ??
-    (import.meta.env.VITE_E2E_EVM_PRIVATE_KEY as string | undefined) ??
-    "",
+  const configuredHeadlessPrivateKey = useMemo(
+    () => selectConfiguredEvmPrivateKey(import.meta.env),
+    [],
   );
-  const configuredHeadlessAddress = normalizeAddress(
-    (import.meta.env.VITE_E2E_EVM_ADDRESS as string | undefined) ??
-    (import.meta.env.VITE_HEADLESS_EVM_ADDRESS as string | undefined) ??
-    "",
+  const configuredHeadlessAddress = useMemo(
+    () =>
+      normalizeAddress(
+        (import.meta.env.VITE_E2E_EVM_ADDRESS as string | undefined) ??
+          (import.meta.env.VITE_HEADLESS_EVM_ADDRESS as string | undefined) ??
+          "",
+      ),
+    [],
   );
   const configuredE2eDuelKey = normalizePredictionMarketDuelKeyHex(
     (import.meta.env.VITE_E2E_EVM_DUEL_KEY as string | undefined) ?? "",

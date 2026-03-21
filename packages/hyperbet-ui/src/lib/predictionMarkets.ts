@@ -69,6 +69,13 @@ function asRecord(value: unknown): Record<string, unknown> | null {
     : null;
 }
 
+function normalizePredictionMarketInteger(value: unknown): number | null {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return null;
+  }
+  return Math.trunc(value);
+}
+
 export const normalizePredictionMarketDuelKeyHex =
   normalizePredictionMarketDuelKeyHexFromRegistry;
 
@@ -145,10 +152,10 @@ export function parsePredictionMarketSyncStatusResponse(
   const candidate = asRecord(payload);
   if (!candidate) return null;
   return {
-    sourceEpoch: normalizePredictionMarketTimestamp(candidate.sourceEpoch),
-    sourceLatestSeq: normalizePredictionMarketTimestamp(candidate.sourceLatestSeq),
-    lastSeenSeq: normalizePredictionMarketTimestamp(candidate.lastSeenSeq),
-    lastAppliedSeq: normalizePredictionMarketTimestamp(candidate.lastAppliedSeq),
+    sourceEpoch: normalizePredictionMarketInteger(candidate.sourceEpoch),
+    sourceLatestSeq: normalizePredictionMarketInteger(candidate.sourceLatestSeq),
+    lastSeenSeq: normalizePredictionMarketInteger(candidate.lastSeenSeq),
+    lastAppliedSeq: normalizePredictionMarketInteger(candidate.lastAppliedSeq),
     applyLagMs: normalizePredictionMarketTimestamp(candidate.applyLagMs),
     sourceEventAgeMs: normalizePredictionMarketTimestamp(candidate.sourceEventAgeMs),
     replayMode: typeof candidate.replayMode === "string" ? candidate.replayMode : null,
