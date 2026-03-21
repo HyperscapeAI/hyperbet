@@ -1045,18 +1045,6 @@ export type LvrAmm = {
           }
         },
         {
-          "name": "treasury",
-          "writable": true
-        },
-        {
-          "name": "treasuryYesAta",
-          "writable": true
-        },
-        {
-          "name": "treasuryNoAta",
-          "writable": true
-        },
-        {
           "name": "tokenProgram",
           "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
         },
@@ -1679,36 +1667,51 @@ export type LvrAmm = {
     },
     {
       "code": 6010,
+      "name": "betNotInitialized",
+      "msg": "Bet not initialized"
+    },
+    {
+      "code": 6011,
       "name": "betNotSettled",
       "msg": "Bet not settled"
     },
     {
-      "code": 6011,
+      "code": 6012,
       "name": "betNotExpired",
       "msg": "Bet not expired"
     },
     {
-      "code": 6012,
+      "code": 6013,
+      "name": "invalidOracleAccount",
+      "msg": "Invalid oracle account"
+    },
+    {
+      "code": 6014,
+      "name": "oracleBetMismatch",
+      "msg": "Oracle duel does not match bet"
+    },
+    {
+      "code": 6015,
       "name": "mathErr",
       "msg": "Overflow or Underflow"
     },
     {
-      "code": 6013,
+      "code": 6016,
       "name": "invalidAddress",
       "msg": "Invalid address (zero/default)"
     },
     {
-      "code": 6014,
+      "code": 6017,
       "name": "feeTooHigh",
       "msg": "Fee BPS exceeds maximum (1000 = 10%)"
     },
     {
-      "code": 6015,
+      "code": 6018,
       "name": "marketPaused",
       "msg": "Market is paused"
     },
     {
-      "code": 6016,
+      "code": 6019,
       "name": "configFrozen",
       "msg": "Config is frozen"
     }

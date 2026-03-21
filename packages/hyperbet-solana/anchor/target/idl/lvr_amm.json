@@ -1039,18 +1039,6 @@
           }
         },
         {
-          "name": "treasury",
-          "writable": true
-        },
-        {
-          "name": "treasury_yes_ata",
-          "writable": true
-        },
-        {
-          "name": "treasury_no_ata",
-          "writable": true
-        },
-        {
           "name": "token_program",
           "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
         },
@@ -1673,36 +1661,51 @@
     },
     {
       "code": 6010,
+      "name": "BetNotInitialized",
+      "msg": "Bet not initialized"
+    },
+    {
+      "code": 6011,
       "name": "BetNotSettled",
       "msg": "Bet not settled"
     },
     {
-      "code": 6011,
+      "code": 6012,
       "name": "BetNotExpired",
       "msg": "Bet not expired"
     },
     {
-      "code": 6012,
+      "code": 6013,
+      "name": "InvalidOracleAccount",
+      "msg": "Invalid oracle account"
+    },
+    {
+      "code": 6014,
+      "name": "OracleBetMismatch",
+      "msg": "Oracle duel does not match bet"
+    },
+    {
+      "code": 6015,
       "name": "MathErr",
       "msg": "Overflow or Underflow"
     },
     {
-      "code": 6013,
+      "code": 6016,
       "name": "InvalidAddress",
       "msg": "Invalid address (zero/default)"
     },
     {
-      "code": 6014,
+      "code": 6017,
       "name": "FeeTooHigh",
       "msg": "Fee BPS exceeds maximum (1000 = 10%)"
     },
     {
-      "code": 6015,
+      "code": 6018,
       "name": "MarketPaused",
       "msg": "Market is paused"
     },
     {
-      "code": 6016,
+      "code": 6019,
       "name": "ConfigFrozen",
       "msg": "Config is frozen"
     }
