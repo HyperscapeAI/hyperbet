@@ -501,6 +501,15 @@ export type LvrAmm = {
         {
           "name": "expirationAt",
           "type": "i64"
+        },
+        {
+          "name": "duelKey",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
         }
       ]
     },
@@ -1888,6 +1897,18 @@ export type LvrAmm = {
           {
             "name": "feeBps",
             "type": "u16"
+          },
+          {
+            "name": "duelKey",
+            "docs": [
+              "Full 32-byte duel key for oracle cross-reference (0 if not set)"
+            ],
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
           }
         ]
       }
