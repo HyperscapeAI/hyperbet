@@ -495,6 +495,15 @@ export type LvrAmm = {
           "type": "bool"
         },
         {
+          "name": "duelKey",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
           "name": "betPrompt",
           "type": "string"
         },
@@ -730,6 +739,10 @@ export type LvrAmm = {
         },
         {
           "name": "marketMaker",
+          "type": "pubkey"
+        },
+        {
+          "name": "fightOracleProgram",
           "type": "pubkey"
         },
         {
@@ -1050,11 +1063,183 @@ export type LvrAmm = {
         },
         {
           "name": "treasuryYesAta",
-          "writable": true
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "treasury"
+              },
+              {
+                "kind": "const",
+                "value": [
+                  6,
+                  221,
+                  246,
+                  225,
+                  215,
+                  101,
+                  161,
+                  147,
+                  217,
+                  203,
+                  225,
+                  70,
+                  206,
+                  235,
+                  121,
+                  172,
+                  28,
+                  180,
+                  133,
+                  237,
+                  95,
+                  91,
+                  55,
+                  145,
+                  58,
+                  140,
+                  245,
+                  133,
+                  126,
+                  255,
+                  0,
+                  169
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mintYes"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
         },
         {
           "name": "treasuryNoAta",
-          "writable": true
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "treasury"
+              },
+              {
+                "kind": "const",
+                "value": [
+                  6,
+                  221,
+                  246,
+                  225,
+                  215,
+                  101,
+                  161,
+                  147,
+                  217,
+                  203,
+                  225,
+                  70,
+                  206,
+                  235,
+                  121,
+                  172,
+                  28,
+                  180,
+                  133,
+                  237,
+                  95,
+                  91,
+                  55,
+                  145,
+                  58,
+                  140,
+                  245,
+                  133,
+                  126,
+                  255,
+                  0,
+                  169
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mintNo"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
         },
         {
           "name": "tokenProgram",
@@ -1150,6 +1335,28 @@ export type LvrAmm = {
           "name": "signer",
           "writable": true,
           "signer": true
+        },
+        {
+          "name": "ammConfig",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  109,
+                  109,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
         },
         {
           "name": "adminState",
@@ -1679,38 +1886,68 @@ export type LvrAmm = {
     },
     {
       "code": 6010,
+      "name": "betNotInitialized",
+      "msg": "Bet not initialized"
+    },
+    {
+      "code": 6011,
       "name": "betNotSettled",
       "msg": "Bet not settled"
     },
     {
-      "code": 6011,
+      "code": 6012,
       "name": "betNotExpired",
       "msg": "Bet not expired"
     },
     {
-      "code": 6012,
+      "code": 6013,
+      "name": "invalidOracleAccount",
+      "msg": "Invalid oracle account"
+    },
+    {
+      "code": 6014,
+      "name": "oracleBetMismatch",
+      "msg": "Oracle duel does not match bet"
+    },
+    {
+      "code": 6015,
       "name": "mathErr",
       "msg": "Overflow or Underflow"
     },
     {
-      "code": 6013,
+      "code": 6016,
       "name": "invalidAddress",
       "msg": "Invalid address (zero/default)"
     },
     {
-      "code": 6014,
+      "code": 6017,
       "name": "feeTooHigh",
       "msg": "Fee BPS exceeds maximum (1000 = 10%)"
     },
     {
-      "code": 6015,
+      "code": 6018,
       "name": "marketPaused",
       "msg": "Market is paused"
     },
     {
-      "code": 6016,
+      "code": 6019,
       "name": "configFrozen",
       "msg": "Config is frozen"
+    },
+    {
+      "code": 6020,
+      "name": "invalidDuelState",
+      "msg": "Invalid duel state account"
+    },
+    {
+      "code": 6021,
+      "name": "missingAmmConfig",
+      "msg": "AMM config account required for oracle settlement"
+    },
+    {
+      "code": 6022,
+      "name": "invalidFightOracleProgram",
+      "msg": "Fight oracle program mismatch"
     }
   ],
   "types": [
@@ -1764,6 +2001,10 @@ export type LvrAmm = {
             "type": "pubkey"
           },
           {
+            "name": "fightOracleProgram",
+            "type": "pubkey"
+          },
+          {
             "name": "feeBps",
             "type": "u16"
           },
@@ -1808,6 +2049,10 @@ export type LvrAmm = {
             "type": "pubkey"
           },
           {
+            "name": "fightOracleProgram",
+            "type": "pubkey"
+          },
+          {
             "name": "feeBps",
             "type": "u16"
           }
@@ -1849,6 +2094,15 @@ export type LvrAmm = {
               "array": [
                 "u64",
                 2
+              ]
+            }
+          },
+          {
+            "name": "duelKey",
+            "type": {
+              "array": [
+                "u8",
+                32
               ]
             }
           },

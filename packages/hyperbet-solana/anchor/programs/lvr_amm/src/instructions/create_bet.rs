@@ -11,6 +11,7 @@ pub fn create_bet(
     bet_id: u64,
     initial_liq: u64,
     is_dynamic: bool,
+    duel_key: [u8; 32],
     bet_prompt: String,
     expiration: i64,
     duel_key: [u8; 32],
@@ -30,6 +31,7 @@ pub fn create_bet(
     bet.is_dynamic = is_dynamic;
     bet.initial_liq = math::calc_initial_liquidity(initial_liq);
     bet.reserves = [initial_liq, initial_liq];
+    bet.duel_key = duel_key;
 
     bet.bet_prompt = bet_prompt;
     bet.created_at = clock.unix_timestamp;

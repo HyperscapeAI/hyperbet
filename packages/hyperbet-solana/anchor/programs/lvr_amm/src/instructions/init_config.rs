@@ -6,16 +6,19 @@ pub fn initialize_amm_config(
     ctx: Context<InitializeAmmConfig>,
     treasury: Pubkey,
     market_maker: Pubkey,
+    fight_oracle_program: Pubkey,
     fee_bps: u16,
 ) -> Result<()> {
     require!(treasury != Pubkey::default(), PredictionMarketError::InvalidAddress);
     require!(market_maker != Pubkey::default(), PredictionMarketError::InvalidAddress);
+    require!(fight_oracle_program != Pubkey::default(), PredictionMarketError::InvalidAddress);
     require!(fee_bps <= 1000, PredictionMarketError::FeeTooHigh);
 
     let config = &mut ctx.accounts.amm_config;
     config.authority = ctx.accounts.signer.key();
     config.treasury = treasury;
     config.market_maker = market_maker;
+    config.fight_oracle_program = fight_oracle_program;
     config.fee_bps = fee_bps;
     config.config_frozen = false;
     config.paused = false;
@@ -24,6 +27,7 @@ pub fn initialize_amm_config(
     emit!(AmmConfigInitialized {
         authority: config.authority,
         treasury: config.treasury,
+        fight_oracle_program: config.fight_oracle_program,
         fee_bps: config.fee_bps,
     });
 
@@ -106,6 +110,7 @@ pub struct SetAmmPaused<'info> {
 pub struct AmmConfigInitialized {
     pub authority: Pubkey,
     pub treasury: Pubkey,
+    pub fight_oracle_program: Pubkey,
     pub fee_bps: u16,
 }
 

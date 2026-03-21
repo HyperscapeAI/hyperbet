@@ -1,5 +1,36 @@
 export const GOLD_AMM_ROUTER_ABI = [
   {
+    "type": "constructor",
+    "inputs": [
+      {
+        "name": "_mUSD",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "_treasury",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "_feeBps",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "admin",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "_duelOracle",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
     "type": "function",
     "name": "DEFAULT_ADMIN_ROLE",
     "inputs": [],
@@ -161,6 +192,11 @@ export const GOLD_AMM_ROUTER_ABI = [
         "name": "collateralIn",
         "type": "uint256",
         "internalType": "uint256"
+      },
+      {
+        "name": "duelKey",
+        "type": "bytes32",
+        "internalType": "bytes32"
       }
     ],
     "outputs": [],
@@ -178,6 +214,19 @@ export const GOLD_AMM_ROUTER_ABI = [
     ],
     "outputs": [],
     "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "duelOracle",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "contract DuelOutcomeOracle"
+      }
+    ],
+    "stateMutability": "view"
   },
   {
     "type": "function",
@@ -262,6 +311,11 @@ export const GOLD_AMM_ROUTER_ABI = [
         "name": "liquidity",
         "type": "uint256",
         "internalType": "uint256"
+      },
+      {
+        "name": "duelKey",
+        "type": "bytes32",
+        "internalType": "bytes32"
       },
       {
         "name": "title",
@@ -477,6 +531,11 @@ export const GOLD_AMM_ROUTER_ABI = [
             "name": "resolutionSource",
             "type": "string",
             "internalType": "string"
+          },
+          {
+            "name": "duelKey",
+            "type": "bytes32",
+            "internalType": "bytes32"
           }
         ]
       }
@@ -632,16 +691,6 @@ export const GOLD_AMM_ROUTER_ABI = [
         "name": "market",
         "type": "address",
         "internalType": "address"
-      },
-      {
-        "name": "oracle",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "duelKey",
-        "type": "bytes32",
-        "internalType": "bytes32"
       }
     ],
     "outputs": [],
@@ -750,6 +799,12 @@ export const GOLD_AMM_ROUTER_ABI = [
         "type": "string",
         "indexed": false,
         "internalType": "string"
+      },
+      {
+        "name": "duelKey",
+        "type": "bytes32",
+        "indexed": false,
+        "internalType": "bytes32"
       },
       {
         "name": "deadline",
@@ -865,6 +920,16 @@ export const GOLD_AMM_ROUTER_ABI = [
   {
     "type": "error",
     "name": "FeeTooHigh",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "InvalidDuelKey",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "InvalidOracle",
     "inputs": []
   },
   {

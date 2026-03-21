@@ -160,6 +160,9 @@ export async function ensureOracleReady(
   program: Program<FightOracle>,
   authority: Keypair,
   reporter = authority.publicKey,
+  finalizer = authority.publicKey,
+  challenger = authority.publicKey,
+  disputeWindowSecs = 60,
 ): Promise<PublicKey> {
   const oracleConfig = deriveOracleConfigPda(program.programId);
   const existingConfig =
@@ -167,7 +170,12 @@ export async function ensureOracleReady(
 
   if (!existingConfig) {
     await program.methods
-      .initializeOracle(reporter)
+      .initializeOracle(
+        reporter,
+        finalizer,
+        challenger,
+        new BN(disputeWindowSecs),
+      )
       .accountsPartial({
         authority: authority.publicKey,
         oracleConfig,
@@ -181,7 +189,13 @@ export async function ensureOracleReady(
   }
 
   await program.methods
-    .updateOracleConfig(authority.publicKey, reporter)
+    .updateOracleConfig(
+      authority.publicKey,
+      reporter,
+      finalizer,
+      challenger,
+      new BN(disputeWindowSecs),
+    )
     .accountsPartial({
       authority: authority.publicKey,
       oracleConfig,
@@ -205,7 +219,7 @@ export async function ensureLvrAdmin(
 ): Promise<PublicKey> {
   const adminState = deriveAdminStatePda(program.programId);
   const existingConfig =
-    await program.account.admin.fetchNullable(adminState);
+    await (program.account as any).admin.fetchNullable(adminState);
 
   if (!existingConfig) {
     await program.methods
@@ -224,18 +238,20 @@ export async function ensureLvrAdmin(
 export async function ensureAmmConfig(
   program: Program<LvrAmm>,
   authority: Keypair,
+  fightOracleProgramId: PublicKey,
   treasury?: PublicKey,
   feeBps = 200,
 ): Promise<PublicKey> {
   const ammConfig = deriveAmmConfigPda(program.programId);
   const existingConfig =
-    await program.account.ammConfig.fetchNullable(ammConfig);
+    await (program.account as any).ammConfig.fetchNullable(ammConfig);
 
   if (!existingConfig) {
     await program.methods
       .initializeConfig(
         treasury ?? authority.publicKey,
         authority.publicKey, // market_maker
+        fightOracleProgramId,
         feeBps,
       )
       .accountsPartial({
@@ -336,22 +352,22 @@ export async function reportDuelResult(
   const oracleConfig = deriveOracleConfigPda(program.programId);
   const duelState = deriveDuelStatePda(program.programId, duelKey);
 
-  await program.methods
-    .reportResult(
-      [...duelKey],
-      options.winner,
-      toBn(options.seed ?? 42),
-      [
-        ...(options.replayHash ??
-          hashLabel(`${Buffer.from(duelKey).toString("hex")}:replay`)),
-      ],
-      [
-        ...(options.resultHash ??
-          hashLabel(`${Buffer.from(duelKey).toString("hex")}:result`)),
-      ],
-      toBn(options.duelEndTs),
-      options.metadataUri ?? "https://hyperscape.gg/duels/result",
-    )
+  const builder: any = (program as any).methods.proposeResult(
+    [...duelKey],
+    options.winner,
+    toBn(options.seed ?? 42),
+    [
+      ...(options.replayHash ??
+        hashLabel(`${Buffer.from(duelKey).toString("hex")}:replay`)),
+    ],
+    [
+      ...(options.resultHash ??
+        hashLabel(`${Buffer.from(duelKey).toString("hex")}:result`)),
+    ],
+    toBn(options.duelEndTs),
+    options.metadataUri ?? "https://hyperscape.gg/duels/result",
+  );
+  await builder
     .accountsPartial({
       reporter: reporter.publicKey,
       oracleConfig,
@@ -389,7 +405,7 @@ export async function initializeCanonicalMarket(
   const expirationAt = new BN(Date.now() / 1000 + 3600);
 
   await program.methods
-    .createBetAccount(betId, initialLiq, isDynamic, description, expirationAt)
+    .createBetAccount(betId, initialLiq, isDynamic, [...duelKey], description, expirationAt)
     .accountsPartial({
       signer: operator.publicKey,
       ammConfig,
@@ -453,7 +469,7 @@ export async function placeClobOrder(
   order: PublicKey;
   restingLevel: PublicKey;
 }> {
-  const bet = await program.account.bet.fetch(args.marketState);
+  const bet = await (program.account as any).bet.fetch(args.marketState);
   const betId = bet.betId;
   const creator = bet.creator;
   
@@ -530,7 +546,7 @@ export async function claimClobWinnings(
     user: Keypair;
   },
 ): Promise<PublicKey> {
-  const bet = await program.account.bet.fetch(args.marketState);
+  const bet = await (program.account as any).bet.fetch(args.marketState);
   const betId = bet.betId;
   const creator = bet.creator;
   
@@ -540,30 +556,40 @@ export async function claimClobWinnings(
   const srcNo = getAssociatedTokenAddressSync(mintNo, args.user.publicKey, true);
 
   // In tests, claim everything on the winning side
-  const infoYes = await program.provider.connection.getAccountInfo(srcYes);
-  const infoNo = await program.provider.connection.getAccountInfo(srcNo);
   const balYes = await program.provider.connection.getTokenAccountBalance(srcYes).catch(() => ({ value: { amount: "0" }}));
   const balNo = await program.provider.connection.getTokenAccountBalance(srcNo).catch(() => ({ value: { amount: "0" }}));
-  
-  const hasYes = BigInt(balYes.value.amount) > 0;
-  const outcome = hasYes ? 0 : 1;
-  const qStr = hasYes ? balYes.value.amount : balNo.value.amount;
-  
-  await program.methods
-    .withdrawPostSettle(betId, outcome, new BN(qStr))
-    .accountsPartial({
-      signer: args.user.publicKey,
-      bet: args.marketState,
-      mintYes,
-      mintNo,
-      destinationYes: srcYes,
-      destinationNo: srcNo,
-      tokenProgram: TOKEN_PROGRAM_ID,
-      systemProgram: SystemProgram.programId,
-      associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
-    })
-    .signers([args.user])
-    .rpc();
+
+  const withdrawals: Array<{ outcome: 0 | 1; amount: string }> = [];
+  const sideWon = bet.sideWon == null ? null : Number(bet.sideWon);
+  const hasYes = BigInt(balYes.value.amount) > 0n;
+  const hasNo = BigInt(balNo.value.amount) > 0n;
+
+  if (sideWon === 2) {
+    if (hasYes) withdrawals.push({ outcome: 0, amount: balYes.value.amount });
+    if (hasNo) withdrawals.push({ outcome: 1, amount: balNo.value.amount });
+  } else if (hasYes) {
+    withdrawals.push({ outcome: 0, amount: balYes.value.amount });
+  } else if (hasNo) {
+    withdrawals.push({ outcome: 1, amount: balNo.value.amount });
+  }
+
+  for (const withdrawal of withdrawals) {
+    await program.methods
+      .withdrawPostSettle(betId, withdrawal.outcome, new BN(withdrawal.amount))
+      .accountsPartial({
+        signer: args.user.publicKey,
+        bet: args.marketState,
+        mintYes,
+        mintNo,
+        destinationYes: srcYes,
+        destinationNo: srcNo,
+        tokenProgram: TOKEN_PROGRAM_ID,
+        systemProgram: SystemProgram.programId,
+        associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+      })
+      .signers([args.user])
+      .rpc();
+  }
 
   return srcYes;
 }
@@ -598,7 +624,12 @@ export async function createOpenMarketFixture(
 
   await ensureOracleReady(fightProgram, authority, authority.publicKey);
   await ensureLvrAdmin(clobProgram, authority);
-  const config = await ensureAmmConfig(clobProgram, authority, treasury);
+  const config = await ensureAmmConfig(
+    clobProgram,
+    authority,
+    fightProgram.programId,
+    treasury,
+  );
   const duelState = await upsertDuel(fightProgram, authority, duelKey, {
     status: duelStatusBettingOpen(),
     betOpenTs: options?.betOpenTs ?? now - 30,

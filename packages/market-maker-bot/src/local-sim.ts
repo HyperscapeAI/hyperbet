@@ -426,7 +426,7 @@ async function deployContracts(provider: ethers.JsonRpcProvider, chain: BettingE
     ` --broadcast --json` +
     ` --libraries contracts/lvr_amm/lib/Math.sol:Math:${mathAddr}` +
     ` --libraries contracts/lvr_amm/lib/SwapMath.sol:SwapMath:${swapMathAddr}` +
-    ` --constructor-args ${musdAddress} ${treasury.address} 200 ${admin.address}`,
+    ` --constructor-args ${musdAddress} ${treasury.address} 200 ${admin.address} ${await oracle.getAddress()}`,
     { cwd: evmContractsDir, env: forgeEnv, encoding: "utf8" },
   );
   const routerAddress = JSON.parse(routerOut).deployedTo;
@@ -523,6 +523,7 @@ async function createMarkets(
     false, // static liquidity (simpler)
     duration,
     collateral,
+    duel,
     { nonce: await nextNonce(admin.address) },
   );
   const receipt = await tx.wait();

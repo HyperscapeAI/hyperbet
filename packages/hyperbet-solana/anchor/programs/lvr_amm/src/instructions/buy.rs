@@ -25,6 +25,7 @@ pub fn buy_instruction(ctx: Context<Buy>, bet_id: u64, outcome: u8, amount_in: u
         bet.side_won.is_none(),
         PredictionMarketError::BetAlreadySettled
     );
+    require!(bet.is_initialized, PredictionMarketError::BetNotInitialized);
     
     let is_buy_yes = outcome == 0;
     

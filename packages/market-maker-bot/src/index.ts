@@ -78,6 +78,10 @@ const SHARE_UNIT_SIZE = 1_000n;
 const EVM_ORDER_FLAG_GTC = 0x01;
 const OUTBOX_LEASE_MS = 60_000;
 const CLAIM_BACKLOG_LEASE_MS = 60_000;
+const TOKEN_PROGRAM_ID = new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
+const ASSOCIATED_TOKEN_PROGRAM_ID = new PublicKey(
+  "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",
+);
 
 const GOLD_CLOB_ABI = [
   "function marketKey(bytes32 duelKey, uint8 marketKind) view returns (bytes32)",
@@ -171,6 +175,7 @@ type SolanaAmmConfig = {
   authority: PublicKey;
   treasury: PublicKey;
   marketMaker: PublicKey;
+  fightOracleProgram: PublicKey;
   feeBps: number;
   paused: boolean;
 };
@@ -217,7 +222,7 @@ const GOLD_AMM_ROUTER_ABI = [
   "function buyNo(address market, uint256 collateralIn, uint256 minAmountOut)",
   "function sellYes(address market, uint256 tokenIn, uint256 minAmountOut)",
   "function sellNo(address market, uint256 tokenIn, uint256 minAmountOut)",
-  "function settleFromOracle(address market, address oracle, bytes32 duelKey)",
+  "function settleFromOracle(address market)",
   "function redeem(address market, uint256 amountYes, uint256 amountNo)",
   "function getAllMarkets() view returns (address[])",
   "function mUSD() view returns (address)",
@@ -257,6 +262,13 @@ function readEnvNumber(name: string, fallback: number): number {
   if (!raw) return fallback;
   const parsed = Number(raw);
   return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function findAssociatedTokenAddress(mint: PublicKey, owner: PublicKey): PublicKey {
+  return PublicKey.findProgramAddressSync(
+    [owner.toBuffer(), TOKEN_PROGRAM_ID.toBuffer(), mint.toBuffer()],
+    ASSOCIATED_TOKEN_PROGRAM_ID,
+  )[0];
 }
 
 function parseEnvironment(raw: string | undefined): BettingAppEnvironment {
@@ -2939,6 +2951,7 @@ export class CrossChainMarketMaker {
           authority: configAccount.authority,
           treasury: configAccount.treasury,
           marketMaker: configAccount.marketMaker,
+          fightOracleProgram: configAccount.fightOracleProgram,
           feeBps: configAccount.feeBps,
           paused: configAccount.paused,
         };
@@ -3031,6 +3044,16 @@ export class CrossChainMarketMaker {
     const amountIn = new BN(decision.amount);
     const mintYes = findAmmMintYesPda(runtime.ammProgramId, betId, creator);
     const mintNo = findAmmMintNoPda(runtime.ammProgramId, betId, creator);
+    const destinationYes = findAssociatedTokenAddress(mintYes, runtime.wallet.publicKey);
+    const destinationNo = findAssociatedTokenAddress(mintNo, runtime.wallet.publicKey);
+    const treasuryYesAta = findAssociatedTokenAddress(
+      mintYes,
+      runtime.ammConfig!.treasury,
+    );
+    const treasuryNoAta = findAssociatedTokenAddress(
+      mintNo,
+      runtime.ammConfig!.treasury,
+    );
 
     const isBuy = decision.action === "buy_yes" || decision.action === "buy_no";
 
@@ -3045,8 +3068,11 @@ export class CrossChainMarketMaker {
             treasury: runtime.ammConfig!.treasury,
             mintYes,
             mintNo,
-            tokenProgram: new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"),
+            destinationYes,
+            destinationNo,
+            tokenProgram: TOKEN_PROGRAM_ID,
             systemProgram: SystemProgram.programId,
+            associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
           })
           .rpc();
       } else {
@@ -3059,8 +3085,13 @@ export class CrossChainMarketMaker {
             treasury: runtime.ammConfig!.treasury,
             mintYes,
             mintNo,
-            tokenProgram: new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"),
+            destinationYes,
+            destinationNo,
+            treasuryYesAta,
+            treasuryNoAta,
+            tokenProgram: TOKEN_PROGRAM_ID,
             systemProgram: SystemProgram.programId,
+            associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
           })
           .rpc();
       }
@@ -3096,27 +3127,68 @@ export class CrossChainMarketMaker {
     const posKey = `solana:${findAmmBetPda(runtime.ammProgramId, betId, creator).toBase58()}`;
     const pos = this.ammPositions.get(posKey);
     if (!pos || pos.settled) return;
-    const sideWon: number = betAccount.sideWon;
-    const balance = sideWon === 0 ? pos.yesBalance : pos.noBalance;
-    if (balance <= 0n) {
-      pos.settled = true;
-      return;
-    }
+
     try {
       const betPda = findAmmBetPda(runtime.ammProgramId, betId, creator);
       const mintYes = findAmmMintYesPda(runtime.ammProgramId, betId, creator);
       const mintNo = findAmmMintNoPda(runtime.ammProgramId, betId, creator);
-      await runtime.ammProgram.methods
-        .withdrawPostSettle(new BN(betId.toString()), sideWon, new BN(balance.toString()))
-        .accountsPartial({
-          signer: runtime.wallet.publicKey,
-          bet: betPda,
-          mintYes,
-          mintNo,
-          tokenProgram: new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"),
-          systemProgram: SystemProgram.programId,
-        })
-        .rpc();
+      const destinationYes = findAssociatedTokenAddress(
+        mintYes,
+        runtime.wallet.publicKey,
+      );
+      const destinationNo = findAssociatedTokenAddress(
+        mintNo,
+        runtime.wallet.publicKey,
+      );
+      const [yesBalanceResp, noBalanceResp] = await Promise.all([
+        runtime.connection.getTokenAccountBalance(destinationYes).catch(() => ({
+          value: { amount: "0" },
+        })),
+        runtime.connection.getTokenAccountBalance(destinationNo).catch(() => ({
+          value: { amount: "0" },
+        })),
+      ]);
+
+      const yesBalance = BigInt(yesBalanceResp.value.amount);
+      const noBalance = BigInt(noBalanceResp.value.amount);
+      const sideWon: number = Number(betAccount.sideWon);
+      const withdrawals: Array<{ outcome: number; balance: bigint }> = [];
+
+      if (sideWon === 2) {
+        if (yesBalance > 0n) withdrawals.push({ outcome: 0, balance: yesBalance });
+        if (noBalance > 0n) withdrawals.push({ outcome: 1, balance: noBalance });
+      } else if (sideWon === 0 && yesBalance > 0n) {
+        withdrawals.push({ outcome: 0, balance: yesBalance });
+      } else if (sideWon === 1 && noBalance > 0n) {
+        withdrawals.push({ outcome: 1, balance: noBalance });
+      }
+
+      if (withdrawals.length === 0) {
+        pos.settled = true;
+        return;
+      }
+
+      for (const withdrawal of withdrawals) {
+        await runtime.ammProgram.methods
+          .withdrawPostSettle(
+            new BN(betId.toString()),
+            withdrawal.outcome,
+            new BN(withdrawal.balance.toString()),
+          )
+          .accountsPartial({
+            signer: runtime.wallet.publicKey,
+            bet: betPda,
+            mintYes,
+            mintNo,
+            destinationYes,
+            destinationNo,
+            tokenProgram: TOKEN_PROGRAM_ID,
+            systemProgram: SystemProgram.programId,
+            associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+          })
+          .rpc();
+      }
+
       pos.settled = true;
       console.log(`[AMM-SOLANA] withdrew from settled bet ${betId}`);
     } catch (error) {

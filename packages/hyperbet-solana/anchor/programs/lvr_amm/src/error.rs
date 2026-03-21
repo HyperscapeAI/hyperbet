@@ -73,4 +73,13 @@ pub enum PredictionMarketError {
 
     #[msg("Config is frozen")]
     ConfigFrozen,
+
+    #[msg("Invalid duel state account")]
+    InvalidDuelState,
+
+    #[msg("AMM config account required for oracle settlement")]
+    MissingAmmConfig,
+
+    #[msg("Fight oracle program mismatch")]
+    InvalidFightOracleProgram,
 }
