@@ -4,7 +4,6 @@
 use anchor_lang::prelude::*;
 use anchor_lang::system_program;
 use std::cmp;
-
 declare_id!("EoZdHN8U3qWQje48ToxB1SLWjucsFGqcWaRUJQYX3eoT");
 
 const FUNDING_RATE_PRECISION: i128 = 1_000_000_000;
@@ -70,6 +69,7 @@ pub mod gold_perps_market {
         )?;
 
         let config = &mut ctx.accounts.config;
+        // One-time initialization only. No bootstrap fallback pattern.
         require!(
             config.authority == Pubkey::default(),
             PerpsError::AlreadyInitialized
