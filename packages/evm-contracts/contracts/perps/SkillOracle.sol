@@ -38,6 +38,7 @@ contract SkillOracle is AccessControl {
     bool public oraclePaused;
 
     event SkillUpdated(bytes32 indexed agentId, uint256 mu, uint256 sigma);
+    event AgentRemoved(bytes32 indexed agentId);
     event OraclePauseUpdated(bool paused, address indexed actor);
     event PauserUpdated(address indexed pauser, bool enabled);
     event MaxOracleDelayUpdated(uint256 newMaxOracleDelay);
@@ -117,6 +118,27 @@ contract SkillOracle is AccessControl {
         agentSkills[agentId] = AgentSkill(mu, sigma, block.timestamp);
         globalMeanMu = totalMu / activeAgents.length;
         emit SkillUpdated(agentId, mu, sigma);
+    }
+
+    function removeAgent(bytes32 agentId) external onlyRole(REPORTER_ROLE) {
+        AgentSkill storage skill = agentSkills[agentId];
+        require(skill.lastUpdate != 0, "Agent not found");
+        totalMu -= skill.mu;
+        delete agentSkills[agentId];
+        // Swap-and-pop from activeAgents array
+        for (uint256 i = 0; i < activeAgents.length; i++) {
+            if (activeAgents[i] == agentId) {
+                activeAgents[i] = activeAgents[activeAgents.length - 1];
+                activeAgents.pop();
+                break;
+            }
+        }
+        if (activeAgents.length > 0) {
+            globalMeanMu = totalMu / activeAgents.length;
+        } else {
+            globalMeanMu = 0;
+        }
+        emit AgentRemoved(agentId);
     }
 
     function getConservativeSkill(bytes32 agentId) public view returns (int256) {

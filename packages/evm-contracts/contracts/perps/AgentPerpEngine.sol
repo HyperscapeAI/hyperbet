@@ -592,14 +592,14 @@ contract AgentPerpEngine is AccessControl, ReentrancyGuard {
             if (position.size != 0) {
                 uint256 newAbsSize = _abs(position.size);
                 // newEntry = (oldEntry * oldAbs - liquidationPrice * closedSize) / newAbsSize
-                // Using mulDiv to avoid overflow
+                // Cap closedNotional at oldNotional to prevent entry price from going to 0
+                // (which would artificially inflate equity and block subsequent liquidations)
                 uint256 oldNotionalAtEntry = Math.mulDiv(position.entryPrice, absSize, ONE);
                 uint256 closedNotionalAtExit = Math.mulDiv(liquidationPrice, closedSize, ONE);
-                if (oldNotionalAtEntry > closedNotionalAtExit) {
-                    position.entryPrice = Math.mulDiv(oldNotionalAtEntry - closedNotionalAtExit, ONE, newAbsSize);
-                } else {
-                    position.entryPrice = 0;
+                if (closedNotionalAtExit > oldNotionalAtEntry) {
+                    closedNotionalAtExit = oldNotionalAtEntry;
                 }
+                position.entryPrice = Math.mulDiv(oldNotionalAtEntry - closedNotionalAtExit, ONE, newAbsSize);
             }
             _addOpenInterest(market, position.size);
         } else {
@@ -924,9 +924,16 @@ contract AgentPerpEngine is AccessControl, ReentrancyGuard {
 
     function _creditMarginFromPool(MarketState storage market, Position storage position, uint256 profit) internal {
         if (profit == 0) return;
-        // Insurance fund is reserved for bad debt only — trader profits must come from vault
-        if (profit > market.vaultBalance) revert InsufficientMarketLiquidity();
-        market.vaultBalance -= profit;
+        uint256 fromVault = profit > market.vaultBalance ? market.vaultBalance : profit;
+        uint256 remaining = profit - fromVault;
+        if (remaining > 0) {
+            // During CLOSE_ONLY settlement, allow insurance as last resort to avoid deadlock.
+            // In ACTIVE markets, vault must fully cover trader profits.
+            if (market.status != MarketStatus.CLOSE_ONLY) revert InsufficientMarketLiquidity();
+            if (remaining > market.insuranceFund) revert InsufficientMarketLiquidity();
+            market.insuranceFund -= remaining;
+        }
+        market.vaultBalance -= fromVault;
         position.margin += profit;
     }
 

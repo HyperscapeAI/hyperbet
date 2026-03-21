@@ -232,6 +232,12 @@ pub mod gold_perps_market {
         market.mu = mu;
         market.sigma = sigma;
         market.oracle_last_updated = now;
+
+        emit!(OracleSynced {
+            market_id,
+            spot_index,
+            timestamp: now,
+        });
         Ok(())
     }
 
@@ -477,6 +483,16 @@ pub mod gold_perps_market {
         position.size = i64::try_from(new_size).map_err(|_| PerpsError::Overflow)?;
         position.entry_price = next_entry_price;
         position.last_funding_rate = current_funding_rate;
+
+        emit!(PositionModified {
+            market_id,
+            trader: trader_key,
+            size_delta: i64::try_from(size_delta).unwrap_or(0),
+            margin_delta: i64::try_from(margin_delta).unwrap_or(0),
+            new_size: position.size,
+            new_margin: position.margin,
+            execution_price: exec_price,
+        });
         Ok(())
     }
 
@@ -720,6 +736,16 @@ pub mod gold_perps_market {
             position.entry_price = next_entry_price;
             position.last_funding_rate = market.current_funding_rate;
         }
+
+        emit!(PositionLiquidated {
+            market_id,
+            trader: ctx.accounts.owner.key(),
+            liquidator: ctx.accounts.liquidator.key(),
+            closed_size: close_size_delta as i64,
+            remaining_size: new_size as i64,
+            liquidation_fee: target_liquidation_fee,
+            exit_price,
+        });
         Ok(())
     }
 
@@ -1382,6 +1408,37 @@ fn calculate_insurance_usage(
 
 fn to_u64(value: i128) -> Result<u64> {
     u64::try_from(value).map_err(|_| PerpsError::Overflow.into())
+}
+
+// ── Events for off-chain monitoring ──
+
+#[event]
+pub struct PositionModified {
+    pub market_id: u64,
+    pub trader: Pubkey,
+    pub size_delta: i64,
+    pub margin_delta: i64,
+    pub new_size: i64,
+    pub new_margin: u64,
+    pub execution_price: u64,
+}
+
+#[event]
+pub struct PositionLiquidated {
+    pub market_id: u64,
+    pub trader: Pubkey,
+    pub liquidator: Pubkey,
+    pub closed_size: i64,
+    pub remaining_size: i64,
+    pub liquidation_fee: u64,
+    pub exit_price: u64,
+}
+
+#[event]
+pub struct OracleSynced {
+    pub market_id: u64,
+    pub spot_index: u64,
+    pub timestamp: i64,
 }
 
 #[derive(Accounts)]
