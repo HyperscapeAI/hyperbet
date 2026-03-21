@@ -130,7 +130,7 @@ contract GoldClob is AccessControl, ReentrancyGuard {
         uint16 boundaryPrice;
         uint8 matchesCount;
         uint256 executedCost;
-        uint256 totalImprovement;
+        uint256 totalImprovement; // L-12: Computed but unused after fee refactor. Kept for ABI stability.
         bool selfTradePrevented;
     }
 
@@ -891,5 +891,7 @@ contract GoldClob is AccessControl, ReentrancyGuard {
         return market.bestBid > 0 && market.bestBid >= price;
     }
 
+    // L-2: Accepts ETH for market vault operations. Bare transfers without
+    // placeOrder context are unrecoverable — consider adding a sweep function.
     receive() external payable {}
 }
