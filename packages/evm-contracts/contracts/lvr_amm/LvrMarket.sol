@@ -96,6 +96,7 @@ contract LvrMarket is ReentrancyGuard {
         feeBps = feeBps_;
         bondValue = 50 * (10 ** IERC20Metadata(collateral_).decimals());
 
+        require(duration > 0, "Duration must be positive");
         deadline = block.timestamp + duration;
         state = MarketState.OPEN;
     }
@@ -152,13 +153,17 @@ contract LvrMarket is ReentrancyGuard {
         require(outcomeValue <= 2, "Invalid outcome");
         require(state == MarketState.DISPUTED || state == MarketState.OPEN, "Invalid Market State");
 
+        // Settle bond before overwriting outcome — slash if proposer was wrong
+        if (proposer != address(0)) {
+            if (state == MarketState.DISPUTED && outcome != outcomeValue) {
+                IERC20(collateralToken).safeTransfer(treasuryAddress, bondValue);
+            } else {
+                IERC20(collateralToken).safeTransfer(proposer, bondValue);
+            }
+        }
+
         outcome = outcomeValue;
         state = MarketState.RESOLVED;
-
-        // If proposer is intialized then return the bond
-        if (proposer != address(0)) {
-            IERC20(collateralToken).safeTransfer(proposer, bondValue);
-        }
 
         emit MarketResolvedByAdmin(outcomeValue, msg.sender);
     }
@@ -284,8 +289,13 @@ contract LvrMarket is ReentrancyGuard {
         IMarketSellCallback(msg.sender).marketSellCallback(amountIn, data);
         require(inputToken.balanceOf(address(this)) >= tokenBalanceBefore + amountIn);
 
-        if (feeAmount > 0 && treasuryAddress != address(0)) {
-            inputToken.safeTransfer(treasuryAddress, feeAmount);
+        // Burn sell fees to maintain solvency (outstanding tokens must not exceed collateral)
+        if (feeAmount > 0) {
+            if (isSellYes) {
+                yesToken.burn(address(this), feeAmount);
+            } else {
+                noToken.burn(address(this), feeAmount);
+            }
         }
 
         if (isSellYes) {
@@ -319,6 +329,7 @@ contract LvrMarket is ReentrancyGuard {
 
     function getPriceYes() public view returns(uint256) {
         uint256 liq = isDynamic ? Math.calcLiquidity(liquidity, deadline, block.timestamp) : liquidity;
+        if (liq == 0) return 0.5e18; // neutral price after deadline
         return Math.calcPrice(yesToken.balanceOf(address(this)), noToken.balanceOf(address(this)), liq);
     }
 
