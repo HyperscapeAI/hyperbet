@@ -21,102 +21,6 @@
   ],
   "instructions": [
     {
-      "name": "deposit_insurance",
-      "discriminator": [
-        34,
-        221,
-        238,
-        103,
-        190,
-        136,
-        23,
-        194
-      ],
-      "accounts": [
-        {
-          "name": "market",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  109,
-                  97,
-                  114,
-                  107,
-                  101,
-                  116
-                ]
-              },
-              {
-                "kind": "arg",
-                "path": "market_id"
-              }
-            ]
-          }
-        },
-        {
-          "name": "payer",
-          "writable": true,
-          "signer": true
-        },
-        {
-          "name": "system_program",
-          "address": "11111111111111111111111111111111"
-        }
-      ],
-      "args": [
-        {
-          "name": "market_id",
-          "type": "u64"
-        },
-        {
-          "name": "amount",
-          "type": "u64"
-        }
-      ]
-    },
-    {
-      "name": "freeze_config",
-      "discriminator": [
-        30,
-        68,
-        20,
-        154,
-        197,
-        42,
-        47,
-        122
-      ],
-      "accounts": [
-        {
-          "name": "config",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  99,
-                  111,
-                  110,
-                  102,
-                  105,
-                  103
-                ]
-              }
-            ]
-          }
-        },
-        {
-          "name": "authority",
-          "signer": true
-        }
-      ],
-      "args": []
-    },
-    {
       "name": "initialize_config",
       "discriminator": [
         208,
@@ -131,22 +35,7 @@
       "accounts": [
         {
           "name": "config",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  99,
-                  111,
-                  110,
-                  102,
-                  105,
-                  103
-                ]
-              }
-            ]
-          }
+          "writable": true
         },
         {
           "name": "authority",
@@ -154,15 +43,13 @@
           "signer": true
         },
         {
-          "name": "program",
-          "address": "EoZdHN8U3qWQje48ToxB1SLWjucsFGqcWaRUJQYX3eoT"
+          "name": "program"
         },
         {
           "name": "program_data"
         },
         {
-          "name": "system_program",
-          "address": "11111111111111111111111111111111"
+          "name": "system_program"
         }
       ],
       "args": [
@@ -237,417 +124,28 @@
       ]
     },
     {
-      "name": "liquidate_position",
+      "name": "freeze_config",
       "discriminator": [
-        187,
-        74,
-        229,
-        149,
-        102,
-        81,
-        221,
-        68
+        30,
+        68,
+        20,
+        154,
+        197,
+        42,
+        47,
+        122
       ],
       "accounts": [
         {
           "name": "config",
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  99,
-                  111,
-                  110,
-                  102,
-                  105,
-                  103
-                ]
-              }
-            ]
-          }
-        },
-        {
-          "name": "market",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  109,
-                  97,
-                  114,
-                  107,
-                  101,
-                  116
-                ]
-              },
-              {
-                "kind": "arg",
-                "path": "market_id"
-              }
-            ]
-          }
-        },
-        {
-          "name": "position",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  112,
-                  111,
-                  115,
-                  105,
-                  116,
-                  105,
-                  111,
-                  110
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "owner"
-              },
-              {
-                "kind": "arg",
-                "path": "market_id"
-              }
-            ]
-          }
-        },
-        {
-          "name": "owner",
           "writable": true
         },
         {
-          "name": "liquidator",
-          "writable": true,
-          "signer": true
-        }
-      ],
-      "args": [
-        {
-          "name": "market_id",
-          "type": "u64"
-        }
-      ]
-    },
-    {
-      "name": "modify_position",
-      "discriminator": [
-        48,
-        249,
-        6,
-        139,
-        14,
-        95,
-        106,
-        88
-      ],
-      "accounts": [
-        {
-          "name": "config",
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  99,
-                  111,
-                  110,
-                  102,
-                  105,
-                  103
-                ]
-              }
-            ]
-          }
-        },
-        {
-          "name": "market",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  109,
-                  97,
-                  114,
-                  107,
-                  101,
-                  116
-                ]
-              },
-              {
-                "kind": "arg",
-                "path": "market_id"
-              }
-            ]
-          }
-        },
-        {
-          "name": "position",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  112,
-                  111,
-                  115,
-                  105,
-                  116,
-                  105,
-                  111,
-                  110
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "trader"
-              },
-              {
-                "kind": "arg",
-                "path": "market_id"
-              }
-            ]
-          }
-        },
-        {
-          "name": "trader",
-          "writable": true,
-          "signer": true
-        },
-        {
-          "name": "system_program",
-          "address": "11111111111111111111111111111111"
-        }
-      ],
-      "args": [
-        {
-          "name": "market_id",
-          "type": "u64"
-        },
-        {
-          "name": "margin_delta",
-          "type": "i64"
-        },
-        {
-          "name": "size_delta",
-          "type": "i64"
-        },
-        {
-          "name": "acceptable_price",
-          "type": "u64"
-        }
-      ]
-    },
-    {
-      "name": "recycle_market_maker_fees",
-      "discriminator": [
-        223,
-        161,
-        208,
-        139,
-        228,
-        66,
-        247,
-        207
-      ],
-      "accounts": [
-        {
-          "name": "config",
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  99,
-                  111,
-                  110,
-                  102,
-                  105,
-                  103
-                ]
-              }
-            ]
-          }
-        },
-        {
-          "name": "market",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  109,
-                  97,
-                  114,
-                  107,
-                  101,
-                  116
-                ]
-              },
-              {
-                "kind": "arg",
-                "path": "market_id"
-              }
-            ]
-          }
-        },
-        {
           "name": "authority",
           "signer": true
         }
       ],
-      "args": [
-        {
-          "name": "market_id",
-          "type": "u64"
-        },
-        {
-          "name": "amount",
-          "type": "u64"
-        }
-      ]
-    },
-    {
-      "name": "repay_bad_debt",
-      "discriminator": [
-        112,
-        144,
-        188,
-        157,
-        43,
-        106,
-        141,
-        34
-      ],
-      "accounts": [
-        {
-          "name": "market",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  109,
-                  97,
-                  114,
-                  107,
-                  101,
-                  116
-                ]
-              },
-              {
-                "kind": "arg",
-                "path": "market_id"
-              }
-            ]
-          }
-        },
-        {
-          "name": "payer",
-          "writable": true,
-          "signer": true
-        },
-        {
-          "name": "system_program",
-          "address": "11111111111111111111111111111111"
-        }
-      ],
-      "args": [
-        {
-          "name": "market_id",
-          "type": "u64"
-        },
-        {
-          "name": "amount",
-          "type": "u64"
-        }
-      ]
-    },
-    {
-      "name": "set_market_status",
-      "discriminator": [
-        101,
-        175,
-        83,
-        107,
-        200,
-        141,
-        155,
-        182
-      ],
-      "accounts": [
-        {
-          "name": "config",
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  99,
-                  111,
-                  110,
-                  102,
-                  105,
-                  103
-                ]
-              }
-            ]
-          }
-        },
-        {
-          "name": "market",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  109,
-                  97,
-                  114,
-                  107,
-                  101,
-                  116
-                ]
-              },
-              {
-                "kind": "arg",
-                "path": "market_id"
-              }
-            ]
-          }
-        },
-        {
-          "name": "authority",
-          "signer": true
-        }
-      ],
-      "args": [
-        {
-          "name": "market_id",
-          "type": "u64"
-        },
-        {
-          "name": "next_status",
-          "type": "u8"
-        },
-        {
-          "name": "settlement_spot_index",
-          "type": "u64"
-        }
-      ]
+      "args": []
     },
     {
       "name": "set_paused",
@@ -664,22 +162,7 @@
       "accounts": [
         {
           "name": "config",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  99,
-                  111,
-                  110,
-                  102,
-                  105,
-                  103
-                ]
-              }
-            ]
-          }
+          "writable": true
         },
         {
           "name": "authority",
@@ -708,22 +191,7 @@
       "accounts": [
         {
           "name": "config",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  99,
-                  111,
-                  110,
-                  102,
-                  105,
-                  103
-                ]
-              }
-            ]
-          }
+          "writable": true
         },
         {
           "name": "authority",
@@ -815,45 +283,11 @@
       ],
       "accounts": [
         {
-          "name": "config",
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  99,
-                  111,
-                  110,
-                  102,
-                  105,
-                  103
-                ]
-              }
-            ]
-          }
+          "name": "config"
         },
         {
           "name": "market",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  109,
-                  97,
-                  114,
-                  107,
-                  101,
-                  116
-                ]
-              },
-              {
-                "kind": "arg",
-                "path": "market_id"
-              }
-            ]
-          }
+          "writable": true
         },
         {
           "name": "authority",
@@ -861,8 +295,7 @@
           "signer": true
         },
         {
-          "name": "system_program",
-          "address": "11111111111111111111111111111111"
+          "name": "system_program"
         }
       ],
       "args": [
@@ -885,6 +318,249 @@
       ]
     },
     {
+      "name": "deposit_insurance",
+      "discriminator": [
+        34,
+        221,
+        238,
+        103,
+        190,
+        136,
+        23,
+        194
+      ],
+      "accounts": [
+        {
+          "name": "market",
+          "writable": true
+        },
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "system_program"
+        }
+      ],
+      "args": [
+        {
+          "name": "market_id",
+          "type": "u64"
+        },
+        {
+          "name": "amount",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "modify_position",
+      "discriminator": [
+        48,
+        249,
+        6,
+        139,
+        14,
+        95,
+        106,
+        88
+      ],
+      "accounts": [
+        {
+          "name": "config"
+        },
+        {
+          "name": "market",
+          "writable": true
+        },
+        {
+          "name": "position",
+          "writable": true
+        },
+        {
+          "name": "trader",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "system_program"
+        }
+      ],
+      "args": [
+        {
+          "name": "market_id",
+          "type": "u64"
+        },
+        {
+          "name": "margin_delta",
+          "type": "i64"
+        },
+        {
+          "name": "size_delta",
+          "type": "i64"
+        },
+        {
+          "name": "acceptable_price",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "liquidate_position",
+      "discriminator": [
+        187,
+        74,
+        229,
+        149,
+        102,
+        81,
+        221,
+        68
+      ],
+      "accounts": [
+        {
+          "name": "config"
+        },
+        {
+          "name": "market",
+          "writable": true
+        },
+        {
+          "name": "position",
+          "writable": true
+        },
+        {
+          "name": "owner",
+          "writable": true
+        },
+        {
+          "name": "liquidator",
+          "writable": true,
+          "signer": true
+        }
+      ],
+      "args": [
+        {
+          "name": "market_id",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "repay_bad_debt",
+      "discriminator": [
+        112,
+        144,
+        188,
+        157,
+        43,
+        106,
+        141,
+        34
+      ],
+      "accounts": [
+        {
+          "name": "market",
+          "writable": true
+        },
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "system_program"
+        }
+      ],
+      "args": [
+        {
+          "name": "market_id",
+          "type": "u64"
+        },
+        {
+          "name": "amount",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "set_market_status",
+      "discriminator": [
+        101,
+        175,
+        83,
+        107,
+        200,
+        141,
+        155,
+        182
+      ],
+      "accounts": [
+        {
+          "name": "config"
+        },
+        {
+          "name": "market",
+          "writable": true
+        },
+        {
+          "name": "authority",
+          "signer": true
+        }
+      ],
+      "args": [
+        {
+          "name": "market_id",
+          "type": "u64"
+        },
+        {
+          "name": "next_status",
+          "type": "u8"
+        },
+        {
+          "name": "settlement_spot_index",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "recycle_market_maker_fees",
+      "discriminator": [
+        223,
+        161,
+        208,
+        139,
+        228,
+        66,
+        247,
+        207
+      ],
+      "accounts": [
+        {
+          "name": "config"
+        },
+        {
+          "name": "market",
+          "writable": true
+        },
+        {
+          "name": "authority",
+          "signer": true
+        }
+      ],
+      "args": [
+        {
+          "name": "market_id",
+          "type": "u64"
+        },
+        {
+          "name": "amount",
+          "type": "u64"
+        }
+      ]
+    },
+    {
       "name": "withdraw_fee_balance",
       "discriminator": [
         226,
@@ -898,45 +574,11 @@
       ],
       "accounts": [
         {
-          "name": "config",
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  99,
-                  111,
-                  110,
-                  102,
-                  105,
-                  103
-                ]
-              }
-            ]
-          }
+          "name": "config"
         },
         {
           "name": "market",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  109,
-                  97,
-                  114,
-                  107,
-                  101,
-                  116
-                ]
-              },
-              {
-                "kind": "arg",
-                "path": "market_id"
-              }
-            ]
-          }
+          "writable": true
         },
         {
           "name": "recipient",
@@ -1002,173 +644,6 @@
         206,
         231
       ]
-    }
-  ],
-  "errors": [
-    {
-      "code": 6000,
-      "name": "InvalidAuthority",
-      "msg": "Operator is not authorized to manage perps markets"
-    },
-    {
-      "code": 6001,
-      "name": "UnauthorizedInitializer",
-      "msg": "Only the configured bootstrap authority can initialize the config"
-    },
-    {
-      "code": 6002,
-      "name": "InvalidRiskConfig",
-      "msg": "Risk configuration is invalid"
-    },
-    {
-      "code": 6003,
-      "name": "InvalidMarket",
-      "msg": "Market does not exist or does not match the requested id"
-    },
-    {
-      "code": 6004,
-      "name": "StaleOracle",
-      "msg": "Oracle price is stale and cannot be used for trading"
-    },
-    {
-      "code": 6005,
-      "name": "InvalidSpotIndex",
-      "msg": "Oracle spot index must be greater than zero"
-    },
-    {
-      "code": 6006,
-      "name": "OracleSpotIndexOutOfBounds",
-      "msg": "Oracle spot index is outside the configured market bounds"
-    },
-    {
-      "code": 6007,
-      "name": "OraclePriceDeltaTooLarge",
-      "msg": "Oracle price move exceeds the configured maximum step"
-    },
-    {
-      "code": 6008,
-      "name": "NoopPositionUpdate",
-      "msg": "Position update must change margin or size"
-    },
-    {
-      "code": 6009,
-      "name": "NoOpenPosition",
-      "msg": "No open position exists for this trader and market"
-    },
-    {
-      "code": 6010,
-      "name": "InvalidPositionOwner",
-      "msg": "Position owner does not match the provided signer"
-    },
-    {
-      "code": 6011,
-      "name": "InvalidMargin",
-      "msg": "Margin is invalid for the requested trade"
-    },
-    {
-      "code": 6012,
-      "name": "InvalidLeverage",
-      "msg": "Requested leverage exceeds the configured maximum"
-    },
-    {
-      "code": 6013,
-      "name": "OpenInterestLimitExceeded",
-      "msg": "Projected market open interest exceeds the configured cap"
-    },
-    {
-      "code": 6014,
-      "name": "MarketInsufficientInsurance",
-      "msg": "Market does not have enough isolated insurance to grow open interest"
-    },
-    {
-      "code": 6015,
-      "name": "InsufficientLiquidity",
-      "msg": "Market account has insufficient liquidity to settle this payout"
-    },
-    {
-      "code": 6016,
-      "name": "NotLiquidatable",
-      "msg": "Position is not undercollateralized; cannot liquidate"
-    },
-    {
-      "code": 6017,
-      "name": "MarketNotActive",
-      "msg": "Market is not active for new oracle updates"
-    },
-    {
-      "code": 6018,
-      "name": "MarketCloseOnly",
-      "msg": "Market is close-only; only reductions and closes are allowed"
-    },
-    {
-      "code": 6019,
-      "name": "MarketArchived",
-      "msg": "Market is archived and cannot be traded"
-    },
-    {
-      "code": 6020,
-      "name": "InvalidMarketStatus",
-      "msg": "Market status transition is invalid"
-    },
-    {
-      "code": 6021,
-      "name": "MarketHasOpenPositions",
-      "msg": "Market still has open positions or open interest"
-    },
-    {
-      "code": 6022,
-      "name": "InvalidInsuranceDeposit",
-      "msg": "Insurance deposit amount must be greater than zero"
-    },
-    {
-      "code": 6023,
-      "name": "SlippageExceeded",
-      "msg": "Trade execution exceeded the caller's acceptable price"
-    },
-    {
-      "code": 6024,
-      "name": "InvalidFeeWithdrawal",
-      "msg": "Fee balance or fee withdrawal is invalid"
-    },
-    {
-      "code": 6025,
-      "name": "InvalidFeeRecipient",
-      "msg": "Fee recipient does not match the configured authority"
-    },
-    {
-      "code": 6026,
-      "name": "InvalidFeeBucket",
-      "msg": "Fee bucket is invalid"
-    },
-    {
-      "code": 6027,
-      "name": "InvalidPositionState",
-      "msg": "Position state is invalid"
-    },
-    {
-      "code": 6028,
-      "name": "Overflow",
-      "msg": "Numeric overflow in perps calculation"
-    },
-    {
-      "code": 6029,
-      "name": "ConfigFrozen",
-      "msg": "Config is frozen and cannot be modified"
-    },
-    {
-      "code": 6030,
-      "name": "TradingPaused",
-      "msg": "Trading is paused"
-    },
-    {
-      "code": 6031,
-      "name": "MaintenanceMarginViolation",
-      "msg": "Position fails maintenance margin check after accounting for unrealized PnL"
-    },
-    {
-      "code": 6032,
-      "name": "InvalidBadDebtRepayment",
-      "msg": "Bad debt repayment amount is invalid"
     }
   ],
   "types": [
