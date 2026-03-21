@@ -123,6 +123,11 @@ export type DbPredictionMarketsOverviewState = {
   updatedAt: number;
 };
 
+export type DbStreamStateSnapshot = {
+  stateJson: string;
+  updatedAt: number;
+};
+
 // ── DB singleton ──────────────────────────────────────────────────────────────
 
 const db = new Database(DB_PATH, { create: true });
@@ -452,6 +457,12 @@ db.run(`CREATE TABLE IF NOT EXISTS bet_sync_overview_state (
   updated_at INTEGER NOT NULL DEFAULT 0
 )`);
 
+db.run(`CREATE TABLE IF NOT EXISTS bet_sync_stream_state (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  state_json TEXT NOT NULL,
+  updated_at INTEGER NOT NULL DEFAULT 0
+)`);
+
 // ── Prepared statements ───────────────────────────────────────────────────────
 
 const insertBet = db.prepare(`INSERT OR IGNORE INTO bets
@@ -578,6 +589,13 @@ const upsertBetSyncOverviewState = db.prepare(`INSERT INTO bet_sync_overview_sta
     recent_settlement_json = excluded.recent_settlement_json,
     updated_at = excluded.updated_at`);
 
+const upsertBetSyncStreamState = db.prepare(`INSERT INTO bet_sync_stream_state
+  (id, state_json, updated_at)
+  VALUES (1, $stateJson, $updatedAt)
+  ON CONFLICT(id) DO UPDATE SET
+    state_json = excluded.state_json,
+    updated_at = excluded.updated_at`);
+
 // ── Load (hydrate in-memory state from DB at startup) ─────────────────────────
 
 export type HydratedState = {
@@ -596,6 +614,7 @@ export type HydratedState = {
   treasuryFeesFromReferralsByWallet: Map<string, number>;
   betSyncCheckpoint: DbBetSyncCheckpoint | null;
   predictionMarketsOverview: DbPredictionMarketsOverviewState | null;
+  streamStateSnapshot: DbStreamStateSnapshot | null;
 };
 
 export function loadAll(betLimit = 5000): HydratedState {
@@ -786,6 +805,20 @@ export function loadAll(betLimit = 5000): HydratedState {
         updatedAt: Number(overviewRow.updated_at ?? 0),
       }
     : null;
+  const streamStateRow = db
+    .prepare(
+      `SELECT state_json, updated_at
+         FROM bet_sync_stream_state
+        WHERE id = 1`,
+    )
+    .get() as Record<string, unknown> | null;
+  const streamStateSnapshot =
+    streamStateRow && streamStateRow.state_json != null
+      ? {
+          stateJson: String(streamStateRow.state_json),
+          updatedAt: Number(streamStateRow.updated_at ?? 0),
+        }
+      : null;
 
   console.log(
     `[db] loaded ${bets.length} bets, ${walletDisplay.size} wallets, ${pointsByWallet.size} point records from ${DB_PATH}`,
@@ -807,6 +840,7 @@ export function loadAll(betLimit = 5000): HydratedState {
     treasuryFeesFromReferralsByWallet,
     betSyncCheckpoint,
     predictionMarketsOverview,
+    streamStateSnapshot,
   };
 }
 
@@ -1168,6 +1202,21 @@ export function loadPredictionMarketsOverviewState(): DbPredictionMarketsOvervie
   };
 }
 
+export function loadBetSyncStreamStateSnapshot(): DbStreamStateSnapshot | null {
+  const row = db
+    .prepare(
+      `SELECT state_json, updated_at
+         FROM bet_sync_stream_state
+        WHERE id = 1`,
+    )
+    .get() as Record<string, unknown> | null;
+  if (!row || row.state_json == null) return null;
+  return {
+    stateJson: String(row.state_json),
+    updatedAt: Number(row.updated_at ?? 0),
+  };
+}
+
 export function savePredictionMarketsOverviewState(
   state: DbPredictionMarketsOverviewState,
 ): void {
@@ -1176,6 +1225,67 @@ export function savePredictionMarketsOverviewState(
     $recentSettlementJson: state.recentSettlementJson,
     $updatedAt: state.updatedAt,
   });
+}
+
+export function commitBetSyncProjectionState(input: {
+  streamState: DbStreamStateSnapshot;
+  checkpoint: DbBetSyncCheckpoint;
+  overview: DbPredictionMarketsOverviewState;
+  applyLogEntry?: DbBetSyncApplyLogEntry | null;
+}): boolean {
+  const commit = db.transaction(
+    (
+      streamState: DbStreamStateSnapshot,
+      checkpoint: DbBetSyncCheckpoint,
+      overview: DbPredictionMarketsOverviewState,
+      applyLogEntry: DbBetSyncApplyLogEntry | null | undefined,
+    ) => {
+      if (applyLogEntry) {
+        const result = insertBetSyncApplyLogEntry.run({
+          $sourceEpoch: applyLogEntry.sourceEpoch,
+          $seq: applyLogEntry.seq,
+          $eventType: applyLogEntry.eventType,
+          $duelKey: applyLogEntry.duelKey,
+          $duelId: applyLogEntry.duelId,
+          $phase: applyLogEntry.phase,
+          $phaseVersion: applyLogEntry.phaseVersion,
+          $emittedAt: applyLogEntry.emittedAt,
+          $payloadJson: applyLogEntry.payloadJson,
+          $receivedAt: applyLogEntry.receivedAt,
+          $appliedAt: applyLogEntry.appliedAt,
+        }) as { changes?: number };
+        if (Number(result.changes ?? 0) <= 0) {
+          return false;
+        }
+      }
+
+      upsertBetSyncStreamState.run({
+        $stateJson: streamState.stateJson,
+        $updatedAt: streamState.updatedAt,
+      });
+      upsertBetSyncCheckpoint.run({
+        $sourceEpoch: checkpoint.sourceEpoch,
+        $lastSeenSeq: checkpoint.lastSeenSeq,
+        $lastAppliedSeq: checkpoint.lastAppliedSeq,
+        $replayMode: checkpoint.replayMode,
+        $degradedReason: checkpoint.degradedReason,
+        $updatedAt: checkpoint.updatedAt,
+      });
+      upsertBetSyncOverviewState.run({
+        $liveJson: overview.liveJson,
+        $recentSettlementJson: overview.recentSettlementJson,
+        $updatedAt: overview.updatedAt,
+      });
+      return true;
+    },
+  );
+
+  return commit(
+    input.streamState,
+    input.checkpoint,
+    input.overview,
+    input.applyLogEntry,
+  );
 }
 
 export function closeDb(): void {

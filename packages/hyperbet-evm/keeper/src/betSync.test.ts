@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import {
+  isBetSyncEventStaleAfterSourceReset,
   mergePredictionMarketsSurface,
   parseBetSyncBootstrapState,
   parseBetSyncEvent,
@@ -246,5 +247,32 @@ describe("bet-sync helpers", () => {
       replayMode: "reset",
       replayUntilSeq: null,
     });
+  });
+
+  test("rejects materially stale reset events before projection rollback", () => {
+    expect(
+      isBetSyncEventStaleAfterSourceReset({
+        sourceEpochChanged: true,
+        currentStreamEmittedAt: 10_000,
+        eventEmittedAt: 4_000,
+        toleranceMs: 1_000,
+      }),
+    ).toBe(true);
+    expect(
+      isBetSyncEventStaleAfterSourceReset({
+        sourceEpochChanged: true,
+        currentStreamEmittedAt: 10_000,
+        eventEmittedAt: 9_500,
+        toleranceMs: 1_000,
+      }),
+    ).toBe(false);
+    expect(
+      isBetSyncEventStaleAfterSourceReset({
+        sourceEpochChanged: false,
+        currentStreamEmittedAt: 10_000,
+        eventEmittedAt: 1_000,
+        toleranceMs: 1_000,
+      }),
+    ).toBe(false);
   });
 });

@@ -43,6 +43,7 @@ import {
 import {
   deleteIdentityMembers,
   appendBetSyncApplyLogEntry,
+  commitBetSyncProjectionState,
   type DbBetSyncCheckpoint,
   loadAll,
   loadBetSyncCheckpoint,
@@ -64,6 +65,7 @@ import {
   saveReferralFees,
 } from "./db";
 import {
+  isBetSyncEventStaleAfterSourceReset,
   mergePredictionMarketsSurface,
   parseBetSyncBootstrapState,
   parseBetSyncEvent,
@@ -231,7 +233,7 @@ function loadKeeperBotHealthSnapshot(): KeeperBotHealthSnapshot | null {
   }
 }
 
-function loadStreamStateSnapshot(): StreamState | null {
+function loadStreamStateSnapshotFile(): StreamState | null {
   if (!KEEPER_STREAM_STATE_FILE || !fs_node.existsSync(KEEPER_STREAM_STATE_FILE)) {
     return null;
   }
@@ -243,17 +245,31 @@ function loadStreamStateSnapshot(): StreamState | null {
   }
 }
 
-function persistStreamStateSnapshot(next: StreamState): void {
+function parsePersistedStreamStateSnapshot(
+  raw: string | null,
+): StreamState | null {
+  if (!raw) return null;
+  try {
+    return toStreamState(JSON.parse(raw));
+  } catch (error) {
+    console.warn("[service] Failed to parse persisted stream state snapshot:", error);
+    return null;
+  }
+}
+
+function persistStreamStateSnapshotFile(next: StreamState): void {
   if (!KEEPER_STREAM_STATE_FILE) return;
   try {
     fs_node.mkdirSync(path.dirname(KEEPER_STREAM_STATE_FILE), {
       recursive: true,
     });
+    const tempPath = `${KEEPER_STREAM_STATE_FILE}.tmp`;
     fs_node.writeFileSync(
-      KEEPER_STREAM_STATE_FILE,
+      tempPath,
       `${JSON.stringify(next, null, 2)}\n`,
       "utf8",
     );
+    fs_node.renameSync(tempPath, KEEPER_STREAM_STATE_FILE);
   } catch (error) {
     console.warn("[service] Failed to persist stream state snapshot:", error);
   }
@@ -334,6 +350,10 @@ const BET_SYNC_RECONNECT_MIN_MS = Math.max(
 const BET_SYNC_RECONNECT_MAX_MS = Math.max(
   BET_SYNC_RECONNECT_MIN_MS,
   Number(process.env.BET_SYNC_RECONNECT_MAX_MS || 30_000),
+);
+const BET_SYNC_STALE_EVENT_TOLERANCE_MS = Math.max(
+  0,
+  Number(process.env.BET_SYNC_STALE_EVENT_TOLERANCE_MS || 5_000),
 );
 const CONTRACT_POLL_MS = Math.max(
   5_000,
@@ -455,7 +475,23 @@ const defaultAgentB = {
 };
 
 let streamSeq = 1;
-const persistedStreamState = loadStreamStateSnapshot();
+const persistedStreamStateFile = loadStreamStateSnapshotFile();
+
+const sseClients = new Set<ReadableStreamDefaultController<Uint8Array>>();
+const manifestCache = new Map<string, unknown>();
+const rateBuckets = new Map<string, RateBucket>();
+const proxyResponseCache = new Map<string, ProxyCacheEntry>();
+const proxyResponseInFlight = new Map<string, Promise<ProxyCacheEntry>>();
+
+// ── Persistent state (hydrated from SQLite on startup, written through on change)
+const _db = loadAll(BET_STORE_LIMIT);
+const persistedBetSyncCheckpoint = _db.betSyncCheckpoint ?? loadBetSyncCheckpoint();
+const persistedPredictionMarketsOverviewState =
+  _db.predictionMarketsOverview ?? loadPredictionMarketsOverviewState();
+const persistedStreamState =
+  parsePersistedStreamStateSnapshot(_db.streamStateSnapshot?.stateJson ?? null) ??
+  persistedStreamStateFile;
+
 if (
   persistedStreamState &&
   typeof persistedStreamState.seq === "number" &&
@@ -493,18 +529,6 @@ let streamLastSourceError: string | null = null;
 let streamSourcePollInFlight = false;
 let streamSourceConsecutiveFailures = 0;
 let streamSourceBackoffUntil = 0;
-
-const sseClients = new Set<ReadableStreamDefaultController<Uint8Array>>();
-const manifestCache = new Map<string, unknown>();
-const rateBuckets = new Map<string, RateBucket>();
-const proxyResponseCache = new Map<string, ProxyCacheEntry>();
-const proxyResponseInFlight = new Map<string, Promise<ProxyCacheEntry>>();
-
-// ── Persistent state (hydrated from SQLite on startup, written through on change)
-const _db = loadAll(BET_STORE_LIMIT);
-const persistedBetSyncCheckpoint = _db.betSyncCheckpoint ?? loadBetSyncCheckpoint();
-const persistedPredictionMarketsOverviewState =
-  _db.predictionMarketsOverview ?? loadPredictionMarketsOverviewState();
 
 const bets: BetRecord[] = _db.bets;
 const walletDisplay: Map<string, string> = _db.walletDisplay;
@@ -568,6 +592,12 @@ let betSyncReplayMode: BetSyncReplayMode =
   (betSyncCheckpoint.replayMode as BetSyncReplayMode | null) ??
   (betSyncCheckpoint.lastAppliedSeq > 0 ? "live" : "bootstrap");
 let betSyncReplayUntilSeq: number | null = null;
+
+if (!predictionMarketsOverview) {
+  persistPredictionMarketsOverview(
+    derivePredictionMarketsOverview(loadKeeperBotHealthSnapshot(), streamState, null),
+  );
+}
 
 const parsers: {
   solana: ParserState;
@@ -1323,36 +1353,43 @@ function handleDuelContext(req: Request): Response {
   );
 }
 
-function currentDuelKey(): string | null {
-  const raw = streamState.cycle?.duelKeyHex;
+function currentDuelKey(sourceState: StreamState = streamState): string | null {
+  const raw = sourceState.cycle?.duelKeyHex;
   if (typeof raw !== "string") return null;
   const normalized = raw.trim().replace(/^0x/i, "").toLowerCase();
   return normalized.length > 0 ? normalized : null;
 }
 
-function currentDuelId(): string | null {
-  const raw = streamState.cycle?.duelId;
+function currentDuelId(sourceState: StreamState = streamState): string | null {
+  const raw = sourceState.cycle?.duelId;
   return typeof raw === "string" && raw.trim().length > 0 ? raw.trim() : null;
 }
 
-function currentBetCloseTime(): number | null {
-  const raw = streamState.cycle?.betCloseTime;
+function currentBetCloseTime(
+  sourceState: StreamState = streamState,
+): number | null {
+  const raw = sourceState.cycle?.betCloseTime;
   return typeof raw === "number" && Number.isFinite(raw) ? raw : null;
 }
 
-function currentAgentNameFromCycle(slot: "agent1" | "agent2"): string | null {
-  const agent = streamState.cycle?.[slot] as { name?: unknown } | null | undefined;
+function currentAgentNameFromCycle(
+  slot: "agent1" | "agent2",
+  sourceState: StreamState = streamState,
+): string | null {
+  const agent = sourceState.cycle?.[slot] as { name?: unknown } | null | undefined;
   return typeof agent?.name === "string" && agent.name.trim().length > 0
     ? agent.name.trim()
     : null;
 }
 
-function currentWinnerFromCycle(): PredictionMarketWinner {
-  const cycleAgent1 = streamState.cycle?.agent1 as { id?: unknown } | null | undefined;
-  const cycleAgent2 = streamState.cycle?.agent2 as { id?: unknown } | null | undefined;
+function currentWinnerFromCycle(
+  sourceState: StreamState = streamState,
+): PredictionMarketWinner {
+  const cycleAgent1 = sourceState.cycle?.agent1 as { id?: unknown } | null | undefined;
+  const cycleAgent2 = sourceState.cycle?.agent2 as { id?: unknown } | null | undefined;
   const winnerId =
-    typeof streamState.cycle?.winnerId === "string"
-      ? streamState.cycle.winnerId
+    typeof sourceState.cycle?.winnerId === "string"
+      ? sourceState.cycle.winnerId
       : null;
   const agent1Id =
     typeof cycleAgent1?.id === "string"
@@ -1436,14 +1473,16 @@ function selectBotHealthMarket(
 
 function buildPredictionMarketLifecycleRecords(
   botHealthSnapshot: KeeperBotHealthSnapshot | null = null,
+  duelOverride: PredictionMarketsSurface["duel"] | null = null,
 ): PredictionMarketLifecycleRecord[] {
-  const duelKey = currentDuelKey();
-  const duelId = currentDuelId();
-  const betCloseTime = currentBetCloseTime();
+  const duelKey = duelOverride?.duelKey ?? currentDuelKey();
+  const duelId = duelOverride?.duelId ?? currentDuelId();
+  const betCloseTime = duelOverride?.betCloseTime ?? currentBetCloseTime();
   const cycleLifecycle = resolveLifecycleFromStreamPhase(
-    typeof streamState.cycle?.phase === "string" ? streamState.cycle.phase : null,
+    duelOverride?.phase ??
+      (typeof streamState.cycle?.phase === "string" ? streamState.cycle.phase : null),
   );
-  const cycleWinner = currentWinnerFromCycle();
+  const cycleWinner = duelOverride?.winner ?? currentWinnerFromCycle();
   const records: PredictionMarketLifecycleRecord[] = [];
 
   if (parsers.solana.enabled || parsers.solana.snapshot) {
@@ -1540,16 +1579,18 @@ function buildPredictionMarketLifecycleRecords(
   return records;
 }
 
-function currentDuelSnapshot(): PredictionMarketsSurface["duel"] {
+function currentDuelSnapshot(
+  sourceState: StreamState = streamState,
+): PredictionMarketsSurface["duel"] {
   return {
-    duelKey: currentDuelKey(),
-    duelId: currentDuelId(),
+    duelKey: currentDuelKey(sourceState),
+    duelId: currentDuelId(sourceState),
     phase:
-      typeof streamState.cycle?.phase === "string" ? streamState.cycle.phase : null,
-    winner: currentWinnerFromCycle(),
-    betCloseTime: currentBetCloseTime(),
-    agent1Name: currentAgentNameFromCycle("agent1"),
-    agent2Name: currentAgentNameFromCycle("agent2"),
+      typeof sourceState.cycle?.phase === "string" ? sourceState.cycle.phase : null,
+    winner: currentWinnerFromCycle(sourceState),
+    betCloseTime: currentBetCloseTime(sourceState),
+    agent1Name: currentAgentNameFromCycle("agent1", sourceState),
+    agent2Name: currentAgentNameFromCycle("agent2", sourceState),
   };
 }
 
@@ -1586,15 +1627,15 @@ function persistPredictionMarketsOverview(
 
 function buildLivePredictionMarketsSurface(
   botHealthSnapshot: KeeperBotHealthSnapshot | null = null,
+  sourceState: StreamState = streamState,
+  previousOverview: PredictionMarketsOverviewResponse | null = predictionMarketsOverview,
 ): PredictionMarketsSurface {
   const effectiveBotHealth = botHealthSnapshot ?? loadKeeperBotHealthSnapshot();
-  const streamDuelKey = currentDuelKey();
-  const streamDuelId = currentDuelId();
-  const cyclePhase =
-    typeof streamState.cycle?.phase === "string"
-      ? streamState.cycle.phase
-      : null;
-  const previousLive = predictionMarketsOverview?.live ?? null;
+  const streamDuel = currentDuelSnapshot(sourceState);
+  const streamDuelKey = streamDuel.duelKey;
+  const streamDuelId = streamDuel.duelId;
+  const cyclePhase = streamDuel.phase;
+  const previousLive = previousOverview?.live ?? null;
 
   // Preserve the just-finished duel across the transient source IDLE gap so it
   // can roll into recentSettlement with intact duel identity and timing.
@@ -1611,10 +1652,13 @@ function buildLivePredictionMarketsSurface(
     );
   }
 
-  const markets = buildPredictionMarketLifecycleRecords(effectiveBotHealth);
+  const markets = buildPredictionMarketLifecycleRecords(
+    effectiveBotHealth,
+    streamDuel,
+  );
   const fallbackMarket =
     markets.find((market) => market.duelKey != null || market.duelId != null) ?? null;
-  const cycleWinner = currentWinnerFromCycle();
+  const cycleWinner = streamDuel.winner;
   return {
     duel: {
       duelKey: streamDuelKey ?? fallbackMarket?.duelKey ?? null,
@@ -1624,13 +1668,14 @@ function buildLivePredictionMarketsSurface(
         cycleWinner !== "NONE"
           ? cycleWinner
           : (fallbackMarket?.winner ?? "NONE"),
-      betCloseTime: currentBetCloseTime() ?? fallbackMarket?.betCloseTime ?? null,
+      betCloseTime:
+        streamDuel.betCloseTime ?? fallbackMarket?.betCloseTime ?? null,
       agent1Name:
-        currentAgentNameFromCycle("agent1") ??
+        streamDuel.agent1Name ??
         previousLive?.duel.agent1Name ??
         null,
       agent2Name:
-        currentAgentNameFromCycle("agent2") ??
+        streamDuel.agent2Name ??
         previousLive?.duel.agent2Name ??
         null,
     },
@@ -1647,7 +1692,7 @@ function buildPredictionMarketsSurfaceForDuel(
   const nextSurface: PredictionMarketsSurface = {
     duel,
     markets: filterPredictionMarketsForDuel(
-      buildPredictionMarketLifecycleRecords(botHealthSnapshot),
+      buildPredictionMarketLifecycleRecords(botHealthSnapshot, duel),
       duel,
     ).map((market) => ({
       ...market,
@@ -1660,13 +1705,19 @@ function buildPredictionMarketsSurfaceForDuel(
   return mergePredictionMarketsSurface(previous, nextSurface) ?? nextSurface;
 }
 
-function rebuildPredictionMarketsOverview(
+function derivePredictionMarketsOverview(
   botHealthSnapshot: KeeperBotHealthSnapshot | null = null,
+  sourceState: StreamState = streamState,
+  previousOverview: PredictionMarketsOverviewResponse | null = predictionMarketsOverview,
 ): PredictionMarketsOverviewResponse {
   const effectiveBotHealth = botHealthSnapshot ?? loadKeeperBotHealthSnapshot();
-  const live = buildLivePredictionMarketsSurface(effectiveBotHealth);
+  const live = buildLivePredictionMarketsSurface(
+    effectiveBotHealth,
+    sourceState,
+    previousOverview,
+  );
   const rolled = rollPredictionMarketsOverview(
-    predictionMarketsOverview,
+    previousOverview,
     live,
     Date.now(),
   );
@@ -1686,19 +1737,33 @@ function rebuildPredictionMarketsOverview(
         ? null
         : refreshedRecentSettlement,
   };
+  return next;
+}
+
+function refreshPredictionMarketsOverview(
+  botHealthSnapshot: KeeperBotHealthSnapshot | null = null,
+  sourceState: StreamState = streamState,
+): PredictionMarketsOverviewResponse {
+  const next = derivePredictionMarketsOverview(
+    botHealthSnapshot,
+    sourceState,
+    predictionMarketsOverview,
+  );
   persistPredictionMarketsOverview(next);
   return next;
 }
 
 function handlePredictionMarkets(req: Request): Response {
-  const overview = rebuildPredictionMarketsOverview();
+  const overview =
+    predictionMarketsOverview ?? refreshPredictionMarketsOverview();
   return jsonResponse(req, overview.live, 200, {
     "cache-control": "no-store",
   });
 }
 
 function handlePredictionMarketsOverview(req: Request): Response {
-  const overview = rebuildPredictionMarketsOverview();
+  const overview =
+    predictionMarketsOverview ?? refreshPredictionMarketsOverview();
   return jsonResponse(req, overview, 200, {
     "cache-control": "no-store",
   });
@@ -1956,47 +2021,107 @@ function broadcastStreamState(nextState: StreamState, event = "state"): void {
   }
 }
 
-function publishStreamState(next: StreamState, sourceLabel: string): void {
-  streamSeq = Math.max(streamSeq + 1, next.seq || streamSeq + 1);
-  streamState = {
+function serializePredictionMarketsOverviewState(
+  next: PredictionMarketsOverviewResponse,
+): {
+  liveJson: string | null;
+  recentSettlementJson: string | null;
+  updatedAt: number;
+} {
+  return {
+    liveJson: next.live ? JSON.stringify(next.live) : null,
+    recentSettlementJson: next.recentSettlement
+      ? JSON.stringify(next.recentSettlement)
+      : null,
+    updatedAt: next.updatedAt ?? Date.now(),
+  };
+}
+
+function normalizePublishedStreamState(next: StreamState): StreamState {
+  const nextSeq = Math.max(streamSeq + 1, next.seq || streamSeq + 1);
+  return {
     ...next,
     type: "STREAMING_STATE_UPDATE",
-    seq: streamSeq,
+    seq: nextSeq,
     emittedAt:
       typeof next.emittedAt === "number" && Number.isFinite(next.emittedAt)
         ? next.emittedAt
         : Date.now(),
   };
+}
+
+function nextBetSyncCheckpointState(
+  next: Partial<DbBetSyncCheckpoint> = {},
+): DbBetSyncCheckpoint {
+  return {
+    ...betSyncCheckpoint,
+    ...next,
+    updatedAt: Date.now(),
+  };
+}
+
+function applyBetSyncCheckpointState(next: DbBetSyncCheckpoint): void {
+  betSyncCheckpoint = next;
+  betSyncReplayMode =
+    (betSyncCheckpoint.replayMode as BetSyncReplayMode | null) ??
+    (betSyncCheckpoint.lastAppliedSeq > 0 ? "live" : "bootstrap");
+}
+
+function commitStreamProjection(params: {
+  nextStreamState: StreamState;
+  nextOverview: PredictionMarketsOverviewResponse;
+  nextCheckpoint: DbBetSyncCheckpoint;
+  sourceLabel: string;
+  applyLogEntry?: Parameters<typeof appendBetSyncApplyLogEntry>[0] | null;
+}): boolean {
+  const committedStreamState = normalizePublishedStreamState(params.nextStreamState);
+  const committed = commitBetSyncProjectionState({
+    streamState: {
+      stateJson: JSON.stringify(committedStreamState),
+      updatedAt: committedStreamState.emittedAt,
+    },
+    checkpoint: params.nextCheckpoint,
+    overview: serializePredictionMarketsOverviewState(params.nextOverview),
+    applyLogEntry: params.applyLogEntry,
+  });
+  if (!committed) {
+    return false;
+  }
+
+  streamSeq = committedStreamState.seq;
+  streamState = committedStreamState;
   streamLastUpdatedAt = Date.now();
   streamLastSourceError = null;
-  persistStreamStateSnapshot(streamState);
+  predictionMarketsOverview = params.nextOverview;
+  applyBetSyncCheckpointState(params.nextCheckpoint);
+  persistStreamStateSnapshotFile(streamState);
   broadcastStreamState(streamState, "state");
-  try {
-    rebuildPredictionMarketsOverview(loadKeeperBotHealthSnapshot());
-  } catch (error) {
-    console.warn(
-      `[${nowIso()}] [prediction-markets] failed to refresh overview after stream publish: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
-    );
-  }
   console.log(
-    `[${nowIso()}] [stream] updated from ${sourceLabel} cycle=${streamState.cycle?.cycleId ?? "unknown"} phase=${streamState.cycle?.phase ?? "unknown"}`,
+    `[${nowIso()}] [stream] updated from ${params.sourceLabel} cycle=${streamState.cycle?.cycleId ?? "unknown"} phase=${streamState.cycle?.phase ?? "unknown"}`,
   );
+  return true;
+}
+
+function publishStreamState(next: StreamState, sourceLabel: string): void {
+  const nextOverview = derivePredictionMarketsOverview(
+    loadKeeperBotHealthSnapshot(),
+    next,
+    predictionMarketsOverview,
+  );
+  commitStreamProjection({
+    nextStreamState: next,
+    nextOverview,
+    nextCheckpoint: nextBetSyncCheckpointState(),
+    sourceLabel,
+  });
 }
 
 function persistBetSyncCheckpointState(
   next: Partial<DbBetSyncCheckpoint> = {},
 ): void {
-  betSyncCheckpoint = {
-    ...betSyncCheckpoint,
-    ...next,
-    updatedAt: Date.now(),
-  };
-  betSyncReplayMode =
-    (betSyncCheckpoint.replayMode as BetSyncReplayMode | null) ??
-    (betSyncCheckpoint.lastAppliedSeq > 0 ? "live" : "bootstrap");
-  saveBetSyncCheckpoint(betSyncCheckpoint);
+  const checkpoint = nextBetSyncCheckpointState(next);
+  applyBetSyncCheckpointState(checkpoint);
+  saveBetSyncCheckpoint(checkpoint);
 }
 
 function nextStreamSourceBackoffMs(): number {
@@ -2074,6 +2199,12 @@ async function pollStreamStateSource(): Promise<void> {
       return;
     }
 
+    if (BET_SYNC_SOURCE_EVENTS_URL) {
+      streamLastSourceError = null;
+      resetStreamSourceFailures();
+      return;
+    }
+
     const changed =
       streamState.cycle?.cycleId !== nextState.cycle?.cycleId ||
       streamState.cycle?.phase !== nextState.cycle?.phase ||
@@ -2122,25 +2253,6 @@ function matchesPredictionMarketDuel(
     return market.duelId === duel.duelId;
   }
   return false;
-}
-
-function applyRecentSettlementRefresh(
-  overview: PredictionMarketsOverviewResponse,
-  botHealthSnapshot: KeeperBotHealthSnapshot | null,
-): PredictionMarketsOverviewResponse {
-  if (!overview.recentSettlement) {
-    return overview;
-  }
-  const recent = buildPredictionMarketsSurfaceForDuel(
-    overview.recentSettlement.duel,
-    botHealthSnapshot,
-    overview.recentSettlement,
-  );
-  return {
-    ...overview,
-    updatedAt: Date.now(),
-    recentSettlement: sameDuelIdentity(recent, overview.live) ? null : recent,
-  };
 }
 
 function syncStatusPayload(): Record<string, unknown> {
@@ -2195,34 +2307,30 @@ async function applyBetSyncEvent(
   betSyncLatestEvent = event;
   betSyncLastEventReceivedAt = Date.now();
   const sourceEpochChanged = event.sourceEpoch !== betSyncCheckpoint.sourceEpoch;
-
-  if (sourceEpochChanged) {
-    betSyncReplayUntilSeq = null;
+  const currentAppliedEmittedAt =
+    typeof streamState.emittedAt === "number" && Number.isFinite(streamState.emittedAt)
+      ? streamState.emittedAt
+      : null;
+  if (
+    isBetSyncEventStaleAfterSourceReset({
+      sourceEpochChanged,
+      currentStreamEmittedAt: currentAppliedEmittedAt,
+      eventEmittedAt: event.emittedAt,
+      toleranceMs: BET_SYNC_STALE_EVENT_TOLERANCE_MS,
+    })
+  ) {
+    const degradedReason = "stale_source_reset_event";
+    betSyncLastError = degradedReason;
     persistBetSyncCheckpointState({
-      sourceEpoch: event.sourceEpoch,
-      lastSeenSeq: 0,
-      lastAppliedSeq: 0,
-      replayMode: "reset",
-      degradedReason: null,
+      degradedReason,
     });
+    return;
   }
-  const nextSeenSeq = Math.max(betSyncCheckpoint.lastSeenSeq, event.seq);
 
-  const inserted = appendBetSyncApplyLogEntry({
-    sourceEpoch: event.sourceEpoch,
-    seq: event.seq,
-    eventType: "state",
-    duelKey: event.duelKey,
-    duelId: event.duelId,
-    phase: event.phase,
-    phaseVersion: event.phaseVersion,
-    emittedAt: event.emittedAt,
-    payloadJson: JSON.stringify(event),
-    receivedAt: Date.now(),
-    appliedAt: Date.now(),
-  });
-
-  if (!inserted && event.seq <= betSyncCheckpoint.lastAppliedSeq) {
+  const nextSeenSeq = sourceEpochChanged
+    ? event.seq
+    : Math.max(betSyncCheckpoint.lastSeenSeq, event.seq);
+  if (!sourceEpochChanged && event.seq <= betSyncCheckpoint.lastAppliedSeq) {
     persistBetSyncCheckpointState({
       lastSeenSeq: nextSeenSeq,
       degradedReason: null,
@@ -2230,23 +2338,55 @@ async function applyBetSyncEvent(
     return;
   }
 
-  publishStreamState(toStreamStateFromBetSyncEvent(event), sourceLabel);
-  betSyncLastAppliedAt = Date.now();
-  persistBetSyncCheckpointState({
-    lastAppliedSeq: Math.max(betSyncCheckpoint.lastAppliedSeq, event.seq),
+  const nextStreamState = toStreamStateFromBetSyncEvent(event);
+  const botHealthSnapshot = loadKeeperBotHealthSnapshot();
+  const nextOverview = derivePredictionMarketsOverview(
+    botHealthSnapshot,
+    nextStreamState,
+    predictionMarketsOverview,
+  );
+  const nextCheckpoint = nextBetSyncCheckpointState({
+    sourceEpoch: event.sourceEpoch,
     lastSeenSeq: nextSeenSeq,
+    lastAppliedSeq: Math.max(
+      sourceEpochChanged ? 0 : betSyncCheckpoint.lastAppliedSeq,
+      event.seq,
+    ),
+    replayMode: betSyncReplayMode,
     degradedReason: null,
   });
-  persistPredictionMarketsOverview(
-    applyRecentSettlementRefresh(
-      rollPredictionMarketsOverview(
-        predictionMarketsOverview,
-        buildLivePredictionMarketsSurface(loadKeeperBotHealthSnapshot()),
-        Date.now(),
-      ),
-      loadKeeperBotHealthSnapshot(),
-    ),
-  );
+  const committed = commitStreamProjection({
+    nextStreamState,
+    nextOverview,
+    nextCheckpoint,
+    sourceLabel,
+    applyLogEntry: {
+      sourceEpoch: event.sourceEpoch,
+      seq: event.seq,
+      eventType: "state",
+      duelKey: event.duelKey,
+      duelId: event.duelId,
+      phase: event.phase,
+      phaseVersion: event.phaseVersion,
+      emittedAt: event.emittedAt,
+      payloadJson: JSON.stringify(event),
+      receivedAt: Date.now(),
+      appliedAt: Date.now(),
+    },
+  });
+  if (!committed) {
+    persistBetSyncCheckpointState({
+      lastSeenSeq: nextSeenSeq,
+      degradedReason: null,
+    });
+    return;
+  }
+
+  if (sourceEpochChanged) {
+    betSyncReplayUntilSeq = null;
+  }
+  betSyncLastError = null;
+  betSyncLastAppliedAt = Date.now();
 }
 
 async function bootstrapBetSyncState(): Promise<BetSyncBootstrapState | null> {
@@ -2377,10 +2517,6 @@ async function consumeBetSyncEventsOnce(): Promise<void> {
       if (eventName === "reset") {
         betSyncOldestReplaySeq = parsed.seq;
       }
-      persistBetSyncCheckpointState({
-        replayMode: betSyncReplayMode,
-        degradedReason: null,
-      });
       await applyBetSyncEvent(parsed, "bet-sync-events");
     }
   }
@@ -2642,7 +2778,7 @@ async function pollContractParsers(): Promise<void> {
       pollEvmSnapshot("base", baseClient, baseContractAddress),
       pollEvmSnapshot("avax", avaxClient, avaxContractAddress),
     ]);
-    rebuildPredictionMarketsOverview(loadKeeperBotHealthSnapshot());
+    refreshPredictionMarketsOverview(loadKeeperBotHealthSnapshot());
   } finally {
     contractPollInFlight = false;
   }
@@ -3469,7 +3605,9 @@ const server = Bun.serve({
 
     if (url.pathname === "/status") {
       const botHealthSnapshotRaw = loadKeeperBotHealthSnapshot();
-      const overview = rebuildPredictionMarketsOverview(botHealthSnapshotRaw);
+      const overview =
+        predictionMarketsOverview ??
+        refreshPredictionMarketsOverview(botHealthSnapshotRaw);
       const predictionMarkets = overview.live?.markets ?? [];
       const botHealthSnapshot = botHealthSnapshotRaw
         ? {

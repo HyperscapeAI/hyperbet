@@ -425,6 +425,21 @@ export function selectBetSyncReplayUntilSeq(params: {
   return params.latestSeq > resumeSeq ? params.latestSeq : null;
 }
 
+export function isBetSyncEventStaleAfterSourceReset(params: {
+  sourceEpochChanged: boolean;
+  currentStreamEmittedAt: number | null;
+  eventEmittedAt: number;
+  toleranceMs: number;
+}): boolean {
+  if (!params.sourceEpochChanged || params.currentStreamEmittedAt == null) {
+    return false;
+  }
+  return (
+    params.eventEmittedAt + Math.max(0, params.toleranceMs) <
+    params.currentStreamEmittedAt
+  );
+}
+
 export function resolveBetSyncReplayMode(params: {
   eventName: string;
   eventSeq: number;
