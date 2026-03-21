@@ -1659,6 +1659,9 @@ const [hmBottomTab, setHmBottomTab] = useState<
                 <span className="hm-logo-text">HYPERBET</span>
                 <ChainSelector />
               </div>
+            </div>
+
+            <div className="hm-header-center">
               <NavTabs
                 activeTab={surfaceMode}
                 onChange={(id) => setSurfaceMode(id as "DUELS" | "MODELS")}
@@ -1667,20 +1670,6 @@ const [hmBottomTab, setHmBottomTab] = useState<
                   { id: "MODELS", label: copy.models, testId: "surface-mode-models" },
                 ]}
               />
-              {surfaceMode === "DUELS" ? (
-                <div className="hm-market-info">
-                  <span className="hm-market-name">
-                    {effA1.name} vs {effA2.name}
-                  </span>
-                </div>
-              ) : (
-                <div className="hm-mode-summary">
-                  <span className="hm-market-name">{copy.modelMarkets}</span>
-                  <span className="hm-mode-summary-copy">
-                    {copy.modelsStatus(effLeaderboard.length)}
-                  </span>
-                </div>
-              )}
             </div>
 
             <div className="hm-header-right">
