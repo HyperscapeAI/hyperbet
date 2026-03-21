@@ -432,6 +432,9 @@ export function SolanaClobPanel({
         claimReady: "可领取结算",
         claimLocked: "暂无可领取结算",
         claimHelp: "对局结算后，可在这里领取胜出份额或取消退款。",
+        claimCleanupReady: "清理已结算仓位",
+        claimCleanupHelp: "若本局已判定负方，可在这里清理残留仓位状态。",
+        claim: "领取",
         limitPrice: "限价",
         hideAdminPanel: "隐藏管理面板",
         showAdminPanel: "显示管理面板",
@@ -474,6 +477,10 @@ export function SolanaClobPanel({
         claimLocked: "Nothing claimable yet",
         claimHelp:
           "Once the duel resolves, claim winning shares or cancelled refunds here.",
+        claimCleanupReady: "Clear resolved position",
+        claimCleanupHelp:
+          "If this market resolved against you, use this once to clear the stale position state.",
+        claim: "Claim",
         limitPrice: "Limit price",
         hideAdminPanel: "Hide Admin Panel",
         showAdminPanel: "Show Admin Panel",
@@ -1296,6 +1303,24 @@ export function SolanaClobPanel({
     yesPool + noPool > 0n ? Number((yesPool * 100n) / (yesPool + noPool)) : 50;
   const noPercent = 100 - yesPercent;
   const canClaim = uiState.canClaim;
+  const claimActionLabel =
+    uiState.claimKind === "LOSER_CLEANUP" && canClaim
+      ? copy.claimCleanupReady
+      : canClaim
+        ? copy.claimReady
+        : copy.claimLocked;
+  const claimButtonLabel =
+    uiState.claimKind === "LOSER_CLEANUP" && canClaim
+      ? copy.claimCleanupReady
+      : copy.claim;
+  const claimHelpText =
+    uiState.claimKind === "LOSER_CLEANUP" && canClaim
+      ? copy.claimCleanupHelp
+      : copy.claimHelp;
+  const claimValueText =
+    canClaim && uiState.claimableAmount > 0n
+      ? `${fmtAmount(uiState.claimableAmount).toFixed(3)} SOL`
+      : null;
   const marketStateText = activeMarket?.marketState.toBase58() ?? "-";
   const lifecycleDebugText = [
     `duelKey=${lifecycleMarket?.duelKey ?? lifecycleDuel?.duelKey ?? duelKeyHex ?? "-"}`,
@@ -1380,32 +1405,86 @@ export function SolanaClobPanel({
             <span>{duelLabel}</span>
           </div>
 
-          <button
-            data-testid={isE2eMode ? "solana-clob-claim-payout" : undefined}
-            type="button"
-            onClick={() => void handleClaim()}
-            disabled={!canClaim}
-            style={buttonStyle(
-              canClaim
-                ? "#0f3f2b"
-                : "var(--hm-panel-claim-idle-bg, linear-gradient(180deg, rgba(255,255,255,0.05) 0%, rgba(255,255,255,0.02) 100%))",
-              canClaim
-                ? "rgba(34,197,94,0.35)"
-                : "var(--hm-panel-claim-idle-border, rgba(255,255,255,0.08))",
-              !canClaim,
-            )}
-          >
-            {canClaim ? copy.claimReady : copy.claimLocked}
-          </button>
-          <div
-            style={{
-              fontSize: 11,
-              color: "var(--hm-panel-subtle-text, rgba(255,255,255,0.48))",
-              lineHeight: 1.45,
-            }}
-          >
-            {copy.claimHelp}
-          </div>
+          {canClaim ? (
+            <div
+              style={{
+                display: "grid",
+                gap: 8,
+                padding: "12px",
+                borderRadius: "var(--hm-radius)",
+                border: "1px solid rgba(52,211,153,0.26)",
+                background:
+                  "linear-gradient(180deg, rgba(16,92,53,0.14) 0%, rgba(12,67,39,0.08) 100%)",
+                boxShadow:
+                  "inset 0 1px 0 rgba(255,255,255,0.05), 0 10px 22px rgba(0,0,0,0.14)",
+              }}
+            >
+              <div
+                style={{
+                  display: "grid",
+                  gap: 4,
+                  minWidth: 0,
+                }}
+              >
+                <span
+                  style={{
+                    fontSize: 9,
+                    fontWeight: 800,
+                    letterSpacing: 1,
+                    textTransform: "uppercase",
+                    color: "rgba(167,243,208,0.82)",
+                    fontFamily: "var(--hm-font-display)",
+                  }}
+                >
+                  {copy.adminStatus}
+                </span>
+                <span
+                  style={{
+                    fontSize: compact ? 12 : 13,
+                    fontWeight: 700,
+                    color: "var(--hm-text, #f8fafc)",
+                    lineHeight: 1.4,
+                    minWidth: 0,
+                    overflowWrap: "anywhere",
+                  }}
+                >
+                  {claimActionLabel}
+                </span>
+                {claimValueText ? (
+                  <span
+                    style={{
+                      fontSize: 11,
+                      fontWeight: 700,
+                      color: "rgba(167,243,208,0.88)",
+                      fontFamily: "var(--hm-font-mono)",
+                    }}
+                  >
+                    {claimValueText}
+                  </span>
+                ) : null}
+                <span
+                  style={{
+                    fontSize: 11,
+                    color: "var(--hm-panel-subtle-text, rgba(255,255,255,0.48))",
+                    lineHeight: 1.45,
+                    minWidth: 0,
+                    overflowWrap: "anywhere",
+                  }}
+                >
+                  {claimHelpText}
+                </span>
+              </div>
+
+              <button
+                data-testid={isE2eMode ? "solana-clob-claim-payout" : undefined}
+                type="button"
+                onClick={() => void handleClaim()}
+                style={buttonStyle("#0f3f2b", "rgba(34,197,94,0.35)", false)}
+              >
+                {claimButtonLabel}
+              </button>
+            </div>
+          ) : null}
         </div>
       </PredictionMarketPanel>
       <div
