@@ -11,7 +11,6 @@ pub fn create_bet(
     bet_id: u64,
     initial_liq: u64,
     is_dynamic: bool,
-    duel_key: [u8; 32],
     bet_prompt: String,
     expiration: i64,
     duel_key: [u8; 32],
@@ -43,7 +42,6 @@ pub fn create_bet(
     // Read fee/treasury from protocol config — not caller inputs
     bet.treasury = config.treasury;
     bet.fee_bps = config.fee_bps;
-    bet.duel_key = duel_key;
 
     Ok(())
 }
