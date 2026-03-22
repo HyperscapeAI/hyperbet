@@ -489,6 +489,14 @@
           "type": "bool"
         },
         {
+          "name": "bet_prompt",
+          "type": "string"
+        },
+        {
+          "name": "expiration_at",
+          "type": "i64"
+        },
+        {
           "name": "duel_key",
           "type": {
             "array": [
@@ -496,14 +504,6 @@
               32
             ]
           }
-        },
-        {
-          "name": "bet_prompt",
-          "type": "string"
-        },
-        {
-          "name": "expiration_at",
-          "type": "i64"
         }
       ]
     },
@@ -1052,190 +1052,6 @@
           }
         },
         {
-          "name": "treasury",
-          "writable": true
-        },
-        {
-          "name": "treasury_yes_ata",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "account",
-                "path": "treasury"
-              },
-              {
-                "kind": "const",
-                "value": [
-                  6,
-                  221,
-                  246,
-                  225,
-                  215,
-                  101,
-                  161,
-                  147,
-                  217,
-                  203,
-                  225,
-                  70,
-                  206,
-                  235,
-                  121,
-                  172,
-                  28,
-                  180,
-                  133,
-                  237,
-                  95,
-                  91,
-                  55,
-                  145,
-                  58,
-                  140,
-                  245,
-                  133,
-                  126,
-                  255,
-                  0,
-                  169
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "mint_yes"
-              }
-            ],
-            "program": {
-              "kind": "const",
-              "value": [
-                140,
-                151,
-                37,
-                143,
-                78,
-                36,
-                137,
-                241,
-                187,
-                61,
-                16,
-                41,
-                20,
-                142,
-                13,
-                131,
-                11,
-                90,
-                19,
-                153,
-                218,
-                255,
-                16,
-                132,
-                4,
-                142,
-                123,
-                216,
-                219,
-                233,
-                248,
-                89
-              ]
-            }
-          }
-        },
-        {
-          "name": "treasury_no_ata",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "account",
-                "path": "treasury"
-              },
-              {
-                "kind": "const",
-                "value": [
-                  6,
-                  221,
-                  246,
-                  225,
-                  215,
-                  101,
-                  161,
-                  147,
-                  217,
-                  203,
-                  225,
-                  70,
-                  206,
-                  235,
-                  121,
-                  172,
-                  28,
-                  180,
-                  133,
-                  237,
-                  95,
-                  91,
-                  55,
-                  145,
-                  58,
-                  140,
-                  245,
-                  133,
-                  126,
-                  255,
-                  0,
-                  169
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "mint_no"
-              }
-            ],
-            "program": {
-              "kind": "const",
-              "value": [
-                140,
-                151,
-                37,
-                143,
-                78,
-                36,
-                137,
-                241,
-                187,
-                61,
-                16,
-                41,
-                20,
-                142,
-                13,
-                131,
-                11,
-                90,
-                19,
-                153,
-                218,
-                255,
-                16,
-                132,
-                4,
-                142,
-                123,
-                216,
-                219,
-                233,
-                248,
-                89
-              ]
-            }
-          }
-        },
-        {
           "name": "token_program",
           "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
         },
@@ -1331,28 +1147,6 @@
           "signer": true
         },
         {
-          "name": "amm_config",
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  97,
-                  109,
-                  109,
-                  95,
-                  99,
-                  111,
-                  110,
-                  102,
-                  105,
-                  103
-                ]
-              }
-            ]
-          }
-        },
-        {
           "name": "admin_state",
           "pda": {
             "seeds": [
@@ -1396,6 +1190,32 @@
                 "kind": "account",
                 "path": "bet.creator",
                 "account": "Bet"
+              }
+            ]
+          }
+        },
+        {
+          "name": "amm_config",
+          "docs": [
+            "Optional: AmmConfig for oracle program ID validation (required when duel_state is provided)"
+          ],
+          "optional": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  109,
+                  109,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
               }
             ]
           }
@@ -1910,38 +1730,68 @@
     },
     {
       "code": 6016,
+      "name": "MathOverflow",
+      "msg": "Arithmetic overflow"
+    },
+    {
+      "code": 6017,
+      "name": "InsufficientReserves",
+      "msg": "Insufficient reserves for swap"
+    },
+    {
+      "code": 6018,
+      "name": "MarketExpired",
+      "msg": "Market has expired"
+    },
+    {
+      "code": 6019,
+      "name": "InvalidSettlementOutcome",
+      "msg": "Invalid settlement outcome"
+    },
+    {
+      "code": 6020,
       "name": "InvalidAddress",
       "msg": "Invalid address (zero/default)"
     },
     {
-      "code": 6017,
+      "code": 6021,
       "name": "FeeTooHigh",
       "msg": "Fee BPS exceeds maximum (1000 = 10%)"
     },
     {
-      "code": 6018,
+      "code": 6022,
       "name": "MarketPaused",
       "msg": "Market is paused"
     },
     {
-      "code": 6019,
+      "code": 6023,
       "name": "ConfigFrozen",
       "msg": "Config is frozen"
     },
     {
-      "code": 6020,
+      "code": 6024,
       "name": "InvalidDuelState",
       "msg": "Invalid duel state account"
     },
     {
-      "code": 6021,
+      "code": 6025,
       "name": "MissingAmmConfig",
       "msg": "AMM config account required for oracle settlement"
     },
     {
-      "code": 6022,
+      "code": 6026,
       "name": "InvalidFightOracleProgram",
       "msg": "Fight oracle program mismatch"
+    },
+    {
+      "code": 6027,
+      "name": "MathConvergenceError",
+      "msg": "AMM Newton-Raphson solver did not converge"
+    },
+    {
+      "code": 6028,
+      "name": "MathFixedPointOverflow",
+      "msg": "AMM fixed-point overflow"
     }
   ],
   "types": [
