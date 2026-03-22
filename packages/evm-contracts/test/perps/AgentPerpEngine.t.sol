@@ -670,4 +670,83 @@ contract AgentPerpEngineTest is Test {
             // NotLiquidatable means the price didn't move enough — test is inconclusive but not failing
         }
     }
+
+    // ── Funding freeze in CLOSE_ONLY ──
+
+    function testFundingFreezeInCloseOnly() public {
+        // Open opposing positions to create skew (non-zero funding rate)
+        vm.prank(alice);
+        engine.modifyPosition(agentId, 10_000 * 1e18, 50 * 1e18);
+
+        // Let funding accrue
+        vm.warp(block.timestamp + 30);
+        engine.syncOracle(agentId);
+
+        // Record the funding rate before CLOSE_ONLY (field index 2 = currentFundingRate)
+        (,, int256 fundingRateBefore,,,,,,,,,,,,,) = engine.markets(agentId);
+
+        // Transition to CLOSE_ONLY
+        vm.prank(operator);
+        engine.setMarketStatus(agentId, AgentPerpEngine.MarketStatus.CLOSE_ONLY);
+
+        // Warp forward — funding should NOT accrue
+        vm.warp(block.timestamp + 600);
+
+        // Close the position (triggers _syncOracle internally)
+        vm.prank(alice);
+        engine.modifyPosition(agentId, 0, -50 * 1e18);
+
+        // Verify funding rate didn't change after CLOSE_ONLY
+        (,, int256 fundingRateAfter,,,,,,,,,,,,,) = engine.markets(agentId);
+        assertEq(fundingRateAfter, fundingRateBefore, "Funding rate should be frozen in CLOSE_ONLY");
+    }
+
+    // ── Oracle staleness bypass in CLOSE_ONLY ──
+
+    function testCloseOnlyAllowsTradesWithStaleOracle() public {
+        vm.prank(alice);
+        engine.modifyPosition(agentId, 10_000 * 1e18, 10 * 1e18);
+
+        // Transition to CLOSE_ONLY
+        vm.prank(operator);
+        engine.setMarketStatus(agentId, AgentPerpEngine.MarketStatus.CLOSE_ONLY);
+
+        // Warp past oracle staleness threshold
+        vm.warp(block.timestamp + 10 minutes);
+
+        // Should NOT revert — settlement price is frozen, oracle staleness is irrelevant
+        vm.prank(alice);
+        engine.modifyPosition(agentId, 0, -10 * 1e18);
+    }
+
+    // ── Individual fee cap validation ──
+
+    function testCreateMarketRejectsExcessiveFee() public {
+        vm.prank(admin);
+        oracle.updateAgentSkill(agentB, 1500, 200);
+
+        // Individual treasury fee exceeds 5% cap
+        vm.prank(operator);
+        vm.expectRevert(AgentPerpEngine.InvalidFeeConfig.selector);
+        engine.createMarket(agentB, 1_000_000 * 1e18, 5 * 1e18, 1_000, 500, 2 minutes, 0, 501, 0);
+    }
+
+    function testCreateMarketRejectsExcessiveMmFee() public {
+        vm.prank(admin);
+        oracle.updateAgentSkill(agentB, 1500, 200);
+
+        // Individual MM fee exceeds 5% cap
+        vm.prank(operator);
+        vm.expectRevert(AgentPerpEngine.InvalidFeeConfig.selector);
+        engine.createMarket(agentB, 1_000_000 * 1e18, 5 * 1e18, 1_000, 500, 2 minutes, 0, 0, 501);
+    }
+
+    function testCreateMarketAcceptsValidFees() public {
+        vm.prank(admin);
+        oracle.updateAgentSkill(agentB, 1500, 200);
+
+        // Both fees at 5% (max allowed)
+        vm.prank(operator);
+        engine.createMarket(agentB, 1_000_000 * 1e18, 5 * 1e18, 1_000, 500, 2 minutes, 0, 500, 500);
+    }
 }
