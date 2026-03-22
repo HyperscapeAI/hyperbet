@@ -9,6 +9,7 @@ import {
 } from "./ci-lib";
 
 type ProofMode = "read-only" | "canary-write";
+type RunScope = "LIVE_INDICATOR" | "LIVE_CANARY";
 type ProofTarget = "all" | "solana" | "bsc" | "avax";
 type SupportedChain = Exclude<ProofTarget, "all">;
 
@@ -116,6 +117,7 @@ type AvaxCanaryResult = {
 
 type ProofSummary = {
   mode: ProofMode;
+  runScope: RunScope;
   target: ProofTarget;
   startedAt: string;
   completedAt?: string;
@@ -140,7 +142,39 @@ type ProofSummary = {
 const artifactRoot = resolveArtifactRoot("staged-live-proof");
 const expectedCommit = process.env.GITHUB_SHA?.trim() || null;
 
-function parseArgs(): { mode: ProofMode; target: ProofTarget } {
+function getOptionalArg(name: string): string | null {
+  const prefix = `${name}=`;
+  const match = process.argv.find((entry) => entry.startsWith(prefix));
+  return match ? match.slice(prefix.length).trim() : null;
+}
+
+function resolveRunScope(mode: ProofMode): RunScope {
+  const explicit = getOptionalArg("--run-scope");
+  const envScope = process.env.RUN_SCOPE?.trim();
+  const resolved = (
+    explicit ??
+    envScope ??
+    (mode === "canary-write" ? "LIVE_CANARY" : "LIVE_INDICATOR")
+  ).toUpperCase();
+  if (resolved !== "LIVE_INDICATOR" && resolved !== "LIVE_CANARY") {
+    throw new Error(
+      `unsupported run scope ${resolved}; expected LIVE_INDICATOR or LIVE_CANARY`,
+    );
+  }
+  if (mode === "read-only" && resolved !== "LIVE_INDICATOR") {
+    throw new Error(`read-only proof requires run scope LIVE_INDICATOR`);
+  }
+  if (mode === "canary-write" && resolved !== "LIVE_CANARY") {
+    throw new Error(`canary-write proof requires run scope LIVE_CANARY`);
+  }
+  return resolved as RunScope;
+}
+
+function parseArgs(): {
+  mode: ProofMode;
+  target: ProofTarget;
+  runScope: RunScope;
+} {
   const args = process.argv.slice(2);
   const modeArg =
     args.find((arg) => arg.startsWith("--mode="))?.slice("--mode=".length) ??
@@ -160,7 +194,11 @@ function parseArgs(): { mode: ProofMode; target: ProofTarget } {
   ) {
     throw new Error(`unsupported proof target ${targetArg}`);
   }
-  return { mode: modeArg, target: targetArg };
+  return {
+    mode: modeArg,
+    target: targetArg,
+    runScope: resolveRunScope(modeArg),
+  };
 }
 
 function requireEnv(name: string): string {
@@ -513,7 +551,7 @@ function runAvaxCanary(): AvaxCanaryResult {
 
 function humanSummary(summary: ProofSummary): string {
   const lines = [
-    `staged live proof: mode=${summary.mode} target=${summary.target}`,
+    `staged live proof: mode=${summary.mode} scope=${summary.runScope} target=${summary.target}`,
     `started=${summary.startedAt}`,
     `completed=${summary.completedAt ?? "in-progress"}`,
   ];
@@ -553,7 +591,7 @@ function humanSummary(summary: ProofSummary): string {
 }
 
 async function main(): Promise<void> {
-  const { mode, target } = parseArgs();
+  const { mode, target, runScope } = parseArgs();
   mkdirSync(artifactRoot, { recursive: true });
 
   const includeSolana = target === "all" || target === "solana";
@@ -562,6 +600,7 @@ async function main(): Promise<void> {
 
   const summary: ProofSummary = {
     mode,
+    runScope,
     target,
     startedAt: new Date().toISOString(),
     gitSha: expectedCommit,

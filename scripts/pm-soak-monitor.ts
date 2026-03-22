@@ -53,6 +53,7 @@ const DEFAULT_STAGED_DURATION_MIN = 120;
 const DEFAULT_LOCAL_DURATION_MIN = 25;
 
 type MonitorMode = "local" | "staged";
+type RunScope = "LOCALNET" | "LIVE_INDICATOR" | "LIVE_CANARY";
 type SupportedChain = "solana" | "bsc" | "avax";
 type CanaryIntent = "YES" | "NO";
 
@@ -134,6 +135,11 @@ type PredictionMarketsOverviewResponse = {
   live: PredictionMarketsResponse | null;
   recentSettlement: PredictionMarketsResponse | null;
   updatedAt?: number | null;
+};
+
+type PerpsEvidence = {
+  markets: JsonValue | null;
+  oracleHistory: JsonValue | null;
 };
 
 type SyncStatusResponse = {
@@ -373,6 +379,7 @@ type ChainSnapshot = {
   sourceRtmpStatus: SourceRtmpStatusResponse | null;
   botHealth: BotHealthResponse | null;
   streamState: StreamState | null;
+  perps: PerpsEvidence;
   fetchedAtMs: number;
 };
 
@@ -383,6 +390,7 @@ type LocalSummary = {
   durationMs: number;
   pollMs: number;
   artifactRoot: string;
+  runScope: RunScope;
   follow: boolean;
   cyclesObserved: number;
   cycleDurationsMs: number[];
@@ -416,6 +424,7 @@ type StagedSummary = {
   durationMs: number;
   pollMs: number;
   artifactRoot: string;
+  runScope: RunScope;
   chains: SupportedChain[];
   incidents: Incident[];
   chainSummary: Record<SupportedChain, StagedChainSummary>;
@@ -424,6 +433,7 @@ type StagedSummary = {
 
 type MonitorArgs = {
   mode: MonitorMode;
+  runScope: RunScope;
   chains: SupportedChain[];
   durationMin: number;
   pollMs: number;
@@ -462,6 +472,7 @@ function parseArgs(): MonitorArgs {
   if (mode !== "local" && mode !== "staged") {
     throw new Error(`unsupported soak mode ${mode}`);
   }
+  const runScope = resolveRunScope(rawArgs, mode);
   const follow = getBooleanArg(rawArgs, "--follow", false);
 
   const chainsArg = getArg(rawArgs, "--chains", "solana,bsc,avax");
@@ -518,6 +529,7 @@ function parseArgs(): MonitorArgs {
 
   return {
     mode,
+    runScope,
     chains,
     durationMin,
     pollMs,
@@ -551,6 +563,43 @@ function getBooleanArg(
     return true;
   }
   return raw === "1" || raw === "true" || raw === "yes" || raw === "on";
+}
+
+function getOptionalArg(args: string[], name: string): string | null {
+  const prefix = `${name}=`;
+  const match = args.find((entry) => entry.startsWith(prefix));
+  return match ? match.slice(prefix.length).trim() : null;
+}
+
+function resolveRunScope(
+  args: string[],
+  mode: MonitorMode,
+): RunScope {
+  const explicit = getOptionalArg(args, "--run-scope");
+  const envScope = process.env.RUN_SCOPE?.trim();
+  const rawScope = (
+    explicit ??
+    envScope ??
+    (mode === "local" ? "LOCALNET" : "LIVE_INDICATOR")
+  ).toUpperCase();
+  if (
+    rawScope !== "LOCALNET" &&
+    rawScope !== "LIVE_INDICATOR" &&
+    rawScope !== "LIVE_CANARY"
+  ) {
+    throw new Error(
+      `unsupported run scope ${rawScope}; expected LOCALNET, LIVE_INDICATOR, or LIVE_CANARY`,
+    );
+  }
+
+  if (mode === "local" && rawScope !== "LOCALNET") {
+    throw new Error(`local soak mode requires run scope LOCALNET (got ${rawScope})`);
+  }
+  if (mode === "staged" && rawScope === "LOCALNET") {
+    throw new Error(`staged soak mode does not support run scope LOCALNET (got ${rawScope})`);
+  }
+
+  return rawScope as RunScope;
 }
 
 function resolvePath(value: string): string {
@@ -1302,6 +1351,7 @@ async function fetchLocalSnapshot(): Promise<{
   status: KeeperStatusResponse | null;
   botHealth: BotHealthResponse | null;
   buildInfo: BuildInfo | null;
+  perps: PerpsEvidence;
   fetchedAtMs: number;
 }> {
   const fetchedAtMs = Date.now();
@@ -1326,6 +1376,13 @@ async function fetchLocalSnapshot(): Promise<{
     "http://127.0.0.1:8080/api/arena/prediction-markets/overview";
   const statusUrl =
     optionalEnv("KEEPER_STATUS_URL") ?? "http://127.0.0.1:8080/status";
+  const keeperBaseUrl = statusUrl.replace(/\/status\/?$/, "");
+  const perpsMarketsUrl =
+    optionalEnv("PERPS_MARKETS_URL") ??
+    `${keeperBaseUrl}/api/perps/markets`;
+  const perpsOracleHistoryUrl =
+    optionalEnv("PERPS_ORACLE_HISTORY_URL") ??
+    `${keeperBaseUrl}/api/perps/oracle-history`;
   const botHealthUrl =
     optionalEnv("KEEPER_BOT_HEALTH_URL") ??
     "http://127.0.0.1:8080/api/keeper/bot-health";
@@ -1343,6 +1400,8 @@ async function fetchLocalSnapshot(): Promise<{
     status,
     botHealth,
     buildInfo,
+    perpsMarkets,
+    perpsOracleHistory,
   ] =
     await Promise.all([
       requestJson<StreamState>(sourceStreamStateUrl),
@@ -1361,6 +1420,8 @@ async function fetchLocalSnapshot(): Promise<{
       buildInfoUrl
         ? requestJson<BuildInfo>(buildInfoUrl)
         : Promise.resolve(null),
+      requestJsonOrNull<JsonValue>(perpsMarketsUrl),
+      requestJsonOrNull<JsonValue>(perpsOracleHistoryUrl),
     ]);
 
   return {
@@ -1374,6 +1435,10 @@ async function fetchLocalSnapshot(): Promise<{
     status,
     botHealth,
     buildInfo,
+    perps: {
+      markets: perpsMarkets,
+      oracleHistory: perpsOracleHistory,
+    },
     fetchedAtMs,
   };
 }
@@ -1396,8 +1461,17 @@ async function fetchStagedChainSnapshot(
 ): Promise<ChainSnapshot> {
   const urls = stagedKeeperUrls(chain);
   const fetchedAtMs = Date.now();
-  const [buildInfo, status, active, overview, syncStatus, botHealth, streamState] =
-    await Promise.all([
+  const [
+    buildInfo,
+    status,
+    active,
+    overview,
+    syncStatus,
+    botHealth,
+    streamState,
+    perpsMarkets,
+    perpsOracleHistory,
+  ] = await Promise.all([
       requestJson<BuildInfo>(`${urls.pagesUrl}/build-info.json`),
       requestJson<KeeperStatusResponse>(`${urls.keeperUrl}/status`),
       requestJson<PredictionMarketsResponse>(
@@ -1409,6 +1483,8 @@ async function fetchStagedChainSnapshot(
       requestJsonOrNull<SyncStatusResponse>(`${urls.keeperUrl}/api/sync/status`),
       requestJson<BotHealthResponse>(`${urls.keeperUrl}/api/keeper/bot-health`),
       requestJson<StreamState>(`${urls.keeperUrl}/api/streaming/state`),
+      requestJsonOrNull<JsonValue>(`${urls.keeperUrl}/api/perps/markets`),
+      requestJsonOrNull<JsonValue>(`${urls.keeperUrl}/api/perps/oracle-history`),
     ]);
   return {
     chain,
@@ -1421,6 +1497,10 @@ async function fetchStagedChainSnapshot(
     sourceRtmpStatus: null,
     botHealth,
     streamState,
+    perps: {
+      markets: perpsMarkets,
+      oracleHistory: perpsOracleHistory,
+    },
     fetchedAtMs,
   };
 }
@@ -1835,6 +1915,7 @@ async function runLocalSoak(args: MonitorArgs): Promise<void> {
 
   const summary: LocalSummary = {
     mode: "local",
+    runScope: args.runScope,
     startedAt: new Date(startedAtMs).toISOString(),
     completedAt: nowIso(),
     durationMs: Date.now() - startedAtMs,
@@ -2075,6 +2156,7 @@ async function runStagedSoak(args: MonitorArgs): Promise<void> {
 
   const summary: StagedSummary = {
     mode: "staged",
+    runScope: args.runScope,
     startedAt: new Date(startedAtMs).toISOString(),
     completedAt: nowIso(),
     durationMs: Date.now() - startedAtMs,
@@ -3037,6 +3119,7 @@ async function main(): Promise<void> {
   writeJsonArtifact(args.artifactRoot, "metadata.json", {
     startedAt: nowIso(),
     mode: args.mode,
+    runScope: args.runScope,
     follow: args.follow,
     chains: args.chains,
     durationMin: args.durationMin,

@@ -82,7 +82,7 @@ curl http://127.0.0.1:5555/api/agents/<agent-id>/start -X POST
 
 ```bash
 cd /Users/mac/Desktop/hyperbet/.claude/worktrees/blissful-golick
-node --import tsx scripts/pm-soak-monitor.ts --mode=local --follow --duration-min=25
+RUN_SCOPE=LOCALNET node --import tsx scripts/pm-soak-monitor.ts --mode=local --follow --duration-min=25
 ```
 
 Defaults:
@@ -152,7 +152,7 @@ not spin up the sibling Hyperscapes repo or the local desktop UIs.
 
 ```bash
 cd /Users/mac/Desktop/hyperbet/.claude/worktrees/blissful-golick
-node --import tsx scripts/pm-soak-monitor.ts \
+RUN_SCOPE=LIVE_INDICATOR node --import tsx scripts/pm-soak-monitor.ts \
   --mode=staged \
   --chains=solana,bsc,avax \
   --duration-min=120
