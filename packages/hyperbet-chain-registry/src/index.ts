@@ -105,6 +105,8 @@ export interface BettingEvmDeployment {
   emergencyCouncilAddress: string;
   deploymentVersion: string;
   goldTokenAddress: string;
+  skillOracleAddress: string;
+  perpEngineAddress: string;
   nativeCurrency: NativeCurrencyConfig;
   blockExplorerUrl: string;
   featureFlags: ChainFeatureFlags;
@@ -292,6 +294,8 @@ const EVM_DEPLOYMENTS: Record<BettingEvmNetwork, BettingEvmDeployment> = {
     emergencyCouncilAddress: "0xdCDeC0c831ED7Af279E724fddb127dc6134e5df6",
     deploymentVersion: "v3",
     goldTokenAddress: "",
+    skillOracleAddress: "",
+    perpEngineAddress: "",
     nativeCurrency: { name: "BNB", symbol: "BNB", decimals: 18 },
     blockExplorerUrl: "https://testnet.bscscan.com",
     featureFlags: DEFAULT_FEATURE_FLAGS,
@@ -323,6 +327,8 @@ const EVM_DEPLOYMENTS: Record<BettingEvmNetwork, BettingEvmDeployment> = {
     emergencyCouncilAddress: "",
     deploymentVersion: "v2",
     goldTokenAddress: "",
+    skillOracleAddress: "",
+    perpEngineAddress: "",
     nativeCurrency: { name: "BNB", symbol: "BNB", decimals: 18 },
     blockExplorerUrl: "https://bscscan.com",
     featureFlags: DEFAULT_FEATURE_FLAGS,
@@ -354,6 +360,8 @@ const EVM_DEPLOYMENTS: Record<BettingEvmNetwork, BettingEvmDeployment> = {
     emergencyCouncilAddress: "",
     deploymentVersion: "v2",
     goldTokenAddress: "",
+    skillOracleAddress: "",
+    perpEngineAddress: "",
     nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
     blockExplorerUrl: "https://sepolia.basescan.org",
     featureFlags: DEFAULT_FEATURE_FLAGS,
@@ -385,6 +393,8 @@ const EVM_DEPLOYMENTS: Record<BettingEvmNetwork, BettingEvmDeployment> = {
     emergencyCouncilAddress: "",
     deploymentVersion: "v2",
     goldTokenAddress: "",
+    skillOracleAddress: "",
+    perpEngineAddress: "",
     nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
     blockExplorerUrl: "https://basescan.org",
     featureFlags: DEFAULT_FEATURE_FLAGS,
@@ -416,6 +426,8 @@ const EVM_DEPLOYMENTS: Record<BettingEvmNetwork, BettingEvmDeployment> = {
     emergencyCouncilAddress: "0xdCDeC0c831ED7Af279E724fddb127dc6134e5df6",
     deploymentVersion: "v3",
     goldTokenAddress: "",
+    skillOracleAddress: "",
+    perpEngineAddress: "",
     nativeCurrency: { name: "Avalanche", symbol: "AVAX", decimals: 18 },
     blockExplorerUrl: "https://testnet.snowtrace.io",
     featureFlags: DEFAULT_FEATURE_FLAGS,
@@ -447,6 +459,8 @@ const EVM_DEPLOYMENTS: Record<BettingEvmNetwork, BettingEvmDeployment> = {
     emergencyCouncilAddress: "",
     deploymentVersion: "v2",
     goldTokenAddress: "",
+    skillOracleAddress: "",
+    perpEngineAddress: "",
     nativeCurrency: { name: "Avalanche", symbol: "AVAX", decimals: 18 },
     blockExplorerUrl: "https://snowtrace.io",
     featureFlags: DEFAULT_FEATURE_FLAGS,

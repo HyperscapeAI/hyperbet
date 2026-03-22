@@ -105,6 +105,20 @@ async function confirmSignatureByPolling(
     throw new Error(`Timed out waiting for transaction ${signature}`);
 }
 
+async function sendTransactionAndConfirmByPolling(
+    provider: anchor.AnchorProvider,
+    transaction: anchor.web3.Transaction,
+    signers: Keypair[],
+): Promise<string> {
+    const signature = await provider.sendAndConfirm(
+        transaction,
+        signers,
+        { commitment: "processed" },
+    );
+    await confirmSignatureByPolling(provider.connection, signature);
+    return signature;
+}
+
 async function airdrop(
     connection: anchor.web3.Connection,
     recipient: PublicKey,
@@ -581,7 +595,8 @@ export class SolanaProgramRuntime {
             return;
         }
 
-        await this.provider.sendAndConfirm(
+        await sendTransactionAndConfirmByPolling(
+            this.provider,
             new anchor.web3.Transaction().add(
                 SystemProgram.transfer({
                     fromPubkey: this.authority.publicKey,

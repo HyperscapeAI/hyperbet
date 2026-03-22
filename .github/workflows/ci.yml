@@ -84,6 +84,33 @@ jobs:
           path: .ci-artifacts/evm-contract-validation
           if-no-files-found: ignore
 
+  perps-contract-tests:
+    name: Perps Contract Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Hyperbet toolchain
+        uses: ./.github/actions/setup-hyperbet
+        with:
+          install-foundry: "true"
+
+      - name: Install root dependencies
+        run: bash scripts/ci-install-verified.sh root
+
+      - name: Run perps Forge tests (fuzz 512)
+        working-directory: packages/evm-contracts
+        run: forge test --match-path "test/perps/*" -vvv --summary
+
+      - name: Upload perps test artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: perps-contract-tests
+          path: packages/evm-contracts/out
+          if-no-files-found: ignore
+
   shared-validation:
     name: Shared Validation
     runs-on: ubuntu-latest

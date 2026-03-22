@@ -8,6 +8,9 @@ via_ir = true
 optimizer = true
 optimizer_runs = 200
 
+[profile.default.fuzz]
+runs = 512
+
 [dependencies]
 "@openzeppelin/" = "node_modules/@openzeppelin/"
 "forge-std/" = "lib/forge-std/src/"

@@ -300,3 +300,63 @@ jobs:
           name: base-add-chain-smoke
           path: .ci-artifacts/base-add-chain-smoke
           if-no-files-found: ignore
+
+  perps-forge-gate:
+    name: Perps Forge Test Gate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.PREDICTION_MARKET_GATE_REF }}
+
+      - name: Setup Hyperbet toolchain
+        uses: ./.github/actions/setup-hyperbet
+        with:
+          install-foundry: "true"
+
+      - name: Install dependencies
+        run: bash scripts/ci-install-verified.sh root
+
+      - name: Run perps Forge tests (fuzz 512)
+        working-directory: packages/evm-contracts
+        run: forge test --match-path "test/perps/*" -vvv --summary
+
+      - name: Upload perps Forge artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: perps-forge-gate
+          path: packages/evm-contracts/out
+          if-no-files-found: ignore
+
+  perps-solana-gate:
+    name: Perps Solana Build Gate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.PREDICTION_MARKET_GATE_REF }}
+
+      - name: Setup Hyperbet toolchain
+        uses: ./.github/actions/setup-hyperbet
+        with:
+          install-rust: "true"
+          install-solana: "true"
+          install-anchor: "true"
+
+      - name: Install dependencies
+        run: bash scripts/ci-install-verified.sh root
+
+      - name: Build gold_perps_market program
+        working-directory: packages/hyperbet-solana/anchor
+        run: anchor build -p gold_perps_market
+
+      - name: Upload Solana perps build artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: perps-solana-gate
+          path: packages/hyperbet-solana/anchor/target/deploy/gold_perps_market.so
+          if-no-files-found: ignore

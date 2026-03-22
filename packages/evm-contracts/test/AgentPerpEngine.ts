@@ -61,15 +61,12 @@ describe("AgentPerpEngine", function () {
     expect(await engine.marketCount()).to.equal(1n);
   });
 
-  it("allows owner-managed reporter rotation for skill updates", async function () {
-    const { owner, reporter, agentId, oracle } = await deployFixture();
+  it("blocks non-reporter from updating skills", async function () {
+    const { reporter, agentId, oracle } = await deployFixture();
 
-    await oracle.connect(owner).setReporter(reporter.address, true);
-    await oracle.connect(reporter).updateAgentSkill(agentId, 1_700, 25);
-
-    const stored = await oracle.agentSkills(agentId);
-    expect(stored.mu).to.equal(1700n);
-    expect(stored.sigma).to.equal(25n);
+    await expect(
+      oracle.connect(reporter).updateAgentSkill(agentId, 1_700, 25),
+    ).to.be.reverted;
   });
 
   it("opens, reduces, and closes positions with ERC20 collateral", async function () {

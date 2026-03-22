@@ -236,6 +236,33 @@ export async function seedMarket(
   return market;
 }
 
+/**
+ * Drop the oracle price from its current value to the target in steps small
+ * enough to stay within the configured max_oracle_price_delta_bps (25%).
+ * Each step reduces by at most 24% to stay safely within bounds.
+ */
+export async function crashOracle(
+  program: Program<GoldPerpsMarket>,
+  authority: Keypair,
+  marketId: number,
+  targetPrice: number,
+): Promise<void> {
+  const market = marketPda(program.programId, marketId);
+  let currentPrice = num(
+    (await program.account.marketState.fetch(market)).spotIndex,
+  );
+  const MAX_DROP_RATIO = 0.76; // 24% drop per step
+
+  while (currentPrice > targetPrice) {
+    const nextPrice = Math.max(
+      targetPrice,
+      Math.floor(currentPrice * MAX_DROP_RATIO),
+    );
+    await refreshMarketOracle(program, authority, marketId, nextPrice);
+    currentPrice = nextPrice;
+  }
+}
+
 export async function refreshMarketOracle(
   program: Program<GoldPerpsMarket>,
   authority: Keypair,
