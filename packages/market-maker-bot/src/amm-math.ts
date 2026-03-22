@@ -37,7 +37,7 @@ function qMul(a: bigint, b: bigint): bigint {
 }
 
 function qDiv(a: bigint, b: bigint): bigint {
-  if (b === 0n) return 0n;
+  if (b === 0n) throw new Error("Q64.64 division by zero");
   return (a << FRAC_BITS) / b;
 }
 

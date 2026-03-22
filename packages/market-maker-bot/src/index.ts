@@ -2872,7 +2872,8 @@ export class CrossChainMarketMaker {
         routerAddress,
         rpcUrl,
       };
-    } catch {
+    } catch (err) {
+      console.warn(`[AMM] Failed to create EVM AMM runtime for ${chainKey}:`, err);
       return disabled;
     }
   }
