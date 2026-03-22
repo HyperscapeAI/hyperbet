@@ -152,7 +152,9 @@ export function createUnlockedRpcWalletClient(
     chain: chainConfig.wagmiChain,
     async writeContract(parameters) {
       const { address, abi, functionName, args, value } = parameters;
-      const data = (encodeFunctionData as (parameters: unknown) => Hex)({
+      // viem's encodeFunctionData generics lose type info when parameters are
+      // destructured from writeContract — inputs are already caller-validated.
+      const data = (encodeFunctionData as (params: { abi: typeof abi; functionName: string; args: readonly unknown[] }) => Hex)({
         abi,
         functionName,
         args: args ?? [],

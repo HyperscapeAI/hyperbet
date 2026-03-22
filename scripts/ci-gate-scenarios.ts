@@ -123,7 +123,7 @@ function sanitizeArtifactName(value: string): string {
 }
 
 function getScenarioPreset(scenarioId: string): ScenarioPreset {
-  const chainKey = target === "evm" ? "bsc" : "solana";
+  const chainKey = target === "evm" ? "anvil" : "solana";
   const preset =
     SCENARIO_PRESETS.find(
       (entry) => entry.id === scenarioId && entry.chainKey === chainKey,

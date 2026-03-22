@@ -62,6 +62,7 @@ import {
     GATE_SCENARIOS,
     SCENARIO_PRESETS,
     getScenarioPresetByIdOrName,
+    type ScenarioChainKey,
     type ScenarioPreset,
     type ScenarioSettlementMode,
     type ScenarioSettlementStatus,
@@ -119,6 +120,10 @@ type PersistedScenarioState = {
     runs: ScenarioRunRecord[];
 };
 
+function toRegistryChainKey(chainKey: ScenarioChainKey): ScenarioResult["chainKey"] {
+    return chainKey === "anvil" ? "bsc" : chainKey;
+}
+
 type CachedPosition = {
     aShares: bigint;
     bShares: bigint;
@@ -153,7 +158,7 @@ type CachedMarketState = {
 };
 
 const INTERACTIVE_SCENARIOS = SCENARIO_PRESETS.filter(
-    (scenario) => scenario.chainKey === "bsc",
+    (scenario) => scenario.chainKey === "anvil",
 );
 
 // ─── State ───────────────────────────────────────────────────────────────────
@@ -357,7 +362,7 @@ function loadScenarioState(): void {
                           run.chainKey ??
                           (SCENARIO_PRESETS.find(
                               (preset) => preset.id === run.scenarioId,
-                          )?.chainKey ?? "bsc"),
+                          )?.chainKey ?? "anvil"),
                   }))
             : [];
     } catch (error) {
@@ -1583,6 +1588,7 @@ async function simulationTick(): Promise<void> {
                     const address = await getAgentAddress(agent);
                     const position = getCachedPosition(address);
                     const ctx: SimContext = {
+                        chainKey: scenarioPreset?.chainKey ?? "anvil",
                         duelKey: currentDuelKey,
                         marketKey: currentMarketKey,
                         bestBid: Number(market.bestBid),
@@ -1878,10 +1884,10 @@ async function broadcastState(): Promise<void> {
                 tick: simTick,
                 running: simRunning,
                 speed: simSpeed,
-                scenario: {
-                    id: currentScenarioId,
-                    chainKey: activeScenarioPreset?.chainKey ?? "bsc",
-                },
+                    scenario: {
+                        id: currentScenarioId,
+                        chainKey: activeScenarioPreset?.chainKey ?? "anvil",
+                    },
                 duel: {
                     label: currentDuelLabel,
                     key: currentDuelKey,
@@ -2142,7 +2148,7 @@ async function captureScenarioSummaryState(): Promise<void> {
         tick: simTick,
         scenario: {
             id: currentScenarioId,
-            chainKey: activeScenarioPreset?.chainKey ?? "bsc",
+            chainKey: activeScenarioPreset?.chainKey ?? "anvil",
         },
         market: {
             status: marketStatus,
@@ -2259,7 +2265,9 @@ async function runSimLoop(): Promise<void> {
 }
 
 function buildScenarioTraces(limit = 80): AgentActionTrace[] {
-    const chainKey = getScenarioPresetByIdOrName(currentScenarioId)?.chainKey ?? "bsc";
+    const chainKey = toRegistryChainKey(
+        getScenarioPresetByIdOrName(currentScenarioId)?.chainKey ?? "anvil",
+    );
     return eventLog.slice(-limit).map((entry) => ({
         actor: String(entry.args?.maker ?? "protocol"),
         action: String(entry.event ?? "unknown"),
@@ -2313,7 +2321,7 @@ function buildScenarioResult(
             name: preset.name,
             family: preset.family,
             seed,
-            chainKey: preset.chainKey,
+            chainKey: toRegistryChainKey(preset.chainKey),
             attackerPnl: bestAttackerPnlSeen,
             marketMakerPnl,
             maxDrawdownBps: Math.round(
@@ -2368,7 +2376,7 @@ function buildScenarioResult(
         name: preset.name,
         family: preset.family,
         seed,
-        chainKey: preset.chainKey,
+        chainKey: toRegistryChainKey(preset.chainKey),
         attackerPnl: bestAttackerPnlSeen,
         marketMakerPnl,
         maxDrawdownBps,
@@ -2650,7 +2658,7 @@ function buildSolanaDegradedScenarioArtifacts(
         name: preset.name,
         family: preset.family,
         seed: run.seed,
-        chainKey: preset.chainKey,
+        chainKey: toRegistryChainKey(preset.chainKey),
         attackerPnl: 0,
         marketMakerPnl: 0,
         maxDrawdownBps: 0,
@@ -3294,7 +3302,7 @@ function handleWsMessage(data: string): void {
                     (p) => p.name === msg.value || p.id === msg.value,
                 );
                 if (preset) {
-                    if (preset.chainKey !== "bsc") {
+                    if (preset.chainKey !== "anvil") {
                         broadcast({
                             type: "log",
                             data: {

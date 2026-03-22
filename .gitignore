@@ -23,7 +23,10 @@ packages/*/anchor/.tmp-ledger
 packages/*/anchor/test-ledger
 packages/*/anchor/target/debug
 packages/*/anchor/target/release
+packages/*/anchor/target/deploy/*.so
+packages/*/anchor/target/deploy/*-keypair.json
 packages/*/anchor/target/sbf-solana-solana
+packages/*/anchor/target/sbpf-solana-solana
 packages/*/keeper/keeper.sqlite*
 packages/*/keeper/.status/
 packages/*/keeper/workspace.package.json
