@@ -782,6 +782,9 @@ if [[ "$CAPTURE_LOCAL_UI_FLOW" == "true" ]]; then
       PM_SOAK_RECONCILE_PUBLISH_URL="${PM_SOAK_RECONCILE_PUBLISH_URL:-${KEEPER_URL}/api/streaming/state/publish}" \
       PM_SOAK_RECONCILE_PUBLISH_KEY="${PM_SOAK_RECONCILE_PUBLISH_KEY:-${STREAM_PUBLISH_KEY:-${ARENA_EXTERNAL_BET_WRITE_KEY:-${E2E_ARENA_WRITE_KEY:-}}}}" \
       PM_SOAK_SCREENSHOTS="${PM_SOAK_SCREENSHOTS:-true}" \
+      RUN_SCOPE="LOCALNET" \
+      PERPS_MARKETS_URL="${KEEPER_URL}/api/perps/markets" \
+      PERPS_ORACLE_HISTORY_URL="${KEEPER_URL}/api/perps/oracle-history" \
       BUN_BIN="$BUN_BIN" \
       "$NODE_BIN" --import tsx scripts/pm-soak-monitor.ts --mode=local --follow --duration-min="${PM_SOAK_LOCAL_DURATION_MIN:-25}" --poll-ms="${PM_SOAK_POLL_MS:-5000}"
   ) &
