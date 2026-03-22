@@ -1,0 +1,15 @@
+export const POINTS_DRAWER_OVERLAY_STYLE = {
+  position: "fixed",
+  top: 0,
+  left: 0,
+  right: 0,
+  bottom: 0,
+  background: "rgba(0,0,0,0.5)",
+  backdropFilter: "blur(8px)",
+  WebkitBackdropFilter: "blur(8px)",
+  zIndex: 100,
+  display: "flex",
+  justifyContent: "center",
+  alignItems: "center",
+  padding: 16,
+} as const;

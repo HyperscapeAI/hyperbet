@@ -109,6 +109,17 @@ export function getSenderUrl(): string | null {
   return null;
 }
 
+/** C-8: Redact API keys from RPC URLs before logging. */
+export function redactUrl(url: string): string {
+  return url.replace(/api-key=[^&]+/g, "api-key=***");
+}
+
+/** Sanitize an error message to remove embedded API keys before logging. */
+export function sanitizeErrorMessage(err: unknown): string {
+  const msg = err instanceof Error ? err.message : String(err);
+  return redactUrl(msg);
+}
+
 export function readKeypair(keypairRef: string): Keypair {
   const trimmed = keypairRef.trim();
 
@@ -164,6 +175,15 @@ function resolveConfiguredProgramId(
   return resolveProgramId(idlJson, fallback);
 }
 
+function resolveOptionalProgramId(
+  configuredAddress: string | undefined,
+  fallback: string | undefined,
+): PublicKey | null {
+  const candidate = configuredAddress?.trim() || fallback?.trim() || "";
+  if (!candidate) return null;
+  return new PublicKey(candidate);
+}
+
 function ensureIdlAddress(idlJson: unknown, programId: PublicKey): Idl {
   const idlWithMaybeAddress = idlJson as Idl & { address?: string };
   return {
@@ -186,6 +206,10 @@ export const GOLD_PERPS_MARKET_PROGRAM_ID = resolveConfiguredProgramId(
   process.env.GOLD_PERPS_MARKET_PROGRAM_ID,
   goldPerpsMarketIdl,
   solanaDeployment.goldPerpsMarketProgramId,
+);
+export const GOLD_AMM_MARKET_PROGRAM_ID = resolveOptionalProgramId(
+  process.env.GOLD_AMM_MARKET_PROGRAM_ID,
+  solanaDeployment.goldAmmMarketProgramId,
 );
 
 /** @deprecated Binary market is no longer deployed. Retained for backward compat. */

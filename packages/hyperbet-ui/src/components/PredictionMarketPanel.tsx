@@ -31,6 +31,7 @@ interface PredictionMarketPanelProps {
   onPlaceBet: () => void;
   isWalletReady: boolean;
   programsReady: boolean;
+  isSubmitting?: boolean;
   agent1Name: string;
   agent2Name: string;
   isEvm: boolean;
@@ -64,6 +65,7 @@ export function PredictionMarketPanel({
   onPlaceBet,
   isWalletReady,
   programsReady,
+  isSubmitting = false,
   agent1Name,
   agent2Name,
   isEvm,
@@ -89,7 +91,7 @@ export function PredictionMarketPanel({
 
   const yesSelected = side === "YES";
   const noSelected = side === "NO";
-  const canBet = isWalletReady && programsReady;
+  const canBet = isWalletReady && programsReady && !isSubmitting;
   const sellSupported = isEvm || supportsSell;
   const selectedAccent = side === "YES" ? "var(--hm-buy)" : "var(--hm-sell)";
   const selectedGlow =

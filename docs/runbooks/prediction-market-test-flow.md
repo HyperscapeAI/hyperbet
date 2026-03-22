@@ -78,7 +78,7 @@ Expected state:
 - Hyperbet UI reflects live duel state
 - `markets[]` may remain empty if keeper bot is disabled
 - both local UIs open automatically and screenshots are written to
-  `output/playwright/hyperscapes-pm-local/`
+  `output/playwright/pm-soak/<timestamp>/screenshots/`
 
 Runbook:
 

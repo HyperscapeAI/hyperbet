@@ -13,6 +13,8 @@
     "simulate:adversarial:seed-corpus": "tsx src/simulate-adversarial.ts --seed-corpus",
     "simulate:adversarial:replay-corpus": "tsx src/simulate-adversarial.ts --replay-corpus",
     "simulate:adversarial:ci": "bun run simulate:adversarial && bun run simulate:adversarial:gate",
+    "simulate:local": "tsx src/local-sim.ts",
+    "simulate:local:bsc": "tsx src/local-sim.ts --chain bsc",
     "smoke:runtime": "tsx src/runtime-smoke.ts",
     "smoke:runtime:bsc": "tsx src/runtime-smoke.ts --chain bsc",
     "smoke:runtime:avax": "tsx src/runtime-smoke.ts --chain avax",

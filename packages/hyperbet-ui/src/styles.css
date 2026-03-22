@@ -133,7 +133,8 @@ body {
    ============================================================ */
 .app-root {
   position: relative;
-  width: 100vw;
+  width: 100%;
+  max-width: 100%;
   height: 100vh;
   height: 100dvh;
   /* dynamic viewport height: avoids iOS toolbar overlap */
@@ -1781,7 +1782,8 @@ select:focus-visible {
 .hm-root {
   display: flex;
   flex-direction: column;
-  width: 100vw;
+  width: 100%;
+  max-width: 100%;
   height: 100vh;
   height: 100dvh;
   overflow: hidden;
@@ -2129,6 +2131,7 @@ select:focus-visible {
   justify-content: space-between;
 }
 
+.hm-nav-tab,
 .hm-view-tab {
   border: 0;
   border-radius: 2px;
@@ -2143,6 +2146,18 @@ select:focus-visible {
   transition:
     background 0.2s ease,
     color 0.2s ease;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hm-nav-tab-label {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .hm-view-tab:hover {
@@ -2834,8 +2849,8 @@ select:focus-visible {
   pointer-events: none;
 }
 
-/* Hide resize handles on narrow screens where layout stacks differently */
-@media (max-width: 768px) {
+/* Hide resize handles once the desktop split layout is no longer active */
+@media (max-width: 1360px) {
   .resize-handle {
     display: none;
   }
@@ -4915,8 +4930,8 @@ select:focus-visible {
   pointer-events: none;
 }
 
-/* ── ≤960px: tablet landscape — stack content above sidebar ── */
-@media (max-width: 960px) {
+/* ── ≤1360px: mid desktop/tablet landscape — stack content above sidebar ── */
+@media (max-width: 1360px) {
   .hm-main {
     flex-direction: column;
     overflow: hidden;
@@ -5123,6 +5138,8 @@ select:focus-visible {
     -webkit-overflow-scrolling: touch;
     scrollbar-width: none;
     padding: 0 8px;
+    min-width: 0;
+    max-width: 100%;
   }
 
   .hm-bottom-tabs::-webkit-scrollbar {
@@ -5134,6 +5151,11 @@ select:focus-visible {
     font-size: 12px;
     /* Touch target */
     min-height: 44px;
+  }
+
+  .hm-trades-summary {
+    flex-wrap: wrap;
+    gap: 8px 16px;
   }
 
   .hm-trades-filters {
@@ -5215,9 +5237,33 @@ select:focus-visible {
   }
 
   .hm-header-mob-row2 {
-    height: 36px;
-    padding: 0 8px;
+    height: auto;
+    padding: 6px 8px;
     gap: 6px;
+  }
+
+  .hm-nav-tabs--mobile,
+  .hm-view-tabs--mobile {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    gap: 2px;
+    padding: 4px;
+  }
+
+  .hm-nav-tabs--mobile .hm-nav-tab,
+  .hm-view-tabs--mobile .hm-view-tab {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    padding: 8px 4px;
+    font-size: 9px;
+    letter-spacing: 0.04em;
   }
 
   .hm-header-mob-row2 .hm-market-name {
@@ -5261,13 +5307,21 @@ select:focus-visible {
   /* bottom-panel inherits flex:1 from ≤768px — no fixed height override needed */
 
   .hm-bottom-tabs {
-    padding: 0 4px;
+    padding: 0 6px;
+    flex-wrap: wrap;
+    gap: 0 4px;
+    overflow-x: visible;
   }
 
   .hm-bottom-tab {
-    padding: 9px 9px;
-    font-size: 11px;
-    min-height: 40px;
+    flex: 1 1 calc(33.333% - 4px);
+    min-width: 0;
+    padding: 8px 6px;
+    font-size: 10px;
+    line-height: 1.2;
+    min-height: 36px;
+    white-space: normal;
+    text-align: center;
   }
 
   .hm-sidebar {
@@ -5294,7 +5348,7 @@ select:focus-visible {
   }
 
   .hm-bet-fab {
-    bottom: 16px;
+    bottom: 72px;
     right: 16px;
     height: 48px;
     padding: 0 20px;

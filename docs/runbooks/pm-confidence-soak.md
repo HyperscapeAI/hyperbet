@@ -50,7 +50,7 @@ That runner already:
 - starts the Hyperbet keeper bridge
 - starts the Hyperbet EVM app
 - opens both UIs
-- keeps the paired UI capture helper running in the background
+- keeps the PM soak follow monitor running in the background
 
 ### If The Duel Stream Stays `IDLE`
 
@@ -82,7 +82,7 @@ curl http://127.0.0.1:5555/api/agents/<agent-id>/start -X POST
 
 ```bash
 cd /Users/mac/Desktop/hyperbet/.claude/worktrees/blissful-golick
-node --import tsx scripts/pm-soak-monitor.ts --mode=local --duration-min=25
+node --import tsx scripts/pm-soak-monitor.ts --mode=local --follow --duration-min=25
 ```
 
 Defaults:
@@ -90,6 +90,7 @@ Defaults:
 - cadence baseline: `30s ANNOUNCEMENT + 150s FIGHTING + 5s RESOLUTION`
 - soak budget: `8` cycles, about `25` minutes
 - screenshots: enabled
+- follow mode: enabled for the live local integration lane
 
 Artifacts:
 
@@ -97,7 +98,7 @@ Artifacts:
   - `output/playwright/pm-soak/<timestamp>/summary.json`
   - `output/playwright/pm-soak/<timestamp>/cycles.csv`
 - dual-UI paired captures from the runner:
-  - `output/playwright/hyperscapes-pm-local/<timestamp>/`
+  - `output/playwright/pm-soak/<timestamp>/screenshots/`
 
 Local pass bar:
 

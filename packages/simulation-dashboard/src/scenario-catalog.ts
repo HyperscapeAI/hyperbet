@@ -1,5 +1,5 @@
 export type ScenarioGateTier = "gate" | "diagnostic";
-export type ScenarioChainKey = "bsc" | "solana";
+export type ScenarioChainKey = "anvil" | "solana";
 export type ScenarioSettlementMode = "resolve" | "cancel";
 export type ScenarioSettlementStatus =
     | "NULL"
@@ -759,7 +759,7 @@ const SOLANA_PROOF_SCENARIOS: ScenarioPreset[] = [
 
 export const SCENARIO_PRESETS: ScenarioPreset[] = [
     ...EVM_SCENARIO_PRESETS.map((preset) => ({
-        chainKey: "bsc" as const,
+        chainKey: "anvil" as const,
         ...preset,
     })),
     ...SOLANA_PROOF_SCENARIOS,

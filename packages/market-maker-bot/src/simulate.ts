@@ -12,6 +12,14 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+type SimMode = "clob" | "amm" | "both";
+
+function parseSimMode(): SimMode {
+  const raw = (process.env.SIM_MODE ?? "both").toLowerCase();
+  if (raw === "clob" || raw === "amm" || raw === "both") return raw;
+  return "both";
+}
+
 function bootstrapDefaults() {
   if (!process.env.EVM_PRIVATE_KEY) {
     process.env.EVM_PRIVATE_KEY = DEFAULT_DEV_PRIVATE_KEY;
@@ -28,6 +36,14 @@ function bootstrapDefaults() {
   if (!process.env.SOLANA_RPC_URL) {
     process.env.SOLANA_RPC_URL = "http://127.0.0.1:8899";
   }
+
+  const simMode = parseSimMode();
+  if (simMode === "clob") {
+    process.env.MM_ENABLE_AMM = "false";
+  } else if (simMode === "amm") {
+    process.env.MM_ENABLE_AMM = "true";
+  }
+  // "both" leaves MM_ENABLE_AMM at its default (true)
 }
 
 async function main() {
@@ -47,14 +63,17 @@ async function main() {
     await sleep(delayMs);
   }
 
+  const simMode = parseSimMode();
   const config = mm.getConfig();
   const inventory = mm.getInventory();
   const activeOrders = mm.getActiveOrders();
+  const ammPositions = mm.getAmmPositions();
 
   console.log("[simulate] Completed.");
   console.log(
     JSON.stringify(
       {
+        simMode,
         cycles,
         chainStatus: {
           bsc: config.bscEnabled,
@@ -62,7 +81,11 @@ async function main() {
           avax: config.avaxEnabled,
           solana: config.solanaEnabled,
         },
+        ammEnabled: config.ammEnabled,
+        ammSolanaEnabled: config.ammSolanaEnabled,
+        ammEvmChains: config.ammEvmChains,
         inventory,
+        ammPositions,
         activeOrderCount: activeOrders.length,
       },
       null,
@@ -70,12 +93,18 @@ async function main() {
     ),
   );
 
-  if (
-    !config.bscEnabled &&
-    !config.baseEnabled &&
-    !config.avaxEnabled &&
-    !config.solanaEnabled
-  ) {
+  const hasClobChain =
+    config.bscEnabled || config.baseEnabled || config.avaxEnabled || config.solanaEnabled;
+  const hasAmmChain =
+    config.ammEnabled && (config.ammSolanaEnabled || Object.values(config.ammEvmChains ?? {}).some(Boolean));
+
+  if (simMode === "clob" && !hasClobChain) {
+    throw new Error("No CLOB chain endpoints were reachable");
+  }
+  if (simMode === "amm" && !hasAmmChain) {
+    throw new Error("No AMM chain endpoints were reachable");
+  }
+  if (simMode === "both" && !hasClobChain && !hasAmmChain) {
     throw new Error("No chain endpoints were reachable");
   }
 }

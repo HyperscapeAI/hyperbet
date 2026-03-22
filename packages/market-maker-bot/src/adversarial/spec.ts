@@ -43,25 +43,25 @@ const baseScenarioBudget = (
 
 export const CHAIN_RISK_BUDGETS: Record<ChainId, ChainRiskBudget> = {
   solana: {
-    maxAggregateMitigatedAttackerPnl: 290,
-    maxAggregateExploitEvents: 270,
-    maxAggregateInventoryPeak: 215,
-    maxAggregateReconciliationLagMs: 40_000,
-    maxAggregateUnresolvedClaimBacklog: 20,
+    maxAggregateMitigatedAttackerPnl: 540,
+    maxAggregateExploitEvents: 470,
+    maxAggregateInventoryPeak: 340,
+    maxAggregateReconciliationLagMs: 55_000,
+    maxAggregateUnresolvedClaimBacklog: 30,
   },
   bsc: {
-    maxAggregateMitigatedAttackerPnl: 355,
-    maxAggregateExploitEvents: 330,
-    maxAggregateInventoryPeak: 275,
-    maxAggregateReconciliationLagMs: 45_000,
-    maxAggregateUnresolvedClaimBacklog: 22,
+    maxAggregateMitigatedAttackerPnl: 620,
+    maxAggregateExploitEvents: 530,
+    maxAggregateInventoryPeak: 420,
+    maxAggregateReconciliationLagMs: 62_000,
+    maxAggregateUnresolvedClaimBacklog: 34,
   },
   avax: {
-    maxAggregateMitigatedAttackerPnl: 390,
-    maxAggregateExploitEvents: 350,
-    maxAggregateInventoryPeak: 300,
-    maxAggregateReconciliationLagMs: 47_000,
-    maxAggregateUnresolvedClaimBacklog: 24,
+    maxAggregateMitigatedAttackerPnl: 660,
+    maxAggregateExploitEvents: 555,
+    maxAggregateInventoryPeak: 450,
+    maxAggregateReconciliationLagMs: 65_000,
+    maxAggregateUnresolvedClaimBacklog: 36,
   },
 };
 
@@ -299,6 +299,68 @@ export const SCENARIO_RISK_BUDGETS: Record<ScenarioId, ScenarioRiskBudget> = {
       maxToxicFillRate: 0.38,
       maxAdverseSlippageBps: 135,
       maxReconciliationLagMs: 800,
+    },
+  ),
+  amm_sandwich_attack: baseScenarioBudget(
+    ["amm.slippage_tolerance", "amm.mev_protection"],
+    {
+      maxMitigatedAttackerPnl: 55,
+      maxExploitEvents: 45,
+      maxToxicFillRate: 0.68,
+      maxAdverseSlippageBps: 300,
+      maxReconciliationLagMs: 1_200,
+    },
+  ),
+  amm_reserve_manipulation: baseScenarioBudget(
+    ["amm.max_trade_size", "amm.reserve_imbalance_check"],
+    {
+      maxMitigatedAttackerPnl: 48,
+      maxExploitEvents: 36,
+      maxToxicFillRate: 0.62,
+      maxAdverseSlippageBps: 310,
+      maxReconciliationLagMs: 1_000,
+    },
+  ),
+  amm_stale_price_arb: baseScenarioBudget(
+    ["amm.price_freshness_check", "stale_halt.active"],
+    {
+      maxMitigatedAttackerPnl: 40,
+      maxExploitEvents: 32,
+      maxToxicFillRate: 0.5,
+      maxAdverseSlippageBps: 310,
+      maxStaleQuoteUptimeRatio: 1,
+      maxReconciliationLagMs: 5_000,
+    },
+  ),
+  amm_slippage_griefing: baseScenarioBudget(
+    ["amm.slippage_tolerance", "amm.max_trade_size"],
+    {
+      maxMitigatedAttackerPnl: 50,
+      maxExploitEvents: 38,
+      maxToxicFillRate: 0.58,
+      maxAdverseSlippageBps: 300,
+      maxReconciliationLagMs: 1_100,
+    },
+  ),
+  amm_token_drain: baseScenarioBudget(
+    ["amm.max_position_size", "amm.reserve_imbalance_check"],
+    {
+      maxMitigatedAttackerPnl: 42,
+      maxExploitEvents: 35,
+      maxToxicFillRate: 0.55,
+      maxAdverseSlippageBps: 310,
+      minMitigatedMaxDrawdown: -22,
+      maxReconciliationLagMs: 1_000,
+    },
+  ),
+  amm_expiry_race: baseScenarioBudget(
+    ["amm.dynamic_liquidity_decay", "amm.expiry_guard"],
+    {
+      maxMitigatedAttackerPnl: 42,
+      maxExploitEvents: 34,
+      maxToxicFillRate: 0.58,
+      maxAdverseSlippageBps: 310,
+      maxReconciliationLagMs: 1_200,
     },
   ),
 };

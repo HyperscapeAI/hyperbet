@@ -17,8 +17,13 @@ import {
 } from "@hyperbet/chain-registry";
 import {
   DEFAULT_MARKET_MAKER_CONFIG,
+  DEFAULT_AMM_MARKET_MAKER_CONFIG,
   buildQuotePlan,
+  buildAmmTradeDecision,
   evaluateQuoteDecision,
+  type AmmMarketMakerConfig,
+  type AmmMarketSnapshot,
+  type AmmTradeDecision,
   type MarketMakerConfig,
   type MarketSnapshot,
 } from "@hyperbet/mm-core";
@@ -37,6 +42,7 @@ import dotenv from "dotenv";
 import { ethers } from "ethers";
 
 import goldClobMarketIdl from "./idl/gold_clob_market.json" with { type: "json" };
+import lvrAmmIdl from "./idl/lvr_amm.json" with { type: "json" };
 import {
   duelKeyHexToBytes,
   findClobVaultPda,
@@ -47,7 +53,13 @@ import {
   ORDER_BEHAVIOR_GTC,
   findPriceLevelPda,
   findUserBalancePda,
+  findAmmConfigPda,
+  findAmmAdminStatePda,
+  findAmmBetPda,
+  findAmmMintYesPda,
+  findAmmMintNoPda,
 } from "./solana-helpers.ts";
+import { calcAmmPrice, calcDynamicLiquidity, estimateSlippage } from "./amm-math.ts";
 import {
   createDefaultMarketMakerStateStore,
   type ClaimBacklogInput,
@@ -66,6 +78,10 @@ const SHARE_UNIT_SIZE = 1_000n;
 const EVM_ORDER_FLAG_GTC = 0x01;
 const OUTBOX_LEASE_MS = 60_000;
 const CLAIM_BACKLOG_LEASE_MS = 60_000;
+const TOKEN_PROGRAM_ID = new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
+const ASSOCIATED_TOKEN_PROGRAM_ID = new PublicKey(
+  "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",
+);
 
 const GOLD_CLOB_ABI = [
   "function marketKey(bytes32 duelKey, uint8 marketKind) view returns (bytes32)",
@@ -121,6 +137,8 @@ type EvmRuntime = {
   goldClobAddress: string;
 };
 
+type EvmNonceRuntime = Pick<EvmRuntime, "chainKey" | "provider" | "walletAddress">;
+
 type SignableTx = Transaction | VersionedTransaction;
 type AnchorLikeWallet = Wallet & {
   payer: Keypair;
@@ -153,6 +171,82 @@ type SolanaManagedOrder = {
   remainingRawAmount: bigint;
 };
 
+// --- AMM runtime types ---
+
+type SolanaAmmConfig = {
+  authority: PublicKey;
+  treasury: PublicKey;
+  marketMaker: PublicKey;
+  fightOracleProgram: PublicKey;
+  feeBps: number;
+  paused: boolean;
+};
+
+type SolanaAmmRuntime = {
+  connection: Connection;
+  provider: AnchorProvider;
+  wallet: Keypair;
+  walletAddress: string;
+  fightOracleProgramId: PublicKey;
+  ammProgramId: PublicKey;
+  ammProgram: Program<any>;
+  ammConfigPda: PublicKey;
+  ammAdminStatePda: PublicKey;
+  ammConfig: SolanaAmmConfig | null;
+  rpcUrl: string;
+};
+
+type EvmAmmRuntime = {
+  chainKey: BettingEvmChain;
+  enabled: boolean;
+  provider: ethers.JsonRpcProvider;
+  wallet: ethers.Wallet;
+  walletAddress: string;
+  router: ethers.Contract;
+  mUsd: ethers.Contract;
+  routerAddress: string;
+  rpcUrl: string;
+};
+
+type AmmPosition = {
+  chainKey: BettingChainKey;
+  marketRef: string;
+  betId: string;
+  creator: string;
+  yesBalance: bigint;
+  noBalance: bigint;
+  costBasis: bigint;
+  settled: boolean;
+};
+
+const GOLD_AMM_ROUTER_ABI = [
+  "function buyYes(address market, uint256 collateralIn, uint256 minAmountOut)",
+  "function buyNo(address market, uint256 collateralIn, uint256 minAmountOut)",
+  "function sellYes(address market, uint256 tokenIn, uint256 minAmountOut)",
+  "function sellNo(address market, uint256 tokenIn, uint256 minAmountOut)",
+  "function settleFromOracle(address market)",
+  "function redeem(address market, uint256 amountYes, uint256 amountNo)",
+  "function getAllMarkets() view returns (address[])",
+  "function mUSD() view returns (address)",
+] as const;
+
+const LVR_MARKET_ABI = [
+  "function state() view returns (uint8)",
+  "function getMarketDetails() view returns (uint8, uint256, uint256, uint256, uint256, uint256, uint256, uint256)",
+  "function getPriceYes() view returns (uint256)",
+  "function getPriceNo() view returns (uint256)",
+  "function yesToken() view returns (address)",
+  "function noToken() view returns (address)",
+  "function feeBps() view returns (uint256)",
+  "function isDynamic() view returns (bool)",
+] as const;
+
+const ERC20_ABI = [
+  "function balanceOf(address) view returns (uint256)",
+  "function approve(address spender, uint256 amount) returns (bool)",
+  "function allowance(address owner, address spender) view returns (uint256)",
+] as const;
+
 type CrossChainMarketMakerOptions = {
   stateStore?: MarketMakerStateStore;
 };
@@ -170,6 +264,13 @@ function readEnvNumber(name: string, fallback: number): number {
   if (!raw) return fallback;
   const parsed = Number(raw);
   return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function findAssociatedTokenAddress(mint: PublicKey, owner: PublicKey): PublicKey {
+  return PublicKey.findProgramAddressSync(
+    [owner.toBuffer(), TOKEN_PROGRAM_ID.toBuffer(), mint.toBuffer()],
+    ASSOCIATED_TOKEN_PROGRAM_ID,
+  )[0];
 }
 
 function parseEnvironment(raw: string | undefined): BettingAppEnvironment {
@@ -626,6 +727,14 @@ export class CrossChainMarketMaker {
   private lastPredictionMarkets: PredictionMarketsResponse | null = null;
   private lastPredictionMarketsAt = 0;
 
+  // AMM state
+  private readonly evmAmmRuntimes: EvmAmmRuntime[];
+  private readonly solanaAmmRuntime: SolanaAmmRuntime | null;
+  private readonly ammPositions = new Map<string, AmmPosition>();
+  private ammEnabled = readEnvBoolean("MM_ENABLE_AMM", true);
+  private ammSolanaEnabled = readEnvBoolean("MM_ENABLE_AMM_SOLANA", true);
+  private readonly ammConfig: AmmMarketMakerConfig;
+
   constructor(options: CrossChainMarketMakerOptions = {}) {
     this.instanceId = (process.env.MM_INSTANCE_ID || "mm-1").trim() || "mm-1";
     this.config = buildMarketMakerConfig();
@@ -635,6 +744,21 @@ export class CrossChainMarketMaker {
       this.createEvmRuntime(chainKey),
     );
     this.solanaRuntime = this.createSolanaRuntime();
+
+    // AMM runtimes
+    this.ammConfig = {
+      ...DEFAULT_AMM_MARKET_MAKER_CONFIG,
+      deviationThresholdBps: readEnvNumber("MM_AMM_DEVIATION_THRESHOLD_BPS", DEFAULT_AMM_MARKET_MAKER_CONFIG.deviationThresholdBps),
+      maxTradeSize: readEnvNumber("MM_AMM_MAX_TRADE_SIZE", DEFAULT_AMM_MARKET_MAKER_CONFIG.maxTradeSize),
+      minTradeSize: readEnvNumber("MM_AMM_MIN_TRADE_SIZE", DEFAULT_AMM_MARKET_MAKER_CONFIG.minTradeSize),
+      maxPositionSize: readEnvNumber("MM_AMM_MAX_POSITION_SIZE", DEFAULT_AMM_MARKET_MAKER_CONFIG.maxPositionSize),
+    };
+    this.evmAmmRuntimes = this.ammEnabled
+      ? BETTING_EVM_CHAIN_ORDER.map((chainKey) => this.createEvmAmmRuntime(chainKey))
+      : [];
+    this.solanaAmmRuntime = this.ammEnabled && this.ammSolanaEnabled
+      ? this.createSolanaAmmRuntime()
+      : null;
   }
 
   private async ensureStateStoreReady() {
@@ -1600,6 +1724,17 @@ export class CrossChainMarketMaker {
     }
 
     await this.solanaMarketMake(predictionMarkets, duelSignal);
+
+    // AMM market-making (parallel to CLOB above)
+    if (this.ammEnabled) {
+      for (const runtime of this.evmAmmRuntimes) {
+        if (!runtime.enabled) continue;
+        await this.evmAmmMarketMake(runtime, predictionMarkets, duelSignal);
+      }
+      if (this.ammSolanaEnabled && this.solanaAmmRuntime) {
+        await this.solanaAmmMarketMake(predictionMarkets, duelSignal);
+      }
+    }
   }
 
   private async evmMarketMake(
@@ -1850,7 +1985,7 @@ export class CrossChainMarketMaker {
     return null;
   }
 
-  private async nextRuntimeNonce(runtime: EvmRuntime): Promise<number> {
+  private async nextRuntimeNonce(runtime: EvmNonceRuntime): Promise<number> {
     const cached = this.nextNonceByChain.get(runtime.chainKey);
     if (cached != null) {
       return cached;
@@ -1863,14 +1998,14 @@ export class CrossChainMarketMaker {
     return fresh;
   }
 
-  private noteRuntimeNonceCommitted(runtime: EvmRuntime, nonce: number) {
+  private noteRuntimeNonceCommitted(runtime: EvmNonceRuntime, nonce: number) {
     const cached = this.nextNonceByChain.get(runtime.chainKey);
     if (cached == null || nonce >= cached) {
       this.nextNonceByChain.set(runtime.chainKey, nonce + 1);
     }
   }
 
-  private async refreshRuntimeNonce(runtime: EvmRuntime): Promise<number> {
+  private async refreshRuntimeNonce(runtime: EvmNonceRuntime): Promise<number> {
     const fresh = await runtime.provider.getTransactionCount(
       runtime.walletAddress,
       "pending",
@@ -1880,7 +2015,7 @@ export class CrossChainMarketMaker {
   }
 
   private async sendEvmTransaction<T>(
-    runtime: EvmRuntime,
+    runtime: EvmNonceRuntime,
     buildTransaction: (nonce: number) => Promise<T>,
   ): Promise<{ tx: T; nonce: number }> {
     const nonce = await this.nextRuntimeNonce(runtime);
@@ -2694,11 +2829,622 @@ export class CrossChainMarketMaker {
     }
   }
 
+  // --- AMM Runtime Creation ---
+
+  private createEvmAmmRuntime(chainKey: BettingEvmChain): EvmAmmRuntime {
+    const disabled: EvmAmmRuntime = {
+      chainKey,
+      enabled: false,
+      provider: null as any,
+      wallet: null as any,
+      walletAddress: "",
+      router: null as any,
+      mUsd: null as any,
+      routerAddress: "",
+      rpcUrl: "",
+    };
+    try {
+      const resolved = resolveBettingEvmRuntimeEnv(chainKey, TARGET_ENV);
+      const routerAddress = resolved.goldAmmRouterAddress?.trim();
+      if (!routerAddress) return disabled;
+      const mUsdAddress = resolved.mUsdTokenAddress?.trim();
+      const rpcUrl = resolved.rpcUrl;
+      const privateKey = (
+        process.env[`EVM_PRIVATE_KEY_${chainKey.toUpperCase()}`] ||
+        process.env.EVM_PRIVATE_KEY ||
+        ""
+      ).trim();
+      if (!privateKey) return disabled;
+      const provider = new ethers.JsonRpcProvider(rpcUrl);
+      const wallet = new ethers.Wallet(privateKey, provider);
+      const router = new ethers.Contract(routerAddress, GOLD_AMM_ROUTER_ABI, wallet);
+      const mUsd = mUsdAddress
+        ? new ethers.Contract(mUsdAddress, ERC20_ABI, wallet)
+        : (null as any);
+      return {
+        chainKey,
+        enabled: true,
+        provider,
+        wallet,
+        walletAddress: wallet.address,
+        router,
+        mUsd,
+        routerAddress,
+        rpcUrl,
+      };
+    } catch (err) {
+      console.warn(`[AMM] Failed to create EVM AMM runtime for ${chainKey}:`, err);
+      return disabled;
+    }
+  }
+
+  private createSolanaAmmRuntime(): SolanaAmmRuntime | null {
+    if (!this.ammSolanaEnabled) return null;
+    const solanaPrivateKey = (process.env.SOLANA_PRIVATE_KEY || "").trim();
+    if (!solanaPrivateKey) return null;
+    try {
+      const deployment = resolveBettingSolanaDeployment(
+        normalizeSolanaCluster(TARGET_ENV) as any,
+      );
+      const ammProgramIdStr = (
+        process.env.GOLD_AMM_MARKET_PROGRAM_ID || ""
+      ).trim() || deployment.goldAmmMarketProgramId;
+      if (!ammProgramIdStr) return null;
+      const ammProgramId = new PublicKey(ammProgramIdStr);
+      const rpcUrl =
+        (process.env.SOLANA_RPC_URL || "").trim() ||
+        defaultSolanaRpcUrl(TARGET_ENV);
+      const keyBytes = decodeSolanaSecretKey(solanaPrivateKey);
+      const wallet =
+        keyBytes.length === 32
+          ? Keypair.fromSeed(keyBytes)
+          : Keypair.fromSecretKey(keyBytes);
+      const connection = new Connection(rpcUrl, "confirmed");
+      const provider = new AnchorProvider(
+        connection,
+        toAnchorWallet(wallet),
+        { commitment: "confirmed", preflightCommitment: "confirmed" },
+      );
+      const fightOracleProgramId = new PublicKey(
+        (process.env.FIGHT_ORACLE_PROGRAM_ID || "").trim() ||
+          deployment.fightOracleProgramId,
+      );
+      const ammProgram = new Program(
+        ensureIdlAddress(lvrAmmIdl, ammProgramId),
+        provider,
+      ) as Program<any>;
+      return {
+        connection,
+        provider,
+        wallet,
+        walletAddress: wallet.publicKey.toBase58(),
+        fightOracleProgramId,
+        ammProgramId,
+        ammProgram,
+        ammConfigPda: findAmmConfigPda(ammProgramId),
+        ammAdminStatePda: findAmmAdminStatePda(ammProgramId),
+        ammConfig: null,
+        rpcUrl,
+      };
+    } catch (error) {
+      console.warn(
+        `[AMM-SOLANA] Disabled: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      return null;
+    }
+  }
+
+  // --- AMM Market-Making Cycle ---
+
+  private async solanaAmmMarketMake(
+    predictionMarkets: PredictionMarketsResponse | null,
+    duelSignal: DuelSignal | null,
+  ) {
+    const runtime = this.solanaAmmRuntime;
+    if (!this.ammEnabled || !this.ammSolanaEnabled || !runtime) return;
+
+    // Fetch ammConfig on first cycle
+    if (!runtime.ammConfig) {
+      try {
+        const configAccount = await (runtime.ammProgram.account as any).ammConfig.fetchNullable(
+          runtime.ammConfigPda,
+        );
+        if (!configAccount) return;
+        runtime.ammConfig = {
+          authority: configAccount.authority,
+          treasury: configAccount.treasury,
+          marketMaker: configAccount.marketMaker,
+          fightOracleProgram: configAccount.fightOracleProgram,
+          feeBps: configAccount.feeBps,
+          paused: configAccount.paused,
+        };
+      } catch {
+        return;
+      }
+    }
+    if (runtime.ammConfig.paused) return;
+
+    // Find AMM markets from lifecycle records
+    const ammMarkets = (predictionMarkets?.markets ?? []).filter(
+      (m) => m.chainKey === "solana" && m.marketType === "amm",
+    );
+
+    for (const market of ammMarkets) {
+      try {
+        await this.solanaAmmMarketMakeOne(runtime, market, duelSignal);
+      } catch (error) {
+        console.warn(
+          `[AMM-SOLANA] market-make error for ${market.marketRef}: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
+  }
+
+  private async solanaAmmMarketMakeOne(
+    runtime: SolanaAmmRuntime,
+    market: PredictionMarketLifecycleRecord,
+    duelSignal: DuelSignal | null,
+  ) {
+    const metadata = market.metadata as Record<string, unknown> | undefined;
+    const betId = BigInt((metadata?.betId as string) || "0");
+    const creatorStr = (metadata?.creator as string) || "";
+    if (!betId || !creatorStr) return;
+    const creator = new PublicKey(creatorStr);
+
+    const betPda = findAmmBetPda(runtime.ammProgramId, betId, creator);
+
+    // Fetch bet state
+    const betAccount = await (runtime.ammProgram.account as any).bet.fetchNullable(betPda);
+    if (!betAccount || !betAccount.isInitialized) return;
+
+    // Check if settled
+    if (betAccount.sideWon != null) {
+      await this.solanaAmmWithdraw(runtime, betId, creator, betAccount);
+      return;
+    }
+
+    // Compute price
+    const reserveYes = BigInt(betAccount.reserves[0].toString());
+    const reserveNo = BigInt(betAccount.reserves[1].toString());
+    const currentTime = BigInt(Math.floor(Date.now() / 1000));
+    const liq = betAccount.isDynamic
+      ? calcDynamicLiquidity(BigInt(betAccount.initialLiq.toString()), BigInt(betAccount.expirationAt.toString()), currentTime)
+      : BigInt(betAccount.initialLiq.toString());
+    const ammPrice = calcAmmPrice(reserveYes, reserveNo, liq);
+
+    // Build snapshot
+    const posKey = `solana:${betPda.toBase58()}`;
+    const existing = this.ammPositions.get(posKey);
+    const snapshot: AmmMarketSnapshot = {
+      chainKey: "solana",
+      lifecycleStatus: market.lifecycleStatus,
+      duelKey: market.duelKey,
+      marketRef: betPda.toBase58(),
+      ammPriceYes: ammPrice,
+      reserveYes: Number(reserveYes),
+      reserveNo: Number(reserveNo),
+      liquidity: Number(liq),
+      betCloseTimeMs: betAccount.expirationAt
+        ? Number(betAccount.expirationAt) * 1000
+        : null,
+      lastStreamAtMs: Date.now(),
+      lastOracleAtMs: Date.now(),
+      lastRpcAtMs: Date.now(),
+      exposure: {
+        yes: Number(existing?.yesBalance ?? 0n),
+        no: Number(existing?.noBalance ?? 0n),
+        openYes: 0,
+        openNo: 0,
+      },
+    };
+
+    const signal = duelSignal
+      ? { signalPrice: duelSignal.midPrice, signalWeight: duelSignal.weight }
+      : {};
+    const decision = buildAmmTradeDecision(snapshot, signal, this.ammConfig);
+
+    if (decision.action === "hold") return;
+
+    const outcome = decision.action === "buy_yes" || decision.action === "sell_yes" ? 0 : 1;
+    const amountIn = new BN(decision.amount);
+    const mintYes = findAmmMintYesPda(runtime.ammProgramId, betId, creator);
+    const mintNo = findAmmMintNoPda(runtime.ammProgramId, betId, creator);
+    const destinationYes = findAssociatedTokenAddress(mintYes, runtime.wallet.publicKey);
+    const destinationNo = findAssociatedTokenAddress(mintNo, runtime.wallet.publicKey);
+    const treasuryYesAta = findAssociatedTokenAddress(
+      mintYes,
+      runtime.ammConfig!.treasury,
+    );
+    const treasuryNoAta = findAssociatedTokenAddress(
+      mintNo,
+      runtime.ammConfig!.treasury,
+    );
+
+    const isBuy = decision.action === "buy_yes" || decision.action === "buy_no";
+
+    try {
+      if (isBuy) {
+        await runtime.ammProgram.methods
+          .buy(new BN(betId.toString()), outcome, amountIn)
+          .accountsPartial({
+            signer: runtime.wallet.publicKey,
+            ammConfig: runtime.ammConfigPda,
+            bet: betPda,
+            treasury: runtime.ammConfig!.treasury,
+            mintYes,
+            mintNo,
+            destinationYes,
+            destinationNo,
+            tokenProgram: TOKEN_PROGRAM_ID,
+            systemProgram: SystemProgram.programId,
+            associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+          })
+          .rpc();
+      } else {
+        await runtime.ammProgram.methods
+          .sell(new BN(betId.toString()), outcome, amountIn)
+          .accountsPartial({
+            signer: runtime.wallet.publicKey,
+            ammConfig: runtime.ammConfigPda,
+            bet: betPda,
+            treasury: runtime.ammConfig!.treasury,
+            mintYes,
+            mintNo,
+            destinationYes,
+            destinationNo,
+            treasuryYesAta,
+            treasuryNoAta,
+            tokenProgram: TOKEN_PROGRAM_ID,
+            systemProgram: SystemProgram.programId,
+            associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+          })
+          .rpc();
+      }
+
+      // Read actual token balances after trade for accurate position tracking
+      const [yesBalResp, noBalResp] = await Promise.all([
+        runtime.connection.getTokenAccountBalance(destinationYes).catch(() => ({
+          value: { amount: "0" },
+        })),
+        runtime.connection.getTokenAccountBalance(destinationNo).catch(() => ({
+          value: { amount: "0" },
+        })),
+      ]);
+
+      const pos: AmmPosition = existing ?? {
+        chainKey: "solana",
+        marketRef: betPda.toBase58(),
+        betId: betId.toString(),
+        creator: creatorStr,
+        yesBalance: 0n,
+        noBalance: 0n,
+        costBasis: 0n,
+        settled: false,
+      };
+      pos.yesBalance = BigInt(yesBalResp.value.amount);
+      pos.noBalance = BigInt(noBalResp.value.amount);
+      if (isBuy) {
+        pos.costBasis += BigInt(decision.amount);
+      }
+      this.ammPositions.set(posKey, pos);
+    } catch (error) {
+      console.warn(
+        `[AMM-SOLANA] ${decision.action} failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
+  private async solanaAmmWithdraw(
+    runtime: SolanaAmmRuntime,
+    betId: bigint,
+    creator: PublicKey,
+    betAccount: any,
+  ) {
+    const posKey = `solana:${findAmmBetPda(runtime.ammProgramId, betId, creator).toBase58()}`;
+    const pos = this.ammPositions.get(posKey);
+    if (!pos || pos.settled) return;
+
+    try {
+      const betPda = findAmmBetPda(runtime.ammProgramId, betId, creator);
+      const mintYes = findAmmMintYesPda(runtime.ammProgramId, betId, creator);
+      const mintNo = findAmmMintNoPda(runtime.ammProgramId, betId, creator);
+      const destinationYes = findAssociatedTokenAddress(
+        mintYes,
+        runtime.wallet.publicKey,
+      );
+      const destinationNo = findAssociatedTokenAddress(
+        mintNo,
+        runtime.wallet.publicKey,
+      );
+      const [yesBalanceResp, noBalanceResp] = await Promise.all([
+        runtime.connection.getTokenAccountBalance(destinationYes).catch(() => ({
+          value: { amount: "0" },
+        })),
+        runtime.connection.getTokenAccountBalance(destinationNo).catch(() => ({
+          value: { amount: "0" },
+        })),
+      ]);
+
+      const yesBalance = BigInt(yesBalanceResp.value.amount);
+      const noBalance = BigInt(noBalanceResp.value.amount);
+      const sideWon: number = Number(betAccount.sideWon);
+      const withdrawals: Array<{ outcome: number; balance: bigint }> = [];
+
+      if (sideWon === 2) {
+        if (yesBalance > 0n) withdrawals.push({ outcome: 0, balance: yesBalance });
+        if (noBalance > 0n) withdrawals.push({ outcome: 1, balance: noBalance });
+      } else if (sideWon === 0 && yesBalance > 0n) {
+        withdrawals.push({ outcome: 0, balance: yesBalance });
+      } else if (sideWon === 1 && noBalance > 0n) {
+        withdrawals.push({ outcome: 1, balance: noBalance });
+      }
+
+      if (withdrawals.length === 0) {
+        pos.settled = true;
+        return;
+      }
+
+      for (const withdrawal of withdrawals) {
+        await runtime.ammProgram.methods
+          .withdrawPostSettle(
+            new BN(betId.toString()),
+            withdrawal.outcome,
+            new BN(withdrawal.balance.toString()),
+          )
+          .accountsPartial({
+            signer: runtime.wallet.publicKey,
+            bet: betPda,
+            mintYes,
+            mintNo,
+            destinationYes,
+            destinationNo,
+            tokenProgram: TOKEN_PROGRAM_ID,
+            systemProgram: SystemProgram.programId,
+            associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+          })
+          .rpc();
+      }
+
+      pos.settled = true;
+      console.log(`[AMM-SOLANA] withdrew from settled bet ${betId}`);
+    } catch (error) {
+      console.warn(
+        `[AMM-SOLANA] withdraw failed for bet ${betId}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
+  private async evmAmmMarketMake(
+    runtime: EvmAmmRuntime,
+    predictionMarkets: PredictionMarketsResponse | null,
+    duelSignal: DuelSignal | null,
+  ) {
+    if (!runtime.enabled) return;
+
+    const ammMarkets = (predictionMarkets?.markets ?? []).filter(
+      (m) => m.chainKey === runtime.chainKey && m.marketType === "amm",
+    );
+
+    for (const market of ammMarkets) {
+      try {
+        await this.evmAmmMarketMakeOne(runtime, market, duelSignal);
+      } catch (error) {
+        console.warn(
+          `[AMM-${runtime.chainKey.toUpperCase()}] error: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
+  }
+
+  private async evmAmmMarketMakeOne(
+    runtime: EvmAmmRuntime,
+    market: PredictionMarketLifecycleRecord,
+    duelSignal: DuelSignal | null,
+  ) {
+    const marketAddress = market.contractAddress ?? market.marketRef;
+    if (!marketAddress) return;
+
+    const lvrMarket = new ethers.Contract(marketAddress, LVR_MARKET_ABI, runtime.provider);
+    const [stateRaw, deadlineRaw, , liqRaw, reserveYesRaw, reserveNoRaw] =
+      await lvrMarket.getMarketDetails();
+
+    // state: 0=OPEN, 1=CLOSED, 2=PENDING, 3=DISPUTED, 4=RESOLVED
+    const marketState = Number(stateRaw);
+    if (marketState === 4) {
+      await this.evmAmmRedeem(runtime, marketAddress);
+      return;
+    }
+    if (marketState !== 0) return;
+
+    // Compute price using EVM WAD (1e18) reserves — normalize to [0, 1]
+    // We use the Solana math port (1e6 scale) by downscaling
+    const scale = 1_000_000_000_000n; // 1e18 / 1e6
+    const ry = BigInt(reserveYesRaw.toString()) / scale;
+    const rn = BigInt(reserveNoRaw.toString()) / scale;
+    const l = BigInt(liqRaw.toString()) / scale;
+    const ammPrice = calcAmmPrice(ry, rn, l);
+
+    const posKey = `${runtime.chainKey}:${marketAddress}`;
+    const existing = this.ammPositions.get(posKey);
+
+    const now = Date.now();
+    const snapshot: AmmMarketSnapshot = {
+      chainKey: runtime.chainKey,
+      lifecycleStatus: market.lifecycleStatus,
+      duelKey: market.duelKey,
+      marketRef: marketAddress,
+      ammPriceYes: ammPrice,
+      reserveYes: Number(ry),
+      reserveNo: Number(rn),
+      liquidity: Number(l),
+      betCloseTimeMs: Number(deadlineRaw) * 1000,
+      lastStreamAtMs: now, // AMM uses on-chain state, no separate stream
+      lastOracleAtMs: now,
+      lastRpcAtMs: now,
+      exposure: {
+        // Normalize WAD (1e18) token balances to human-readable units
+        yes: Number((existing?.yesBalance ?? 0n) / 1_000_000_000_000_000_000n),
+        no: Number((existing?.noBalance ?? 0n) / 1_000_000_000_000_000_000n),
+        openYes: 0,
+        openNo: 0,
+      },
+    };
+
+    const signal = duelSignal
+      ? { signalPrice: duelSignal.midPrice, signalWeight: duelSignal.weight }
+      : {};
+    const decision = buildAmmTradeDecision(snapshot, signal, this.ammConfig);
+
+    if (decision.action === "hold") return;
+
+    const amountBn = ethers.parseUnits(decision.amount.toString(), 18); // mUSD WAD (18 decimals)
+
+    // Compute slippage-protected minAmountOut (2% tolerance)
+    const isBuyAction = decision.action === "buy_yes" || decision.action === "buy_no";
+    const isBuyYesAction = decision.action === "buy_yes" || decision.action === "sell_no";
+    const { amountOut: expectedOut } = estimateSlippage(
+      isBuyYesAction, BigInt(ry.toString()), BigInt(rn.toString()), BigInt(l.toString()),
+      BigInt(amountBn.toString()) / 1_000_000_000_000n, // scale WAD to u64 1e6
+    );
+    const slippageBps = BigInt(this.ammConfig.maxSlippageBps ?? 200);
+    // Scale minAmountOut back to WAD for the router
+    const minAmountOut = (expectedOut * (10000n - slippageBps) / 10000n) * 1_000_000_000_000n;
+
+    try {
+      if (isBuyAction) {
+        // Ensure mUSD approval (use nonce tracker for all EVM txs)
+        if (runtime.mUsd) {
+          const allowance = await runtime.mUsd.allowance(
+            runtime.walletAddress,
+            runtime.routerAddress,
+          );
+          if (BigInt(allowance.toString()) < BigInt(amountBn.toString())) {
+            await this.sendEvmTransaction(runtime, (nonce) =>
+              runtime.mUsd!.approve(runtime.routerAddress, ethers.MaxUint256, { nonce }),
+            );
+          }
+        }
+        if (decision.action === "buy_yes") {
+          await this.sendEvmTransaction(runtime, (nonce) =>
+            runtime.router.buyYes(marketAddress, amountBn, minAmountOut, { nonce }),
+          );
+        } else {
+          await this.sendEvmTransaction(runtime, (nonce) =>
+            runtime.router.buyNo(marketAddress, amountBn, minAmountOut, { nonce }),
+          );
+        }
+      } else {
+        // Sell: need token approval
+        const [yesTokenAddr, noTokenAddr] = await Promise.all([
+          lvrMarket.yesToken(),
+          lvrMarket.noToken(),
+        ]);
+        const tokenAddr = decision.action === "sell_yes" ? yesTokenAddr : noTokenAddr;
+        const token = new ethers.Contract(tokenAddr, ERC20_ABI, runtime.wallet);
+        const allowance = await token.allowance(runtime.walletAddress, runtime.routerAddress);
+        if (BigInt(allowance.toString()) < BigInt(amountBn.toString())) {
+          await this.sendEvmTransaction(runtime, (nonce) =>
+            token.approve(runtime.routerAddress, ethers.MaxUint256, { nonce }),
+          );
+        }
+        if (decision.action === "sell_yes") {
+          await this.sendEvmTransaction(runtime, (nonce) =>
+            runtime.router.sellYes(marketAddress, amountBn, minAmountOut, { nonce }),
+          );
+        } else {
+          await this.sendEvmTransaction(runtime, (nonce) =>
+            runtime.router.sellNo(marketAddress, amountBn, minAmountOut, { nonce }),
+          );
+        }
+      }
+
+      // Read actual token balances after trade
+      const [yesTokenAddr, noTokenAddr] = await Promise.all([
+        lvrMarket.yesToken(),
+        lvrMarket.noToken(),
+      ]);
+      const yesToken = new ethers.Contract(yesTokenAddr, ERC20_ABI, runtime.provider);
+      const noToken = new ethers.Contract(noTokenAddr, ERC20_ABI, runtime.provider);
+      const [yesBal, noBal] = await Promise.all([
+        yesToken.balanceOf(runtime.walletAddress),
+        noToken.balanceOf(runtime.walletAddress),
+      ]);
+
+      const pos: AmmPosition = existing ?? {
+        chainKey: runtime.chainKey,
+        marketRef: marketAddress,
+        betId: "0",
+        creator: "",
+        yesBalance: 0n,
+        noBalance: 0n,
+        costBasis: 0n,
+        settled: false,
+      };
+      pos.yesBalance = BigInt(yesBal.toString());
+      pos.noBalance = BigInt(noBal.toString());
+      if (decision.action === "buy_yes" || decision.action === "buy_no") {
+        pos.costBasis += BigInt(decision.amount);
+      }
+      this.ammPositions.set(posKey, pos);
+    } catch (error) {
+      console.warn(
+        `[AMM-${runtime.chainKey.toUpperCase()}] ${decision.action} failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
+  private async evmAmmRedeem(runtime: EvmAmmRuntime, marketAddress: string) {
+    const posKey = `${runtime.chainKey}:${marketAddress}`;
+    const pos = this.ammPositions.get(posKey);
+    if (!pos || pos.settled) return;
+    if (pos.yesBalance <= 0n && pos.noBalance <= 0n) {
+      pos.settled = true;
+      return;
+    }
+    try {
+      const lvrMarket = new ethers.Contract(marketAddress, LVR_MARKET_ABI, runtime.provider);
+      const [yesTokenAddr, noTokenAddr] = await Promise.all([
+        lvrMarket.yesToken(),
+        lvrMarket.noToken(),
+      ]);
+      // Approve both tokens
+      for (const addr of [yesTokenAddr, noTokenAddr]) {
+        const token = new ethers.Contract(addr, ERC20_ABI, runtime.wallet);
+        const allowance = await token.allowance(runtime.walletAddress, runtime.routerAddress);
+        if (BigInt(allowance.toString()) < ethers.MaxUint256 / 2n) {
+          await token.approve(runtime.routerAddress, ethers.MaxUint256);
+        }
+      }
+      await runtime.router.redeem(marketAddress, pos.yesBalance, pos.noBalance);
+      pos.settled = true;
+      console.log(`[AMM-${runtime.chainKey.toUpperCase()}] redeemed from ${marketAddress}`);
+    } catch (error) {
+      console.warn(
+        `[AMM-${runtime.chainKey.toUpperCase()}] redeem failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
+  getAmmPositions() {
+    return [...this.ammPositions.entries()].map(([key, pos]) => ({
+      key,
+      ...pos,
+      yesBalance: pos.yesBalance.toString(),
+      noBalance: pos.noBalance.toString(),
+      costBasis: pos.costBasis.toString(),
+    }));
+  }
+
   getInventory() {
-    const aggregate = { yes: 0, no: 0 };
+    const aggregate = { yes: 0, no: 0, ammYes: 0, ammNo: 0 };
     for (const exposure of this.exposureByChain.values()) {
       aggregate.yes += exposure.yes;
       aggregate.no += exposure.no;
+    }
+    for (const pos of this.ammPositions.values()) {
+      // Normalize WAD (1e18) to human-readable
+      aggregate.ammYes += Number(pos.yesBalance / 1_000_000_000_000_000_000n);
+      aggregate.ammNo += Number(pos.noBalance / 1_000_000_000_000_000_000n);
     }
     return aggregate;
   }
@@ -2735,6 +3481,15 @@ export class CrossChainMarketMaker {
       solanaRpcUrl: runtime?.rpcUrl ?? null,
       solanaLastSuccessfulRpcAt: this.lastSuccessfulSolanaRpcAt,
       solanaLastTxSignature: this.lastSolanaTxSignature,
+      ammEnabled: this.ammEnabled,
+      ammSolanaEnabled: this.ammSolanaEnabled,
+      ammSolanaProgramId: this.solanaAmmRuntime?.ammProgramId.toBase58() ?? null,
+      ammEvmChains: Object.fromEntries(
+        this.evmAmmRuntimes.map((r) => [r.chainKey, r.enabled]),
+      ),
+      ammDeviationThresholdBps: this.ammConfig.deviationThresholdBps,
+      ammMaxTradeSize: this.ammConfig.maxTradeSize,
+      ammPositionCount: this.ammPositions.size,
     };
   }
 }

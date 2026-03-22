@@ -16,7 +16,7 @@
       "@hyperbet/ui": ["../../hyperbet-ui/src/index.ts"],
       "@hyperbet/ui/*": ["../../hyperbet-ui/src/*"]
     },
-    "types": ["vite/client"]
+    "types": ["vite/client", "bun-types"]
   },
   "include": ["src", "vite.config.ts"]
 }

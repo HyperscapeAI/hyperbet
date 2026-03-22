@@ -94,12 +94,47 @@ export type DbPerpsMarketRecord = {
   updatedAt: number;
 };
 
+export type DbBetSyncCheckpoint = {
+  sourceEpoch: number;
+  lastSeenSeq: number;
+  lastAppliedSeq: number;
+  replayMode: string | null;
+  degradedReason: string | null;
+  updatedAt: number;
+};
+
+export type DbBetSyncApplyLogEntry = {
+  sourceEpoch: number;
+  seq: number;
+  eventType: string;
+  duelKey: string | null;
+  duelId: string | null;
+  phase: string | null;
+  phaseVersion: number | null;
+  emittedAt: number;
+  payloadJson: string;
+  receivedAt: number;
+  appliedAt: number;
+};
+
+export type DbPredictionMarketsOverviewState = {
+  liveJson: string | null;
+  recentSettlementJson: string | null;
+  updatedAt: number;
+};
+
+export type DbStreamStateSnapshot = {
+  stateJson: string;
+  updatedAt: number;
+};
+
 // ── DB singleton ──────────────────────────────────────────────────────────────
 
 const db = new Database(DB_PATH, { create: true });
 db.run("PRAGMA journal_mode = WAL");
 db.run("PRAGMA synchronous = NORMAL");
 db.run("PRAGMA foreign_keys = ON");
+db.run("PRAGMA auto_vacuum = INCREMENTAL");
 
 // ── Schema ────────────────────────────────────────────────────────────────────
 
@@ -388,6 +423,47 @@ db.run(`CREATE TABLE IF NOT EXISTS perps_markets (
 db.run(`CREATE INDEX IF NOT EXISTS idx_perps_markets_status_seen
   ON perps_markets (status, last_seen_at DESC)`);
 
+db.run(`CREATE TABLE IF NOT EXISTS bet_sync_checkpoint (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  source_epoch INTEGER NOT NULL DEFAULT 0,
+  last_seen_seq INTEGER NOT NULL DEFAULT 0,
+  last_applied_seq INTEGER NOT NULL DEFAULT 0,
+  replay_mode TEXT,
+  degraded_reason TEXT,
+  updated_at INTEGER NOT NULL DEFAULT 0
+)`);
+
+db.run(`CREATE TABLE IF NOT EXISTS bet_sync_apply_log (
+  source_epoch INTEGER NOT NULL,
+  seq INTEGER NOT NULL,
+  event_type TEXT NOT NULL,
+  duel_key TEXT,
+  duel_id TEXT,
+  phase TEXT,
+  phase_version INTEGER,
+  emitted_at INTEGER NOT NULL,
+  payload_json TEXT NOT NULL,
+  received_at INTEGER NOT NULL,
+  applied_at INTEGER NOT NULL,
+  PRIMARY KEY (source_epoch, seq)
+)`);
+
+db.run(`CREATE INDEX IF NOT EXISTS idx_bet_sync_apply_log_duel_time
+  ON bet_sync_apply_log (duel_key, emitted_at DESC)`);
+
+db.run(`CREATE TABLE IF NOT EXISTS bet_sync_overview_state (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  live_json TEXT,
+  recent_settlement_json TEXT,
+  updated_at INTEGER NOT NULL DEFAULT 0
+)`);
+
+db.run(`CREATE TABLE IF NOT EXISTS bet_sync_stream_state (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  state_json TEXT NOT NULL,
+  updated_at INTEGER NOT NULL DEFAULT 0
+)`);
+
 // ── Prepared statements ───────────────────────────────────────────────────────
 
 const insertBet = db.prepare(`INSERT OR IGNORE INTO bets
@@ -491,6 +567,36 @@ const upsertPerpsMarket = db.prepare(`INSERT INTO perps_markets
     deprecated_at = excluded.deprecated_at,
     updated_at = excluded.updated_at`);
 
+const upsertBetSyncCheckpoint = db.prepare(`INSERT INTO bet_sync_checkpoint
+  (id, source_epoch, last_seen_seq, last_applied_seq, replay_mode, degraded_reason, updated_at)
+  VALUES (1, $sourceEpoch, $lastSeenSeq, $lastAppliedSeq, $replayMode, $degradedReason, $updatedAt)
+  ON CONFLICT(id) DO UPDATE SET
+    source_epoch = excluded.source_epoch,
+    last_seen_seq = excluded.last_seen_seq,
+    last_applied_seq = excluded.last_applied_seq,
+    replay_mode = excluded.replay_mode,
+    degraded_reason = excluded.degraded_reason,
+    updated_at = excluded.updated_at`);
+
+const insertBetSyncApplyLogEntry = db.prepare(`INSERT OR IGNORE INTO bet_sync_apply_log
+  (source_epoch, seq, event_type, duel_key, duel_id, phase, phase_version, emitted_at, payload_json, received_at, applied_at)
+  VALUES ($sourceEpoch, $seq, $eventType, $duelKey, $duelId, $phase, $phaseVersion, $emittedAt, $payloadJson, $receivedAt, $appliedAt)`);
+
+const upsertBetSyncOverviewState = db.prepare(`INSERT INTO bet_sync_overview_state
+  (id, live_json, recent_settlement_json, updated_at)
+  VALUES (1, $liveJson, $recentSettlementJson, $updatedAt)
+  ON CONFLICT(id) DO UPDATE SET
+    live_json = excluded.live_json,
+    recent_settlement_json = excluded.recent_settlement_json,
+    updated_at = excluded.updated_at`);
+
+const upsertBetSyncStreamState = db.prepare(`INSERT INTO bet_sync_stream_state
+  (id, state_json, updated_at)
+  VALUES (1, $stateJson, $updatedAt)
+  ON CONFLICT(id) DO UPDATE SET
+    state_json = excluded.state_json,
+    updated_at = excluded.updated_at`);
+
 // ── Load (hydrate in-memory state from DB at startup) ─────────────────────────
 
 export type HydratedState = {
@@ -507,6 +613,9 @@ export type HydratedState = {
   invitedWalletsByWallet: Map<string, Set<string>>;
   referralFeeShareGoldByWallet: Map<string, number>;
   treasuryFeesFromReferralsByWallet: Map<string, number>;
+  betSyncCheckpoint: DbBetSyncCheckpoint | null;
+  predictionMarketsOverview: DbPredictionMarketsOverviewState | null;
+  streamStateSnapshot: DbStreamStateSnapshot | null;
 };
 
 export function loadAll(betLimit = 5000): HydratedState {
@@ -655,6 +764,63 @@ export function loadAll(betLimit = 5000): HydratedState {
     );
   }
 
+  const checkpointRow = db
+    .prepare(
+      `SELECT source_epoch, last_seen_seq, last_applied_seq, replay_mode, degraded_reason, updated_at
+         FROM bet_sync_checkpoint
+        WHERE id = 1`,
+    )
+    .get() as Record<string, unknown> | null;
+  const betSyncCheckpoint = checkpointRow
+    ? {
+        sourceEpoch: Number(checkpointRow.source_epoch ?? 0),
+        lastSeenSeq: Number(checkpointRow.last_seen_seq ?? 0),
+        lastAppliedSeq: Number(checkpointRow.last_applied_seq ?? 0),
+        replayMode:
+          checkpointRow.replay_mode == null
+            ? null
+            : String(checkpointRow.replay_mode),
+        degradedReason:
+          checkpointRow.degraded_reason == null
+            ? null
+            : String(checkpointRow.degraded_reason),
+        updatedAt: Number(checkpointRow.updated_at ?? 0),
+      }
+    : null;
+
+  const overviewRow = db
+    .prepare(
+      `SELECT live_json, recent_settlement_json, updated_at
+         FROM bet_sync_overview_state
+        WHERE id = 1`,
+    )
+    .get() as Record<string, unknown> | null;
+  const predictionMarketsOverview = overviewRow
+    ? {
+        liveJson:
+          overviewRow.live_json == null ? null : String(overviewRow.live_json),
+        recentSettlementJson:
+          overviewRow.recent_settlement_json == null
+            ? null
+            : String(overviewRow.recent_settlement_json),
+        updatedAt: Number(overviewRow.updated_at ?? 0),
+      }
+    : null;
+  const streamStateRow = db
+    .prepare(
+      `SELECT state_json, updated_at
+         FROM bet_sync_stream_state
+        WHERE id = 1`,
+    )
+    .get() as Record<string, unknown> | null;
+  const streamStateSnapshot =
+    streamStateRow && streamStateRow.state_json != null
+      ? {
+          stateJson: String(streamStateRow.state_json),
+          updatedAt: Number(streamStateRow.updated_at ?? 0),
+        }
+      : null;
+
   console.log(
     `[db] loaded ${bets.length} bets, ${walletDisplay.size} wallets, ${pointsByWallet.size} point records from ${DB_PATH}`,
   );
@@ -673,6 +839,9 @@ export function loadAll(betLimit = 5000): HydratedState {
     invitedWalletsByWallet,
     referralFeeShareGoldByWallet,
     treasuryFeesFromReferralsByWallet,
+    betSyncCheckpoint,
+    predictionMarketsOverview,
+    streamStateSnapshot,
   };
 }
 
@@ -963,6 +1132,161 @@ export function savePerpsMarket(record: DbPerpsMarketRecord): void {
     $deprecatedAt: record.deprecatedAt,
     $updatedAt: record.updatedAt,
   });
+}
+
+export function loadBetSyncCheckpoint(): DbBetSyncCheckpoint | null {
+  const row = db
+    .prepare(
+      `SELECT source_epoch, last_seen_seq, last_applied_seq, replay_mode, degraded_reason, updated_at
+         FROM bet_sync_checkpoint
+        WHERE id = 1`,
+    )
+    .get() as Record<string, unknown> | null;
+  if (!row) return null;
+  return {
+    sourceEpoch: Number(row.source_epoch ?? 0),
+    lastSeenSeq: Number(row.last_seen_seq ?? 0),
+    lastAppliedSeq: Number(row.last_applied_seq ?? 0),
+    replayMode: row.replay_mode == null ? null : String(row.replay_mode),
+    degradedReason:
+      row.degraded_reason == null ? null : String(row.degraded_reason),
+    updatedAt: Number(row.updated_at ?? 0),
+  };
+}
+
+export function saveBetSyncCheckpoint(checkpoint: DbBetSyncCheckpoint): void {
+  upsertBetSyncCheckpoint.run({
+    $sourceEpoch: checkpoint.sourceEpoch,
+    $lastSeenSeq: checkpoint.lastSeenSeq,
+    $lastAppliedSeq: checkpoint.lastAppliedSeq,
+    $replayMode: checkpoint.replayMode,
+    $degradedReason: checkpoint.degradedReason,
+    $updatedAt: checkpoint.updatedAt,
+  });
+}
+
+export function appendBetSyncApplyLogEntry(
+  entry: DbBetSyncApplyLogEntry,
+): boolean {
+  const result = insertBetSyncApplyLogEntry.run({
+    $sourceEpoch: entry.sourceEpoch,
+    $seq: entry.seq,
+    $eventType: entry.eventType,
+    $duelKey: entry.duelKey,
+    $duelId: entry.duelId,
+    $phase: entry.phase,
+    $phaseVersion: entry.phaseVersion,
+    $emittedAt: entry.emittedAt,
+    $payloadJson: entry.payloadJson,
+    $receivedAt: entry.receivedAt,
+    $appliedAt: entry.appliedAt,
+  }) as { changes?: number };
+  return Number(result.changes ?? 0) > 0;
+}
+
+export function loadPredictionMarketsOverviewState(): DbPredictionMarketsOverviewState | null {
+  const row = db
+    .prepare(
+      `SELECT live_json, recent_settlement_json, updated_at
+         FROM bet_sync_overview_state
+        WHERE id = 1`,
+    )
+    .get() as Record<string, unknown> | null;
+  if (!row) return null;
+  return {
+    liveJson: row.live_json == null ? null : String(row.live_json),
+    recentSettlementJson:
+      row.recent_settlement_json == null
+        ? null
+        : String(row.recent_settlement_json),
+    updatedAt: Number(row.updated_at ?? 0),
+  };
+}
+
+export function loadBetSyncStreamStateSnapshot(): DbStreamStateSnapshot | null {
+  const row = db
+    .prepare(
+      `SELECT state_json, updated_at
+         FROM bet_sync_stream_state
+        WHERE id = 1`,
+    )
+    .get() as Record<string, unknown> | null;
+  if (!row || row.state_json == null) return null;
+  return {
+    stateJson: String(row.state_json),
+    updatedAt: Number(row.updated_at ?? 0),
+  };
+}
+
+export function savePredictionMarketsOverviewState(
+  state: DbPredictionMarketsOverviewState,
+): void {
+  upsertBetSyncOverviewState.run({
+    $liveJson: state.liveJson,
+    $recentSettlementJson: state.recentSettlementJson,
+    $updatedAt: state.updatedAt,
+  });
+}
+
+export function commitBetSyncProjectionState(input: {
+  streamState: DbStreamStateSnapshot;
+  checkpoint: DbBetSyncCheckpoint;
+  overview: DbPredictionMarketsOverviewState;
+  applyLogEntry?: DbBetSyncApplyLogEntry | null;
+}): boolean {
+  const commit = db.transaction(
+    (
+      streamState: DbStreamStateSnapshot,
+      checkpoint: DbBetSyncCheckpoint,
+      overview: DbPredictionMarketsOverviewState,
+      applyLogEntry: DbBetSyncApplyLogEntry | null | undefined,
+    ) => {
+      if (applyLogEntry) {
+        const result = insertBetSyncApplyLogEntry.run({
+          $sourceEpoch: applyLogEntry.sourceEpoch,
+          $seq: applyLogEntry.seq,
+          $eventType: applyLogEntry.eventType,
+          $duelKey: applyLogEntry.duelKey,
+          $duelId: applyLogEntry.duelId,
+          $phase: applyLogEntry.phase,
+          $phaseVersion: applyLogEntry.phaseVersion,
+          $emittedAt: applyLogEntry.emittedAt,
+          $payloadJson: applyLogEntry.payloadJson,
+          $receivedAt: applyLogEntry.receivedAt,
+          $appliedAt: applyLogEntry.appliedAt,
+        }) as { changes?: number };
+        if (Number(result.changes ?? 0) <= 0) {
+          return false;
+        }
+      }
+
+      upsertBetSyncStreamState.run({
+        $stateJson: streamState.stateJson,
+        $updatedAt: streamState.updatedAt,
+      });
+      upsertBetSyncCheckpoint.run({
+        $sourceEpoch: checkpoint.sourceEpoch,
+        $lastSeenSeq: checkpoint.lastSeenSeq,
+        $lastAppliedSeq: checkpoint.lastAppliedSeq,
+        $replayMode: checkpoint.replayMode,
+        $degradedReason: checkpoint.degradedReason,
+        $updatedAt: checkpoint.updatedAt,
+      });
+      upsertBetSyncOverviewState.run({
+        $liveJson: overview.liveJson,
+        $recentSettlementJson: overview.recentSettlementJson,
+        $updatedAt: overview.updatedAt,
+      });
+      return true;
+    },
+  );
+
+  return commit(
+    input.streamState,
+    input.checkpoint,
+    input.overview,
+    input.applyLogEntry,
+  );
 }
 
 export function closeDb(): void {

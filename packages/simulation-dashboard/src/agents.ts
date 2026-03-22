@@ -7,7 +7,7 @@ import {
     type MarketSnapshot,
     type QuotePlan,
 } from "@hyperbet/mm-core";
-import type { ScenarioRuntimeProfile } from "./scenario-catalog.js";
+import type { ScenarioChainKey, ScenarioRuntimeProfile } from "./scenario-catalog.js";
 import {
     BUY_SIDE,
     SELL_SIDE,
@@ -39,6 +39,7 @@ export type AgentAction = {
 };
 
 export type SimContext = {
+    chainKey: ScenarioChainKey;
     duelKey: string;
     marketKey: string;
     bestBid: number;
@@ -54,6 +55,10 @@ export type SimContext = {
     scenarioProfile: ScenarioRuntimeProfile | null;
     agentPosition: { aShares: bigint; bShares: bigint; aStake: bigint; bStake: bigint };
 };
+
+function toSnapshotChainKey(chainKey: ScenarioChainKey): MarketSnapshot["chainKey"] {
+    return chainKey === "anvil" ? "bsc" : chainKey;
+}
 
 type ManagedQuoteRef = ManagedQuoteState & {
     orderId: number;
@@ -113,7 +118,12 @@ export abstract class BaseAgent {
         ctx: SimContext,
     ): Promise<string[]> {
         const logs: string[] = [];
-        for (const action of actions) {
+        const scenarioMode = ctx.scenarioProfile != null;
+        const plannedActions = scenarioMode ? actions.slice(0, 2) : actions;
+        const actionTimeoutMs = scenarioMode ? 3_000 : 10_000;
+        const receiptTimeoutMs = scenarioMode ? 3_000 : 10_000;
+        const postActionSleepMs = scenarioMode ? 1 : 25;
+        for (const action of plannedActions) {
             try {
                 if (action.type === "placeOrder" && action.side && action.price && action.amount) {
                     const valueNeeded = quoteWithFees(
@@ -134,12 +144,12 @@ export abstract class BaseAgent {
                             ORDER_FLAG_GTC,
                             { value: valueNeeded },
                         ),
-                        10_000,
+                        actionTimeoutMs,
                         `${this.config.name} placeOrder`,
                     );
                     const receipt: any = await withTimeout(
                         tx.wait(),
-                        10_000,
+                        receiptTimeoutMs,
                         `${this.config.name} placeOrder receipt`,
                     );
                     this.tradeCount++;
@@ -154,7 +164,9 @@ export abstract class BaseAgent {
                                 orderId = Number(parsed.args.orderId ?? parsed.args[1]);
                                 break;
                             }
-                        } catch { /* skip */ }
+                        } catch (_parseErr) {
+                            // Expected: receipt contains logs from other contracts that don't match this ABI
+                        }
                     }
                     this.onOrderPlaced(action, orderId, ctx);
 
@@ -162,7 +174,7 @@ export abstract class BaseAgent {
                     logs.push(
                         `[${this.config.name}] ${sideLabel} @${action.price} x${action.amount} (order #${orderId})`,
                     );
-                    await sleep(25);
+                    await sleep(postActionSleepMs);
                 } else if (action.type === "cancelOrder" && action.orderId) {
                     try {
                         const tx: any = await withTimeout(
@@ -171,16 +183,16 @@ export abstract class BaseAgent {
                                 MARKET_KIND_DUEL_WINNER,
                                 action.orderId,
                             ),
-                            10_000,
+                            actionTimeoutMs,
                             `${this.config.name} cancelOrder`,
                         );
                         await withTimeout(
                             tx.wait(),
-                            10_000,
+                            receiptTimeoutMs,
                             `${this.config.name} cancelOrder receipt`,
                         );
                         logs.push(`[${this.config.name}] CANCEL order #${action.orderId}`);
-                        await sleep(25);
+                        await sleep(postActionSleepMs);
                     } catch {
                         // Order was already filled or cancelled — silently clean up
                     }
@@ -273,7 +285,7 @@ export class MarketMakerAgent extends BaseAgent {
             .map((quote) => Math.max(0, nowMs - quote.placedAtMs));
 
         const snapshot: MarketSnapshot = {
-            chainKey: "bsc",
+            chainKey: toSnapshotChainKey(ctx.chainKey),
             lifecycleStatus: "OPEN",
             duelKey: ctx.duelKey,
             marketRef: ctx.marketKey,

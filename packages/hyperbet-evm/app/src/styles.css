@@ -236,7 +236,8 @@ body {
    ============================================================ */
 .app-root {
   position: relative;
-  width: 100vw;
+  width: 100%;
+  max-width: 100%;
   height: 100vh;
   overflow: hidden;
   background: var(--hm-bg, #0b0c0e);
@@ -337,6 +338,8 @@ body {
   display: flex;
   overflow: hidden;
   min-height: 0;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .stream-stage-placeholder {
@@ -357,15 +360,16 @@ body {
    Panel (shared)
    ============================================================ */
 .panel {
-  width: clamp(300px, 30vw, 420px);
-  min-width: 300px;
-  max-width: 420px;
+  width: clamp(260px, 24vw, 340px);
+  min-width: 260px;
+  max-width: 340px;
   background: var(--glass-bg);
   backdrop-filter: blur(var(--glass-blur)) saturate(1.4);
   -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.4);
   display: flex;
   flex-direction: column;
   pointer-events: auto;
+  box-sizing: border-box;
 }
 
 .panel-left {
@@ -377,10 +381,12 @@ body {
 }
 
 .panel-main {
-  width: min(760px, calc(100vw - 24px));
-  min-width: min(760px, calc(100vw - 24px));
-  max-width: 760px;
+  flex: 1 1 0;
+  width: auto;
+  min-width: 0;
+  max-width: none;
   border: 1px solid var(--panel-border);
+  box-sizing: border-box;
 }
 
 .panel-inner {
@@ -1718,7 +1724,8 @@ select:focus-visible {
 .hm-root {
   display: flex;
   flex-direction: column;
-  width: 100vw;
+  width: 100%;
+  max-width: 100%;
   height: 100vh;
   height: 100dvh;
   overflow: hidden;
@@ -1746,7 +1753,7 @@ select:focus-visible {
    ================================================================ */
 .hm-header {
   display: grid;
-  grid-template-columns: 1fr auto 1fr;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
   gap: 12px;
   padding: 0 14px;
@@ -1788,12 +1795,16 @@ select:focus-visible {
   align-items: center;
   gap: 12px;
   min-width: 0;
+  max-width: 100%;
 }
 
 .hm-header-center {
   display: flex;
   align-items: center;
   justify-content: center;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
 }
 
 .hm-header-right {
@@ -1801,6 +1812,9 @@ select:focus-visible {
   align-items: center;
   gap: 10px;
   justify-content: flex-end;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
 }
 
 .hm-logo {
@@ -1856,6 +1870,7 @@ select:focus-visible {
   align-items: center;
   gap: 10px;
   min-width: 0;
+  max-width: 100%;
 }
 
 .hm-back-btn {
@@ -3046,7 +3061,7 @@ select:focus-visible {
   pointer-events: none;
 }
 /* Hide resize handles once the desktop split layout is no longer active */
-@media (max-width: 960px) {
+@media (max-width: 1360px) {
   .resize-handle {
     display: none;
   }
@@ -4078,6 +4093,82 @@ select:focus-visible {
   max-width: 240px;
 }
 
+.hm-stream-status-row {
+  display: flex;
+  align-items: center;
+  padding: 0 12px 10px;
+}
+
+.hm-stream-status-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--hm-panel-card-border, var(--hm-border));
+  background: var(--hm-panel-card-bg, var(--hm-surface-raised));
+  box-shadow: inset 0 1px 0 var(--hm-panel-card-highlight, rgba(255, 255, 255, 0.08));
+}
+
+.hm-stream-status-chip--refreshing {
+  border-color: rgba(110, 168, 254, 0.24);
+  background: linear-gradient(
+    180deg,
+    rgba(110, 168, 254, 0.08) 0%,
+    rgba(18, 20, 23, 0.98) 100%
+  );
+}
+
+.hm-stream-status-chip--degraded {
+  border-color: rgba(250, 204, 21, 0.24);
+  background: linear-gradient(
+    180deg,
+    rgba(250, 204, 21, 0.08) 0%,
+    rgba(18, 20, 23, 0.98) 100%
+  );
+}
+
+.hm-stream-status-chip--drift {
+  border-color: rgba(232, 65, 66, 0.24);
+  background: linear-gradient(
+    180deg,
+    rgba(232, 65, 66, 0.08) 0%,
+    rgba(18, 20, 23, 0.98) 100%
+  );
+}
+
+.hm-stream-status-spinner {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(110, 168, 254, 0.95);
+  box-shadow: 0 0 0 0 rgba(110, 168, 254, 0.35);
+  animation: hm-stream-status-pulse 1.4s ease-in-out infinite;
+}
+
+.hm-stream-status-text {
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--hm-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+@keyframes hm-stream-status-pulse {
+  0%, 100% {
+    opacity: 0.65;
+    box-shadow: 0 0 0 0 rgba(110, 168, 254, 0.18);
+  }
+  50% {
+    opacity: 1;
+    box-shadow: 0 0 0 5px rgba(110, 168, 254, 0);
+  }
+}
+
 /* ================================================================
    SIDEBAR MATCHUP
    ================================================================ */
@@ -4952,8 +5043,8 @@ select:focus-visible {
     linear-gradient(180deg, #f0f0f0 0%, #e8e8e8 50%, #f0f0f0 100%);
 }
 
-/* ── ≤960px: tablet landscape — stack content above sidebar ── */
-@media (max-width: 960px) {
+/* ── ≤1360px: mid desktop/tablet landscape — stack content above sidebar ── */
+@media (max-width: 1360px) {
   .hm-main {
     flex-direction: column;
     overflow: hidden;
@@ -5019,6 +5110,17 @@ select:focus-visible {
   /* Keep root contained — layout self-fits within 100dvh */
   .hm-root {
     overflow: hidden;
+  }
+
+  .hm-header {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: flex-start;
+    grid-template-columns: none;
+    gap: 0;
+    padding: 0;
+    min-height: auto;
   }
 
   .hm-main {
@@ -5143,10 +5245,77 @@ select:focus-visible {
   }
 
   /* Desktop header classes not rendered on mobile (isMobile branch in React) */
-  .hm-header {
-    padding: 0;
-    min-height: auto;
-    flex-direction: column;
+  .hm-header-mob-row1,
+  .hm-header-mob-row2 {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    min-width: 0;
+    overflow: hidden;
+  }
+
+  .hm-header-mob-row1 .hm-logo {
+    min-width: 0;
+    flex: 1 1 auto;
+    gap: 6px;
+    overflow: hidden;
+  }
+
+  .hm-header-mob-row1 .chain-select-wrap,
+  .hm-header-mob-row1 .chain-badge {
+    min-width: 0;
+    max-width: 132px;
+    flex: 0 1 auto;
+  }
+
+  .hm-header-mob-row1 .chain-select {
+    max-width: 132px;
+    font-size: 10px;
+    padding-right: 16px;
+  }
+
+  .hm-header-mob-controls {
+    flex: 0 0 auto;
+  }
+
+  .hm-header-mob-row2 {
+    height: auto;
+    padding: 6px 8px;
+  }
+
+  .hm-nav-tabs--mobile,
+  .hm-view-tabs--mobile {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    gap: 2px;
+    padding: 4px;
+  }
+
+  .hm-nav-tabs--mobile .hm-nav-tab,
+  .hm-view-tabs--mobile .hm-view-tab {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    padding: 8px 4px;
+  }
+
+  .hm-trades-summary {
+    flex-wrap: wrap;
+    gap: 8px 16px;
+  }
+
+  .hm-bottom-panel,
+  .hm-bottom-tabs,
+  .hm-trades-panel {
+    min-width: 0;
+    max-width: 100%;
   }
 
   .hm-back-btn {
@@ -5249,10 +5418,29 @@ select:focus-visible {
     gap: 6px;
   }
 
+  .hm-header-mob-controls {
+    gap: 4px;
+  }
+
   .hm-header-mob-row2 {
-    height: 36px;
+    height: auto;
     padding: 0 8px;
     gap: 6px;
+  }
+
+  .hm-nav-tabs--mobile,
+  .hm-view-tabs--mobile {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  .hm-nav-tabs--mobile .hm-nav-tab,
+  .hm-view-tabs--mobile .hm-view-tab {
+    min-width: 0;
+    flex: 1 1 0;
+    padding-inline: 8px;
+    font-size: 9px;
+    letter-spacing: 0.04em;
   }
 
   .hm-header-mob-row2 .hm-market-name {
@@ -5284,9 +5472,27 @@ select:focus-visible {
     flex-shrink: 0;
   }
 
+  .hm-header-mob-wallet-btn {
+    max-width: 88px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
   /* Hide chain badge on very small screens to reclaim ~40px */
   .hm-header-mob-row1 .chain-badge {
     display: none;
+  }
+
+  .hm-header-mob-row1 .chain-select-wrap {
+    max-width: 104px;
+  }
+
+  .hm-header-mob-row1 .chain-select {
+    max-width: 104px;
+    font-size: 9px;
+    padding-left: 6px;
+    padding-right: 14px;
   }
 
   .hm-statusbar {
@@ -5296,13 +5502,21 @@ select:focus-visible {
   /* bottom-panel inherits flex:1 from ≤768px — no fixed height override needed */
 
   .hm-bottom-tabs {
-    padding: 0 4px;
+    padding: 0 6px;
+    flex-wrap: wrap;
+    gap: 0 4px;
+    overflow-x: visible;
   }
 
   .hm-bottom-tab {
-    padding: 9px 9px;
-    font-size: 11px;
-    min-height: 40px;
+    flex: 1 1 calc(33.333% - 4px);
+    min-width: 0;
+    padding: 8px 6px;
+    font-size: 10px;
+    line-height: 1.2;
+    min-height: 36px;
+    white-space: normal;
+    text-align: center;
   }
 
   .hm-sidebar {
@@ -5329,7 +5543,7 @@ select:focus-visible {
   }
 
   .hm-bet-fab {
-    bottom: 16px;
+    bottom: 72px;
     right: 16px;
     height: 48px;
     padding: 0 20px;
@@ -5683,6 +5897,28 @@ select:focus-visible {
   );
 }
 
+.hm-header {
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+}
+
+.hm-header-left {
+  flex-wrap: nowrap;
+  row-gap: 0;
+}
+
+.hm-header-center {
+  display: flex;
+  justify-content: center;
+}
+
+.hm-mode-summary-copy,
+.hm-mode-summary-meta,
+.hm-nav-tab-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .hm-wallet-btn:hover,
 .hm-locale-selector:hover,
 .hm-theme-toggle:hover,
@@ -5701,6 +5937,10 @@ select:focus-visible {
 .hm-header-mob-row1,
 .hm-header-mob-row2 {
   background: transparent;
+}
+
+.hm-stream-status-row {
+  padding: 0 16px 14px;
 }
 
 .hm-theme-toggle {

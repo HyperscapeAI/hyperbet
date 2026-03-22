@@ -35,6 +35,9 @@ jobs:
   pm-soak:
     name: PM Confidence Soak
     runs-on: ubuntu-latest
+    timeout-minutes: 180
+    permissions:
+      contents: read
     environment: staging
     steps:
       - name: Checkout code
@@ -58,7 +61,7 @@ jobs:
 
           ```bash
           bash scripts/run-hyperscapes-pm-local.sh
-          node --import tsx scripts/pm-soak-monitor.ts --mode=local --duration-min=25
+          node --import tsx scripts/pm-soak-monitor.ts --mode=local --follow --duration-min=25
           ```
 
           Local artifacts land under `output/playwright/pm-soak/...`.
@@ -75,11 +78,13 @@ jobs:
         env:
           PM_SOAK_ENABLE_CANARY_TRADES: "true"
           PM_SOAK_SCREENSHOTS: ${{ inputs.screenshots }}
+          PM_SOAK_CHAINS: ${{ inputs.chains }}
+          PM_SOAK_DURATION_MINUTES: ${{ inputs.duration_minutes }}
         run: >
           node --import tsx scripts/pm-soak-monitor.ts
           --mode=staged
-          --chains=${{ inputs.chains }}
-          --duration-min=${{ inputs.duration_minutes }}
+          --chains="${PM_SOAK_CHAINS}"
+          --duration-min="${PM_SOAK_DURATION_MINUTES}"
 
       - name: Upload PM soak artifacts
         if: always()

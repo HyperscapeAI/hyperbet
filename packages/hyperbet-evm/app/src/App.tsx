@@ -11,6 +11,7 @@ import {
 import { useMockDataOptional } from "./lib/useMockAvaxStreamData";
 import { ConnectButton } from "@rainbow-me/rainbowkit";
 import { useAccount } from "wagmi";
+import { privateKeyToAccount } from "viem/accounts";
 
 import {
   formatLocaleAmount,
@@ -28,6 +29,12 @@ import {
   getFixedMatchId,
   STREAM_URLS,
 } from "./lib/config";
+import { POINTS_DRAWER_OVERLAY_STYLE } from "./lib/pointsDrawer";
+import {
+  advanceStreamSyncUiState,
+  INITIAL_STREAM_SYNC_UI_SNAPSHOT,
+  type StreamSyncUiState,
+} from "./lib/streamSyncUi";
 import {
   captureInviteCodeFromLocation,
   getStoredInviteCode,
@@ -35,10 +42,12 @@ import {
 import { StreamPlayer } from "@hyperbet/ui/components/StreamPlayer";
 import { ChainSelector } from "@hyperbet/ui/components/ChainSelector";
 import { ThemeSelector } from "@hyperbet/ui/components/ThemeSelector";
+import { selectConfiguredEvmPrivateKey } from "@hyperbet/ui/lib/evmPrivateKey";
 
 import { useChain } from "./lib/ChainContext";
 import { useStreamingState } from "@hyperbet/ui/spectator/useStreamingState";
 import { useDuelContext } from "@hyperbet/ui/spectator/useDuelContext";
+import type { StreamingAgentContext } from "@hyperbet/ui/components/AgentStats";
 import { useResizePanel, useIsMobile } from "@hyperbet/ui/lib/useResizePanel";
 import { ResizeHandle } from "@hyperbet/ui/components/ResizeHandle";
 import { HmChart, type HmChartPoint } from "@hyperbet/ui/components/HmChart";
@@ -48,6 +57,11 @@ import {
   toDuelKeyHex,
 } from "@hyperbet/ui/lib/evmClient";
 import { getEvmChainConfig } from "@hyperbet/ui/lib/chainConfig";
+import {
+  normalizePredictionMarketDuelKeyHex,
+  usePredictionMarketOverview,
+  usePredictionMarketSyncStatus,
+} from "@hyperbet/ui/lib/predictionMarkets";
 
 // ── Shared UI utilities ──────────────────────────────────────────────────────
 function formatGold(v: number, locale: UiLocale): string {
@@ -77,6 +91,17 @@ function formatTimeAgo(ts: number, locale: UiLocale): string {
 function truncateAddr(addr: string): string {
   if (addr.length <= 12) return addr;
   return `${addr.slice(0, 6)}...${addr.slice(-4)}`;
+}
+
+function deriveAddressFromPrivateKey(
+  privateKey: `0x${string}` | null,
+): `0x${string}` | null {
+  if (!privateKey) return null;
+  try {
+    return privateKeyToAccount(privateKey).address;
+  } catch {
+    return null;
+  }
 }
 
 const FOOTER_SOCIALS = [
@@ -203,6 +228,11 @@ function getAppCopy(locale: UiLocale) {
       muteStream: "静音",
       source: "信源",
       waitingForStream: "等待直播流…",
+      refreshingLiveState: "即将开放下注",
+      streamReady: "直播流已就绪",
+      reconnectingStream: "即将开放下注",
+      resyncingMarketState: "即将开放下注",
+      outOfSync: "即将开放下注",
       trades: "成交",
       orderBook: "订单簿",
       matchLog: "对局日志",
@@ -293,6 +323,11 @@ function getAppCopy(locale: UiLocale) {
     muteStream: "Mute stream",
     source: "Source",
     waitingForStream: "Waiting for stream…",
+    refreshingLiveState: "Betting starts soon",
+    streamReady: "Stream ready",
+    reconnectingStream: "Betting starts soon",
+    resyncingMarketState: "Betting starts soon",
+    outOfSync: "Betting starts soon",
     trades: "Trades",
     orderBook: "Order Book",
     matchLog: "Match Log",
@@ -437,8 +472,34 @@ function PanelFallback({
   );
 }
 
+function StreamStatusChip({
+  title,
+  detail,
+  state,
+  loading = false,
+}: {
+  title: string;
+  detail?: string | null;
+  state: Exclude<StreamSyncUiState, "hidden">;
+  loading?: boolean;
+}) {
+  return (
+    <div
+      className={`hm-stream-status-chip hm-stream-status-chip--${state}`}
+      title={detail ?? title}
+    >
+      {loading ? <span className="hm-stream-status-spinner" aria-hidden="true" /> : null}
+      <span className="hm-stream-status-text">{title}</span>
+    </div>
+  );
+}
+
 export function App() {
   const mockData = useMockDataOptional();
+  const searchParams = useMemo(
+    () => new URLSearchParams(window.location.search),
+    [],
+  );
   const { address: evmWalletAddress } = useAccount();
   const { activeChain, setActiveChain, availableChains } = useChain();
   const activeEvmChain =
@@ -455,12 +516,25 @@ export function App() {
   const copy = useMemo(() => getAppCopy(locale), [locale]);
   const isE2eMode = import.meta.env.MODE === "e2e";
   const isStreamUiMode = import.meta.env.MODE === "stream-ui";
-  const isE2eDebugMode =
-    isE2eMode && new URLSearchParams(window.location.search).has("debug");
+  const isE2eDebugMode = isE2eMode && searchParams.has("debug");
+  const isBettingPanelOnlyMode =
+    isE2eDebugMode && searchParams.get("panel") === "betting";
+  const configuredHeadlessEvmPrivateKey = useMemo(
+    () => selectConfiguredEvmPrivateKey(import.meta.env),
+    [],
+  );
+  const configuredHeadlessEvmAddress = useMemo(
+    () => deriveAddressFromPrivateKey(configuredHeadlessEvmPrivateKey),
+    [configuredHeadlessEvmPrivateKey],
+  );
+  const effectiveEvmWalletAddress =
+    evmWalletAddress ?? configuredHeadlessEvmAddress ?? null;
   // Only poll chain data when a wallet is connected (saves unnecessary RPC calls for spectators).
-  const shouldPollChainData = Boolean(!isStreamUiMode && (isE2eMode || evmWalletAddress));
+  const shouldPollChainData = Boolean(
+    !isStreamUiMode && (isE2eMode || effectiveEvmWalletAddress),
+  );
   // In stream-ui mode treat wallet as disconnected so invite/points fetches don't fire.
-  const pointsWalletAddress = isStreamUiMode ? null : (evmWalletAddress ?? null);
+  const pointsWalletAddress = isStreamUiMode ? null : effectiveEvmWalletAddress;
   const invitePlatformQuery = "evm" as const;
 
   const [surfaceMode, setSurfaceMode] = useState<"DUELS" | "MODELS">("DUELS");
@@ -472,7 +546,7 @@ export function App() {
   const [_inviteCode, setInviteCode] = useState<string | null>(() =>
     getStoredInviteCode(),
   );
-  const [selectedAgentForStats, _setSelectedAgentForStats] = useState<any>(null); // For agent stats modal
+  const [selectedAgentForStats, _setSelectedAgentForStats] = useState<StreamingAgentContext | null>(null);
   const [isShowingStats, setIsShowingStats] = useState(false);
   const [streamSourceIndex, setStreamSourceIndex] = useState(0);
   const [showPointsDrawer, setShowPointsDrawer] = useState(false);
@@ -486,7 +560,9 @@ export function App() {
   // Track mobile breakpoint — inline resize styles must NOT apply on mobile
   // because they override CSS media-query layout (sidebar fixed sheet, etc.)
   const isMobile = useIsMobile(768);
-  const isStackedLayout = useIsMobile(960);
+  // Stack the trading sidebar earlier so smaller desktop widths do not clip
+  // the right rail or force the betting controls off-screen.
+  const isStackedLayout = useIsMobile(1360);
 
   // Sidebar width (right column)
   const { size: sidebarWidthPx, startDrag: startSidebarDrag } = useResizePanel({
@@ -510,9 +586,24 @@ export function App() {
 
   const { state: streamingState } = useStreamingState();
   const { context: duelContext } = useDuelContext();
+  const {
+    live: liveOverviewMarket,
+    liveDuel: liveOverviewDuel,
+    refresh: refreshMarketOverview,
+    error: marketOverviewError,
+  } = usePredictionMarketOverview(activeEvmChain);
+  const { data: syncStatus } = usePredictionMarketSyncStatus();
+  const requestOverviewRefresh = useCallback(async () => {
+    await refreshMarketOverview();
+  }, [refreshMarketOverview]);
   const liveCycle = streamingState?.cycle ?? null;
   const streamSources = STREAM_URLS;
-  const activeStreamUrl = isE2eMode ? "" : (streamSources[streamSourceIndex] ?? "");
+  // Keep the stream visible in e2e/local integration lanes when a real source
+  // URL is configured. Wallet/chain polling stays gated separately above.
+  const activeStreamUrl = streamSources[streamSourceIndex] ?? "";
+  const [streamSurfaceReady, setStreamSurfaceReady] = useState(false);
+  const [streamSurfaceUnavailable, setStreamSurfaceUnavailable] =
+    useState(false);
 
   const handleLocaleChange = useCallback((nextLocale: UiLocale) => {
     setStoredUiLocale(nextLocale);
@@ -535,6 +626,11 @@ export function App() {
     if (streamSourceIndex < streamSources.length) return;
     setStreamSourceIndex(0);
   }, [streamSourceIndex, streamSources.length]);
+
+  useEffect(() => {
+    setStreamSurfaceReady(false);
+    setStreamSurfaceUnavailable(false);
+  }, [activeStreamUrl]);
 
   useEffect(() => {
     captureInviteCodeFromLocation();
@@ -672,18 +768,19 @@ export function App() {
   // ── Market data polling ───────────────────────────────────────────────────
   // Runs independently of wallet connection — spectators see live odds too.
   useEffect(() => {
-    const duelKeyHex =
-      typeof liveCycle?.duelKeyHex === "string" ? liveCycle.duelKeyHex : null;
+    const duelKeyHex = normalizePredictionMarketDuelKeyHex(
+      typeof liveCycle?.duelKeyHex === "string" ? liveCycle.duelKeyHex : null,
+    );
     const chainConfig = getEvmChainConfig(activeEvmChain);
     if (!duelKeyHex || !chainConfig) return;
 
     const publicClient = createEvmPublicClient(chainConfig);
     const contractAddr = chainConfig.goldClobAddress as `0x${string}`;
-    const duelKey = toDuelKeyHex(duelKeyHex);
     let cancelled = false;
 
     const fetchMarket = async () => {
       try {
+        const duelKey = toDuelKeyHex(duelKeyHex);
         const market = await getMarketMeta(
           publicClient,
           contractAddr,
@@ -846,10 +943,44 @@ export function App() {
   const countdownText = liveCycle
     ? formatCountdown(normalizeRemainingSeconds(liveCycle.timeRemaining))
     : "";
+  const liveOverviewDuelKey = normalizePredictionMarketDuelKeyHex(
+    liveOverviewDuel?.duelKey ?? null,
+  );
+  const streamedDuelKey = normalizePredictionMarketDuelKeyHex(
+    liveCycle?.duelKeyHex ?? null,
+  );
+  const rendererHealth =
+    liveCycle?.rendererHealth ?? syncStatus?.rendererHealth ?? null;
+  const streamMarketAligned = !liveOverviewDuelKey
+    ? true
+    : streamedDuelKey === liveOverviewDuelKey;
+  const [streamSyncUi, setStreamSyncUi] = useState(
+    INITIAL_STREAM_SYNC_UI_SNAPSHOT,
+  );
+
+  useEffect(() => {
+    setStreamSyncUi((previous) =>
+      advanceStreamSyncUiState(previous, {
+        marketAligned: streamMarketAligned,
+        syncStatus,
+        rendererReady: rendererHealth?.ready ?? null,
+        streamSurfaceReady,
+        streamSurfaceUnavailable,
+        marketOverviewErrorPresent: Boolean(marketOverviewError),
+      }),
+    );
+  }, [
+    marketOverviewError,
+    rendererHealth?.ready,
+    streamMarketAligned,
+    streamSurfaceReady,
+    streamSurfaceUnavailable,
+    syncStatus,
+  ]);
 
   // Sidebar bet state
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-const [hmBottomTab, setHmBottomTab] = useState<
+  const [hmBottomTab, setHmBottomTab] = useState<
     "positions" | "orders" | "trades" | "topTraders" | "holders" | "news"
   >("trades");
   const [hmMuted, setHmMuted] = useState(true);
@@ -860,27 +991,185 @@ const [hmBottomTab, setHmBottomTab] = useState<
     }
   }, [surfaceMode]);
 
+  const bettingPanelBody = (
+    <Suspense
+      fallback={<PanelFallback label={copy.loadingEvmMarket} minHeight={360} />}
+    >
+      <EvmBettingPanel
+        agent1Name={effAgent1Name}
+        agent2Name={effAgent2Name}
+        compact
+        locale={locale}
+        lifecycleDuelOverride={liveOverviewDuel}
+        lifecycleMarketOverride={liveOverviewMarket}
+        onLifecycleRefreshRequested={requestOverviewRefresh}
+      />
+    </Suspense>
+  );
+
+  const tradingSidebar = (
+    <aside
+      className={`hm-sidebar${isSidebarOpen ? " hm-sidebar--open" : ""}`}
+      aria-label={copy.tradingControls}
+      style={
+        isBettingPanelOnlyMode
+          ? {
+              width: "100%",
+              maxWidth: 420,
+              minWidth: 0,
+              height: "auto",
+              maxHeight: "none",
+              borderLeft: "none",
+              borderTop: "none",
+              margin: "0 auto",
+            }
+          : isStackedLayout
+            ? undefined
+            : { width: sidebarWidthPx, minWidth: sidebarWidthPx }
+      }
+    >
+      <div className="hm-matchup-header">
+        <span className="hm-matchup-label">{copy.currentMatch}</span>
+        <div className="hm-matchup-header-right">
+          <span
+            className={`hm-phase-badge hm-phase-badge--${effCycle.phase.toLowerCase()} hm-phase-badge--sm`}
+          >
+            {effPhaseLabel}
+          </span>
+          {!isBettingPanelOnlyMode ? (
+            <button
+              className="hm-sidebar-close"
+              type="button"
+              aria-label={copy.closeTradingPanel}
+              onClick={() => setIsSidebarOpen(false)}
+            >
+              ×
+            </button>
+          ) : null}
+        </div>
+      </div>
+      {streamSyncUi.state !== "hidden" ? (
+        <div className="hm-stream-status-row">
+          {streamSyncUi.state === "refreshing" ? (
+            <StreamStatusChip
+              state="refreshing"
+              title={copy.refreshingLiveState}
+              loading
+            />
+          ) : null}
+
+          {streamSyncUi.state === "degraded" ? (
+            <StreamStatusChip
+              state="degraded"
+              title={copy.reconnectingStream}
+              detail={copy.refreshingLiveState}
+            />
+          ) : null}
+
+          {streamSyncUi.state === "drift" ? (
+            <StreamStatusChip
+              state="drift"
+              title={copy.outOfSync}
+              detail={copy.resyncingMarketState}
+            />
+          ) : null}
+        </div>
+      ) : null}
+      <div className="hm-matchup">
+        <div className="hm-matchup-agent">
+          <span className="hm-matchup-name" title={effA1.name}>
+            {effA1.name}
+          </span>
+          <span className="hm-matchup-record">
+            {copy.record(effA1.wins, effA1.losses)}
+            {effA1.combatLevel ? copy.level(effA1.combatLevel) : ""}
+          </span>
+          <span className="hm-matchup-odds hm-matchup-odds--yes">
+            {effYesPercent}%
+          </span>
+        </div>
+        <span className="hm-matchup-vs">VS</span>
+        <div className="hm-matchup-agent hm-matchup-agent--right">
+          <span className="hm-matchup-name" title={effA2.name}>
+            {effA2.name}
+          </span>
+          <span className="hm-matchup-record">
+            {copy.record(effA2.wins, effA2.losses)}
+            {effA2.combatLevel ? copy.level(effA2.combatLevel) : ""}
+          </span>
+          <span className="hm-matchup-odds hm-matchup-odds--no">
+            {effNoPercent}%
+          </span>
+        </div>
+      </div>
+
+      <div className="hm-market-panel-wrap">
+        <div className="hm-market-panel-body">
+          {bettingPanelBody}
+        </div>
+      </div>
+
+      <p className="hm-legal-text">
+        {copy.legalLead} <a href="#terms">{copy.terms}</a> &amp;{" "}
+        <a href="#privacy">{copy.privacy}</a>
+      </p>
+
+      <div className="hm-footer-socials" aria-label="Social links">
+        {FOOTER_SOCIALS.map((social) => (
+          <a
+            key={social.id}
+            className="hm-footer-social"
+            href={social.href}
+            aria-label={social.label}
+            title={social.label}
+            target={social.href.startsWith("http") ? "_blank" : undefined}
+            rel={
+              social.href.startsWith("http")
+                ? "noreferrer noopener"
+                : undefined
+            }
+          >
+            {social.icon}
+          </a>
+        ))}
+      </div>
+    </aside>
+  );
+
+  if (isBettingPanelOnlyMode) {
+    return (
+      <div className="hm-root" ref={appRootRef}>
+        <div
+          style={{
+            minHeight: "100vh",
+            padding: 24,
+            background:
+              "radial-gradient(circle at top left, rgba(229,184,74,0.08), transparent 30%), linear-gradient(180deg, rgba(8,10,14,0.98) 0%, rgba(11,12,14,1) 100%)",
+            overflow: "auto",
+            boxSizing: "border-box",
+          }}
+        >
+          <div
+            style={{
+              width: "100%",
+              maxWidth: 420,
+              margin: "0 auto",
+            }}
+          >
+            {bettingPanelBody}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="hm-root" ref={appRootRef}>
       {/* Points / Leaderboard / Referral Drawer */}
       {showPointsDrawer && (
         <div
           data-testid="points-drawer-overlay"
-          style={{
-            position: "absolute",
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            background: "rgba(0,0,0,0.5)",
-            backdropFilter: "blur(8px)",
-            WebkitBackdropFilter: "blur(8px)",
-            zIndex: 100,
-            display: "flex",
-            justifyContent: "center",
-            alignItems: "center",
-            padding: 16,
-          }}
+          style={POINTS_DRAWER_OVERLAY_STYLE}
           onClick={() => setShowPointsDrawer(false)}
         >
           <div
@@ -1268,11 +1557,6 @@ const [hmBottomTab, setHmBottomTab] = useState<
                 <ChainSelector />
               </div>
               <div className="hm-header-mob-controls">
-                <LocaleSelector
-                  locale={locale}
-                  onChange={handleLocaleChange}
-                  compact
-                />
                 <ThemeSelector compact />
                 <button
                   type="button"
@@ -1293,7 +1577,15 @@ const [hmBottomTab, setHmBottomTab] = useState<
                     mounted,
                   }) => {
                     if (!mounted || !account)
-                      return (
+                      return effectiveEvmWalletAddress ? (
+                        <button
+                          type="button"
+                          className="hm-header-mob-wallet-btn hm-header-mob-wallet-btn--linked"
+                          title={effectiveEvmWalletAddress}
+                        >
+                          ⬡ {truncateAddr(effectiveEvmWalletAddress)}
+                        </button>
+                      ) : (
                         <button
                           type="button"
                           className="hm-header-mob-wallet-btn"
@@ -1327,31 +1619,15 @@ const [hmBottomTab, setHmBottomTab] = useState<
             </div>
             {/* Row 2: Match strip — name + agent side-select chips */}
             <div className="hm-header-mob-row2">
-              <div className="hm-view-tabs hm-view-tabs--mobile">
-                <button
-                  data-testid="surface-mode-duels"
-                  className={`hm-view-tab ${surfaceMode === "DUELS" ? "hm-view-tab--active" : ""}`}
-                  onClick={() => startTransition(() => setSurfaceMode("DUELS"))}
-                  type="button"
-                >
-                  {copy.duels}
-                </button>
-                <button
-                  data-testid="surface-mode-models"
-                  className={`hm-view-tab ${surfaceMode === "MODELS" ? "hm-view-tab--active" : ""}`}
-                  onClick={() =>
-                    startTransition(() => setSurfaceMode("MODELS"))
-                  }
-                  type="button"
-                >
-                  {copy.models}
-                </button>
-              </div>
-              {surfaceMode !== "DUELS" && (
-                <div className="hm-mode-summary hm-mode-summary--mobile">
-                  <span className="hm-market-name">{copy.modelMarkets}</span>
-                </div>
-              )}
+              <NavTabs
+                variant="mobile"
+                activeTab={surfaceMode}
+                onChange={(id) => setSurfaceMode(id as "DUELS" | "MODELS")}
+                tabs={[
+                  { id: "DUELS", label: copy.duels, testId: "surface-mode-duels" },
+                  { id: "MODELS", label: copy.models, testId: "surface-mode-models" },
+                ]}
+              />
             </div>
           </>
         ) : (
@@ -1376,6 +1652,12 @@ const [hmBottomTab, setHmBottomTab] = useState<
             </div>
 
             <div className="hm-header-right">
+              <span
+                className="hm-status-text"
+                style={{ color: effStatusColor }}
+              >
+                {effStatus}
+              </span>
               <LocaleSelector locale={locale} onChange={handleLocaleChange} />
               <ThemeSelector />
               {/* <PointsDisplay
@@ -1393,17 +1675,25 @@ const [hmBottomTab, setHmBottomTab] = useState<
               >
                 🏆
               </button>
-              <ConnectButton.Custom>
-                {({
-                  openConnectModal,
-                  openAccountModal,
-                  openChainModal,
+                <ConnectButton.Custom>
+                  {({
+                    openConnectModal,
+                    openAccountModal,
+                    openChainModal,
                   account,
-                  chain,
-                  mounted,
-                }) => {
-                  if (!mounted || !account)
-                    return (
+                    chain,
+                    mounted,
+                  }) => {
+                    if (!mounted || !account)
+                    return effectiveEvmWalletAddress ? (
+                      <button
+                        type="button"
+                        className="hm-wallet-btn hm-wallet-btn--linked"
+                        title={effectiveEvmWalletAddress}
+                      >
+                        {truncateAddr(effectiveEvmWalletAddress)}
+                      </button>
+                    ) : (
                       <button
                         type="button"
                         className="hm-wallet-btn"
@@ -1474,7 +1764,14 @@ const [hmBottomTab, setHmBottomTab] = useState<
                         streamUrl={activeStreamUrl}
                         muted={hmMuted}
                         autoPlay={true}
-                        onStreamUnavailable={switchToBackupStream}
+                        onStreamReady={() => {
+                          setStreamSurfaceReady(true);
+                          setStreamSurfaceUnavailable(false);
+                        }}
+                        onStreamUnavailable={() => {
+                          setStreamSurfaceUnavailable(true);
+                          switchToBackupStream();
+                        }}
                         style={{
                           position: "absolute",
                           inset: 0,
@@ -1947,109 +2244,7 @@ const [hmBottomTab, setHmBottomTab] = useState<
             ) : null}
 
             {/* ── RIGHT SIDEBAR: Real betting or mock controls ──────────────── */}
-            <aside
-              className={`hm-sidebar${isSidebarOpen ? " hm-sidebar--open" : ""}`}
-              aria-label={copy.tradingControls}
-              style={
-                isStackedLayout
-                  ? undefined
-                  : { width: sidebarWidthPx, minWidth: sidebarWidthPx }
-              }
-            >
-              {/* Agent matchup header — close button lives here so it never floats over agent names */}
-              <div className="hm-matchup-header">
-                <span className="hm-matchup-label">{copy.currentMatch}</span>
-                <div className="hm-matchup-header-right">
-                  <span
-                    className={`hm-phase-badge hm-phase-badge--${effCycle.phase.toLowerCase()} hm-phase-badge--sm`}
-                  >
-                    {effPhaseLabel}
-                  </span>
-                  <button
-                    className="hm-sidebar-close"
-                    type="button"
-                    aria-label={copy.closeTradingPanel}
-                    onClick={() => setIsSidebarOpen(false)}
-                  >
-                    ×
-                  </button>
-                </div>
-              </div>
-              <div className="hm-matchup">
-                <div className="hm-matchup-agent">
-                  <span className="hm-matchup-name" title={effA1.name}>
-                    {effA1.name}
-                  </span>
-                  <span className="hm-matchup-record">
-                    {copy.record(effA1.wins, effA1.losses)}
-                    {effA1.combatLevel ? copy.level(effA1.combatLevel) : ""}
-                  </span>
-                  <span className="hm-matchup-odds hm-matchup-odds--yes">
-                    {effYesPercent}%
-                  </span>
-                </div>
-                <span className="hm-matchup-vs">VS</span>
-                <div className="hm-matchup-agent hm-matchup-agent--right">
-                  <span className="hm-matchup-name" title={effA2.name}>
-                    {effA2.name}
-                  </span>
-                  <span className="hm-matchup-record">
-                    {copy.record(effA2.wins, effA2.losses)}
-                    {effA2.combatLevel ? copy.level(effA2.combatLevel) : ""}
-                  </span>
-                  <span className="hm-matchup-odds hm-matchup-odds--no">
-                    {effNoPercent}%
-                  </span>
-                </div>
-              </div>
-
-              {/* Market type tabs + betting panels */}
-              <div className="hm-market-panel-wrap">
-                {/* Active market panel */}
-                <div className="hm-market-panel-body">
-                  <Suspense
-                    fallback={
-                      <PanelFallback
-                        label={copy.loadingEvmMarket}
-                        minHeight={360}
-                      />
-                    }
-                  >
-                    <EvmBettingPanel
-                      agent1Name={effAgent1Name}
-                      agent2Name={effAgent2Name}
-                      compact
-                      locale={locale}
-                    />
-                  </Suspense>
-                </div>
-              </div>
-
-              <p className="hm-legal-text">
-                {copy.legalLead} <a href="#terms">{copy.terms}</a> &amp;{" "}
-                <a href="#privacy">{copy.privacy}</a>
-              </p>
-
-              <div className="hm-footer-socials" aria-label="Social links">
-                {FOOTER_SOCIALS.map((social) => (
-                  <a
-                    key={social.id}
-                    className="hm-footer-social"
-                    href={social.href}
-                    aria-label={social.label}
-                    title={social.label}
-                    target={social.href.startsWith("http") ? "_blank" : undefined}
-                    rel={
-                      social.href.startsWith("http")
-                        ? "noreferrer noopener"
-                        : undefined
-                    }
-                  >
-                    {social.icon}
-                  </a>
-                ))}
-              </div>
-            </aside>
+            {tradingSidebar}
           </div>
 
           {/* Mobile FAB — opens the sidebar sheet */}
@@ -2091,6 +2286,7 @@ const [hmBottomTab, setHmBottomTab] = useState<
               aria-hidden="true"
             />
           )}
+
         </>
       )}
 

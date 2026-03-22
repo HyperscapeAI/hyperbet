@@ -16,6 +16,12 @@ const trackedArtifactPaths = [
   "packages/hyperbet-solana/anchor/target/idl",
   "packages/hyperbet-solana/app/src/idl",
   "packages/hyperbet-solana/keeper/src/idl",
+  "packages/hyperbet-ui/src/idl",
+  "packages/hyperbet-bsc/app/src/idl",
+  "packages/hyperbet-bsc/keeper/src/idl",
+  "packages/hyperbet-avax/keeper/src/idl",
+  "packages/hyperbet-evm/keeper/src/idl",
+  "packages/market-maker-bot/src/idl",
 ];
 
 function currentGitStatus(paths: string[]): string {
