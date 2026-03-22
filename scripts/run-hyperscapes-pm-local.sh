@@ -634,6 +634,7 @@ close_existing_anvil_listeners "$GAME_CLIENT_PORT"
     --skip-betting
     --skip-keeper
     "--bots=${DUEL_BOTS}"
+    "--ws-url=${GAME_WS_URL}"
   )
   if [[ "$HYPERSCAPES_SKIP_CHAIN_SETUP" == "true" ]]; then
     duel_args+=(--skip-chain-setup)
