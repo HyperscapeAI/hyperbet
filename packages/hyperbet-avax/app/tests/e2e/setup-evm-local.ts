@@ -49,6 +49,7 @@ const SELL_SIDE = 2;
 const DUEL_STATUS_BETTING_OPEN = 2;
 const ORDER_FLAG_GTC = 0x01;
 const DUEL_ORACLE_DISPUTE_WINDOW_SECONDS = 3_600;
+const E2E_BET_WINDOW_SECONDS = 3_600n;
 
 type EvmArtifact = {
   abi: unknown[];
@@ -245,7 +246,7 @@ async function main(): Promise<void> {
     latestBlock.timestamp - 15n;
   const duelBetCloseTs =
     parseTimestampMsEnv("E2E_EVM_BET_CLOSE_TIME_MS") ??
-    duelBetOpenTs + 300n;
+    duelBetOpenTs + E2E_BET_WINDOW_SECONDS;
   const duelStartTs = (() => {
     const sourceFightStartTs = parseTimestampMsEnv("E2E_EVM_FIGHT_START_TIME_MS");
     if (sourceFightStartTs == null) {
