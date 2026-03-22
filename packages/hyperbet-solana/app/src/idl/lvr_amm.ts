@@ -742,6 +742,10 @@ export type LvrAmm = {
           "type": "pubkey"
         },
         {
+          "name": "fightOracleProgram",
+          "type": "pubkey"
+        },
+        {
           "name": "feeBps",
           "type": "u16"
         }
@@ -1192,6 +1196,32 @@ export type LvrAmm = {
                 "kind": "account",
                 "path": "bet.creator",
                 "account": "bet"
+              }
+            ]
+          }
+        },
+        {
+          "name": "ammConfig",
+          "docs": [
+            "Optional: AmmConfig for oracle program ID validation (required when duel_state is provided)"
+          ],
+          "optional": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  109,
+                  109,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
               }
             ]
           }
@@ -1706,23 +1736,68 @@ export type LvrAmm = {
     },
     {
       "code": 6016,
+      "name": "mathOverflow",
+      "msg": "Arithmetic overflow"
+    },
+    {
+      "code": 6017,
+      "name": "insufficientReserves",
+      "msg": "Insufficient reserves for swap"
+    },
+    {
+      "code": 6018,
+      "name": "marketExpired",
+      "msg": "Market has expired"
+    },
+    {
+      "code": 6019,
+      "name": "invalidSettlementOutcome",
+      "msg": "Invalid settlement outcome"
+    },
+    {
+      "code": 6020,
       "name": "invalidAddress",
       "msg": "Invalid address (zero/default)"
     },
     {
-      "code": 6017,
+      "code": 6021,
       "name": "feeTooHigh",
       "msg": "Fee BPS exceeds maximum (1000 = 10%)"
     },
     {
-      "code": 6018,
+      "code": 6022,
       "name": "marketPaused",
       "msg": "Market is paused"
     },
     {
-      "code": 6019,
+      "code": 6023,
       "name": "configFrozen",
       "msg": "Config is frozen"
+    },
+    {
+      "code": 6024,
+      "name": "invalidDuelState",
+      "msg": "Invalid duel state account"
+    },
+    {
+      "code": 6025,
+      "name": "missingAmmConfig",
+      "msg": "AMM config account required for oracle settlement"
+    },
+    {
+      "code": 6026,
+      "name": "invalidFightOracleProgram",
+      "msg": "Fight oracle program mismatch"
+    },
+    {
+      "code": 6027,
+      "name": "mathConvergenceError",
+      "msg": "AMM Newton-Raphson solver did not converge"
+    },
+    {
+      "code": 6028,
+      "name": "mathFixedPointOverflow",
+      "msg": "AMM fixed-point overflow"
     }
   ],
   "types": [
@@ -1776,6 +1851,10 @@ export type LvrAmm = {
             "type": "pubkey"
           },
           {
+            "name": "fightOracleProgram",
+            "type": "pubkey"
+          },
+          {
             "name": "feeBps",
             "type": "u16"
           },
@@ -1817,6 +1896,10 @@ export type LvrAmm = {
           },
           {
             "name": "treasury",
+            "type": "pubkey"
+          },
+          {
+            "name": "fightOracleProgram",
             "type": "pubkey"
           },
           {
@@ -1865,6 +1948,15 @@ export type LvrAmm = {
             }
           },
           {
+            "name": "duelKey",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
             "name": "betPrompt",
             "type": "string"
           },
@@ -1897,18 +1989,6 @@ export type LvrAmm = {
           {
             "name": "feeBps",
             "type": "u16"
-          },
-          {
-            "name": "duelKey",
-            "docs": [
-              "Full 32-byte duel key for oracle cross-reference (0 if not set)"
-            ],
-            "type": {
-              "array": [
-                "u8",
-                32
-              ]
-            }
           }
         ]
       }

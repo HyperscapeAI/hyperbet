@@ -42,9 +42,11 @@ export {
   SCENARIO_RISK_BUDGETS,
 } from "./spec.js";
 export type {
+  AmmMarketState,
   BudgetBreach,
   ChainId,
   ChainReport,
+  MarketType,
   Metrics,
   ScenarioId,
   ScenarioRun,

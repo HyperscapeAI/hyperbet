@@ -20,12 +20,12 @@ contract LvrMarket is ReentrancyGuard {
     using SafeCast for uint256;
 
     event MarketInitialized(uint256 liquidity, uint256 collateralIn, uint256 timestamp);
-    
+
     event OutcomeProposed(uint256 outcome, address indexed proposer, uint256 resolutionTimestamp);
     event MarketDisputed();
     event MarketSettled(uint256 outcome, address indexed proposer, uint256 bondReturned);
     event MarketResolvedByAdmin(uint256 outcome, address indexed admin);
-    
+
     event MarketBuy(address indexed buyer, bool isBuyYes, uint256 amountIn, uint256 amountOut);
     event MarketSell(address indexed seller, bool isSellYes, uint256 amountIn, uint256 amountOut);
     event CollateralRedeemed(address indexed redeemer, uint256 amountYes, uint256 amountNo, uint256 payout);
@@ -132,10 +132,10 @@ contract LvrMarket is ReentrancyGuard {
 
     function dispute() external isRouter nonReentrant {
         require(state == MarketState.PENDING, "Challenge Window Not opened");
-        // Break the bond 
+        // Break the bond
         state = MarketState.DISPUTED;
         // set the market outcome through creator/resolver voting/admin
-        
+
         emit MarketDisputed();
     }
 
@@ -189,13 +189,15 @@ contract LvrMarket is ReentrancyGuard {
             outcome = duel.winner == DuelOutcomeOracle.Side.A ? 0 : 1;
         }
 
-        // Settle bond: slash if proposer was wrong or market was cancelled
+        // Settle bond: return if proposer was correct or market cancelled; slash if wrong
         uint256 returnedBond = 0;
         if (proposer != address(0)) {
-            if (state == MarketState.PENDING && outcome == proposedOutcome) {
+            if (outcome == proposedOutcome || outcome == 2) {
+                // Proposer was correct, or market cancelled — return bond
                 IERC20(collateralToken).safeTransfer(proposer, bondValue);
                 returnedBond = bondValue;
             } else {
+                // Proposer was wrong — slash to treasury
                 IERC20(collateralToken).safeTransfer(treasuryAddress, bondValue);
             }
         }
@@ -228,7 +230,8 @@ contract LvrMarket is ReentrancyGuard {
             // Cancellation: each token redeems at 0.5 collateral to maintain solvency.
             // Paying 1:1 for both tokens would exceed collateral pool since
             // total_yes_supply + total_no_supply > total_collateral after fee burns.
-            payout = (amountYesIn + amountNoIn) / 2;
+            // Intentional: rounds down (loses at most 1 wei) to guarantee solvency.
+            payout = amountYesIn / 2 + amountNoIn / 2;
             IERC20(collateralToken).safeTransfer(redeemer, payout);
         } else {
             revert("Invalid outcome");
@@ -243,7 +246,7 @@ contract LvrMarket is ReentrancyGuard {
         noToken = new NoToken(address(this), collateralIn);
         liquidity = Math.calcInitialLiquidity(collateralIn);
         liquidityInitialized = true;
-        
+
         emit MarketInitialized(liquidity, collateralIn, block.timestamp);
         return liquidity;
     }
@@ -340,7 +343,7 @@ contract LvrMarket is ReentrancyGuard {
     }
 
     function getPriceYes() public view returns(uint256) {
-        if (isDynamic && block.timestamp >= deadline) return 0.5e18; // neutral price after deadline
+        if (block.timestamp >= deadline) return 0.5e18; // neutral price after deadline (market expired)
         uint256 liq = isDynamic ? Math.calcLiquidity(liquidity, deadline, block.timestamp) : liquidity;
         return Math.calcPrice(yesToken.balanceOf(address(this)), noToken.balanceOf(address(this)), liq);
     }

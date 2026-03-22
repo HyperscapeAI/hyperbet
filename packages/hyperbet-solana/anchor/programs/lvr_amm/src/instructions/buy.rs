@@ -25,6 +25,7 @@ pub fn buy_instruction(ctx: Context<Buy>, bet_id: u64, outcome: u8, amount_in: u
         bet.side_won.is_none(),
         PredictionMarketError::BetAlreadySettled
     );
+    require!(bet.is_initialized, PredictionMarketError::BetNotInitialized);
     
     let is_buy_yes = outcome == 0;
     
@@ -49,12 +50,12 @@ pub fn buy_instruction(ctx: Context<Buy>, bet_id: u64, outcome: u8, amount_in: u
         .ok_or(PredictionMarketError::MathOverflow)?;
 
     let amount_out = math::get_swap_amount(
-        !is_buy_yes, 
-        bet.reserves[0], 
-        bet.reserves[1], 
-        liq, 
+        !is_buy_yes,
+        bet.reserves[0],
+        bet.reserves[1],
+        liq,
         net_amount_in
-    );
+    )?;
 
     // Update Virtual Reserves
     // EVM:

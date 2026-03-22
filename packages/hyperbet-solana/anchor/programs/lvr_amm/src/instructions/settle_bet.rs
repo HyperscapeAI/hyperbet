@@ -1,9 +1,8 @@
 use anchor_lang::prelude::*;
-use core::str::FromStr;
 
 use crate::{
     error::PredictionMarketError,
-    state::{admin::Admin, bet::Bet},
+    state::{admin::Admin, bet::Bet, config::AmmConfig},
 };
 
 const DUEL_STATE_DISCRIMINATOR: [u8; 8] = [0x95, 0xd5, 0x3b, 0xa5, 0x7c, 0x74, 0x91, 0x78];
@@ -71,12 +70,12 @@ pub fn settle_bet_instruction(ctx: Context<SettleBet>, _bet_id: u64, side_won: u
 
     // If an oracle duel_state is provided, read winner from oracle (trustless path)
     let final_side_won = if let Some(duel_account) = &ctx.accounts.duel_state {
-        let fight_oracle_program_id = Pubkey::from_str("B5mRCRDJk9BrnH7regMWW5mpTQ8QG1CcCGSnDxMt8hmo")
-            .map_err(|_| error!(PredictionMarketError::InvalidOracleAccount))?;
+        let amm_config = ctx.accounts.amm_config.as_ref()
+            .ok_or(error!(PredictionMarketError::MissingAmmConfig))?;
         require_keys_eq!(
             *duel_account.owner,
-            fight_oracle_program_id,
-            PredictionMarketError::InvalidOracleAccount
+            amm_config.fight_oracle_program,
+            PredictionMarketError::InvalidFightOracleProgram
         );
 
         let data = duel_account.try_borrow_data()?;
@@ -154,6 +153,13 @@ pub struct SettleBet<'info> {
         bump,
     )]
     pub bet: Account<'info, Bet>,
+
+    /// Optional: AmmConfig for oracle program ID validation (required when duel_state is provided)
+    #[account(
+        seeds = [b"amm_config"],
+        bump = amm_config.bump,
+    )]
+    pub amm_config: Option<Account<'info, AmmConfig>>,
 
     /// Optional: fight_oracle DuelState account. When provided, winner is read
     /// from the oracle rather than trusting the caller's `side_won` argument.

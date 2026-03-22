@@ -214,8 +214,14 @@ const ATTACKER_STRATEGIES = new Set([
     "stress_test",
     "cancel_replace",
 ]);
-const MARKET_STATUS_RESOLVED = 3;
-const MARKET_STATUS_CANCELLED = 4;
+// GoldClob (CLOB) enum: NULL=0, OPEN=1, LOCKED=2, RESOLVED=3, CANCELLED=4
+// LvrMarket (AMM) enum: OPEN=0, CLOSED=1, PENDING=2, DISPUTED=3, RESOLVED=4
+const CLOB_STATUS = { RESOLVED: 3, CANCELLED: 4 } as const;
+const AMM_STATUS = { RESOLVED: 4, CANCELLED: undefined } as const;
+
+// Default to CLOB for current sim (anvil runs GoldClob)
+const MARKET_STATUS_RESOLVED = CLOB_STATUS.RESOLVED;
+const MARKET_STATUS_CANCELLED = CLOB_STATUS.CANCELLED;
 let peakInventorySeen = 0;
 let worstMarketMakerPnl = 0;
 let bestAttackerPnlSeen = 0;
@@ -230,6 +236,124 @@ let closeGuardTripsSeen = 0;
 let circuitBreakerTripsSeen = 0;
 let scenarioMarketLocked = false;
 let lastComputedState: Record<string, any> | null = null;
+
+// ─── Game API compatibility (SSE + HTTP for betting frontend) ────────────────
+const sseClients = new Set<ServerResponse>();
+let simStartedAtMs = Date.now();
+let duelOpenedAtMs = Date.now();
+let lastStreamingState: Record<string, any> | null = null;
+
+function buildStreamingStateUpdate(): Record<string, any> {
+    const state = lastComputedState;
+    const now = Date.now();
+    const marketStatus = state?.market?.status ?? 0;
+
+    // Map sim market status to streaming phase
+    let phase: string;
+    if (!state || marketStatus === 0) {
+        phase = "IDLE";
+    } else if (marketStatus === MARKET_STATUS_RESOLVED || marketStatus === MARKET_STATUS_CANCELLED) {
+        phase = "RESOLUTION";
+    } else {
+        phase = "FIGHTING";
+    }
+
+    // Synthesize agent HP from sim tick progress
+    const tickProgress = Math.min(1, simTick / Math.max(1, 200)); // ~200 ticks typical scenario
+    const winner = state?.market?.winner ?? 0;
+    const isResolved = marketStatus === MARKET_STATUS_RESOLVED || marketStatus === MARKET_STATUS_CANCELLED;
+    let hp1 = 100;
+    let hp2 = 100;
+    if (isResolved) {
+        hp1 = winner === 1 ? Math.max(10, Math.round(100 - tickProgress * 40)) : 0;
+        hp2 = winner === 2 ? Math.max(10, Math.round(100 - tickProgress * 40)) : 0;
+        if (winner === 0) { hp1 = 0; hp2 = 0; } // cancelled
+    } else if (simRunning) {
+        // Both lose HP proportional to progress, leader stays ahead
+        const bestBid = state?.market?.bestBid ?? 500;
+        const edge = (bestBid - 500) / 500; // positive = agent1 favored
+        hp1 = Math.max(5, Math.round(100 - tickProgress * (40 - edge * 20)));
+        hp2 = Math.max(5, Math.round(100 - tickProgress * (40 + edge * 20)));
+    }
+
+    const label = currentDuelLabel || "sim-duel-0";
+    const parts = label.split("-");
+    const duelId = `sim-${duelCounter}`;
+    const betCloseMs = duelOpenedAtMs + 604800 * 1000; // matches the 1-week window
+
+    const update = {
+        type: "STREAMING_STATE_UPDATE",
+        cycle: {
+            cycleId: duelId,
+            phase,
+            cycleStartTime: simStartedAtMs,
+            phaseStartTime: duelOpenedAtMs,
+            phaseEndTime: betCloseMs,
+            timeRemaining: Math.max(0, Math.round((betCloseMs - now) / 1000)),
+            agent1: {
+                id: "agent-alpha",
+                name: "Agent Alpha",
+                provider: "Simulation",
+                model: "v1",
+                hp: hp1,
+                maxHp: 100,
+                combatLevel: 1,
+                wins: 0,
+                losses: 0,
+                damageDealtThisFight: 100 - hp2,
+            },
+            agent2: {
+                id: "agent-beta",
+                name: "Agent Beta",
+                provider: "Simulation",
+                model: "v1",
+                hp: hp2,
+                maxHp: 100,
+                combatLevel: 1,
+                wins: 0,
+                losses: 0,
+                damageDealtThisFight: 100 - hp1,
+            },
+            duelId,
+            duelKeyHex: currentDuelKey ? currentDuelKey.replace(/^0x/, "") : null,
+            betOpenTime: duelOpenedAtMs,
+            betCloseTime: betCloseMs,
+            fightStartTime: duelOpenedAtMs,
+            duelEndTime: isResolved ? now : null,
+            winnerId: isResolved && winner === 1 ? "agent-alpha" : isResolved && winner === 2 ? "agent-beta" : null,
+            winnerName: isResolved && winner === 1 ? "Agent Alpha" : isResolved && winner === 2 ? "Agent Beta" : null,
+            winReason: isResolved ? "simulation" : null,
+            countdown: null,
+            seed: null,
+            replayHash: null,
+        },
+        leaderboard: [],
+        cameraTarget: null,
+        seq: simTick,
+        emittedAt: now,
+    };
+    lastStreamingState = update;
+    return update;
+}
+
+function broadcastSse(): void {
+    if (sseClients.size === 0) return;
+    const update = buildStreamingStateUpdate();
+    const frame = `event: state\ndata: ${JSON.stringify(update)}\n\n`;
+    for (const res of sseClients) {
+        try {
+            res.write(frame);
+        } catch {
+            sseClients.delete(res);
+        }
+    }
+}
+
+function writeCorsHeaders(res: ServerResponse): void {
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Cache-Control, Last-Event-ID");
+}
 let lastObservedMarketState: CachedMarketState | null = null;
 let lastObservedProtocolMmBalance: bigint | null = null;
 let lastObservedRuntimeMmBalance: bigint | null = null;
@@ -1430,6 +1554,7 @@ async function openNewDuel(): Promise<void> {
     currentDuelLabel = `sim-duel-${duelCounter}`;
     currentDuelKey = duelKey(currentDuelLabel);
     currentScenarioId = "manual";
+    duelOpenedAtMs = Date.now();
     resetScenarioMetrics();
 
     const reporter = reporterSigner ?? (await provider.getSigner(2));
@@ -3267,6 +3392,8 @@ function broadcast(msg: any): void {
             ws.send(payload);
         }
     }
+    // Also push to SSE clients for the betting frontend
+    broadcastSse();
 }
 
 function handleWsMessage(data: string): void {
@@ -3400,6 +3527,7 @@ function writeJson(
     statusCode: number,
     payload: unknown,
 ): void {
+    writeCorsHeaders(res);
     res.writeHead(statusCode, {
         "Content-Type": "application/json",
         "Cache-Control": "no-cache",
@@ -3415,6 +3543,119 @@ async function handleHttpRequest(
         req.url ?? "/",
         `http://${req.headers.host ?? `127.0.0.1:${HTTP_PORT}`}`,
     );
+
+    // ─── CORS preflight ──────────────────────────────────────────────────────
+    if (req.method === "OPTIONS") {
+        writeCorsHeaders(res);
+        res.writeHead(204);
+        res.end();
+        return;
+    }
+
+    // ─── Game API compatibility endpoints (for betting frontend) ─────────────
+
+    if (requestUrl.pathname === "/api/config") {
+        writeJson(res, 200, {
+            chainId: 31337,
+            rpcUrl: `http://127.0.0.1:${ANVIL_PORT}`,
+            clobAddress: clobAddr,
+            oracleAddress: oracleAddr,
+            duelKey: currentDuelKey,
+            duelLabel: currentDuelLabel,
+            marketKey: currentMarketKey,
+        });
+        return;
+    }
+
+    if (requestUrl.pathname === "/api/streaming/state/events") {
+        writeCorsHeaders(res);
+        res.writeHead(200, {
+            "Content-Type": "text/event-stream",
+            "Cache-Control": "no-cache",
+            Connection: "keep-alive",
+        });
+        // Send current state immediately
+        const current = buildStreamingStateUpdate();
+        res.write(`event: state\ndata: ${JSON.stringify(current)}\n\n`);
+        sseClients.add(res);
+        req.on("close", () => {
+            sseClients.delete(res);
+        });
+        return;
+    }
+
+    if (requestUrl.pathname === "/api/streaming/state") {
+        const state = lastStreamingState ?? buildStreamingStateUpdate();
+        writeJson(res, 200, state);
+        return;
+    }
+
+    if (requestUrl.pathname === "/api/streaming/duel-context") {
+        const ss = lastStreamingState ?? buildStreamingStateUpdate();
+        const cycle = ss.cycle ?? {};
+        // useDuelContext expects { type, cycle: {...}, leaderboard, cameraTarget }
+        writeJson(res, 200, {
+            type: "STREAMING_DUEL_CONTEXT",
+            cycle: {
+                ...cycle,
+                agent1: cycle.agent1 ? { ...cycle.agent1, inventory: [], monologues: [] } : null,
+                agent2: cycle.agent2 ? { ...cycle.agent2, inventory: [], monologues: [] } : null,
+            },
+            leaderboard: ss.leaderboard ?? [],
+            cameraTarget: ss.cameraTarget ?? null,
+        });
+        return;
+    }
+
+    if (requestUrl.pathname === "/api/arena/prediction-markets/active") {
+        const now = Date.now();
+        const ss = lastStreamingState ?? buildStreamingStateUpdate();
+        const cycle = ss.cycle ?? {};
+        const marketStatus = lastComputedState?.market?.status ?? 0;
+        const isResolved = marketStatus === MARKET_STATUS_RESOLVED || marketStatus === MARKET_STATUS_CANCELLED;
+        const winner = lastComputedState?.market?.winner ?? 0;
+
+        let lifecycleStatus = "IDLE";
+        if (marketStatus === 1) lifecycleStatus = "OPEN";
+        else if (marketStatus === 2) lifecycleStatus = "LOCKED";
+        else if (marketStatus === MARKET_STATUS_RESOLVED) lifecycleStatus = "RESOLVED";
+        else if (marketStatus === MARKET_STATUS_CANCELLED) lifecycleStatus = "CANCELLED";
+
+        let winnerStr = "NONE";
+        if (isResolved && winner === 1) winnerStr = "A";
+        else if (isResolved && winner === 2) winnerStr = "B";
+
+        writeJson(res, 200, {
+            duel: {
+                duelKey: currentDuelKey || null,
+                duelId: cycle.duelId ?? `sim-${duelCounter}`,
+                phase: cycle.phase ?? "IDLE",
+                winner: isResolved ? winnerStr : null,
+                betCloseTime: cycle.betCloseTime ?? null,
+            },
+            markets: [
+                {
+                    chainKey: "bsc",
+                    duelKey: currentDuelKey || null,
+                    duelId: cycle.duelId ?? `sim-${duelCounter}`,
+                    marketId: `sim-bsc-${duelCounter}`,
+                    marketRef: currentMarketKey || null,
+                    lifecycleStatus,
+                    winner: winnerStr,
+                    betCloseTime: cycle.betCloseTime ?? null,
+                    contractAddress: clobAddr,
+                    programId: null,
+                    txRef: null,
+                    syncedAt: now,
+                    marketType: "clob",
+                },
+            ],
+            updatedAt: now,
+        });
+        return;
+    }
+
+    // ─── Original sim dashboard API endpoints ────────────────────────────────
 
     if (requestUrl.pathname === "/api/state") {
         writeJson(res, 200, {

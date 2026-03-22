@@ -10,6 +10,7 @@ PROGRAMS=(
   "fight_oracle"
   "gold_clob_market"
   "gold_perps_market"
+  "lvr_amm"
 )
 
 extract_marker_json() {

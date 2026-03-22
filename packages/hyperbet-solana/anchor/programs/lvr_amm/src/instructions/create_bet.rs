@@ -30,6 +30,7 @@ pub fn create_bet(
     bet.is_dynamic = is_dynamic;
     bet.initial_liq = math::calc_initial_liquidity(initial_liq);
     bet.reserves = [initial_liq, initial_liq];
+    bet.duel_key = duel_key;
 
     bet.bet_prompt = bet_prompt;
     bet.created_at = clock.unix_timestamp;
@@ -41,7 +42,6 @@ pub fn create_bet(
     // Read fee/treasury from protocol config — not caller inputs
     bet.treasury = config.treasury;
     bet.fee_bps = config.fee_bps;
-    bet.duel_key = duel_key;
 
     Ok(())
 }

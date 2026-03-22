@@ -1,5 +1,7 @@
 ﻿export type ChainId = "solana" | "bsc" | "avax";
 
+export type MarketType = "clob" | "amm";
+
 export type ScenarioId =
   | "latency_sniping"
   | "spoof_pressure"
@@ -21,7 +23,13 @@ export type ScenarioId =
   | "sybil_wash_trading"
   | "sybil_identity_churn"
   | "rebate_farming_ring"
-  | "coordinated_resolution_push";
+  | "coordinated_resolution_push"
+  | "amm_sandwich_attack"
+  | "amm_reserve_manipulation"
+  | "amm_stale_price_arb"
+  | "amm_slippage_griefing"
+  | "amm_token_drain"
+  | "amm_expiry_race";
 
 export type BudgetBreach = {
   control: string;
@@ -119,4 +127,18 @@ export type VulnerabilityVector = {
   stale: number;
   inventory: number;
   cancel: number;
+};
+
+export type AmmMarketState = {
+  reserveYes: number;
+  reserveNo: number;
+  liquidity: number;
+  yesBalance: number;
+  noBalance: number;
+  cash: number;
+  drawdown: number;
+  toxicFills: number;
+  totalFills: number;
+  exploitEvents: number;
+  adverseSlippageBpsTotal: number;
 };

@@ -1,4 +1,5 @@
 import type {
+  AmmPositionRecord,
   ClaimBacklogInput,
   ClaimBacklogItem,
   MarketMakerStateStore,
@@ -15,6 +16,7 @@ export class InMemoryMarketMakerStateStore implements MarketMakerStateStore {
   private readonly claimBacklog = new Map<string, ClaimBacklogItem>();
   private readonly outbox = new Map<number, OutboxItem>();
   private readonly cursors = new Map<string, ReconciliationCursor>();
+  private readonly ammPositions = new Map<string, AmmPositionRecord>();
   private nextOutboxId = 1;
   private nextEventId = 1;
 
@@ -241,6 +243,14 @@ export class InMemoryMarketMakerStateStore implements MarketMakerStateStore {
       cursorValue,
       updatedAt,
     });
+  }
+
+  async listAmmPositions(): Promise<AmmPositionRecord[]> {
+    return [...this.ammPositions.values()];
+  }
+
+  async upsertAmmPosition(record: AmmPositionRecord): Promise<void> {
+    this.ammPositions.set(record.positionKey, structuredClone(record));
   }
 }
 

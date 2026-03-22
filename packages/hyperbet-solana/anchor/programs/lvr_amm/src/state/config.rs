@@ -6,6 +6,7 @@ pub struct AmmConfig {
     pub authority: Pubkey,
     pub treasury: Pubkey,
     pub market_maker: Pubkey,
+    pub fight_oracle_program: Pubkey,
     pub fee_bps: u16,
     pub config_frozen: bool,
     pub paused: bool,

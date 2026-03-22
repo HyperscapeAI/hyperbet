@@ -46,7 +46,7 @@ const artifactTargets = [
     label: "market-maker-bot",
     dir: path.join(rootDir, "..", "market-maker-bot", "src", "idl"),
     copyTypes: false,
-    programs: ["gold_clob_market"],
+    programs: ["gold_clob_market", "lvr_amm"],
   },
 ];
 
@@ -54,6 +54,7 @@ const programNames = [
   "fight_oracle",
   "gold_clob_market",
   "gold_perps_market",
+  "lvr_amm",
 ];
 
 for (const programName of programNames) {

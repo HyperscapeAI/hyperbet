@@ -736,6 +736,10 @@
           "type": "pubkey"
         },
         {
+          "name": "fight_oracle_program",
+          "type": "pubkey"
+        },
+        {
           "name": "fee_bps",
           "type": "u16"
         }
@@ -1186,6 +1190,32 @@
                 "kind": "account",
                 "path": "bet.creator",
                 "account": "Bet"
+              }
+            ]
+          }
+        },
+        {
+          "name": "amm_config",
+          "docs": [
+            "Optional: AmmConfig for oracle program ID validation (required when duel_state is provided)"
+          ],
+          "optional": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  109,
+                  109,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
               }
             ]
           }
@@ -1700,23 +1730,68 @@
     },
     {
       "code": 6016,
+      "name": "MathOverflow",
+      "msg": "Arithmetic overflow"
+    },
+    {
+      "code": 6017,
+      "name": "InsufficientReserves",
+      "msg": "Insufficient reserves for swap"
+    },
+    {
+      "code": 6018,
+      "name": "MarketExpired",
+      "msg": "Market has expired"
+    },
+    {
+      "code": 6019,
+      "name": "InvalidSettlementOutcome",
+      "msg": "Invalid settlement outcome"
+    },
+    {
+      "code": 6020,
       "name": "InvalidAddress",
       "msg": "Invalid address (zero/default)"
     },
     {
-      "code": 6017,
+      "code": 6021,
       "name": "FeeTooHigh",
       "msg": "Fee BPS exceeds maximum (1000 = 10%)"
     },
     {
-      "code": 6018,
+      "code": 6022,
       "name": "MarketPaused",
       "msg": "Market is paused"
     },
     {
-      "code": 6019,
+      "code": 6023,
       "name": "ConfigFrozen",
       "msg": "Config is frozen"
+    },
+    {
+      "code": 6024,
+      "name": "InvalidDuelState",
+      "msg": "Invalid duel state account"
+    },
+    {
+      "code": 6025,
+      "name": "MissingAmmConfig",
+      "msg": "AMM config account required for oracle settlement"
+    },
+    {
+      "code": 6026,
+      "name": "InvalidFightOracleProgram",
+      "msg": "Fight oracle program mismatch"
+    },
+    {
+      "code": 6027,
+      "name": "MathConvergenceError",
+      "msg": "AMM Newton-Raphson solver did not converge"
+    },
+    {
+      "code": 6028,
+      "name": "MathFixedPointOverflow",
+      "msg": "AMM fixed-point overflow"
     }
   ],
   "types": [
@@ -1770,6 +1845,10 @@
             "type": "pubkey"
           },
           {
+            "name": "fight_oracle_program",
+            "type": "pubkey"
+          },
+          {
             "name": "fee_bps",
             "type": "u16"
           },
@@ -1811,6 +1890,10 @@
           },
           {
             "name": "treasury",
+            "type": "pubkey"
+          },
+          {
+            "name": "fight_oracle_program",
             "type": "pubkey"
           },
           {
@@ -1859,6 +1942,15 @@
             }
           },
           {
+            "name": "duel_key",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
             "name": "bet_prompt",
             "type": "string"
           },
@@ -1891,18 +1983,6 @@
           {
             "name": "fee_bps",
             "type": "u16"
-          },
-          {
-            "name": "duel_key",
-            "docs": [
-              "Full 32-byte duel key for oracle cross-reference (0 if not set)"
-            ],
-            "type": {
-              "array": [
-                "u8",
-                32
-              ]
-            }
           }
         ]
       }

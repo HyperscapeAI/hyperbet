@@ -47,12 +47,12 @@ pub fn sell_instruction(ctx: Context<Sell>, bet_id: u64, outcome: u8, amount_in:
         .ok_or(PredictionMarketError::MathOverflow)?;
 
     let amount_out = math::get_swap_amount(
-        is_sell_yes, 
-        bet.reserves[0], 
-        bet.reserves[1], 
-        liq, 
+        is_sell_yes,
+        bet.reserves[0],
+        bet.reserves[1],
+        liq,
         net_amount_in
-    );
+    )?;
 
     // Update Virtual Reserves
     if is_sell_yes {

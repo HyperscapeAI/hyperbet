@@ -24,6 +24,12 @@ export const SCENARIOS: ScenarioId[] = [
   "layering_spoof_ladder",
   "quote_stuffing_burst",
   "cancel_storm_griefing",
+  "amm_sandwich_attack",
+  "amm_reserve_manipulation",
+  "amm_stale_price_arb",
+  "amm_slippage_griefing",
+  "amm_token_drain",
+  "amm_expiry_race",
 ];
 
 export const CHAIN_PROFILES: ChainProfile[] = [

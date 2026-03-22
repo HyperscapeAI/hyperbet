@@ -22,9 +22,10 @@ pub mod lvr_amm {
         ctx: Context<InitializeAmmConfig>,
         treasury: Pubkey,
         market_maker: Pubkey,
+        fight_oracle_program: Pubkey,
         fee_bps: u16,
     ) -> Result<()> {
-        initialize_amm_config(ctx, treasury, market_maker, fee_bps)
+        initialize_amm_config(ctx, treasury, market_maker, fight_oracle_program, fee_bps)
     }
 
     pub fn freeze_config(ctx: Context<FreezeAmmConfig>) -> Result<()> {
