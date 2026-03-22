@@ -22,6 +22,7 @@ contract AgentPerpEngine is AccessControl, ReentrancyGuard {
     uint256 public constant DEFAULT_MAX_ORACLE_DELAY = 2 minutes;
     uint256 public constant PARTIAL_LIQUIDATION_TARGET_MARGIN_RATIO = 2_000; // 20% = 2x maintenance (10%)
     uint256 public constant MAX_SOCIALIZED_LOSS_BPS = 50; // 0.5% cap per position
+    uint256 public constant MAX_FEE_BPS = 500; // 5% individual fee cap
 
     SkillOracle public immutable oracle;
     IERC20 public immutable marginToken;
@@ -739,6 +740,7 @@ contract AgentPerpEngine is AccessControl, ReentrancyGuard {
     ) internal {
         if (marketConfigs[agentId].exists) revert MarketAlreadyExists();
         _validateConfig(skewScale, maxLeverage, maintenanceMarginBps, liquidationRewardBps, maxOracleDelay);
+        if (tradeTreasuryFeeBps > MAX_FEE_BPS || tradeMarketMakerFeeBps > MAX_FEE_BPS) revert InvalidFeeConfig();
         if (tradeTreasuryFeeBps + tradeMarketMakerFeeBps >= BPS) revert InvalidFeeConfig();
 
         marketConfigs[agentId] = MarketConfig({
@@ -790,6 +792,11 @@ contract AgentPerpEngine is AccessControl, ReentrancyGuard {
         MarketConfig memory config = _requireMarket(agentId);
         MarketState storage market = markets[agentId];
 
+        // Settlement price frozen — skip oracle fetch and funding drift
+        if (market.settlementPrice != 0) {
+            return market.settlementPrice;
+        }
+
         (uint256 mu, uint256 sigma, uint256 lastUpdate) = oracle.agentSkills(agentId);
         if (lastUpdate == 0) revert UnknownOracleAgent();
         if (!_isLiquidationContext && block.timestamp - lastUpdate > config.maxOracleDelay) revert StaleOracle();
@@ -808,6 +815,8 @@ contract AgentPerpEngine is AccessControl, ReentrancyGuard {
     // ── Internal: funding ──
 
     function _accrueFunding(MarketState storage market, MarketConfig memory config) internal {
+        if (market.status != MarketStatus.ACTIVE) return;
+
         uint256 lastTimestamp = market.lastFundingTimestamp;
         if (lastTimestamp == 0) {
             market.lastFundingTimestamp = block.timestamp;
@@ -834,6 +843,8 @@ contract AgentPerpEngine is AccessControl, ReentrancyGuard {
     {
         previewCurrentFundingRate = market.currentFundingRate;
         previewCumulativeFundingRate = market.cumulativeFundingRate;
+
+        if (market.status != MarketStatus.ACTIVE) return (previewCurrentFundingRate, previewCumulativeFundingRate);
 
         uint256 lastTimestamp = market.lastFundingTimestamp;
         if (lastTimestamp == 0 || block.timestamp <= lastTimestamp) {

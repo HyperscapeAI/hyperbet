@@ -102,6 +102,7 @@ contract AgentPerpEngineNative is AccessControl, ReentrancyGuard {
     uint256 public immutable fundingVelocity;
     uint256 public immutable maxLeverage;
     bool public tradingPaused;
+    bool private _isLiquidationContext;
 
     event PositionOpened(
         bytes32 indexed agentId,
@@ -240,19 +241,28 @@ contract AgentPerpEngineNative is AccessControl, ReentrancyGuard {
     // ── Oracle ──
 
     function _syncOracle(bytes32 agentId) internal returns (uint256 price) {
+        MarketState storage market = markets[agentId];
+
+        // Settlement price frozen — skip oracle fetch and funding drift
+        if (market.settlementPrice != 0) {
+            return market.settlementPrice;
+        }
+
         MarketConfig memory config = marketConfigs[agentId];
         (uint256 mu,, uint256 lastUpdate) = oracle.agentSkills(agentId);
         if (lastUpdate == 0) revert UnknownOracleAgent();
-        if (block.timestamp - lastUpdate > config.maxOracleDelay) revert StaleOracle();
+        if (!_isLiquidationContext && block.timestamp - lastUpdate > config.maxOracleDelay) revert StaleOracle();
 
         _updateFunding(agentId);
         price = oracle.getIndexPrice(agentId);
-        markets[agentId].lastOraclePrice = price;
-        markets[agentId].lastOracleTimestamp = lastUpdate;
+        market.lastOraclePrice = price;
+        market.lastOracleTimestamp = lastUpdate;
     }
 
     function _updateFunding(bytes32 agentId) internal {
         MarketState storage market = markets[agentId];
+        if (market.status != MarketStatus.ACTIVE) return;
+
         MarketConfig memory config = marketConfigs[agentId];
         uint256 lastTimestamp = market.lastFundingTimestamp;
         if (lastTimestamp == 0) {
@@ -522,7 +532,9 @@ contract AgentPerpEngineNative is AccessControl, ReentrancyGuard {
 
     function liquidate(bytes32 agentId, address trader) external nonReentrant {
         if (!marketConfigs[agentId].exists) revert MarketNotFound();
+        _isLiquidationContext = true;
         _syncOracle(agentId);
+        _isLiquidationContext = false;
 
         MarketConfig memory config = marketConfigs[agentId];
         MarketState storage market = markets[agentId];

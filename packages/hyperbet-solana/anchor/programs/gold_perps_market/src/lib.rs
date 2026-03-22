@@ -16,6 +16,7 @@ const FEE_BUCKET_TREASURY: u8 = 0;
 const FEE_BUCKET_MARKET_MAKER: u8 = 1;
 const MAX_SOCIALIZED_LOSS_BPS: u64 = 50; // 0.5% of notional per position
 const MIN_LIQUIDATION_CLOSE_BPS: u64 = 1_000; // 10% minimum close
+const MAX_FEE_BPS: u64 = 500; // 5% individual fee cap
 
 /// Native-SOL isolated perpetual markets for model ranking derivatives.
 ///
@@ -946,6 +947,11 @@ fn validate_config_inputs(
     );
     require!(
         u64::from(liquidation_fee_bps) < BPS_DENOMINATOR,
+        PerpsError::InvalidRiskConfig
+    );
+    require!(
+        u64::from(trade_treasury_fee_bps) <= MAX_FEE_BPS
+            && u64::from(trade_market_maker_fee_bps) <= MAX_FEE_BPS,
         PerpsError::InvalidRiskConfig
     );
     require!(
