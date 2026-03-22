@@ -2,7 +2,10 @@ import { describe, expect, it } from "bun:test";
 
 import {
   normalizePredictionMarketDuelKeyHex,
+  parsePredictionMarketsOverviewResponse,
   parsePredictionMarketsResponse,
+  parsePredictionMarketSyncStatusResponse,
+  selectPredictionMarketOverviewRecord,
   selectPredictionMarketLifecycleRecord,
 } from "../src/lib/predictionMarkets";
 import {
@@ -28,6 +31,8 @@ describe("prediction market lifecycle helpers", () => {
         phase: "ANNOUNCEMENT",
         winner: "NONE",
         betCloseTime: 12345,
+        agent1Name: "Alpha",
+        agent2Name: "Beta",
       },
       markets: [
         {
@@ -70,6 +75,8 @@ describe("prediction market lifecycle helpers", () => {
 
     expect(parsed).not.toBeNull();
     expect(parsed?.duel.duelKey).toBe(duelKey);
+    expect(parsed?.duel.agent1Name).toBe("Alpha");
+    expect(parsed?.duel.agent2Name).toBe("Beta");
     expect(parsed?.markets).toHaveLength(2);
     expect(parsed?.markets[0]?.duelKey).toBe(duelKey);
     expect(parsed?.markets[1]?.duelKey).toBeNull();
@@ -123,6 +130,97 @@ describe("prediction market lifecycle helpers", () => {
       "avax:12",
     );
     expect(selectPredictionMarketLifecycleRecord(payload, "base")).toBeNull();
+  });
+
+  it("parses live and recent settlement overview payloads", () => {
+    const duelKey = "12".repeat(32);
+    const parsed = parsePredictionMarketsOverviewResponse({
+      live: {
+        duel: {
+          duelKey: `0x${duelKey}`,
+          duelId: "duel-live",
+          phase: "FIGHTING",
+          winner: "NONE",
+          betCloseTime: 111,
+          agent1Name: "Live Alpha",
+          agent2Name: "Live Beta",
+        },
+        markets: [
+          {
+            chainKey: "bsc",
+            duelKey,
+            duelId: "duel-live",
+            marketId: "market-live",
+            marketRef: "market-live",
+            lifecycleStatus: "OPEN",
+            winner: "NONE",
+            betCloseTime: 111,
+            contractAddress: "0x123",
+            programId: null,
+            txRef: null,
+            syncedAt: 1,
+          },
+        ],
+        updatedAt: 100,
+      },
+      recentSettlement: {
+        duel: {
+          duelKey,
+          duelId: "duel-previous",
+          phase: "RESOLUTION",
+          winner: "A",
+          betCloseTime: 222,
+          agent1Name: "Settled Alpha",
+          agent2Name: "Settled Beta",
+        },
+        markets: [],
+        updatedAt: 90,
+      },
+      updatedAt: 123,
+    });
+
+    expect(parsed).not.toBeNull();
+    expect(parsed?.live?.duel.duelId).toBe("duel-live");
+    expect(parsed?.recentSettlement?.duel.duelId).toBe("duel-previous");
+    expect(parsed?.recentSettlement?.duel.agent1Name).toBe("Settled Alpha");
+    expect(parsed?.recentSettlement?.duel.agent2Name).toBe("Settled Beta");
+    expect(selectPredictionMarketOverviewRecord(parsed, "bsc", "live")?.marketRef).toBe(
+      "market-live",
+    );
+    expect(
+      selectPredictionMarketOverviewRecord(parsed, "bsc", "recentSettlement"),
+    ).toBeNull();
+  });
+
+  it("parses sync status sequence fields as integers", () => {
+    const parsed = parsePredictionMarketSyncStatusResponse({
+      sourceEpoch: 7.9,
+      sourceLatestSeq: 101.8,
+      lastSeenSeq: 99.2,
+      lastAppliedSeq: 98.7,
+      applyLagMs: 1500,
+      sourceEventAgeMs: 2500,
+      replayMode: "replay",
+      degradedReason: null,
+      rendererHealth: {
+        ready: true,
+        degradedReason: null,
+        updatedAt: 1234,
+      },
+      rendererHealthAgeMs: 15,
+      lastEventReceivedAt: 2345,
+      lastAppliedAt: 3456,
+      connectedAt: 4567,
+      enabled: true,
+    });
+
+    expect(parsed).toMatchObject({
+      sourceEpoch: 7,
+      sourceLatestSeq: 101,
+      lastSeenSeq: 99,
+      lastAppliedSeq: 98,
+      replayMode: "replay",
+    });
   });
 });
 

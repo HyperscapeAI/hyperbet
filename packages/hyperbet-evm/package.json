@@ -23,9 +23,9 @@
     "build:testnet": "bun run --cwd app build --mode testnet",
     "build:mainnet": "bun run --cwd app build --mode mainnet",
     "preview": "bun run --cwd app preview",
-    "keeper:bot": "bun run --cwd keeper bot",
-    "keeper:bot:once": "bun run --cwd keeper bot -- --once",
-    "keeper:service": "bun run --cwd keeper service",
+    "keeper:bot": "bun --bun keeper/src/bot.ts",
+    "keeper:bot:once": "bun --bun keeper/src/bot.ts -- --once",
+    "keeper:service": "bun --bun keeper/src/service.ts",
     "test:e2e:local": "bun run --cwd app test:e2e:local"
   },
   "dependencies": {

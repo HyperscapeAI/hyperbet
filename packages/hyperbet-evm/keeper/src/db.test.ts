@@ -272,4 +272,199 @@ describe("keeper db persistence", () => {
       inspectDb.close(false);
     }
   });
+
+  test("persists bet-sync checkpoint and overview state", async () => {
+    const db = (await import(
+      `./db.ts?case=${Date.now()}-bet-sync`
+    )) as typeof import("./db.ts");
+    loadedModules.push(db);
+
+    db.saveBetSyncCheckpoint({
+      sourceEpoch: 7,
+      lastSeenSeq: 101,
+      lastAppliedSeq: 99,
+      replayMode: "replay",
+      degradedReason: "consumer lag",
+      updatedAt: 1_700_000_100_000,
+    });
+    db.savePredictionMarketsOverviewState({
+      liveJson: JSON.stringify({ duel: { duelId: "duel-live" } }),
+      recentSettlementJson: JSON.stringify({ duel: { duelId: "duel-old" } }),
+      updatedAt: 1_700_000_100_500,
+    });
+
+    expect(db.loadBetSyncCheckpoint()).toEqual({
+      sourceEpoch: 7,
+      lastSeenSeq: 101,
+      lastAppliedSeq: 99,
+      replayMode: "replay",
+      degradedReason: "consumer lag",
+      updatedAt: 1_700_000_100_000,
+    });
+    expect(db.loadPredictionMarketsOverviewState()).toEqual({
+      liveJson: JSON.stringify({ duel: { duelId: "duel-live" } }),
+      recentSettlementJson: JSON.stringify({ duel: { duelId: "duel-old" } }),
+      updatedAt: 1_700_000_100_500,
+    });
+    expect(
+      db.appendBetSyncApplyLogEntry({
+        sourceEpoch: 7,
+        seq: 101,
+        eventType: "state",
+        duelKey: "aa".repeat(32),
+        duelId: "duel-live",
+        phase: "COUNTDOWN",
+        phaseVersion: 2,
+        emittedAt: 1_700_000_100_100,
+        payloadJson: JSON.stringify({ seq: 101 }),
+        receivedAt: 1_700_000_100_200,
+        appliedAt: 1_700_000_100_300,
+      }),
+    ).toBe(true);
+    expect(
+      db.appendBetSyncApplyLogEntry({
+        sourceEpoch: 7,
+        seq: 101,
+        eventType: "state",
+        duelKey: "aa".repeat(32),
+        duelId: "duel-live",
+        phase: "COUNTDOWN",
+        phaseVersion: 2,
+        emittedAt: 1_700_000_100_100,
+        payloadJson: JSON.stringify({ seq: 101 }),
+        receivedAt: 1_700_000_100_200,
+        appliedAt: 1_700_000_100_300,
+      }),
+    ).toBe(false);
+  });
+
+  test("commits stream snapshot, checkpoint, overview, and apply-log atomically", async () => {
+    const db = (await import(
+      `./db.ts?case=${Date.now()}-projection-state`
+    )) as typeof import("./db.ts");
+    loadedModules.push(db);
+
+    const firstCommit = db.commitBetSyncProjectionState({
+      streamState: {
+        stateJson: JSON.stringify({
+          type: "STREAMING_STATE_UPDATE",
+          cycle: { duelId: "duel-1", phase: "COUNTDOWN" },
+          leaderboard: [],
+          cameraTarget: null,
+          seq: 17,
+          emittedAt: 1_700_000_200_000,
+        }),
+        updatedAt: 1_700_000_200_000,
+      },
+      checkpoint: {
+        sourceEpoch: 9,
+        lastSeenSeq: 17,
+        lastAppliedSeq: 17,
+        replayMode: "live",
+        degradedReason: null,
+        updatedAt: 1_700_000_200_010,
+      },
+      overview: {
+        liveJson: JSON.stringify({ duel: { duelId: "duel-1" } }),
+        recentSettlementJson: JSON.stringify({ duel: { duelId: "duel-0" } }),
+        updatedAt: 1_700_000_200_020,
+      },
+      applyLogEntry: {
+        sourceEpoch: 9,
+        seq: 17,
+        eventType: "state",
+        duelKey: "bb".repeat(32),
+        duelId: "duel-1",
+        phase: "COUNTDOWN",
+        phaseVersion: 3,
+        emittedAt: 1_700_000_200_000,
+        payloadJson: JSON.stringify({ seq: 17 }),
+        receivedAt: 1_700_000_200_030,
+        appliedAt: 1_700_000_200_040,
+      },
+    });
+
+    expect(firstCommit).toBe(true);
+    expect(db.loadBetSyncStreamStateSnapshot()).toEqual({
+      stateJson: JSON.stringify({
+        type: "STREAMING_STATE_UPDATE",
+        cycle: { duelId: "duel-1", phase: "COUNTDOWN" },
+        leaderboard: [],
+        cameraTarget: null,
+        seq: 17,
+        emittedAt: 1_700_000_200_000,
+      }),
+      updatedAt: 1_700_000_200_000,
+    });
+    expect(db.loadBetSyncCheckpoint()).toEqual({
+      sourceEpoch: 9,
+      lastSeenSeq: 17,
+      lastAppliedSeq: 17,
+      replayMode: "live",
+      degradedReason: null,
+      updatedAt: 1_700_000_200_010,
+    });
+    expect(db.loadPredictionMarketsOverviewState()).toEqual({
+      liveJson: JSON.stringify({ duel: { duelId: "duel-1" } }),
+      recentSettlementJson: JSON.stringify({ duel: { duelId: "duel-0" } }),
+      updatedAt: 1_700_000_200_020,
+    });
+
+    const duplicateCommit = db.commitBetSyncProjectionState({
+      streamState: {
+        stateJson: JSON.stringify({
+          type: "STREAMING_STATE_UPDATE",
+          cycle: { duelId: "duel-2", phase: "FIGHTING" },
+          leaderboard: [],
+          cameraTarget: "agent-2",
+          seq: 18,
+          emittedAt: 1_700_000_201_000,
+        }),
+        updatedAt: 1_700_000_201_000,
+      },
+      checkpoint: {
+        sourceEpoch: 9,
+        lastSeenSeq: 18,
+        lastAppliedSeq: 18,
+        replayMode: "live",
+        degradedReason: null,
+        updatedAt: 1_700_000_201_010,
+      },
+      overview: {
+        liveJson: JSON.stringify({ duel: { duelId: "duel-2" } }),
+        recentSettlementJson: JSON.stringify({ duel: { duelId: "duel-1" } }),
+        updatedAt: 1_700_000_201_020,
+      },
+      applyLogEntry: {
+        sourceEpoch: 9,
+        seq: 17,
+        eventType: "state",
+        duelKey: "bb".repeat(32),
+        duelId: "duel-1",
+        phase: "COUNTDOWN",
+        phaseVersion: 3,
+        emittedAt: 1_700_000_200_000,
+        payloadJson: JSON.stringify({ seq: 17 }),
+        receivedAt: 1_700_000_201_030,
+        appliedAt: 1_700_000_201_040,
+      },
+    });
+
+    expect(duplicateCommit).toBe(false);
+    expect(db.loadBetSyncStreamStateSnapshot()).toEqual({
+      stateJson: JSON.stringify({
+        type: "STREAMING_STATE_UPDATE",
+        cycle: { duelId: "duel-1", phase: "COUNTDOWN" },
+        leaderboard: [],
+        cameraTarget: null,
+        seq: 17,
+        emittedAt: 1_700_000_200_000,
+      }),
+      updatedAt: 1_700_000_200_000,
+    });
+    expect(db.loadBetSyncCheckpoint()?.lastAppliedSeq).toBe(17);
+    expect(
+      db.loadPredictionMarketsOverviewState()?.liveJson,
+    ).toBe(JSON.stringify({ duel: { duelId: "duel-1" } }));
+  });
 });

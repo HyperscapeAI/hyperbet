@@ -2,6 +2,7 @@ import {
   type CSSProperties,
   useCallback,
   useEffect,
+  useId,
   useMemo,
   useRef,
   useState,
@@ -15,9 +16,19 @@ import {
   hexToBytes,
   http,
   parseUnits,
+  toHex,
   type Address,
 } from "viem";
-import { privateKeyToAccount } from "viem/accounts";
+import {
+  publicKeyToAddress,
+  sign,
+  signAuthorization,
+  signMessage,
+  signTransaction,
+  signTypedData,
+  toAccount,
+} from "viem/accounts";
+import { secp256k1 } from "@noble/curves/secp256k1.js";
 
 import { useChain } from "../lib/ChainContext";
 import { getEvmChainConfig } from "../lib/chainConfig";
@@ -45,11 +56,13 @@ import {
   normalizePredictionMarketDuelKeyHex,
   usePredictionMarketLifecycle,
 } from "../lib/predictionMarkets";
+import { selectConfiguredEvmPrivateKey } from "../lib/evmPrivateKey";
 import {
   derivePredictionMarketUiState,
   EMPTY_PREDICTION_MARKET_WALLET_SNAPSHOT,
   type PredictionMarketWalletSnapshot,
 } from "../lib/predictionMarketUiState";
+import { derivePredictionMarketClaimUi } from "../lib/predictionMarketClaimUi";
 import { recordPredictionMarketTrade } from "../lib/predictionMarketTracking";
 import { useStreamingState } from "../spectator/useStreamingState";
 import {
@@ -64,12 +77,34 @@ type BetSide = "YES" | "NO";
 
 const MARKET_KIND_DUEL_WINNER = 0;
 
-function normalizePrivateKey(value: string): `0x${string}` | null {
-  const trimmed = value.trim();
-  if (!trimmed) return null;
-  const withPrefix = trimmed.startsWith("0x") ? trimmed : `0x${trimmed}`;
-  if (!/^0x[0-9a-fA-F]{64}$/.test(withPrefix)) return null;
-  return withPrefix as `0x${string}`;
+function createStrictPrivateKeyAccount(privateKey: `0x${string}`) {
+  const privateKeyBytes = hexToBytes(privateKey, { size: 32 });
+  const publicKey = toHex(secp256k1.getPublicKey(privateKeyBytes, false));
+  const address = publicKeyToAddress(publicKey);
+  const account = toAccount({
+    address,
+    async sign({ hash }) {
+      return sign({ hash, privateKey, to: "hex" });
+    },
+    async signAuthorization(authorization) {
+      return signAuthorization({ ...authorization, privateKey });
+    },
+    async signMessage({ message }) {
+      return signMessage({ message, privateKey });
+    },
+    async signTransaction(transaction, { serializer } = {}) {
+      return signTransaction({ privateKey, transaction, serializer });
+    },
+    async signTypedData(typedData) {
+      return signTypedData({ ...typedData, privateKey });
+    },
+  });
+
+  return {
+    ...account,
+    publicKey,
+    source: "privateKey" as const,
+  };
 }
 
 function normalizeAddress(value: string): Address | null {
@@ -101,6 +136,7 @@ function getEvmPanelCopy(locale: UiLocale) {
       resolutionChallenged: "结果已被挑战，结算已暂停",
       marketOpen: "市场开放中",
       refreshFailed: (message: string) => `刷新失败：${message}`,
+      streamDriftDetected: "即将开放下注",
       walletNotConnected: "钱包未连接",
       amountTooLow: "数量必须大于 0",
       placingOrder: "正在下单...",
@@ -123,10 +159,12 @@ function getEvmPanelCopy(locale: UiLocale) {
       estCost: "预计成交",
       estFee: "手续费",
       estMaxPayout: "胜出返还",
-      claimReady: "可领取结算",
+      claimWinningsTitle: "领取收益",
+      claimRefundTitle: "领取退款",
       claimLocked: "暂无可领取结算",
-      claimHelp: "对局结算后，可在这里领取胜出份额或取消退款。",
-      claimCleanupReady: "清理已结算仓位",
+      claimHelp: "对局结算后，可在这里领取获胜份额。",
+      claimRefundHelp: "若本局取消，可在这里领取退回资金。",
+      claimCleanupTitle: "清理已结算仓位",
       claimCleanupHelp: "若本局已判定负方，可在这里清理残留仓位状态。",
       sideYes: "买入 A",
       sideNo: "买入 B",
@@ -141,6 +179,7 @@ function getEvmPanelCopy(locale: UiLocale) {
       quickOrderHelp: "默认把这张票作为快捷下注使用；只有想自己卡价时才需要展开限价。",
       yourShares: "你的 A / B 份额",
       claim: "领取",
+      clearPosition: "清理仓位",
     };
   }
 
@@ -155,6 +194,7 @@ function getEvmPanelCopy(locale: UiLocale) {
     resolutionChallenged: "Result challenged; settlement paused",
     marketOpen: "Market open",
     refreshFailed: (message: string) => `Refresh failed: ${message}`,
+    streamDriftDetected: "Betting starts soon",
     walletNotConnected: "Wallet not connected",
     amountTooLow: "Amount must be greater than zero",
     placingOrder: "Placing order...",
@@ -177,13 +217,14 @@ function getEvmPanelCopy(locale: UiLocale) {
     estCost: "Estimated fill",
     estFee: "Fee",
     estMaxPayout: "Max payout",
-    claimReady: "Claim available",
+    claimWinningsTitle: "Claim winnings",
+    claimRefundTitle: "Claim refund",
     claimLocked: "Nothing claimable yet",
-    claimHelp:
-      "Once the duel resolves, claim winning shares or cancelled refunds here.",
-    claimCleanupReady: "Clear resolved position",
+    claimHelp: "Once the duel resolves, claim your winning shares here.",
+    claimRefundHelp: "If the duel is cancelled, claim your refund here.",
+    claimCleanupTitle: "Clear resolved position",
     claimCleanupHelp:
-      "If this market resolved against you, use this once to clear the stale position state.",
+      "If this market resolved against you, clear the stale position state here.",
     sideYes: "Buy A",
     sideNo: "Buy B",
     walletReady: "Wallet connected",
@@ -198,6 +239,7 @@ function getEvmPanelCopy(locale: UiLocale) {
       "Treat this as a quick ticket by default; only open limit price when you want exact control.",
     yourShares: "Your A / B",
     claim: "Claim",
+    clearPosition: "Clear position",
   };
 }
 
@@ -304,6 +346,8 @@ export function EvmBettingPanel({
 }: EvmBettingPanelProps) {
   const resolvedLocale = resolveUiLocale(locale);
   const copy = getEvmPanelCopy(resolvedLocale);
+  const priceInputId = useId();
+  const priceHintId = useId();
   const { activeChain } = useChain();
   const { address } = useAccount();
   const { data: walletClient } = useWalletClient();
@@ -318,16 +362,18 @@ export function EvmBettingPanel({
     [activeChain],
   );
 
-  const configuredHeadlessPrivateKey = normalizePrivateKey(
-    (import.meta.env.VITE_EVM_PRIVATE_KEY as string | undefined) ??
-    (import.meta.env.VITE_HEADLESS_EVM_PRIVATE_KEY as string | undefined) ??
-    (import.meta.env.VITE_E2E_EVM_PRIVATE_KEY as string | undefined) ??
-    "",
+  const configuredHeadlessPrivateKey = useMemo(
+    () => selectConfiguredEvmPrivateKey(import.meta.env),
+    [],
   );
-  const configuredHeadlessAddress = normalizeAddress(
-    (import.meta.env.VITE_E2E_EVM_ADDRESS as string | undefined) ??
-    (import.meta.env.VITE_HEADLESS_EVM_ADDRESS as string | undefined) ??
-    "",
+  const configuredHeadlessAddress = useMemo(
+    () =>
+      normalizeAddress(
+        (import.meta.env.VITE_E2E_EVM_ADDRESS as string | undefined) ??
+          (import.meta.env.VITE_HEADLESS_EVM_ADDRESS as string | undefined) ??
+          "",
+      ),
+    [],
   );
   const configuredE2eDuelKey = normalizePredictionMarketDuelKeyHex(
     (import.meta.env.VITE_E2E_EVM_DUEL_KEY as string | undefined) ?? "",
@@ -344,28 +390,17 @@ export function EvmBettingPanel({
     if (configuredHeadlessPrivateKey) {
       try {
         return {
-          account: privateKeyToAccount(configuredHeadlessPrivateKey),
+          account: createStrictPrivateKeyAccount(configuredHeadlessPrivateKey),
           error: null,
         };
-      } catch (stringError) {
-        try {
-          return {
-            account: privateKeyToAccount(
-              hexToBytes(
-                configuredHeadlessPrivateKey,
-              ) as unknown as `0x${string}`,
-            ),
-            error: null,
-          };
-        } catch (bytesError) {
-          const error =
-            bytesError instanceof Error
-              ? bytesError.message
-              : stringError instanceof Error
-                ? stringError.message
-                : "failed to create e2e account";
-          return { account: null, error };
-        }
+      } catch (error) {
+        return {
+          account: null,
+          error:
+            error instanceof Error
+              ? error.message
+              : "failed to create e2e account",
+        };
       }
     }
 
@@ -406,6 +441,7 @@ export function EvmBettingPanel({
     null,
   );
   const [nativeBalance, setNativeBalance] = useState<bigint>(0n);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [tradeFeeBps, setTradeFeeBps] = useState(200);
   const [recentTrades, setRecentTrades] = useState<Trade[]>([]);
   const [bids, setBids] = useState<OrderLevel[]>([]);
@@ -423,9 +459,6 @@ export function EvmBettingPanel({
   const streamedDuelId = typeof cycle?.duelId === "string" ? cycle.duelId : null;
   const cycleAgent1 = cycle?.agent1?.name ?? agent1Name;
   const cycleAgent2 = cycle?.agent2?.name ?? agent2Name;
-  const nativeDecimals = chainConfig?.nativeCurrency.decimals ?? 18;
-  const chainNativeSymbol: Record<string, string> = { bsc: "BNB", base: "ETH", avax: "AVAX" };
-  const nativeSymbol = chainConfig?.nativeCurrency.symbol ?? chainNativeSymbol[activeChain] ?? "ETH";
   const lifecycleChainKey =
     activeChain === "bsc" || activeChain === "base" || activeChain === "avax"
       ? activeChain
@@ -443,12 +476,11 @@ export function EvmBettingPanel({
     });
   const effectiveLifecycleDuel = lifecycleDuelOverride ?? lifecycleDuel;
   const effectiveLifecycleMarket = lifecycleMarketOverride ?? lifecycleMarket;
-  const duelKeyHex = useMemo(
+  const liveLifecycleDuelKey = useMemo(
     () =>
       normalizePredictionMarketDuelKeyHex(
         effectiveLifecycleMarket?.duelKey ??
           effectiveLifecycleDuel?.duelKey ??
-          streamedDuelKeyHex ??
           (isE2eMode ? configuredE2eDuelKey : null),
       ),
     [
@@ -456,9 +488,19 @@ export function EvmBettingPanel({
       effectiveLifecycleDuel?.duelKey,
       effectiveLifecycleMarket?.duelKey,
       isE2eMode,
-      streamedDuelKeyHex,
     ],
   );
+  const streamedDuelKey = useMemo(
+    () => normalizePredictionMarketDuelKeyHex(streamedDuelKeyHex),
+    [streamedDuelKeyHex],
+  );
+  const streamDriftDetected =
+    Boolean(liveLifecycleDuelKey) &&
+    (streamedDuelKey == null || streamedDuelKey !== liveLifecycleDuelKey);
+  const nativeDecimals = chainConfig?.nativeCurrency.decimals ?? 18;
+  const chainNativeSymbol: Record<string, string> = { bsc: "BNB", base: "ETH", avax: "AVAX" };
+  const nativeSymbol = chainConfig?.nativeCurrency.symbol ?? chainNativeSymbol[activeChain] ?? "ETH";
+  const duelKeyHex = liveLifecycleDuelKey;
   const duelId =
     effectiveLifecycleMarket?.duelId ??
     effectiveLifecycleDuel?.duelId ??
@@ -740,6 +782,7 @@ export function EvmBettingPanel({
     duelKeyHex,
     effectiveAddress,
     effectiveLifecycleMarket,
+    lifecycleStatusLabel,
     nativeDecimals,
     publicClient,
     updateChartAndTrades,
@@ -768,9 +811,52 @@ export function EvmBettingPanel({
     setOptimisticPosition(null);
   }, [activeChain, duelKeyHex, effectiveAddress]);
 
+  useEffect(() => {
+    if (typeof window === "undefined" || !import.meta.env.DEV) return;
+    (
+      window as typeof window & {
+        __hyperbetEvmPanelDebug?: Record<string, unknown>;
+      }
+    ).__hyperbetEvmPanelDebug = {
+      activeChain,
+      chainConfigReady: Boolean(chainConfig),
+      configuredHeadlessPrivateKey: Boolean(configuredHeadlessPrivateKey),
+      configuredHeadlessAddress,
+      e2eAccountAddress:
+        typeof e2eAccount === "string" ? e2eAccount : e2eAccount?.address,
+      e2eAccountError: e2eAccountResult.error,
+      e2eWalletClientReady: Boolean(e2eWalletClient),
+      wagmiAddress: address ?? null,
+      wagmiWalletClientReady: Boolean(walletClient),
+      effectiveAddress: effectiveAddress ?? null,
+      effectiveWalletClientReady: Boolean(effectiveWalletClient),
+      walletConnected,
+      duelKeyHex,
+      lifecycleStatus: effectiveLifecycleMarket?.lifecycleStatus ?? null,
+      marketStatus: marketMeta?.status ?? null,
+    };
+  }, [
+    activeChain,
+    address,
+    chainConfig,
+    configuredHeadlessAddress,
+    configuredHeadlessPrivateKey,
+    duelKeyHex,
+    e2eAccount,
+    e2eAccountResult.error,
+    e2eWalletClient,
+    effectiveAddress,
+    effectiveLifecycleMarket?.lifecycleStatus,
+    effectiveWalletClient,
+    marketMeta?.status,
+    walletClient,
+    walletConnected,
+  ]);
+
 
 
   const handlePlaceOrder = useCallback(async () => {
+    if (isSubmitting) return;
     if (
       !effectiveWalletClient ||
       !effectiveAddress ||
@@ -780,7 +866,7 @@ export function EvmBettingPanel({
       setStatus(copy.walletNotConnected);
       return;
     }
-
+    setIsSubmitting(true);
     try {
       const amount = parseUnits(amountInput, nativeDecimals);
       if (amount <= 0n) {
@@ -827,7 +913,7 @@ export function EvmBettingPanel({
       );
       setLastOrderTx(tx);
       await publicClient?.waitForTransactionReceipt({ hash: tx });
-      await recordPredictionMarketTrade({
+      const trackingInput = {
         chainKey: chainConfig.chainId,
         bettorWallet: effectiveAddress,
         sourceAsset: nativeSymbol,
@@ -839,7 +925,7 @@ export function EvmBettingPanel({
           effectiveLifecycleMarket?.marketRef ?? marketMeta?.marketKey ?? duelKey,
         duelKey: duelKeyHex,
         duelId,
-      });
+      } as const;
       setOptimisticPosition((current) =>
         addPositionDelta(
           mergePositionSnapshots(position, current),
@@ -847,11 +933,16 @@ export function EvmBettingPanel({
         ),
       );
       setStatus(copy.orderPlaced);
-      await refreshData();
+      setIsSubmitting(false);
+      void recordPredictionMarketTrade(trackingInput);
+      void refreshData();
     } catch (error) {
       setStatus(copy.orderFailed((error as Error).message));
+    } finally {
+      setIsSubmitting(false);
     }
   }, [
+    isSubmitting,
     amountInput,
     chainConfig,
     copy,
@@ -860,6 +951,7 @@ export function EvmBettingPanel({
     effectiveWalletClient,
     nativeDecimals,
     nativeSymbol,
+    position,
     priceInput,
     publicClient,
     refreshData,
@@ -941,8 +1033,6 @@ export function EvmBettingPanel({
       : 0n;
   const estimatedMaxPayout =
     estimatedAmountUnits > 0n ? estimatedAmountUnits - estimatedFee : 0n;
-  const totalPool =
-    (marketMeta?.totalAShares ?? 0n) + (marketMeta?.totalBShares ?? 0n);
   const selectedStake = side === "YES"
     ? (effectivePosition?.aStake ?? 0n)
     : (effectivePosition?.bStake ?? 0n);
@@ -950,19 +1040,18 @@ export function EvmBettingPanel({
     ? (effectivePosition?.aShares ?? 0n)
     : (effectivePosition?.bShares ?? 0n);
   const canClaim = uiState.canClaim;
-  const claimActionLabel =
-    uiState.claimKind === "LOSER_CLEANUP" && canClaim
-      ? copy.claimCleanupReady
-      : canClaim
-        ? copy.claimReady
-        : copy.claimLocked;
-  const claimHelpText =
-    uiState.claimKind === "LOSER_CLEANUP" && canClaim
-      ? copy.claimCleanupHelp
-      : copy.claimHelp;
+  const claimUi = derivePredictionMarketClaimUi(copy, uiState.claimKind, canClaim);
+  const claimValueText =
+    canClaim && uiState.claimableAmount > 0n
+      ? `${formatCompactTokenAmount(uiState.claimableAmount, nativeDecimals)} ${nativeSymbol}`
+      : null;
   const programsReady = Boolean(
-    chainConfig && duelKeyHex && uiState.canTrade,
+    chainConfig && duelKeyHex && uiState.canTrade && !streamDriftDetected,
   );
+  const panelStatusNote =
+    !streamDriftDetected && lastRefreshError != null
+      ? copy.refreshFailed(lastRefreshError ?? "unknown")
+      : null;
   const e2eWalletDebug = isE2eMode
     ? [
       `key=${configuredHeadlessPrivateKey ? "yes" : "no"}`,
@@ -984,6 +1073,7 @@ export function EvmBettingPanel({
       `metaStatus=${marketMeta?.status ?? "-"}`,
       `metaWinner=${marketMeta?.winner ?? "-"}`,
       `metaKey=${marketMeta?.marketKey ?? "-"}`,
+      `streamAligned=${streamDriftDetected ? "no" : "yes"}`,
       `aShares=${effectivePosition?.aShares?.toString() ?? "0"}`,
       `bShares=${effectivePosition?.bShares?.toString() ?? "0"}`,
       `aStake=${effectivePosition?.aStake?.toString() ?? "0"}`,
@@ -1009,6 +1099,7 @@ export function EvmBettingPanel({
         onPlaceBet={() => void handlePlaceOrder()}
         isWalletReady={walletConnected}
         programsReady={programsReady}
+        isSubmitting={isSubmitting}
         agent1Name={cycleAgent1}
         agent2Name={cycleAgent2}
         isEvm
@@ -1020,51 +1111,29 @@ export function EvmBettingPanel({
         currencySymbol={nativeSymbol}
         pointsDisplay={null}
         locale={resolvedLocale}
-        compactHeader={
-          compact ? (
-            <div
-              style={{
-                display: "grid",
-                gap: 10,
-                marginBottom: 2,
-              }}
-            >
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-                  gap: 8,
-                }}
-              >
-                <CompactMetricCard
-                  label={copy.totalPool}
-                  value={`${formatCompactTokenAmount(totalPool, nativeDecimals)} ${nativeSymbol}`}
-                />
-                <CompactMetricCard
-                  label={copy.balance}
-                  value={`${formatCompactTokenAmount(nativeBalance, nativeDecimals)} ${nativeSymbol}`}
-                />
-              </div>
-            </div>
-          ) : null
-        }
         compact={compact}
       >
         <div
           style={{
             display: "grid",
-            gap: compact ? 10 : 10,
-            padding: compact ? "4px 0 0" : "12px 0 0",
+            gap: 12,
+            padding: "12px 0 0",
             color: "var(--hm-text, #d4d4d8)",
             fontFamily: "var(--hm-font-body)",
             fontSize: 12,
+            width: "100%",
+            minWidth: 0,
+            overflowX: "hidden",
+            boxSizing: "border-box",
           }}
         >
           <div
+            className="gm-metric-grid"
             style={{
               display: "grid",
-              gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-              gap: compact ? 6 : 8,
+              gap: 8,
+              width: "100%",
+              minWidth: 0,
             }}
           >
             <CompactMetricCard
@@ -1076,14 +1145,27 @@ export function EvmBettingPanel({
               label={copy.youHold}
               value={`${formatCompactTokenAmount(selectedShares, nativeDecimals)} / ${formatCompactTokenAmount(selectedStake, nativeDecimals)} ${nativeSymbol}`}
             />
+        </div>
+        {panelStatusNote ? (
+          <div
+            style={{
+              fontSize: 10,
+              color: "var(--hm-panel-subtle-text, rgba(255,255,255,0.52))",
+              lineHeight: 1.45,
+              minWidth: 0,
+              overflowWrap: "anywhere",
+            }}
+          >
+            {panelStatusNote}
           </div>
+        ) : null}
 
           <div
             style={{
               display: "grid",
-              gap: compact ? 6 : 8,
-              padding: compact ? "9px" : "12px",
-              borderRadius: compact ? 12 : 14,
+              gap: 8,
+              padding: "12px",
+              borderRadius: "var(--hm-radius)",
               border:
                 "1px solid var(--hm-panel-card-border, rgba(255,255,255,0.08))",
               background:
@@ -1093,17 +1175,20 @@ export function EvmBettingPanel({
             }}
           >
             <div
+              className="gm-pricing-head"
               style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                gap: compact ? 8 : 12,
+                display: "grid",
+                gridTemplateColumns: compact ? "1fr" : "minmax(0, 1fr) auto",
+                alignItems: "start",
+                gap: 12,
+                width: "100%",
+                minWidth: 0,
               }}
             >
               <div
                 style={{
                   display: "grid",
-                  gap: compact ? 2 : 4,
+                  gap: 4,
                   minWidth: 0,
                 }}
               >
@@ -1134,20 +1219,26 @@ export function EvmBettingPanel({
                 </span>
               </div>
               <div
+                className="gm-pricing-head-actions"
                 style={{
                   display: "grid",
-                  justifyItems: "end",
-                  gap: compact ? 3 : 5,
-                  maxWidth: compact ? 118 : "none",
-                  flexShrink: 0,
+                  justifyItems: compact ? "stretch" : "end",
+                  gap: 6,
+                  maxWidth: compact ? "100%" : "none",
+                  minWidth: 0,
+                  width: "100%",
                 }}
               >
                 <button
                   type="button"
                   onClick={() => setShowAdvancedPricing((value) => !value)}
+                  aria-expanded={showAdvancedPricing}
+                  aria-controls={priceHintId}
+                  aria-label={showAdvancedPricing ? copy.hideAdvancedPricing : copy.showAdvancedPricing}
+                  className="gm-pricing-toggle"
                   style={{
-                    padding: compact ? "6px 9px" : "7px 10px",
-                    borderRadius: 999,
+                    padding: "7px 10px",
+                    borderRadius: "var(--hm-radius)",
                     border:
                       "1px solid var(--hm-panel-pill-border, rgba(255,255,255,0.08))",
                     background:
@@ -1172,29 +1263,39 @@ export function EvmBettingPanel({
             {showAdvancedPricing ? (
               <>
                 <div
+                  className="gm-price-row"
                   style={{
                     display: "flex",
                     alignItems: "center",
                     gap: compact ? 8 : 10,
+                    flexWrap: "wrap",
                   }}
                 >
                   <input
                     data-testid={isE2eMode ? "evm-price-input" : undefined}
+                    id={priceInputId}
                     value={priceInput}
-                    onChange={(event) => setPriceInput(event.target.value)}
+                    onChange={(event) => setPriceInput(event.target.value.replace(/[^\d]/g, ""))}
                     inputMode="numeric"
+                    pattern="[0-9]*"
+                    aria-label={copy.limitPrice}
+                    aria-describedby={priceHintId}
+                    autoComplete="off"
+                    type="text"
                     style={{
                       ...inputStyle,
+                      flex: "1 1 0",
+                      minWidth: 0,
                       width: "100%",
                       marginLeft: 0,
-                      padding: compact ? "9px 11px" : "10px 12px",
-                      borderRadius: compact ? 10 : 12,
+                      padding: "10px 12px",
+                      borderRadius: "var(--hm-radius)",
                     }}
                   />
                   <div
                     style={{
-                      padding: compact ? "9px 11px" : "10px 12px",
-                      borderRadius: compact ? 10 : 12,
+                      padding: "10px 12px",
+                      borderRadius: "var(--hm-radius)",
                       border:
                         "1px solid var(--hm-panel-pill-border, rgba(255,255,255,0.08))",
                       background:
@@ -1207,6 +1308,9 @@ export function EvmBettingPanel({
                       alignSelf: "stretch",
                       display: "inline-flex",
                       alignItems: "center",
+                      justifyContent: "center",
+                      minWidth: compact ? 52 : 60,
+                      flex: "0 0 auto",
                     }}
                   >
                     {nativeSymbol}
@@ -1214,6 +1318,7 @@ export function EvmBettingPanel({
                 </div>
 
                 <div
+                  id={priceHintId}
                   style={{
                     fontSize: compact ? 9 : 10,
                     color:
@@ -1245,17 +1350,20 @@ export function EvmBettingPanel({
           </div>
 
           <div
-            style={{
-              display: "grid",
-              gap: 6,
-              padding: compact ? "10px" : "12px",
-              borderRadius: compact ? 12 : 14,
+              style={{
+                display: "grid",
+                gap: 6,
+                padding: "12px",
+              borderRadius: "var(--hm-radius)",
               border:
                 "1px solid var(--hm-panel-card-border, rgba(255,255,255,0.08))",
               background:
                 "var(--hm-panel-card-bg, linear-gradient(180deg, rgba(255,255,255,0.03) 0%, rgba(255,255,255,0.015) 100%))",
               boxShadow:
                 "inset 0 1px 0 var(--hm-panel-card-highlight, rgba(255,255,255,0.08)), 0 10px 22px var(--hm-panel-card-shadow, rgba(0,0,0,0.14))",
+              width: "100%",
+              minWidth: 0,
+              boxSizing: "border-box",
             }}
           >
             <CompactStatRow
@@ -1276,43 +1384,118 @@ export function EvmBettingPanel({
                 fontSize: 10,
                 color:
                   "var(--hm-panel-subtle-text, rgba(255,255,255,0.46))",
+                minWidth: 0,
+                overflowWrap: "anywhere",
               }}
             >
               {copy.positionHint}
             </div>
           </div>
 
-          <button
-            data-testid={isE2eMode ? "evm-claim-payout" : undefined}
-            type="button"
-            onClick={() => void handleClaim()}
-            disabled={!canClaim}
-            style={buttonStyle(
-              canClaim
-                ? "linear-gradient(180deg, rgba(16,92,53,0.95) 0%, rgba(12,67,39,0.98) 100%)"
-                : "var(--hm-panel-claim-idle-bg, linear-gradient(180deg, rgba(255,255,255,0.05) 0%, rgba(255,255,255,0.02) 100%))",
-              canClaim
-                ? "rgba(52,211,153,0.4)"
-                : "var(--hm-panel-claim-idle-border, rgba(255,255,255,0.08))",
-              !canClaim,
-            )}
-          >
-            {claimActionLabel}
-          </button>
-          <div
-            style={{
-              fontSize: 11,
-              color: "var(--hm-panel-subtle-text, rgba(255,255,255,0.48))",
-              lineHeight: 1.45,
-            }}
-          >
-            {claimHelpText}
-          </div>
-          {isE2eMode ? (
-            <div data-testid="evm-wallet-debug">{e2eWalletDebug}</div>
+          {canClaim ? (
+            <div
+              style={{
+                display: "grid",
+                gap: 8,
+                padding: "12px",
+                borderRadius: "var(--hm-radius)",
+                border: "1px solid rgba(52,211,153,0.26)",
+                background:
+                  "linear-gradient(180deg, rgba(16,92,53,0.14) 0%, rgba(12,67,39,0.08) 100%)",
+                boxShadow:
+                  "inset 0 1px 0 rgba(255,255,255,0.05), 0 10px 22px rgba(0,0,0,0.14)",
+                width: "100%",
+                minWidth: 0,
+                boxSizing: "border-box",
+              }}
+            >
+              <div
+                style={{
+                  display: "grid",
+                  gap: 4,
+                  minWidth: 0,
+                }}
+              >
+                <span
+                  style={{
+                    fontSize: 9,
+                    fontWeight: 800,
+                    letterSpacing: 1,
+                    textTransform: "uppercase",
+                    color: "rgba(167,243,208,0.82)",
+                    fontFamily: "var(--hm-font-display)",
+                  }}
+                >
+                  {copy.marketStatus}
+                </span>
+                <span
+                  style={{
+                    fontSize: compact ? 12 : 13,
+                    fontWeight: 700,
+                    color: "var(--hm-text, #f8fafc)",
+                    lineHeight: 1.4,
+                    minWidth: 0,
+                    overflowWrap: "anywhere",
+                  }}
+                >
+                  {claimUi.title}
+                </span>
+                {claimValueText ? (
+                  <span
+                    style={{
+                      fontSize: 11,
+                      fontWeight: 700,
+                      color: "rgba(167,243,208,0.88)",
+                      fontFamily: "var(--hm-font-mono)",
+                    }}
+                  >
+                    {claimValueText}
+                  </span>
+                ) : null}
+                <span
+                  style={{
+                    fontSize: 11,
+                    color: "var(--hm-panel-subtle-text, rgba(255,255,255,0.52))",
+                    lineHeight: 1.45,
+                    minWidth: 0,
+                    overflowWrap: "anywhere",
+                  }}
+                >
+                  {claimUi.helpText}
+                </span>
+              </div>
+
+              <button
+                data-testid={isE2eMode ? "evm-claim-payout" : undefined}
+                type="button"
+                onClick={() => void handleClaim()}
+                style={buttonStyle(
+                  "linear-gradient(180deg, rgba(16,92,53,0.95) 0%, rgba(12,67,39,0.98) 100%)",
+                  "rgba(52,211,153,0.4)",
+                  false,
+                )}
+              >
+                {claimUi.buttonLabel}
+              </button>
+            </div>
           ) : null}
           {isE2eMode ? (
-            <div data-testid="evm-lifecycle-debug">{e2eLifecycleDebug}</div>
+            <pre
+              data-testid="evm-wallet-debug"
+              className="gm-debug-block"
+              style={debugPreStyle()}
+            >
+              {e2eWalletDebug}
+            </pre>
+          ) : null}
+          {isE2eMode ? (
+            <pre
+              data-testid="evm-lifecycle-debug"
+              className="gm-debug-block"
+              style={debugPreStyle()}
+            >
+              {e2eLifecycleDebug}
+            </pre>
           ) : null}
         </div>
       </PredictionMarketPanel>
@@ -1322,64 +1505,79 @@ export function EvmBettingPanel({
             marginTop: 12,
             display: "grid",
             gap: 4,
+            minWidth: 0,
           }}
         >
-          <div data-testid="evm-last-order-tx">{lastOrderTx}</div>
-          <div data-testid="evm-last-claim-tx">{lastClaimTx}</div>
+          <pre
+            data-testid="evm-last-order-tx"
+            className="gm-debug-block"
+            style={debugPreStyle()}
+          >
+            {lastOrderTx}
+          </pre>
+          <pre
+            data-testid="evm-last-claim-tx"
+            className="gm-debug-block"
+            style={debugPreStyle()}
+          >
+            {lastClaimTx}
+          </pre>
         </div>
       ) : null}
-    </div>
-  );
-}
-
-function CompactMetricCard({
-  label,
-  value,
-  tone = "var(--hm-text, #f4f4f5)",
-}: {
-  label: string;
-  value: string;
-  tone?: string;
-}) {
-  return (
-    <div
-      style={{
-        display: "grid",
-        gap: 4,
-        padding: "8px 10px",
-        borderRadius: 12,
-        border:
-          "1px solid var(--hm-panel-card-border, rgba(255,255,255,0.08))",
-        background:
-          "var(--hm-panel-card-bg, linear-gradient(180deg, rgba(255,255,255,0.04) 0%, rgba(255,255,255,0.015) 100%))",
-        boxShadow:
-          "inset 0 1px 0 var(--hm-panel-card-highlight, rgba(255,255,255,0.08))",
-      }}
-    >
-      <span
-        style={{
-          fontSize: 9,
-          fontWeight: 800,
-          letterSpacing: 0.85,
-          textTransform: "uppercase",
-          color: "var(--hm-panel-subtle-text, rgba(255,255,255,0.46))",
-          fontFamily: "var(--hm-font-display)",
-        }}
-      >
-        {label}
-      </span>
-      <span
-        style={{
-          fontSize: 12,
-          fontWeight: 800,
-          color: tone,
-          fontFamily: "var(--hm-font-mono)",
-          fontVariantNumeric: "tabular-nums",
-          lineHeight: 1.3,
-        }}
-      >
-        {value}
-      </span>
+      <style>{`
+        .gm-metric-grid {
+          grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        }
+        .gm-debug-block {
+          display: block;
+          width: 100%;
+          min-width: 0;
+          max-width: 100%;
+          overflow-wrap: anywhere;
+          word-break: break-word;
+          overflow-x: hidden;
+          box-sizing: border-box;
+        }
+        .gm-btn:focus-visible,
+        .gm-btn-sm:focus-visible,
+        .gm-tab-btn:focus-visible,
+        .gm-btn-submit:focus-visible,
+        .gm-pricing-toggle:focus-visible,
+        .gm-amount-input:focus-visible {
+          outline: 2px solid var(--hm-accent-gold, #e5b84a);
+          outline-offset: 2px;
+          box-shadow: 0 0 0 2px rgba(229,184,74,0.18) !important;
+        }
+        .gm-price-row {
+          min-width: 0;
+        }
+        .gm-pricing-head-actions {
+          width: 100%;
+        }
+        @media (max-width: 720px) {
+          .gm-metric-grid {
+            grid-template-columns: 1fr;
+          }
+        }
+        @media (max-width: 520px) {
+          .gm-pricing-head {
+            grid-template-columns: 1fr;
+          }
+          .gm-pricing-head-actions {
+            justify-items: stretch;
+            max-width: 100% !important;
+          }
+          .gm-price-row {
+            align-items: stretch !important;
+          }
+          .gm-price-row > * {
+            width: 100%;
+          }
+          .gm-pricing-toggle {
+            width: 100%;
+          }
+        }
+      `}</style>
     </div>
   );
 }
@@ -1427,14 +1625,80 @@ function CompactStatRow({
   );
 }
 
+function CompactMetricCard({
+  label,
+  value,
+  tone = "var(--hm-text, #f4f4f5)",
+}: {
+  label: string;
+  value: string;
+  tone?: string;
+}) {
+  return (
+    <div
+      style={{
+        display: "grid",
+        gap: 4,
+        padding: "8px 10px",
+        borderRadius: "var(--hm-radius)",
+        border:
+          "1px solid var(--hm-panel-card-border, rgba(255,255,255,0.08))",
+        background:
+          "var(--hm-panel-card-bg, linear-gradient(180deg, rgba(255,255,255,0.04) 0%, rgba(255,255,255,0.015) 100%))",
+        boxShadow:
+          "inset 0 1px 0 var(--hm-panel-card-highlight, rgba(255,255,255,0.08))",
+        width: "100%",
+        minWidth: 0,
+        boxSizing: "border-box",
+      }}
+    >
+      <span
+        style={{
+          fontSize: 9,
+          fontWeight: 800,
+          letterSpacing: 0.85,
+          textTransform: "uppercase",
+          color: "var(--hm-panel-subtle-text, rgba(255,255,255,0.46))",
+          fontFamily: "var(--hm-font-display)",
+          minWidth: 0,
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          whiteSpace: "nowrap",
+        }}
+      >
+        {label}
+      </span>
+      <span
+        style={{
+          fontSize: 12,
+          fontWeight: 800,
+          color: tone,
+          fontFamily: "var(--hm-font-mono)",
+          fontVariantNumeric: "tabular-nums",
+          lineHeight: 1.3,
+          minWidth: 0,
+          overflowWrap: "anywhere",
+        }}
+      >
+        {value}
+      </span>
+    </div>
+  );
+}
+
 function buttonStyle(
   background: string,
   border: string,
   disabled = false,
 ): CSSProperties {
   return {
+    width: "100%",
+    minWidth: 0,
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
     padding: "9px 11px",
-    borderRadius: 10,
+    borderRadius: "var(--hm-radius)",
     border: `1px solid ${border}`,
     background,
     color: disabled
@@ -1447,6 +1711,36 @@ function buttonStyle(
     fontFamily: "var(--hm-font-display)",
     cursor: disabled ? "not-allowed" : "pointer",
     opacity: disabled ? 0.65 : 1,
+    lineHeight: 1.35,
+    whiteSpace: "normal",
+    overflowWrap: "anywhere",
+    textAlign: "center",
+  };
+}
+
+function debugPreStyle(): CSSProperties {
+  return {
+    display: "block",
+    width: "100%",
+    minWidth: 0,
+    maxWidth: "100%",
+    margin: 0,
+    padding: 10,
+    borderRadius: "var(--hm-radius)",
+    border: "1px solid var(--hm-panel-card-border, rgba(255,255,255,0.08))",
+    background:
+      "var(--hm-panel-card-bg, linear-gradient(180deg, rgba(255,255,255,0.04) 0%, rgba(255,255,255,0.015) 100%))",
+    color: "var(--hm-panel-muted-text, rgba(255,255,255,0.78))",
+    whiteSpace: "pre-wrap",
+    overflowWrap: "anywhere",
+    wordBreak: "break-word",
+    fontSize: 9,
+    fontFamily: "var(--hm-font-mono)",
+    lineHeight: 1.45,
+    maxHeight: 160,
+    overflowY: "auto",
+    overflowX: "hidden",
+    boxSizing: "border-box",
   };
 }
 
@@ -1454,7 +1748,7 @@ const inputStyle: CSSProperties = {
   width: 78,
   marginLeft: 8,
   padding: "6px 9px",
-  borderRadius: 8,
+  borderRadius: "var(--hm-radius)",
   border: "1px solid var(--hm-panel-card-border, rgba(255,255,255,0.14))",
   background: "var(--hm-panel-card-bg, rgba(17,24,39,0.65))",
   color: "var(--hm-text, #f4f4f5)",

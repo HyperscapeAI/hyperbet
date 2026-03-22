@@ -14,6 +14,8 @@ import {
 import { GAME_API_URL } from "./config";
 
 const ACTIVE_PREDICTION_MARKETS_URL = `${GAME_API_URL.replace(/\/$/, "")}/api/arena/prediction-markets/active`;
+const OVERVIEW_PREDICTION_MARKETS_URL = `${GAME_API_URL.replace(/\/$/, "")}/api/arena/prediction-markets/overview`;
+const SYNC_STATUS_URL = `${GAME_API_URL.replace(/\/$/, "")}/api/sync/status`;
 const DEFAULT_POLL_INTERVAL_MS = 5_000;
 
 export type PredictionMarketsDuelSnapshot = {
@@ -22,6 +24,8 @@ export type PredictionMarketsDuelSnapshot = {
   phase: string | null;
   winner: PredictionMarketWinner;
   betCloseTime: number | null;
+  agent1Name: string | null;
+  agent2Name: string | null;
 };
 
 export type PredictionMarketsResponse = {
@@ -30,10 +34,46 @@ export type PredictionMarketsResponse = {
   updatedAt: number | null;
 };
 
+export type PredictionMarketsOverviewResponse = {
+  live: PredictionMarketsResponse | null;
+  recentSettlement: PredictionMarketsResponse | null;
+  updatedAt: number | null;
+};
+
+export type PredictionMarketRendererHealth = {
+  ready: boolean;
+  degradedReason: string | null;
+  updatedAt: number | null;
+};
+
+export type PredictionMarketSyncStatusResponse = {
+  sourceEpoch: number | null;
+  sourceLatestSeq: number | null;
+  lastSeenSeq: number | null;
+  lastAppliedSeq: number | null;
+  applyLagMs: number | null;
+  sourceEventAgeMs: number | null;
+  replayMode: string | null;
+  degradedReason: string | null;
+  rendererHealth: PredictionMarketRendererHealth | null;
+  rendererHealthAgeMs: number | null;
+  lastEventReceivedAt: number | null;
+  lastAppliedAt: number | null;
+  connectedAt: number | null;
+  enabled: boolean;
+};
+
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object"
     ? (value as Record<string, unknown>)
     : null;
+}
+
+function normalizePredictionMarketInteger(value: unknown): number | null {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return null;
+  }
+  return Math.trunc(value);
 }
 
 export const normalizePredictionMarketDuelKeyHex =
@@ -57,11 +97,82 @@ export function parsePredictionMarketsResponse(
       phase: typeof duel.phase === "string" ? duel.phase : null,
       winner: normalizePredictionMarketWinner(duel.winner),
       betCloseTime: normalizePredictionMarketTimestamp(duel.betCloseTime),
+      agent1Name: typeof duel.agent1Name === "string" ? duel.agent1Name : null,
+      agent2Name: typeof duel.agent2Name === "string" ? duel.agent2Name : null,
     },
     markets: candidate.markets
       .map((market) => normalizePredictionMarketLifecycleRecord(market))
       .filter((market): market is PredictionMarketLifecycleRecord => market !== null),
     updatedAt: normalizePredictionMarketTimestamp(candidate.updatedAt),
+  };
+}
+
+export function parsePredictionMarketsOverviewResponse(
+  payload: unknown,
+): PredictionMarketsOverviewResponse | null {
+  const candidate = asRecord(payload);
+  if (!candidate) return null;
+
+  const hasEnvelope =
+    Object.prototype.hasOwnProperty.call(candidate, "live") ||
+    Object.prototype.hasOwnProperty.call(candidate, "recentSettlement") ||
+    Object.prototype.hasOwnProperty.call(candidate, "updatedAt");
+  if (!hasEnvelope) return null;
+
+  const live = candidate.live ? parsePredictionMarketsResponse(candidate.live) : null;
+  const recentSettlement = candidate.recentSettlement
+    ? parsePredictionMarketsResponse(candidate.recentSettlement)
+    : null;
+
+  return {
+    live,
+    recentSettlement,
+    updatedAt: normalizePredictionMarketTimestamp(candidate.updatedAt),
+  };
+}
+
+function parseRendererHealth(
+  payload: unknown,
+): PredictionMarketRendererHealth | null {
+  const candidate = asRecord(payload);
+  if (!candidate) return null;
+  return {
+    ready: candidate.ready === true,
+    degradedReason:
+      typeof candidate.degradedReason === "string"
+        ? candidate.degradedReason
+        : null,
+    updatedAt: normalizePredictionMarketTimestamp(candidate.updatedAt),
+  };
+}
+
+export function parsePredictionMarketSyncStatusResponse(
+  payload: unknown,
+): PredictionMarketSyncStatusResponse | null {
+  const candidate = asRecord(payload);
+  if (!candidate) return null;
+  return {
+    sourceEpoch: normalizePredictionMarketInteger(candidate.sourceEpoch),
+    sourceLatestSeq: normalizePredictionMarketInteger(candidate.sourceLatestSeq),
+    lastSeenSeq: normalizePredictionMarketInteger(candidate.lastSeenSeq),
+    lastAppliedSeq: normalizePredictionMarketInteger(candidate.lastAppliedSeq),
+    applyLagMs: normalizePredictionMarketTimestamp(candidate.applyLagMs),
+    sourceEventAgeMs: normalizePredictionMarketTimestamp(candidate.sourceEventAgeMs),
+    replayMode: typeof candidate.replayMode === "string" ? candidate.replayMode : null,
+    degradedReason:
+      typeof candidate.degradedReason === "string"
+        ? candidate.degradedReason
+        : null,
+    rendererHealth: parseRendererHealth(candidate.rendererHealth),
+    rendererHealthAgeMs: normalizePredictionMarketTimestamp(
+      candidate.rendererHealthAgeMs,
+    ),
+    lastEventReceivedAt: normalizePredictionMarketTimestamp(
+      candidate.lastEventReceivedAt,
+    ),
+    lastAppliedAt: normalizePredictionMarketTimestamp(candidate.lastAppliedAt),
+    connectedAt: normalizePredictionMarketTimestamp(candidate.connectedAt),
+    enabled: candidate.enabled !== false,
   };
 }
 
@@ -84,12 +195,69 @@ export async function fetchActivePredictionMarkets(
   return parsed;
 }
 
+async function fetchJsonWithFallback<T>(
+  url: string,
+  signal?: AbortSignal,
+): Promise<T | null> {
+  try {
+    const response = await fetch(url, {
+      cache: "no-store",
+      signal,
+    });
+    if (!response.ok) {
+      return null;
+    }
+    return (await response.json()) as T;
+  } catch {
+    return null;
+  }
+}
+
+export async function fetchPredictionMarketsOverview(
+  signal?: AbortSignal,
+): Promise<PredictionMarketsOverviewResponse> {
+  const overviewPayload = await fetchJsonWithFallback<unknown>(
+    OVERVIEW_PREDICTION_MARKETS_URL,
+    signal,
+  );
+  const parsedOverview = overviewPayload
+    ? parsePredictionMarketsOverviewResponse(overviewPayload)
+    : null;
+  if (parsedOverview) {
+    return parsedOverview;
+  }
+
+  const live = await fetchActivePredictionMarkets(signal);
+  return {
+    live,
+    recentSettlement: null,
+    updatedAt: live.updatedAt,
+  };
+}
+
+export async function fetchPredictionMarketSyncStatus(
+  signal?: AbortSignal,
+): Promise<PredictionMarketSyncStatusResponse | null> {
+  const payload = await fetchJsonWithFallback<unknown>(SYNC_STATUS_URL, signal);
+  if (!payload) return null;
+  return parsePredictionMarketSyncStatusResponse(payload);
+}
+
 export function selectPredictionMarketLifecycleRecord(
   payload: PredictionMarketsResponse | null,
   chainKey: BettingChainKey | null,
 ): PredictionMarketLifecycleRecord | null {
   if (!payload || !chainKey) return null;
   return payload.markets.find((market) => market.chainKey === chainKey) ?? null;
+}
+
+export function selectPredictionMarketOverviewRecord(
+  payload: PredictionMarketsOverviewResponse | null,
+  chainKey: BettingChainKey | null,
+  surface: "live" | "recentSettlement" = "live",
+): PredictionMarketLifecycleRecord | null {
+  if (!payload) return null;
+  return selectPredictionMarketLifecycleRecord(payload[surface], chainKey);
 }
 
 export function usePredictionMarketLifecycle(
@@ -140,14 +308,17 @@ export function usePredictionMarketLifecycle(
     }
 
     const controller = new AbortController();
+    let activePollController: AbortController | null = null;
     void refresh(controller.signal);
     const intervalId = window.setInterval(() => {
-      const pollController = new AbortController();
-      void refresh(pollController.signal);
+      activePollController?.abort();
+      activePollController = new AbortController();
+      void refresh(activePollController.signal);
     }, pollIntervalMs);
 
     return () => {
       controller.abort();
+      activePollController?.abort();
       window.clearInterval(intervalId);
     };
   }, [chainKey, disabled, pollIntervalMs, refresh]);
@@ -162,6 +333,161 @@ export function usePredictionMarketLifecycle(
     duel: data?.duel ?? null,
     market,
     isLoading,
+    error,
+    refresh,
+  };
+}
+
+export function usePredictionMarketOverview(
+  chainKey: BettingChainKey | null,
+  options: {
+    disabled?: boolean;
+    pollIntervalMs?: number;
+  } = {},
+) {
+  const { disabled = false, pollIntervalMs = DEFAULT_POLL_INTERVAL_MS } =
+    options;
+  const [data, setData] = useState<PredictionMarketsOverviewResponse | null>(
+    null,
+  );
+  const [error, setError] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+
+  const refresh = useCallback(
+    async (signal?: AbortSignal) => {
+      if (disabled || !chainKey) return null;
+      setIsLoading(true);
+      try {
+        const nextData = await fetchPredictionMarketsOverview(signal);
+        setData(nextData);
+        setError(null);
+        return nextData;
+      } catch (refreshError) {
+        if (!signal?.aborted) {
+          setError(
+            refreshError instanceof Error
+              ? refreshError.message
+              : "prediction markets overview refresh failed",
+          );
+        }
+        return null;
+      } finally {
+        if (!signal?.aborted) {
+          setIsLoading(false);
+        }
+      }
+    },
+    [chainKey, disabled],
+  );
+
+  useEffect(() => {
+    if (disabled || !chainKey) {
+      setData(null);
+      setError(null);
+      setIsLoading(false);
+      return;
+    }
+
+    const controller = new AbortController();
+    let activePollController: AbortController | null = null;
+    void refresh(controller.signal);
+    const intervalId = window.setInterval(() => {
+      activePollController?.abort();
+      activePollController = new AbortController();
+      void refresh(activePollController.signal);
+    }, pollIntervalMs);
+
+    return () => {
+      controller.abort();
+      activePollController?.abort();
+      window.clearInterval(intervalId);
+    };
+  }, [chainKey, disabled, pollIntervalMs, refresh]);
+
+  const live = useMemo(
+    () => selectPredictionMarketOverviewRecord(data, chainKey, "live"),
+    [chainKey, data],
+  );
+  const recentSettlement = useMemo(
+    () =>
+      selectPredictionMarketOverviewRecord(data, chainKey, "recentSettlement"),
+    [chainKey, data],
+  );
+
+  return {
+    data,
+    live,
+    recentSettlement,
+    liveDuel: data?.live?.duel ?? null,
+    recentSettlementDuel: data?.recentSettlement?.duel ?? null,
+    liveMarket: live,
+    recentSettlementMarket: recentSettlement,
+    isLoading,
+    error,
+    refresh,
+  };
+}
+
+export function usePredictionMarketSyncStatus(
+  options: {
+    disabled?: boolean;
+    pollIntervalMs?: number;
+  } = {},
+) {
+  const { disabled = false, pollIntervalMs = DEFAULT_POLL_INTERVAL_MS } =
+    options;
+  const [data, setData] = useState<PredictionMarketSyncStatusResponse | null>(
+    null,
+  );
+  const [error, setError] = useState<string | null>(null);
+
+  const refresh = useCallback(
+    async (signal?: AbortSignal) => {
+      if (disabled) return null;
+      try {
+        const nextData = await fetchPredictionMarketSyncStatus(signal);
+        setData(nextData);
+        setError(null);
+        return nextData;
+      } catch (refreshError) {
+        if (!signal?.aborted) {
+          setError(
+            refreshError instanceof Error
+              ? refreshError.message
+              : "prediction market sync status refresh failed",
+          );
+        }
+        return null;
+      }
+    },
+    [disabled],
+  );
+
+  useEffect(() => {
+    if (disabled) {
+      setData(null);
+      setError(null);
+      return;
+    }
+
+    const controller = new AbortController();
+    let activePollController: AbortController | null = null;
+    void refresh(controller.signal);
+    const intervalId = window.setInterval(() => {
+      activePollController?.abort();
+      activePollController = new AbortController();
+      void refresh(activePollController.signal);
+    }, pollIntervalMs);
+
+    return () => {
+      controller.abort();
+      activePollController?.abort();
+      window.clearInterval(intervalId);
+    };
+  }, [disabled, pollIntervalMs, refresh]);
+
+  return {
+    data,
     error,
     refresh,
   };

@@ -158,6 +158,8 @@ const DUEL_STATUS_BETTING_OPEN = 2;
 const DUEL_STATUS_LOCKED = 3;
 const ORDER_FLAG_GTC = 0x01;
 const DISPUTE_WINDOW_SECONDS = 3_600;
+const E2E_BET_WINDOW_SECONDS = 3_600n;
+const E2E_DUEL_START_DELAY_SECONDS = 60n;
 const DEFAULT_ANVIL_MNEMONIC =
   "test test test test test test test test test test test junk";
 const SELL_SIDE = 2;
@@ -422,8 +424,8 @@ async function createFreshEvmOpenMarket(
   const latestBlock = await publicClient.getBlock({ blockTag: "latest" });
   const duelId = `${Date.now()}`;
   const betOpenTs = latestBlock.timestamp - 15n;
-  const betCloseTs = betOpenTs + 300n;
-  const duelStartTs = betCloseTs + 60n;
+  const betCloseTs = betOpenTs + E2E_BET_WINDOW_SECONDS;
+  const duelStartTs = betCloseTs + E2E_DUEL_START_DELAY_SECONDS;
 
   const upsertTx = await adminWalletClient.writeContract({
     address: oracleAddress,

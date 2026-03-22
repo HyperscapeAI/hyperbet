@@ -9,6 +9,7 @@ interface StreamPlayerProps {
   className?: string;
   style?: React.CSSProperties;
   onStreamUnavailable?: () => void;
+  onStreamReady?: () => void;
 }
 
 export const StreamPlayer: React.FC<StreamPlayerProps> = ({
@@ -19,6 +20,7 @@ export const StreamPlayer: React.FC<StreamPlayerProps> = ({
   className,
   style,
   onStreamUnavailable,
+  onStreamReady,
 }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const embedUrl = useMemo(
@@ -218,6 +220,7 @@ export const StreamPlayer: React.FC<StreamPlayerProps> = ({
 
         hls.on(Hls.Events.MANIFEST_PARSED, () => {
           console.log("[StreamPlayer] Manifest parsed, starting playback");
+          onStreamReady?.();
           void video.play().catch(() => {});
         });
 
@@ -266,10 +269,12 @@ export const StreamPlayer: React.FC<StreamPlayerProps> = ({
 
     const onWaiting = () => nudgeToLiveEdge();
     const onStalled = () => nudgeToLiveEdge();
+    const onLoadedMetadata = () => onStreamReady?.();
     const onVideoError = () => scheduleRebuild("video element error", 1000);
 
     video.addEventListener("waiting", onWaiting);
     video.addEventListener("stalled", onStalled);
+    video.addEventListener("loadedmetadata", onLoadedMetadata);
     video.addEventListener("error", onVideoError);
 
     if (autoPlay) {
@@ -282,6 +287,7 @@ export const StreamPlayer: React.FC<StreamPlayerProps> = ({
     return () => {
       video.removeEventListener("waiting", onWaiting);
       video.removeEventListener("stalled", onStalled);
+      video.removeEventListener("loadedmetadata", onLoadedMetadata);
       video.removeEventListener("error", onVideoError);
       clearTimers();
       disposed = true;
@@ -344,6 +350,7 @@ export const StreamPlayer: React.FC<StreamPlayerProps> = ({
         allow="autoplay; encrypted-media; picture-in-picture; clipboard-write"
         allowFullScreen
         loading="eager"
+        onLoad={onStreamReady}
         referrerPolicy="strict-origin-when-cross-origin"
         onError={markUnavailable}
         style={{

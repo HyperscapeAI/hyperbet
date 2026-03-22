@@ -30,11 +30,13 @@ function LevelRow({
   type,
   maxTotal,
   locale,
+  label,
 }: {
   level: OrderLevel;
   type: "bid" | "ask";
   maxTotal: number;
   locale: UiLocale;
+  label: string;
 }) {
   const prevAmountRef = useRef(level.amount);
   const [flash, setFlash] = useState<"up" | "down" | null>(null);
@@ -64,8 +66,15 @@ function LevelRow({
   if (flash === "up") rowBg = "var(--hm-flash-up-bg, rgba(255,255,255,0.15))";
   if (flash === "down") rowBg = "var(--hm-flash-down-bg, rgba(232,65,66,0.15))";
 
+  const ariaLabel = `${label} price ${level.price.toFixed(3)}, size ${formatLocaleAmount(
+    level.amount,
+    locale,
+  )}, total ${formatLocaleAmount(level.total, locale)}`;
+
   return (
     <div
+      role="listitem"
+      aria-label={ariaLabel}
       style={{
         display: "flex",
         fontSize: 12,
@@ -75,6 +84,7 @@ function LevelRow({
         transition: "background 0.5s ease-out",
         borderRadius: 4,
         borderLeft: `2px solid ${borderColor}`,
+        lineHeight: 1.2,
       }}
     >
       <div
@@ -147,6 +157,7 @@ export function OrderBook({
   const copy = getUiCopy(resolvedLocale);
   const displayMid = midPrice ?? (totalPot > 0 ? yesPot / totalPot : 0.5);
   const displaySpread = spread ?? 0;
+  const orderBookLabel = copy.orderBook ?? "Order book";
 
   const maxBidTotal = bids.reduce((m, b) => Math.max(m, b.total), 1);
   const maxAskTotal = asks.reduce((m, a) => Math.max(m, a.total), 1);
@@ -163,27 +174,30 @@ export function OrderBook({
         }}
       >
         <div
+          role="heading"
+          aria-level={3}
           style={{
-            fontSize: 14,
+            fontSize: 13,
             fontWeight: 800,
             textTransform: "uppercase",
             letterSpacing: 2,
-            color: "var(--hm-text-dim, rgba(255,255,255,0.4))",
+            color: "var(--hm-text-dim, rgba(255,255,255,0.55))",
             fontFamily: "var(--hm-font-display)",
           }}
         >
-          {copy.orderBook}
+          {orderBookLabel}
         </div>
         {goldPriceUsd !== null && false /* Shown in chart area instead */}
       </div>
 
       {/* Header */}
       <div
+        role="presentation"
         style={{
           display: "flex",
           fontSize: 9,
           fontWeight: 900,
-          color: "var(--hm-text-muted, rgba(255,255,255,0.35))",
+          color: "var(--hm-text-muted, rgba(255,255,255,0.55))",
           padding: "2px 8px",
           textTransform: "uppercase",
           letterSpacing: 1.5,
@@ -197,6 +211,9 @@ export function OrderBook({
 
       {/* Asks (Sells) */}
       <div
+        role="list"
+        aria-label={`${orderBookLabel} asks`}
+        tabIndex={0}
         style={{
           display: "flex",
           flexDirection: "column",
@@ -204,6 +221,9 @@ export function OrderBook({
           flex: 1,
           minHeight: 0,
           justifyContent: "flex-end",
+          overflowY: "auto",
+          scrollbarGutter: "stable",
+          paddingRight: 2,
         }}
       >
         {asks.map((ask) => (
@@ -213,12 +233,15 @@ export function OrderBook({
             type="ask"
             maxTotal={maxAskTotal}
             locale={resolvedLocale}
+            label={copy.sell ?? "Ask"}
           />
         ))}
       </div>
 
       {/* Spread / Mid */}
       <div
+        role="status"
+        aria-live="polite"
         style={{
           display: "flex",
           justifyContent: "center",
@@ -254,7 +277,7 @@ export function OrderBook({
           <div
             style={{
               fontSize: 10,
-              color: "var(--hm-text-muted, rgba(255,255,255,0.35))",
+              color: "var(--hm-text-muted, rgba(255,255,255,0.55))",
               fontFamily: "var(--hm-font-body)",
             }}
           >
@@ -265,12 +288,18 @@ export function OrderBook({
 
       {/* Bids (Buys) */}
       <div
+        role="list"
+        aria-label={`${orderBookLabel} bids`}
+        tabIndex={0}
         style={{
           display: "flex",
           flexDirection: "column",
           gap: 1,
           flex: 1,
           minHeight: 0,
+          overflowY: "auto",
+          scrollbarGutter: "stable",
+          paddingRight: 2,
         }}
       >
         {bids.map((bid) => (
@@ -280,6 +309,7 @@ export function OrderBook({
             type="bid"
             maxTotal={maxBidTotal}
             locale={resolvedLocale}
+            label={copy.buy ?? "Bid"}
           />
         ))}
       </div>
