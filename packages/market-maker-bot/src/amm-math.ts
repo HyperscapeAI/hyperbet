@@ -166,8 +166,7 @@ function getNewReserveQ(xGuess: bigint, y: bigint, l: bigint): bigint {
     t = t - qDiv(f, deriv);
   }
 
-  const res = qAbs(t);
-  return res < Q_MIN_RESERVE ? Q_MIN_RESERVE : res;
+  throw new Error("Newton-Raphson did not converge after 50 iterations");
 }
 
 // === Public API (u64 scaled by 1e6) ===

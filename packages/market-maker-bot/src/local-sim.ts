@@ -520,10 +520,10 @@ async function createMarkets(
     "Local Sim Market",
     "Test market for local simulation",
     "local://sim",
+    duel,
     false, // static liquidity (simpler)
     duration,
     collateral,
-    duel,
     { nonce: await nextNonce(admin.address) },
   );
   const receipt = await tx.wait();
