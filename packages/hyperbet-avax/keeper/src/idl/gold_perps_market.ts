@@ -1060,160 +1060,165 @@ export type GoldPerpsMarket = {
     {
       "code": 6001,
       "name": "unauthorizedInitializer",
-      "msg": "Only the configured bootstrap authority can initialize the config"
+      "msg": "Only the program upgrade authority can initialize the config"
     },
     {
       "code": 6002,
+      "name": "alreadyInitialized",
+      "msg": "Config has already been initialized"
+    },
+    {
+      "code": 6003,
       "name": "invalidRiskConfig",
       "msg": "Risk configuration is invalid"
     },
     {
-      "code": 6003,
+      "code": 6004,
       "name": "invalidMarket",
       "msg": "Market does not exist or does not match the requested id"
     },
     {
-      "code": 6004,
+      "code": 6005,
       "name": "staleOracle",
       "msg": "Oracle price is stale and cannot be used for trading"
     },
     {
-      "code": 6005,
+      "code": 6006,
       "name": "invalidSpotIndex",
       "msg": "Oracle spot index must be greater than zero"
     },
     {
-      "code": 6006,
+      "code": 6007,
       "name": "oracleSpotIndexOutOfBounds",
       "msg": "Oracle spot index is outside the configured market bounds"
     },
     {
-      "code": 6007,
+      "code": 6008,
       "name": "oraclePriceDeltaTooLarge",
       "msg": "Oracle price move exceeds the configured maximum step"
     },
     {
-      "code": 6008,
+      "code": 6009,
       "name": "noopPositionUpdate",
       "msg": "Position update must change margin or size"
     },
     {
-      "code": 6009,
+      "code": 6010,
       "name": "noOpenPosition",
       "msg": "No open position exists for this trader and market"
     },
     {
-      "code": 6010,
+      "code": 6011,
       "name": "invalidPositionOwner",
       "msg": "Position owner does not match the provided signer"
     },
     {
-      "code": 6011,
+      "code": 6012,
       "name": "invalidMargin",
       "msg": "Margin is invalid for the requested trade"
     },
     {
-      "code": 6012,
+      "code": 6013,
       "name": "invalidLeverage",
       "msg": "Requested leverage exceeds the configured maximum"
     },
     {
-      "code": 6013,
+      "code": 6014,
       "name": "openInterestLimitExceeded",
       "msg": "Projected market open interest exceeds the configured cap"
     },
     {
-      "code": 6014,
+      "code": 6015,
       "name": "marketInsufficientInsurance",
       "msg": "Market does not have enough isolated insurance to grow open interest"
     },
     {
-      "code": 6015,
+      "code": 6016,
       "name": "insufficientLiquidity",
       "msg": "Market account has insufficient liquidity to settle this payout"
     },
     {
-      "code": 6016,
+      "code": 6017,
       "name": "notLiquidatable",
       "msg": "Position is not undercollateralized; cannot liquidate"
     },
     {
-      "code": 6017,
+      "code": 6018,
       "name": "marketNotActive",
       "msg": "Market is not active for new oracle updates"
     },
     {
-      "code": 6018,
+      "code": 6019,
       "name": "marketCloseOnly",
       "msg": "Market is close-only; only reductions and closes are allowed"
     },
     {
-      "code": 6019,
+      "code": 6020,
       "name": "marketArchived",
       "msg": "Market is archived and cannot be traded"
     },
     {
-      "code": 6020,
+      "code": 6021,
       "name": "invalidMarketStatus",
       "msg": "Market status transition is invalid"
     },
     {
-      "code": 6021,
+      "code": 6022,
       "name": "marketHasOpenPositions",
       "msg": "Market still has open positions or open interest"
     },
     {
-      "code": 6022,
+      "code": 6023,
       "name": "invalidInsuranceDeposit",
       "msg": "Insurance deposit amount must be greater than zero"
     },
     {
-      "code": 6023,
+      "code": 6024,
       "name": "slippageExceeded",
       "msg": "Trade execution exceeded the caller's acceptable price"
     },
     {
-      "code": 6024,
+      "code": 6025,
       "name": "invalidFeeWithdrawal",
       "msg": "Fee balance or fee withdrawal is invalid"
     },
     {
-      "code": 6025,
+      "code": 6026,
       "name": "invalidFeeRecipient",
       "msg": "Fee recipient does not match the configured authority"
     },
     {
-      "code": 6026,
+      "code": 6027,
       "name": "invalidFeeBucket",
       "msg": "Fee bucket is invalid"
     },
     {
-      "code": 6027,
+      "code": 6028,
       "name": "invalidPositionState",
       "msg": "Position state is invalid"
     },
     {
-      "code": 6028,
+      "code": 6029,
       "name": "overflow",
       "msg": "Numeric overflow in perps calculation"
     },
     {
-      "code": 6029,
+      "code": 6030,
       "name": "configFrozen",
       "msg": "Config is frozen and cannot be modified"
     },
     {
-      "code": 6030,
+      "code": 6031,
       "name": "tradingPaused",
       "msg": "Trading is paused"
     },
     {
-      "code": 6031,
+      "code": 6032,
       "name": "maintenanceMarginViolation",
       "msg": "Position fails maintenance margin check after accounting for unrealized PnL"
     },
     {
-      "code": 6032,
+      "code": 6033,
       "name": "invalidBadDebtRepayment",
       "msg": "Bad debt repayment amount is invalid"
     }
