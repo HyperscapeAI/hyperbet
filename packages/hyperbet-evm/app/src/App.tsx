@@ -47,6 +47,7 @@ import { selectConfiguredEvmPrivateKey } from "@hyperbet/ui/lib/evmPrivateKey";
 import { useChain } from "./lib/ChainContext";
 import { useStreamingState } from "@hyperbet/ui/spectator/useStreamingState";
 import { useDuelContext } from "@hyperbet/ui/spectator/useDuelContext";
+import type { StreamingAgentContext } from "@hyperbet/ui/components/AgentStats";
 import { useResizePanel, useIsMobile } from "@hyperbet/ui/lib/useResizePanel";
 import { ResizeHandle } from "@hyperbet/ui/components/ResizeHandle";
 import { HmChart, type HmChartPoint } from "@hyperbet/ui/components/HmChart";
@@ -545,7 +546,7 @@ export function App() {
   const [_inviteCode, setInviteCode] = useState<string | null>(() =>
     getStoredInviteCode(),
   );
-  const [selectedAgentForStats, _setSelectedAgentForStats] = useState<any>(null); // For agent stats modal
+  const [selectedAgentForStats, _setSelectedAgentForStats] = useState<StreamingAgentContext | null>(null);
   const [isShowingStats, setIsShowingStats] = useState(false);
   const [streamSourceIndex, setStreamSourceIndex] = useState(0);
   const [showPointsDrawer, setShowPointsDrawer] = useState(false);

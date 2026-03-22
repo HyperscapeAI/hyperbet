@@ -1,4 +1,6 @@
 import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   createPublicClient,
   createWalletClient,
@@ -11,7 +13,10 @@ import {
 } from "viem";
 import { mnemonicToAccount, privateKeyToAccount } from "viem/accounts";
 
-const ROOT = "/Users/mac/Desktop/hyperbet/.claude/worktrees/blissful-golick";
+const ROOT = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "../../../../..",
+);
 
 const GOLD_CLOB_PATH = `${ROOT}/packages/evm-contracts/out/GoldClob.sol/GoldClob.json`;
 const DUEL_ORACLE_PATH = `${ROOT}/packages/evm-contracts/out/DuelOutcomeOracle.sol/DuelOutcomeOracle.json`;

@@ -2,10 +2,10 @@ import { mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
-import BN from "../packages/hyperbet-solana/keeper/node_modules/bn.js/lib/bn.js";
-import * as solanaWeb3 from "../packages/hyperbet-solana/keeper/node_modules/@solana/web3.js/lib/index.esm.js";
-import * as viem from "../packages/hyperbet-bsc/keeper/node_modules/viem/_esm/index.js";
-import * as viemAccounts from "../packages/hyperbet-bsc/keeper/node_modules/viem/_esm/accounts/index.js";
+import BN from "bn.js";
+import * as solanaWeb3 from "@solana/web3.js";
+import * as viem from "viem";
+import * as viemAccounts from "viem/accounts";
 
 import { resolveBettingEvmDeploymentForChain } from "../packages/hyperbet-chain-registry/src/index";
 import {

@@ -355,6 +355,10 @@ const BET_SYNC_STALE_EVENT_TOLERANCE_MS = Math.max(
   0,
   Number(process.env.BET_SYNC_STALE_EVENT_TOLERANCE_MS || 5_000),
 );
+const BET_SYNC_MAX_CONSECUTIVE_FAILURES = Math.max(
+  5,
+  Number(process.env.BET_SYNC_MAX_CONSECUTIVE_FAILURES || 50),
+);
 const CONTRACT_POLL_MS = Math.max(
   5_000,
   Number(process.env.CONTRACT_POLL_MS || 15_000),
@@ -2531,21 +2535,31 @@ function startBetSyncConsumer(): void {
   betSyncConsumerRunning = true;
   void (async () => {
     let reconnectDelayMs = BET_SYNC_RECONNECT_MIN_MS;
+    let consecutiveFailures = 0;
     while (true) {
       try {
         await bootstrapBetSyncState();
         await consumeBetSyncEventsOnce();
         reconnectDelayMs = BET_SYNC_RECONNECT_MIN_MS;
+        consecutiveFailures = 0;
         betSyncLastError = null;
       } catch (error) {
+        consecutiveFailures += 1;
         betSyncLastError =
           error instanceof Error ? error.message : "bet-sync consumer failed";
         persistBetSyncCheckpointState({
           replayMode: betSyncReplayMode,
           degradedReason: betSyncLastError,
         });
+        if (consecutiveFailures >= BET_SYNC_MAX_CONSECUTIVE_FAILURES) {
+          console.error(
+            `[${nowIso()}] [bet-sync] CRITICAL: ${consecutiveFailures} consecutive failures — circuit breaker open, consumer stopped. Last error: ${betSyncLastError}`,
+          );
+          betSyncConsumerRunning = false;
+          return;
+        }
         console.warn(
-          `[${nowIso()}] [bet-sync] consumer error: ${betSyncLastError}; reconnecting in ${reconnectDelayMs}ms`,
+          `[${nowIso()}] [bet-sync] consumer error (${consecutiveFailures}/${BET_SYNC_MAX_CONSECUTIVE_FAILURES}): ${betSyncLastError}; reconnecting in ${reconnectDelayMs}ms`,
         );
         await delayMs(reconnectDelayMs);
         reconnectDelayMs = Math.min(
@@ -3729,6 +3743,36 @@ const server = Bun.serve({
       );
     }
 
+    if (req.method === "GET" && url.pathname === "/api/health") {
+      const syncStatus = syncStatusPayload();
+      const betSyncHealthy =
+        !syncStatus.enabled ||
+        (betSyncConsumerRunning && betSyncLastError == null);
+      const botHealthy = Boolean(botSubprocess);
+      const healthy = betSyncHealthy && botHealthy;
+      return jsonResponse(
+        req,
+        {
+          ok: healthy,
+          betSync: {
+            running: betSyncConsumerRunning,
+            connected: betSyncConnectedAt != null,
+            lastEventAt: betSyncLastEventReceivedAt,
+            lastAppliedAt: betSyncLastAppliedAt,
+            lastError: betSyncLastError,
+            replayMode: betSyncReplayMode,
+          },
+          bot: {
+            running: botHealthy,
+            exitCode: botExitCode,
+          },
+          sseClients: connectedSseCount(),
+        },
+        healthy ? 200 : 503,
+        { "cache-control": "no-store" },
+      );
+    }
+
     if (req.method === "GET" && url.pathname === "/api/keeper/bot-health") {
       const botHealthSnapshotRaw = loadKeeperBotHealthSnapshot();
       return jsonResponse(req, {
@@ -3754,16 +3798,20 @@ const server = Bun.serve({
       req.method === "GET" &&
       url.pathname === "/api/streaming/state/events"
     ) {
+      let sseController: ReadableStreamDefaultController<Uint8Array> | null =
+        null;
       const stream = new ReadableStream<Uint8Array>({
         start(controller) {
+          sseController = controller;
           sseClients.add(controller);
           sendSse(controller, "reset", streamState.seq, streamState);
           controller.enqueue(encoder.encode(": connected\n\n"));
         },
-        cancel(reason) {
-          void reason;
-          // The controller that was cancelled is already detached from writes;
-          // stale controllers are pruned on keepalive/broadcast write failure.
+        cancel() {
+          if (sseController) {
+            sseClients.delete(sseController);
+            sseController = null;
+          }
         },
       });
 

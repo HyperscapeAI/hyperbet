@@ -22,8 +22,8 @@ if [[ -z "$ANVIL_BIN" ]]; then
   exit 1
 fi
 BUN_BIN="${BUN_BIN:-$(command -v bun 2>/dev/null || true)}"
-if [[ -z "$BUN_BIN" && -x "/Users/mac/.bun/bin/bun" ]]; then
-  BUN_BIN="/Users/mac/.bun/bin/bun"
+if [[ -z "$BUN_BIN" && -x "$HOME/.bun/bin/bun" ]]; then
+  BUN_BIN="$HOME/.bun/bin/bun"
 fi
 if [[ -z "$BUN_BIN" ]]; then
   echo "[pm-local] bun binary not found; set BUN_BIN or install bun" >&2

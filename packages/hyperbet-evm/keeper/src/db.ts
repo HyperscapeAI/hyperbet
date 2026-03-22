@@ -134,6 +134,7 @@ const db = new Database(DB_PATH, { create: true });
 db.run("PRAGMA journal_mode = WAL");
 db.run("PRAGMA synchronous = NORMAL");
 db.run("PRAGMA foreign_keys = ON");
+db.run("PRAGMA auto_vacuum = INCREMENTAL");
 
 // ── Schema ────────────────────────────────────────────────────────────────────
 

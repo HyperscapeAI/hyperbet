@@ -43,3 +43,4 @@ __pycache__/
 .venv/
 poetry.lock
 packages/market-maker-bot/simulations/
+docs/plans/

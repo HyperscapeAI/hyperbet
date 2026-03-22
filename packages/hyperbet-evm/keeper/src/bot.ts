@@ -1568,6 +1568,7 @@ async function requestRpc<T>(
       method,
       params,
     }),
+    signal: AbortSignal.timeout(10_000),
   });
   if (!response.ok) {
     throw new Error(

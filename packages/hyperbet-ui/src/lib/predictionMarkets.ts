@@ -308,14 +308,17 @@ export function usePredictionMarketLifecycle(
     }
 
     const controller = new AbortController();
+    let activePollController: AbortController | null = null;
     void refresh(controller.signal);
     const intervalId = window.setInterval(() => {
-      const pollController = new AbortController();
-      void refresh(pollController.signal);
+      activePollController?.abort();
+      activePollController = new AbortController();
+      void refresh(activePollController.signal);
     }, pollIntervalMs);
 
     return () => {
       controller.abort();
+      activePollController?.abort();
       window.clearInterval(intervalId);
     };
   }, [chainKey, disabled, pollIntervalMs, refresh]);
@@ -386,14 +389,17 @@ export function usePredictionMarketOverview(
     }
 
     const controller = new AbortController();
+    let activePollController: AbortController | null = null;
     void refresh(controller.signal);
     const intervalId = window.setInterval(() => {
-      const pollController = new AbortController();
-      void refresh(pollController.signal);
+      activePollController?.abort();
+      activePollController = new AbortController();
+      void refresh(activePollController.signal);
     }, pollIntervalMs);
 
     return () => {
       controller.abort();
+      activePollController?.abort();
       window.clearInterval(intervalId);
     };
   }, [chainKey, disabled, pollIntervalMs, refresh]);
@@ -465,14 +471,17 @@ export function usePredictionMarketSyncStatus(
     }
 
     const controller = new AbortController();
+    let activePollController: AbortController | null = null;
     void refresh(controller.signal);
     const intervalId = window.setInterval(() => {
-      const pollController = new AbortController();
-      void refresh(pollController.signal);
+      activePollController?.abort();
+      activePollController = new AbortController();
+      void refresh(activePollController.signal);
     }, pollIntervalMs);
 
     return () => {
       controller.abort();
+      activePollController?.abort();
       window.clearInterval(intervalId);
     };
   }, [disabled, pollIntervalMs, refresh]);
