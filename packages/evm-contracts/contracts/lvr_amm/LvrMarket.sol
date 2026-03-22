@@ -4,6 +4,7 @@ pragma solidity ^0.8.13;
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {YesToken, NoToken} from "./Token.sol";
 import {SwapMath} from "./lib/SwapMath.sol";
@@ -16,6 +17,7 @@ import {DuelOutcomeOracle} from "../DuelOutcomeOracle.sol";
 
 contract LvrMarket is ReentrancyGuard {
     using SafeERC20 for IERC20;
+    using SafeCast for uint256;
 
     event MarketInitialized(uint256 liquidity, uint256 collateralIn, uint256 timestamp);
     
@@ -223,7 +225,10 @@ contract LvrMarket is ReentrancyGuard {
             payout = amountNoIn;
             IERC20(collateralToken).safeTransfer(redeemer, amountNoIn);
         } else if (outcome == 2) {
-            payout = amountYesIn + amountNoIn;
+            // Cancellation: each token redeems at 0.5 collateral to maintain solvency.
+            // Paying 1:1 for both tokens would exceed collateral pool since
+            // total_yes_supply + total_no_supply > total_collateral after fee burns.
+            payout = (amountYesIn + amountNoIn) / 2;
             IERC20(collateralToken).safeTransfer(redeemer, payout);
         } else {
             revert("Invalid outcome");
@@ -251,7 +256,7 @@ contract LvrMarket is ReentrancyGuard {
         uint256 feeAmount = (amountIn * feeBps) / 10000;
         uint256 amountInAfterFee = amountIn - feeAmount;
 
-        uint256 amountOut = _swap(!isBuyYes, int256(amountInAfterFee));
+        uint256 amountOut = _swap(!isBuyYes, amountInAfterFee.toInt256());
 
         IERC20 collateral = IERC20(collateralToken);
         bytes memory data = abi.encode(collateralToken, buyer);
@@ -288,7 +293,7 @@ contract LvrMarket is ReentrancyGuard {
         uint256 feeAmount = (amountIn * feeBps) / 10000;
         uint256 amountInAfterFee = amountIn - feeAmount;
 
-        uint256 amountOut = _swap(isSellYes, int256(amountInAfterFee));
+        uint256 amountOut = _swap(isSellYes, amountInAfterFee.toInt256());
 
         IERC20 inputToken = IERC20(tokenIn);
         uint256 tokenBalanceBefore = inputToken.balanceOf(address(this));
@@ -320,8 +325,8 @@ contract LvrMarket is ReentrancyGuard {
         require(block.timestamp < deadline, "Market Expired");
         uint256 liq = isDynamic ? Math.calcLiquidity(liquidity, deadline, block.timestamp) : liquidity;
 
-        int256 currentReserveYes = int256(IERC20(address(yesToken)).balanceOf(address(this)));
-        int256 currentReserveNo = int256(IERC20(address(noToken)).balanceOf(address(this)));
+        int256 currentReserveYes = IERC20(address(yesToken)).balanceOf(address(this)).toInt256();
+        int256 currentReserveNo = IERC20(address(noToken)).balanceOf(address(this)).toInt256();
         uint256 amountOut = SwapMath.getSwapAmount(yesToNo, currentReserveYes, currentReserveNo, liq, amountIn);
         return amountOut;
     }

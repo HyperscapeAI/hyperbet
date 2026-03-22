@@ -159,7 +159,9 @@ export abstract class BaseAgent {
                                 orderId = Number(parsed.args.orderId ?? parsed.args[1]);
                                 break;
                             }
-                        } catch { /* skip */ }
+                        } catch (_parseErr) {
+                            // Expected: receipt contains logs from other contracts that don't match this ABI
+                        }
                     }
                     this.onOrderPlaced(action, orderId, ctx);
 

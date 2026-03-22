@@ -13,6 +13,7 @@ library SwapMath {
     int256 constant MAX_Z_SCORE = 38e18; // |z| > 38 WAD → beyond f64 precision, clamp to boundary
 
     error ZScoreOutOfBounds();
+    error NewtonNotConverged();
 
     function ammFunc(int256 x, int256 y, int256 l) internal pure returns(int256) {
         int256 z = FixedPointMathLib.sDivWad((y-x), l);
@@ -49,10 +50,8 @@ library SwapMath {
             int256 deriv = funcDerivative(t, y, l);
             t = t - FixedPointMathLib.sDivWad(f, deriv);
         }
-        
-        // Ensure result is at least MIN_RESERVE
-        int256 result = abs(t);
-        return result < MIN_RESERVE ? MIN_RESERVE : result;
+
+        revert NewtonNotConverged();
     }
 
     function abs(int256 f) internal pure returns(int256) {

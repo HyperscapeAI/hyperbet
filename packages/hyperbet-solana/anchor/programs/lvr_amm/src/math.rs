@@ -37,20 +37,15 @@ fn q_mul(a: i128, b: i128) -> i128 {
 
 /// Q64.64 divide: (a << 64) / b
 fn q_div(a: i128, b: i128) -> i128 {
-    if b == 0 { return 0; }
+    assert!(b != 0, "q_div: division by zero");
     i256_to_i128((I256::new(a) << FRAC_BITS) / I256::new(b))
 }
 
 fn i256_to_i128(value: I256) -> i128 {
     let min = I256::new(i128::MIN);
     let max = I256::new(i128::MAX);
-    if value < min {
-        i128::MIN
-    } else if value > max {
-        i128::MAX
-    } else {
-        value.as_i128()
-    }
+    assert!(value >= min && value <= max, "i256_to_i128: overflow");
+    value.as_i128()
 }
 
 fn q_abs(val: i128) -> i128 {
@@ -185,12 +180,11 @@ fn get_new_reserve_q(x_guess: i128, y: i128, l: i128) -> i128 {
             return if res < Q_MIN_RESERVE { Q_MIN_RESERVE } else { res };
         }
         let deriv = func_derivative_q(t, y, l);
-        if deriv == 0 { break; }
+        assert!(deriv != 0, "get_new_reserve_q: zero derivative");
         t = t - q_div(f, deriv);
     }
 
-    let res = q_abs(t);
-    if res < Q_MIN_RESERVE { Q_MIN_RESERVE } else { res }
+    panic!("get_new_reserve_q: Newton-Raphson did not converge after {} iterations", MAX_NEWTON_ITERS);
 }
 
 // === Public API (u64 scaled by 1e6) ===

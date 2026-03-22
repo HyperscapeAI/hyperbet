@@ -50,6 +50,18 @@ pub enum PredictionMarketError {
     #[msg("Overflow or Underflow")]
     MathErr,
 
+    #[msg("Arithmetic overflow")]
+    MathOverflow,
+
+    #[msg("Insufficient reserves for swap")]
+    InsufficientReserves,
+
+    #[msg("Market has expired")]
+    MarketExpired,
+
+    #[msg("Invalid settlement outcome")]
+    InvalidSettlementOutcome,
+
     #[msg("Invalid address (zero/default)")]
     InvalidAddress,
 

@@ -2,6 +2,7 @@
 pragma solidity ^0.8.13;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {DuelOutcomeOracle} from "../DuelOutcomeOracle.sol";
@@ -12,6 +13,8 @@ import {IMarketRedeemCallback} from "./interfaces/IMarketRedeemCallback.sol";
 import {IMarketBondCallback} from "./interfaces/IMarketBondCallback.sol";
 
 contract Router is AccessControl, ReentrancyGuard, IMarketBuyCallback, IMarketSellCallback, IMarketRedeemCallback, IMarketBondCallback{
+    using SafeERC20 for IERC20;
+
     bytes32 public constant MARKET_OPERATOR_ROLE = keccak256("MARKET_OPERATOR_ROLE");
 
     // Enhanced event with full metadata for frontend indexing
@@ -58,6 +61,10 @@ contract Router is AccessControl, ReentrancyGuard, IMarketBuyCallback, IMarketSe
     event FeeConfigUpdated(address indexed treasury, uint256 feeBps);
 
     constructor(address _mUSD, address _oracle, address _treasury, uint256 _feeBps, address admin){
+        require(_mUSD != address(0), "invalid mUSD");
+        require(_oracle != address(0), "invalid oracle");
+        require(_treasury != address(0) || _feeBps == 0, "invalid treasury");
+        require(admin != address(0), "invalid admin");
         require(_feeBps <= MAX_FEE_BPS, "Fee too high");
         mUSD = IERC20(_mUSD);
         duelOracle = DuelOutcomeOracle(_oracle);
@@ -88,7 +95,7 @@ contract Router is AccessControl, ReentrancyGuard, IMarketBuyCallback, IMarketSe
         uint256 collateralIn
     ) public onlyRole(MARKET_OPERATOR_ROLE) {
         // A new market is deployed
-        bytes32 marketId = keccak256(abi.encodePacked(title, msg.sender, block.timestamp));
+        bytes32 marketId = keccak256(abi.encode(title, msg.sender, block.timestamp));
         require(!markets[marketId].initialized, "Market Already Exists");
 
         LvrMarket market =
@@ -96,7 +103,7 @@ contract Router is AccessControl, ReentrancyGuard, IMarketBuyCallback, IMarketSe
         allowedMarkets[address(market)] = true;
 
         // Transfer USD token to market contract
-        mUSD.transferFrom(msg.sender, address(market), collateralIn);
+        mUSD.safeTransferFrom(msg.sender, address(market), collateralIn);
         uint256 liquidity = market.initializeLiquidity(collateralIn);
 
         markets[marketId] = MarketInfo({
@@ -181,27 +188,28 @@ contract Router is AccessControl, ReentrancyGuard, IMarketBuyCallback, IMarketSe
         if (amountOut < minAmountOut) revert SlippageExceeded();
     }
 
-    function proposerOutcome(address market, uint256 _outcome) public {
+    function proposerOutcome(address market, uint256 _outcome) public nonReentrant {
         if (!allowedMarkets[market]) revert MarketNotAllowed();
         LvrMarket(market).proposeOutcome(_outcome, msg.sender);
     }
 
-    function dispute(address market) public {
+    function dispute(address market) public nonReentrant {
         if (!allowedMarkets[market]) revert MarketNotAllowed();
         LvrMarket(market).dispute();
     }
 
-    function settleMarket(address market) public {
+    function settleMarket(address market) public nonReentrant {
         if (!allowedMarkets[market]) revert MarketNotAllowed();
         LvrMarket(market).settleMarket();
     }
 
-    function settleFromOracle(address market) public {
+    function settleFromOracle(address market) public nonReentrant {
         if (!allowedMarkets[market]) revert MarketNotAllowed();
         LvrMarket(market).settleFromOracle();
     }
 
-    function redeem(address market, uint256 amountYes, uint256 amountNo) public {
+    function redeem(address market, uint256 amountYes, uint256 amountNo) public nonReentrant {
+        if (!allowedMarkets[market]) revert MarketNotAllowed();
         LvrMarket(market).redeemCollateralWithToken(amountYes, amountNo, msg.sender);
     }
 
@@ -209,22 +217,22 @@ contract Router is AccessControl, ReentrancyGuard, IMarketBuyCallback, IMarketSe
 
     function marketBuyCallback(uint256 collateralIn, bytes calldata data) external override onlyAllowedMarket {
         (address collateral, address buyer) = abi.decode(data, (address, address));
-        IERC20(collateral).transferFrom(buyer, msg.sender, collateralIn);
+        IERC20(collateral).safeTransferFrom(buyer, msg.sender, collateralIn);
     }
 
     function marketSellCallback(uint256 tokenIn, bytes calldata data) external override onlyAllowedMarket {
         (address tokenToSell, address seller) = abi.decode(data, (address, address));
-        IERC20(tokenToSell).transferFrom(seller, msg.sender, tokenIn);
+        IERC20(tokenToSell).safeTransferFrom(seller, msg.sender, tokenIn);
     }
 
     function marketRedeemCallback(uint256 amountYes, uint256 amountNo, bytes calldata data) external override onlyAllowedMarket {
         (address yesToken, address noToken, address redeemer) = abi.decode(data, (address, address, address));
-        IERC20(yesToken).transferFrom(redeemer, msg.sender, amountYes);
-        IERC20(noToken).transferFrom(redeemer, msg.sender, amountNo);
+        IERC20(yesToken).safeTransferFrom(redeemer, msg.sender, amountYes);
+        IERC20(noToken).safeTransferFrom(redeemer, msg.sender, amountNo);
     }
 
     function marketBondCallback(uint256 bond, bytes calldata data) external override onlyAllowedMarket {
         (address collateral, address proposer) = abi.decode(data, (address, address));
-        IERC20(collateral).transferFrom(proposer, msg.sender, bond);
+        IERC20(collateral).safeTransferFrom(proposer, msg.sender, bond);
     }
 }

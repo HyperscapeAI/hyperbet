@@ -1,5 +1,5 @@
 use anchor_lang::prelude::*;
-use anchor_lang::solana_program::program::invoke_signed;
+use anchor_lang::solana_program::program::invoke;
 use anchor_lang::solana_program::system_instruction::transfer;
 
 use crate::error::PredictionMarketError;
@@ -32,9 +32,7 @@ pub fn buy_instruction(ctx: Context<Buy>, bet_id: u64, outcome: u8, amount_in: u
     
     // Check deadline
     if current_time >= bet.expiration_at {
-        // Market expired, could revert here depending on logic, but EVM allows but liquidity might scale to zero
-        // In EVM `deadline` was used as hard revert in `_swap`
-        return err!(PredictionMarketError::MathErr); // or create custom MarketExpired error
+        return err!(PredictionMarketError::MarketExpired);
     }
 
     let liq = if bet.is_dynamic { 
@@ -43,8 +41,12 @@ pub fn buy_instruction(ctx: Context<Buy>, bet_id: u64, outcome: u8, amount_in: u
         bet.initial_liq
     };
     
-    let fee_amount = (amount_in as u128 * bet.fee_bps as u128 / 10000) as u64;
-    let net_amount_in = amount_in - fee_amount;
+    let fee_amount = (amount_in as u128)
+        .checked_mul(bet.fee_bps as u128)
+        .and_then(|v| v.checked_div(10000))
+        .ok_or(PredictionMarketError::MathOverflow)? as u64;
+    let net_amount_in = amount_in.checked_sub(fee_amount)
+        .ok_or(PredictionMarketError::MathOverflow)?;
 
     let amount_out = math::get_swap_amount(
         !is_buy_yes, 
@@ -60,13 +62,15 @@ pub fn buy_instruction(ctx: Context<Buy>, bet_id: u64, outcome: u8, amount_in: u
     // Returns `amountIn + amountOut` to the User.
     // So Market Reserve increases by `amountIn` for the OPPOSITE token, and decreases by `amountOut` for the REQUESTED token.
     if is_buy_yes {
-        require!(bet.reserves[0] >= amount_out, PredictionMarketError::MathErr);
-        bet.reserves[0] -= amount_out;
-        bet.reserves[1] += net_amount_in;
+        bet.reserves[0] = bet.reserves[0].checked_sub(amount_out)
+            .ok_or(PredictionMarketError::InsufficientReserves)?;
+        bet.reserves[1] = bet.reserves[1].checked_add(net_amount_in)
+            .ok_or(PredictionMarketError::MathOverflow)?;
     } else {
-        require!(bet.reserves[1] >= amount_out, PredictionMarketError::MathErr);
-        bet.reserves[1] -= amount_out;
-        bet.reserves[0] += net_amount_in;
+        bet.reserves[1] = bet.reserves[1].checked_sub(amount_out)
+            .ok_or(PredictionMarketError::InsufficientReserves)?;
+        bet.reserves[0] = bet.reserves[0].checked_add(net_amount_in)
+            .ok_or(PredictionMarketError::MathOverflow)?;
     }
 
     // Transfer fee to treasury if exists
@@ -76,14 +80,13 @@ pub fn buy_instruction(ctx: Context<Buy>, bet_id: u64, outcome: u8, amount_in: u
             &ctx.accounts.treasury.key(),
             fee_amount,
         );
-        invoke_signed(
+        invoke(
             &fee_transfer_instruction,
             &[
                 ctx.accounts.signer.to_account_info(),
                 ctx.accounts.treasury.to_account_info(),
                 ctx.accounts.system_program.to_account_info(),
             ],
-            &[],
         )?;
     }
 
@@ -93,14 +96,13 @@ pub fn buy_instruction(ctx: Context<Buy>, bet_id: u64, outcome: u8, amount_in: u
         &bet.key(),
         net_amount_in,
     );
-    invoke_signed(
+    invoke(
         &transfer_instruction,
         &[
             ctx.accounts.signer.to_account_info(),
             bet.to_account_info(),
             ctx.accounts.system_program.to_account_info(),
         ],
-        &[],
     )?;
 
     // Mint amount_in + amount_out tokens to the buyer

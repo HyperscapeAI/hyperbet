@@ -116,6 +116,10 @@ pub fn settle_bet_instruction(ctx: Context<SettleBet>, _bet_id: u64, side_won: u
             ctx.accounts.signer.key() == ctx.accounts.admin_state.admin.key(),
             PredictionMarketError::SignerIsNotSettlePubKey
         );
+        require!(
+            side_won <= 2,
+            PredictionMarketError::InvalidSettlementOutcome
+        );
         side_won
     };
 

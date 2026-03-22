@@ -30,7 +30,7 @@ pub fn sell_instruction(ctx: Context<Sell>, bet_id: u64, outcome: u8, amount_in:
     let current_time = Clock::get()?.unix_timestamp;
 
     if current_time >= bet.expiration_at {
-        return err!(PredictionMarketError::MathErr);
+        return err!(PredictionMarketError::MarketExpired);
     }
 
     let liq = if bet.is_dynamic { 
@@ -39,8 +39,12 @@ pub fn sell_instruction(ctx: Context<Sell>, bet_id: u64, outcome: u8, amount_in:
         bet.initial_liq
     };
     
-    let fee_amount = (amount_in as u128 * bet.fee_bps as u128 / 10000) as u64;
-    let net_amount_in = amount_in - fee_amount;
+    let fee_amount = (amount_in as u128)
+        .checked_mul(bet.fee_bps as u128)
+        .and_then(|v| v.checked_div(10000))
+        .ok_or(PredictionMarketError::MathOverflow)? as u64;
+    let net_amount_in = amount_in.checked_sub(fee_amount)
+        .ok_or(PredictionMarketError::MathOverflow)?;
 
     let amount_out = math::get_swap_amount(
         is_sell_yes, 
@@ -52,13 +56,15 @@ pub fn sell_instruction(ctx: Context<Sell>, bet_id: u64, outcome: u8, amount_in:
 
     // Update Virtual Reserves
     if is_sell_yes {
-        require!(bet.reserves[1] >= amount_out, PredictionMarketError::MathErr);
-        bet.reserves[0] += net_amount_in;
-        bet.reserves[1] -= amount_out;
+        bet.reserves[1] = bet.reserves[1].checked_sub(amount_out)
+            .ok_or(PredictionMarketError::InsufficientReserves)?;
+        bet.reserves[0] = bet.reserves[0].checked_add(net_amount_in)
+            .ok_or(PredictionMarketError::MathOverflow)?;
     } else {
-        require!(bet.reserves[0] >= amount_out, PredictionMarketError::MathErr);
-        bet.reserves[1] += net_amount_in;
-        bet.reserves[0] -= amount_out;
+        bet.reserves[0] = bet.reserves[0].checked_sub(amount_out)
+            .ok_or(PredictionMarketError::InsufficientReserves)?;
+        bet.reserves[1] = bet.reserves[1].checked_add(net_amount_in)
+            .ok_or(PredictionMarketError::MathOverflow)?;
     }
 
     // Burn the net amount being sold (rest is transferred as fee)

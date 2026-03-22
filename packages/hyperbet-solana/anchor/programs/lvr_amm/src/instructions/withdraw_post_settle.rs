@@ -48,21 +48,24 @@ pub fn withdraw_post_settle_instruction(
     let cpi_context = CpiContext::new(cpi_program, cpi_accounts);
     token_interface::burn(cpi_context, q)?;
 
-    // Only pay if the user holds the winning shares
-    // In LvrAMM (and PMs generally), winning shares redeem 1:1 for Collateral (Lamports here)
+    // Only pay if the user holds the winning shares (or cancelled market)
     let resolved_side = bet.side_won.unwrap();
     if resolved_side == 2 || resolved_side == outcome {
+        // Cancellation (side==2): each token redeems at 0.5 to maintain solvency.
+        // Winning side: redeem 1:1 for collateral.
+        let payout = if resolved_side == 2 { q / 2 } else { q };
+
         let rent_balance = Rent::get()?.minimum_balance(bet.to_account_info().data_len());
         let bet_sol_balance = **bet.to_account_info().lamports.borrow() - rent_balance;
 
         require!(
-            bet_sol_balance >= q,
+            bet_sol_balance >= payout,
             PredictionMarketError::NotEnoughLamports
         );
 
         let bet = &mut ctx.accounts.bet;
-        bet.sub_lamports(q)?;
-        ctx.accounts.signer.add_lamports(q)?;
+        bet.sub_lamports(payout)?;
+        ctx.accounts.signer.add_lamports(payout)?;
     }
 
     Ok(())

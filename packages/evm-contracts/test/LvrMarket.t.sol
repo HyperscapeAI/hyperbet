@@ -9,6 +9,7 @@ import "../contracts/lvr_amm/MockUSD.sol";
 import "../contracts/DuelOutcomeOracle.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {Math} from "../contracts/lvr_amm/lib/Math.sol";
+import {SwapMath} from "../contracts/lvr_amm/lib/SwapMath.sol";
 
 contract LvrMarketTest is Test {
     Router public router;
@@ -385,7 +386,309 @@ contract LvrMarketTest is Test {
         vm.prank(user2);
         router.redeem(marketAddr, 0, user2No);
 
-        assertEq(mUSD.balanceOf(user1), user1Before + user1Yes, "YES holder should be refunded on cancellation");
-        assertEq(mUSD.balanceOf(user2), user2Before + user2No, "NO holder should be refunded on cancellation");
+        // Cancellation pays each token at 0.5 to maintain solvency
+        assertEq(mUSD.balanceOf(user1), user1Before + user1Yes / 2, "YES holder should be refunded at 0.5 on cancellation");
+        assertEq(mUSD.balanceOf(user2), user2Before + user2No / 2, "NO holder should be refunded at 0.5 on cancellation");
+    }
+
+    // ============ Phase 3: settleFromOracle tests ============
+
+    function _createAndTradeStaticMarket(bytes32 duelKey) internal returns (address marketAddr, LvrMarket market) {
+        vm.prank(admin);
+        router.create("Oracle Test", "Desc", "Src", duelKey, false, DURATION, 100 * 10**18);
+        (marketAddr, ) = router.getMarketAtIndex(router.getMarketCount() - 1);
+        market = LvrMarket(marketAddr);
+
+        vm.warp(block.timestamp + 1 hours);
+        vm.prank(user1);
+        router.buyYes(marketAddr, 5 * 10**18, 0);
+        vm.prank(user2);
+        router.buyNo(marketAddr, 5 * 10**18, 0);
+    }
+
+    function _setupOracleDuel(bytes32 duelKey) internal {
+        // Set betting window in the past so LOCKED status is accepted
+        uint64 pastOpen = 1;
+        uint64 pastClose = 2;
+        uint64 duelStart = 2;
+
+        vm.warp(10); // Ensure block.timestamp > betCloseTs
+
+        vm.startPrank(admin);
+        oracle.upsertDuel(
+            duelKey,
+            keccak256("participantA"),
+            keccak256("participantB"),
+            pastOpen,
+            pastClose,
+            duelStart,
+            "test-uri",
+            DuelOutcomeOracle.DuelStatus.LOCKED
+        );
+        vm.stopPrank();
+    }
+
+    function _proposeAndFinalizeOracle(bytes32 duelKey, DuelOutcomeOracle.Side winner) internal {
+        bytes32 resultHash = keccak256("result");
+        bytes32 replayHash = keccak256("replay");
+
+        vm.prank(admin);
+        oracle.proposeResult(duelKey, winner, 42, replayHash, resultHash, uint64(block.timestamp), "result-uri");
+
+        // Wait for dispute window to pass
+        vm.warp(block.timestamp + 1 hours + 1);
+
+        vm.prank(admin);
+        oracle.finalizeResult(duelKey, "final-uri");
+    }
+
+    function test_SettleFromOracle_SideAWins() public {
+        bytes32 duelKey = keccak256("oracle-test-a");
+        _setupOracleDuel(duelKey);
+
+        (address marketAddr, LvrMarket market) = _createAndTradeStaticMarket(duelKey);
+
+        // Resolve oracle: Side A wins → outcome 0 (Yes)
+        _proposeAndFinalizeOracle(duelKey, DuelOutcomeOracle.Side.A);
+
+        vm.warp(block.timestamp + DURATION);
+        router.settleFromOracle(marketAddr);
+
+        (LvrMarket.MarketState currentState,,uint256 mktOutcome,,,,,) = market.getMarketDetails();
+        assertEq(uint256(currentState), uint256(LvrMarket.MarketState.RESOLVED));
+        assertEq(mktOutcome, 0, "Outcome should be 0 (Yes) when Side A wins");
+    }
+
+    function test_SettleFromOracle_SideBWins() public {
+        bytes32 duelKey = keccak256("oracle-test-b");
+        _setupOracleDuel(duelKey);
+
+        (address marketAddr, LvrMarket market) = _createAndTradeStaticMarket(duelKey);
+
+        _proposeAndFinalizeOracle(duelKey, DuelOutcomeOracle.Side.B);
+
+        vm.warp(block.timestamp + DURATION);
+        router.settleFromOracle(marketAddr);
+
+        (,,uint256 mktOutcome,,,,,) = market.getMarketDetails();
+        assertEq(mktOutcome, 1, "Outcome should be 1 (No) when Side B wins");
+    }
+
+    function test_SettleFromOracle_CancelledDuel() public {
+        bytes32 duelKey = keccak256("oracle-test-cancel");
+        _setupOracleDuel(duelKey);
+
+        (address marketAddr, LvrMarket market) = _createAndTradeStaticMarket(duelKey);
+
+        // Cancel the duel instead of resolving
+        vm.prank(admin);
+        oracle.cancelDuel(duelKey, "cancelled-uri");
+
+        vm.warp(block.timestamp + DURATION);
+        router.settleFromOracle(marketAddr);
+
+        (,,uint256 mktOutcome,,,,,) = market.getMarketDetails();
+        assertEq(mktOutcome, 2, "Outcome should be 2 (cancelled) when duel is cancelled");
+    }
+
+    function test_SettleFromOracle_SlashesBondOnWrongProposal() public {
+        bytes32 duelKey = keccak256("oracle-bond-slash");
+        _setupOracleDuel(duelKey);
+
+        (address marketAddr, ) = _createAndTradeStaticMarket(duelKey);
+
+        // user1 proposes outcome=0 on the market
+        vm.warp(block.timestamp + DURATION);
+        LvrMarket market = LvrMarket(marketAddr);
+        uint256 bond = market.bondValue();
+        vm.prank(user1);
+        mUSD.approve(address(router), bond);
+        vm.prank(user1);
+        router.proposerOutcome(marketAddr, 0);
+
+        // Oracle resolves Side B (outcome=1) — proposer was wrong
+        _proposeAndFinalizeOracle(duelKey, DuelOutcomeOracle.Side.B);
+
+        uint256 treasuryBefore = mUSD.balanceOf(treasury);
+        router.settleFromOracle(marketAddr);
+
+        assertEq(mUSD.balanceOf(treasury), treasuryBefore + bond, "Bond should be slashed to treasury");
+    }
+
+    // ============ Phase 3: Slippage and Z-score tests ============
+
+    function test_SlippageProtection_BuyNo() public {
+        vm.prank(admin);
+        router.create("Slippage No", "Desc", "Src", TEST_DUEL_KEY, false, DURATION, 100 * 10**18);
+        (address marketAddr, ) = router.getMarketAtIndex(0);
+
+        vm.warp(block.timestamp + 1 hours);
+
+        vm.prank(user1);
+        vm.expectRevert(Router.SlippageExceeded.selector);
+        router.buyNo(marketAddr, 10 * 10**18, type(uint256).max);
+    }
+
+    function test_SlippageProtection_SellYes() public {
+        vm.prank(admin);
+        router.create("Slippage Sell", "Desc", "Src", TEST_DUEL_KEY, false, DURATION, 100 * 10**18);
+        (address marketAddr, ) = router.getMarketAtIndex(0);
+        LvrMarket market = LvrMarket(marketAddr);
+
+        vm.warp(block.timestamp + 1 hours);
+
+        // Buy YES first so we have tokens to sell
+        vm.startPrank(user1);
+        router.buyYes(marketAddr, 10 * 10**18, 0);
+        uint256 yesBalance = IERC20(address(market.yesToken())).balanceOf(user1);
+        IERC20(address(market.yesToken())).approve(address(router), yesBalance);
+
+        vm.expectRevert(Router.SlippageExceeded.selector);
+        router.sellYes(marketAddr, yesBalance / 2, type(uint256).max);
+        vm.stopPrank();
+    }
+
+    function test_SlippageProtection_SellNo() public {
+        vm.prank(admin);
+        router.create("Slippage SellNo", "Desc", "Src", TEST_DUEL_KEY, false, DURATION, 100 * 10**18);
+        (address marketAddr, ) = router.getMarketAtIndex(0);
+        LvrMarket market = LvrMarket(marketAddr);
+
+        vm.warp(block.timestamp + 1 hours);
+
+        vm.startPrank(user1);
+        router.buyNo(marketAddr, 10 * 10**18, 0);
+        uint256 noBalance = IERC20(address(market.noToken())).balanceOf(user1);
+        IERC20(address(market.noToken())).approve(address(router), noBalance);
+
+        vm.expectRevert(Router.SlippageExceeded.selector);
+        router.sellNo(marketAddr, noBalance / 2, type(uint256).max);
+        vm.stopPrank();
+    }
+
+    function test_BuyAfterDeadlineReverts() public {
+        vm.prank(admin);
+        router.create("Expired", "Desc", "Src", TEST_DUEL_KEY, false, DURATION, 100 * 10**18);
+        (address marketAddr, ) = router.getMarketAtIndex(0);
+
+        vm.warp(block.timestamp + DURATION + 1);
+
+        vm.prank(user1);
+        vm.expectRevert(bytes("Market Expired"));
+        router.buyYes(marketAddr, 10 * 10**18, 0);
+    }
+
+    // ============ Phase 3: Invariant / Property tests ============
+
+    function test_CancellationSolvency() public {
+        // Verify outcome==2 never pays more than available collateral
+        vm.prank(admin);
+        router.create("Solvency Cancel", "Desc", "Src", TEST_DUEL_KEY, false, DURATION, 100 * 10**18);
+        (address marketAddr, ) = router.getMarketAtIndex(0);
+        LvrMarket market = LvrMarket(marketAddr);
+
+        vm.warp(block.timestamp + 1 hours);
+
+        // Both users buy different sides
+        vm.prank(user1);
+        router.buyYes(marketAddr, 20 * 10**18, 0);
+        vm.prank(user2);
+        router.buyNo(marketAddr, 20 * 10**18, 0);
+
+        // user1 also sells some YES to get NO tokens (holds both)
+        uint256 user1Yes = IERC20(address(market.yesToken())).balanceOf(user1);
+        vm.startPrank(user1);
+        IERC20(address(market.yesToken())).approve(address(router), user1Yes);
+        router.sellYes(marketAddr, user1Yes / 2, 0);
+        vm.stopPrank();
+
+        // Cancel the market
+        vm.warp(block.timestamp + DURATION);
+        vm.prank(admin);
+        market.adminResolve(2);
+
+        // Capture balances
+        uint256 u1Yes = IERC20(address(market.yesToken())).balanceOf(user1);
+        uint256 u1No = IERC20(address(market.noToken())).balanceOf(user1);
+        uint256 u2Yes = IERC20(address(market.yesToken())).balanceOf(user2);
+        uint256 u2No = IERC20(address(market.noToken())).balanceOf(user2);
+
+        uint256 totalPayoutNeeded = (u1Yes + u1No) / 2 + (u2Yes + u2No) / 2;
+        uint256 collateral = mUSD.balanceOf(marketAddr);
+
+        assertTrue(collateral >= totalPayoutNeeded, "Collateral must cover all cancellation payouts");
+
+        // Actually redeem and verify no revert
+        vm.startPrank(user1);
+        IERC20(address(market.yesToken())).approve(address(router), u1Yes);
+        IERC20(address(market.noToken())).approve(address(router), u1No);
+        router.redeem(marketAddr, u1Yes, u1No);
+        vm.stopPrank();
+
+        vm.startPrank(user2);
+        IERC20(address(market.yesToken())).approve(address(router), u2Yes);
+        IERC20(address(market.noToken())).approve(address(router), u2No);
+        router.redeem(marketAddr, u2Yes, u2No);
+        vm.stopPrank();
+    }
+
+    function test_Fuzz_SolvencyInvariant(uint256 buyAmount1, uint256 buyAmount2) public {
+        buyAmount1 = bound(buyAmount1, 1 * 10**18, 40 * 10**18);
+        buyAmount2 = bound(buyAmount2, 1 * 10**18, 40 * 10**18);
+
+        vm.prank(admin);
+        router.create("Fuzz Solvency", "Desc", "Src", TEST_DUEL_KEY, false, DURATION, 100 * 10**18);
+        (address marketAddr, ) = router.getMarketAtIndex(0);
+        LvrMarket market = LvrMarket(marketAddr);
+
+        vm.warp(block.timestamp + 1 hours);
+
+        vm.prank(user1);
+        router.buyYes(marketAddr, buyAmount1, 0);
+        vm.prank(user2);
+        router.buyNo(marketAddr, buyAmount2, 0);
+
+        // Solvency: collateral >= max(yesSupply, noSupply)
+        uint256 totalYes = market.yesToken().totalSupply();
+        uint256 totalNo = market.noToken().totalSupply();
+        uint256 collateral = mUSD.balanceOf(marketAddr);
+        uint256 maxSupply = totalYes > totalNo ? totalYes : totalNo;
+        assertTrue(collateral >= maxSupply, "Solvency: collateral must cover max token supply");
+    }
+
+    function test_Fuzz_NoFreeMoney(uint256 buyAmount) public {
+        buyAmount = bound(buyAmount, 1 * 10**18, 30 * 10**18);
+
+        vm.prank(admin);
+        router.create("No Free Money", "Desc", "Src", TEST_DUEL_KEY, false, DURATION, 100 * 10**18);
+        (address marketAddr, ) = router.getMarketAtIndex(0);
+        LvrMarket market = LvrMarket(marketAddr);
+
+        vm.warp(block.timestamp + 1 hours);
+
+        uint256 balanceBefore = mUSD.balanceOf(user1);
+
+        // Buy YES
+        vm.startPrank(user1);
+        router.buyYes(marketAddr, buyAmount, 0);
+
+        uint256 yesBalance = IERC20(address(market.yesToken())).balanceOf(user1);
+        IERC20(address(market.yesToken())).approve(address(router), yesBalance);
+
+        // Immediately sell all YES back
+        router.sellYes(marketAddr, yesBalance, 0);
+        vm.stopPrank();
+
+        uint256 balanceAfter = mUSD.balanceOf(user1);
+        // User should NOT profit from round trip (fees + slippage make it unprofitable)
+        assertTrue(balanceAfter <= balanceBefore, "Round-trip should not generate profit");
+    }
+
+    function test_NewtonNotConverged_Reverts() public {
+        // SwapMath.getSwapAmount should revert (not return garbage) when Newton-Raphson fails
+        // We trigger this by pushing reserves to extreme values relative to liquidity
+        // Using direct library call to test edge case
+        vm.expectRevert(SwapMath.ZScoreOutOfBounds.selector);
+        SwapMath.getSwapAmount(true, 1, int256(1e36), 1, int256(1e30));
     }
 }

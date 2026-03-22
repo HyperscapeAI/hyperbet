@@ -13,13 +13,6 @@ pub fn initialize_amm_config(
     require!(fee_bps <= 1000, PredictionMarketError::FeeTooHigh);
 
     let config = &mut ctx.accounts.amm_config;
-
-    // Prevent re-initialization
-    require!(
-        config.authority == Pubkey::default(),
-        PredictionMarketError::AdminStateAlreadyInitialized
-    );
-
     config.authority = ctx.accounts.signer.key();
     config.treasury = treasury;
     config.market_maker = market_maker;
@@ -70,7 +63,7 @@ pub fn set_amm_paused(ctx: Context<SetAmmPaused>, paused: bool) -> Result<()> {
 #[derive(Accounts)]
 pub struct InitializeAmmConfig<'info> {
     #[account(
-        init_if_needed,
+        init,
         payer = signer,
         space = 8 + AmmConfig::INIT_SPACE,
         seeds = [b"amm_config"],
