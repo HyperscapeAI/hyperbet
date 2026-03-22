@@ -100,11 +100,13 @@ contract Router is AccessControl, ReentrancyGuard, IMarketBuyCallback, IMarketSe
 
         LvrMarket market =
             new LvrMarket(address(this), duelKey, address(duelOracle), isDynamic, duration, address(mUSD), msg.sender, treasury, feeBps);
-        allowedMarkets[address(market)] = true;
 
         // Transfer USD token to market contract
         mUSD.safeTransferFrom(msg.sender, address(market), collateralIn);
         uint256 liquidity = market.initializeLiquidity(collateralIn);
+
+        // Add to allowlist AFTER successful initialization to prevent callbacks to uninitialized markets
+        allowedMarkets[address(market)] = true;
 
         markets[marketId] = MarketInfo({
             market: address(market),
