@@ -82,4 +82,10 @@ pub enum PredictionMarketError {
 
     #[msg("Fight oracle program mismatch")]
     InvalidFightOracleProgram,
+
+    #[msg("AMM Newton-Raphson solver did not converge")]
+    MathConvergenceError,
+
+    #[msg("AMM fixed-point overflow")]
+    MathFixedPointOverflow,
 }

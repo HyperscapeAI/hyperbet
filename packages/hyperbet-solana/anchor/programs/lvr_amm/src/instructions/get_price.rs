@@ -16,7 +16,7 @@ pub fn get_price_instruction(ctx: Context<GetPrice>, outcome: u8) -> Result<u64>
         bet.initial_liq
     };
 
-    let price_yes = math::calc_price(bet.reserves[0], bet.reserves[1], liq);
+    let price_yes = math::calc_price(bet.reserves[0], bet.reserves[1], liq)?;
 
     if outcome == 0 {
         Ok(price_yes)
