@@ -1,12 +1,11 @@
-import { execFile } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { promisify } from "node:util";
+import { pathToFileURL } from "node:url";
 
-import BN from "../packages/hyperbet-solana/keeper/node_modules/bn.js/lib/bn.js";
-import * as solanaWeb3 from "../packages/hyperbet-solana/keeper/node_modules/@solana/web3.js/lib/index.esm.js";
-import * as viem from "../packages/hyperbet-bsc/keeper/node_modules/viem/_esm/index.js";
-import * as viemAccounts from "../packages/hyperbet-bsc/keeper/node_modules/viem/_esm/accounts/index.js";
+import BN from "bn.js";
+import * as solanaWeb3 from "@solana/web3.js";
+import * as viem from "viem";
+import * as viemAccounts from "viem/accounts";
 
 import { resolveBettingEvmDeploymentForChain } from "../packages/hyperbet-chain-registry/src/index";
 import {
@@ -27,10 +26,10 @@ import {
 import { GOLD_CLOB_ABI } from "../packages/hyperbet-ui/src/lib/goldClobAbi";
 import { resolveArtifactRoot, rootDir, writeJsonArtifact } from "./ci-lib";
 
-const execFileAsync = promisify(execFile);
 const { PublicKey, SystemProgram } = solanaWeb3;
 const { createPublicClient, createWalletClient, http } = viem;
 const { privateKeyToAccount } = viemAccounts;
+type SolanaPublicKey = InstanceType<typeof PublicKey>;
 
 type AccountMeta = solanaWeb3.AccountMeta;
 type Address = `0x${string}`;
@@ -131,6 +130,67 @@ type PredictionMarketsResponse = {
   updatedAt?: number | null;
 };
 
+type PredictionMarketsOverviewResponse = {
+  live: PredictionMarketsResponse | null;
+  recentSettlement: PredictionMarketsResponse | null;
+  updatedAt?: number | null;
+};
+
+type SyncStatusResponse = {
+  sourceEpoch?: number | null;
+  sourceLatestSeq?: number | null;
+  lastSeenSeq?: number | null;
+  lastAppliedSeq?: number | null;
+  applyLagMs?: number | null;
+  sourceEventAgeMs?: number | null;
+  replayMode?: string | null;
+  degradedReason?: string | null;
+  rendererHealth?: RendererHealth | null;
+  rendererHealthAgeMs?: number | null;
+  lastEventReceivedAt?: number | null;
+  lastAppliedAt?: number | null;
+  connectedAt?: number | null;
+  enabled?: boolean | null;
+};
+
+type RendererHealth = {
+  ready?: boolean | null;
+  degradedReason?: string | null;
+  updatedAt?: number | null;
+  phase?: string | null;
+};
+
+type BetSyncSourceEvent = {
+  sourceEpoch?: number | null;
+  seq?: number | null;
+  duelId?: string | null;
+  duelKey?: string | null;
+  phase?: string | null;
+  rendererHealth?: RendererHealth | null;
+};
+
+type BetSyncBootstrapStateResponse = {
+  sourceEpoch?: number | null;
+  seq?: number | null;
+  latestSeq?: number | null;
+  oldestReplaySeq?: number | null;
+  duelId?: string | null;
+  duelKey?: string | null;
+  phase?: string | null;
+  rendererHealth?: RendererHealth | null;
+  latestEvent?: BetSyncSourceEvent | null;
+  replay?: {
+    sourceEpoch?: number | null;
+    latestSeq?: number | null;
+    oldestSeq?: number | null;
+  } | null;
+};
+
+type SourceRtmpStatusResponse = {
+  updatedAt?: number | null;
+  rendererHealth?: RendererHealth | null;
+};
+
 type KeeperStatusResponse = {
   ok?: boolean;
   bot?: {
@@ -159,7 +219,7 @@ type KeeperStatusResponse = {
   };
   proxies?: Record<string, boolean> | null;
   parsers?: Record<string, boolean> | null;
-  [key: string]: JsonValue | undefined;
+  [key: string]: unknown;
 };
 
 type BotHealthResponse = {
@@ -174,6 +234,80 @@ type BotHealthResponse = {
 type ScreenshotTarget = {
   name: string;
   url: string;
+  selector?: string;
+  fullPage?: boolean;
+  pageKey?: string;
+};
+
+type SelectorClip = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
+
+type EmbeddedFrameMeta = {
+  href: string;
+  title: string;
+  bodyPreview: string;
+  streamReady: JsonValue;
+  rendererHealth: JsonValue;
+  canvasCount: number;
+};
+
+type ScreenshotCaptureResult = {
+  target: string;
+  filePath: string;
+  meta: Record<string, JsonValue>;
+};
+
+type ScreenshotRuntimeModule = {
+  chromium: {
+    launch(options?: Record<string, unknown>): Promise<{
+      newContext(options?: Record<string, unknown>): Promise<{
+        newPage(): Promise<{
+          goto(
+            url: string,
+            options?: Record<string, unknown>,
+          ): Promise<unknown>;
+          url(): string;
+          waitForLoadState(
+            state?: string,
+            options?: Record<string, unknown>,
+          ): Promise<unknown>;
+          waitForTimeout(timeout: number): Promise<unknown>;
+          screenshot(options: Record<string, unknown>): Promise<unknown>;
+          evaluate<T>(callback: () => T): Promise<T>;
+          isClosed?(): boolean;
+          close(options?: Record<string, unknown>): Promise<unknown>;
+        }>;
+        close(options?: Record<string, unknown>): Promise<unknown>;
+      }>;
+      close(options?: Record<string, unknown>): Promise<unknown>;
+    }>;
+  };
+  devices?: Record<string, Record<string, unknown>>;
+};
+
+type ScreenshotSession = {
+  browser: Awaited<ReturnType<ScreenshotRuntimeModule["chromium"]["launch"]>>;
+  context: Awaited<
+    ReturnType<
+      Awaited<ReturnType<ScreenshotRuntimeModule["chromium"]["launch"]>>["newContext"]
+    >
+  >;
+  pages: Map<
+    string,
+    Awaited<
+      ReturnType<
+        Awaited<
+          ReturnType<
+            Awaited<ReturnType<ScreenshotRuntimeModule["chromium"]["launch"]>>["newContext"]
+          >
+        >["newPage"]
+      >
+    >
+  >;
 };
 
 type Incident = {
@@ -229,10 +363,14 @@ type ChainCycleRecord = {
 };
 
 type ChainSnapshot = {
-  chain: SupportedChain;
+  chain: SupportedChain | "local";
   buildInfo: BuildInfo | null;
   status: KeeperStatusResponse | null;
   active: PredictionMarketsResponse | null;
+  overview: PredictionMarketsOverviewResponse | null;
+  syncStatus: SyncStatusResponse | null;
+  sourceBetSyncState: BetSyncBootstrapStateResponse | null;
+  sourceRtmpStatus: SourceRtmpStatusResponse | null;
   botHealth: BotHealthResponse | null;
   streamState: StreamState | null;
   fetchedAtMs: number;
@@ -245,9 +383,15 @@ type LocalSummary = {
   durationMs: number;
   pollMs: number;
   artifactRoot: string;
+  follow: boolean;
   cyclesObserved: number;
   cycleDurationsMs: number[];
   bothUiReachable: boolean;
+  streamDuelKey: string | null;
+  activeDuelKey: string | null;
+  recentSettlementDuelKey: string | null;
+  driftPolls: number;
+  reconcileAttempts: number;
   incidents: Incident[];
   pass: boolean;
 };
@@ -284,17 +428,25 @@ type MonitorArgs = {
   durationMin: number;
   pollMs: number;
   artifactRoot: string;
+  follow: boolean;
 };
 
 type LocalContext = {
+  mode: "local";
   artifactRoot: string;
   screenshotsEnabled: boolean;
   screenshotTargets: ScreenshotTarget[];
   incidents: Incident[];
   captureIndex: number;
+  streamDuelKey: string | null;
+  activeDuelKey: string | null;
+  recentSettlementDuelKey: string | null;
+  driftPolls: number;
+  reconcileAttempts: number;
 };
 
 type StagedContext = {
+  mode: "staged";
   artifactRoot: string;
   screenshotsEnabled: boolean;
   incidents: Incident[];
@@ -310,6 +462,7 @@ function parseArgs(): MonitorArgs {
   if (mode !== "local" && mode !== "staged") {
     throw new Error(`unsupported soak mode ${mode}`);
   }
+  const follow = getBooleanArg(rawArgs, "--follow", false);
 
   const chainsArg = getArg(rawArgs, "--chains", "solana,bsc,avax");
   const chains = chainsArg
@@ -327,7 +480,11 @@ function parseArgs(): MonitorArgs {
     getArg(
       rawArgs,
       "--duration-min",
-      String(mode === "local" ? DEFAULT_LOCAL_DURATION_MIN : DEFAULT_STAGED_DURATION_MIN),
+      String(
+        mode === "local"
+          ? DEFAULT_LOCAL_DURATION_MIN
+          : DEFAULT_STAGED_DURATION_MIN,
+      ),
     ),
     10,
   );
@@ -365,12 +522,35 @@ function parseArgs(): MonitorArgs {
     durationMin,
     pollMs,
     artifactRoot,
+    follow,
   };
 }
 
 function getArg(args: string[], name: string, fallback: string): string {
   const prefix = `${name}=`;
-  return args.find((arg) => arg.startsWith(prefix))?.slice(prefix.length) ?? fallback;
+  return (
+    args.find((arg) => arg.startsWith(prefix))?.slice(prefix.length) ?? fallback
+  );
+}
+
+function getBooleanArg(
+  args: string[],
+  name: string,
+  fallback: boolean,
+): boolean {
+  const prefix = `${name}=`;
+  const match = args.find((arg) => arg === name || arg.startsWith(prefix));
+  if (!match) {
+    return fallback;
+  }
+  if (match === name) {
+    return true;
+  }
+  const raw = match.slice(prefix.length).trim().toLowerCase();
+  if (!raw) {
+    return true;
+  }
+  return raw === "1" || raw === "true" || raw === "yes" || raw === "on";
 }
 
 function resolvePath(value: string): string {
@@ -388,6 +568,21 @@ function requiredEnv(name: string): string {
 function optionalEnv(name: string): string | null {
   const value = process.env[name]?.trim() ?? "";
   return value || null;
+}
+
+function normalizeDuelKey(value: string | null | undefined): string | null {
+  const trimmed = value?.trim() ?? "";
+  if (!trimmed) {
+    return null;
+  }
+  return trimmed.toLowerCase().replace(/^0x/, "");
+}
+
+function duelKeysAligned(
+  streamDuelKey: string | null,
+  activeDuelKey: string | null,
+): boolean {
+  return normalizeDuelKey(streamDuelKey) === normalizeDuelKey(activeDuelKey);
 }
 
 function normalizeUrl(value: string): string {
@@ -413,11 +608,14 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function requestJson<T>(url: string): Promise<T> {
+async function requestJson<T>(url: string, init: RequestInit = {}): Promise<T> {
+  const headers = new Headers(init.headers);
+  if (!headers.has("accept")) {
+    headers.set("accept", "application/json");
+  }
   const response = await fetch(url, {
-    headers: {
-      accept: "application/json",
-    },
+    ...init,
+    headers,
   });
   const raw = await response.text();
   if (!response.ok) {
@@ -426,7 +624,21 @@ async function requestJson<T>(url: string): Promise<T> {
   return JSON.parse(raw) as T;
 }
 
-function currentCycleId(streamState: StreamState | null, active: PredictionMarketsResponse | null): string {
+async function requestJsonOrNull<T>(
+  url: string,
+  init: RequestInit = {},
+): Promise<T | null> {
+  try {
+    return await requestJson<T>(url, init);
+  } catch {
+    return null;
+  }
+}
+
+function currentCycleId(
+  streamState: StreamState | null,
+  active: PredictionMarketsResponse | null,
+): string {
   return (
     streamState?.cycle?.cycleId ||
     streamState?.cycle?.duelKeyHex ||
@@ -437,7 +649,10 @@ function currentCycleId(streamState: StreamState | null, active: PredictionMarke
   );
 }
 
-function currentDuelKey(streamState: StreamState | null, active: PredictionMarketsResponse | null): string {
+function currentDuelKey(
+  streamState: StreamState | null,
+  active: PredictionMarketsResponse | null,
+): string {
   return (
     streamState?.cycle?.duelKeyHex ||
     streamState?.cycle?.duelKey ||
@@ -448,7 +663,91 @@ function currentDuelKey(streamState: StreamState | null, active: PredictionMarke
   );
 }
 
-function currentPhase(streamState: StreamState | null, active: PredictionMarketsResponse | null): string {
+function currentStreamDuelKey(streamState: StreamState | null): string | null {
+  return normalizeDuelKey(
+    streamState?.cycle?.duelKeyHex ||
+      streamState?.cycle?.duelKey ||
+      streamState?.duel?.duelKey ||
+      null,
+  );
+}
+
+function currentSourceBetSyncDuelKey(
+  sourceBetSyncState: BetSyncBootstrapStateResponse | null,
+): string | null {
+  return normalizeDuelKey(
+    sourceBetSyncState?.latestEvent?.duelKey ?? sourceBetSyncState?.duelKey ?? null,
+  );
+}
+
+function currentActiveDuelKey(
+  active: PredictionMarketsResponse | null,
+): string | null {
+  return normalizeDuelKey(active?.duel?.duelKey ?? null);
+}
+
+function currentOverviewLiveDuelKey(
+  overview: PredictionMarketsOverviewResponse | null,
+): string | null {
+  return normalizeDuelKey(overview?.live?.duel?.duelKey ?? null);
+}
+
+function currentOverviewRecentSettlementDuelKey(
+  overview: PredictionMarketsOverviewResponse | null,
+): string | null {
+  return normalizeDuelKey(overview?.recentSettlement?.duel?.duelKey ?? null);
+}
+
+function currentRendererHealth(
+  snapshot: ChainSnapshot | null,
+): RendererHealth | null {
+  return (
+    snapshot?.sourceBetSyncState?.latestEvent?.rendererHealth ??
+    snapshot?.sourceBetSyncState?.rendererHealth ??
+    snapshot?.syncStatus?.rendererHealth ??
+    snapshot?.sourceRtmpStatus?.rendererHealth ??
+    null
+  );
+}
+
+function currentSourceEpoch(snapshot: ChainSnapshot | null): number | null {
+  return (
+    snapshot?.sourceBetSyncState?.latestEvent?.sourceEpoch ??
+    snapshot?.sourceBetSyncState?.sourceEpoch ??
+    snapshot?.syncStatus?.sourceEpoch ??
+    null
+  );
+}
+
+function currentSourceSeq(snapshot: ChainSnapshot | null): number | null {
+  return (
+    snapshot?.sourceBetSyncState?.latestEvent?.seq ??
+    snapshot?.sourceBetSyncState?.seq ??
+    snapshot?.sourceBetSyncState?.latestSeq ??
+    snapshot?.syncStatus?.sourceLatestSeq ??
+    null
+  );
+}
+
+function currentSourceBetSyncPhase(
+  sourceBetSyncState: BetSyncBootstrapStateResponse | null,
+): string | null {
+  const phase =
+    sourceBetSyncState?.latestEvent?.phase ?? sourceBetSyncState?.phase ?? null;
+  return typeof phase === "string" && phase.trim().length > 0 ? phase : null;
+}
+
+function buildAuthHeadersFromEnv(token: string | null): HeadersInit | undefined {
+  if (!token) return undefined;
+  return {
+    authorization: `Bearer ${token}`,
+  };
+}
+
+function currentPhase(
+  streamState: StreamState | null,
+  active: PredictionMarketsResponse | null,
+): string {
   return (
     streamState?.cycle?.phase ||
     streamState?.duel?.phase ||
@@ -462,10 +761,16 @@ function terminalLifecycle(status: string | null | undefined): boolean {
 }
 
 function proposalLifecycle(status: string | null | undefined): boolean {
-  return status === "PROPOSED" || status === "CHALLENGED" || terminalLifecycle(status);
+  return (
+    status === "PROPOSED" ||
+    status === "CHALLENGED" ||
+    terminalLifecycle(status)
+  );
 }
 
-function hasTwoSidedQuotes(health: KeeperMarketHealth | null | undefined): boolean {
+function hasTwoSidedQuotes(
+  health: KeeperMarketHealth | null | undefined,
+): boolean {
   return (
     (health?.bidPrice ?? null) != null &&
     (health?.askPrice ?? null) != null &&
@@ -483,29 +788,291 @@ function hasAnyQuote(health: KeeperMarketHealth | null | undefined): boolean {
   );
 }
 
-async function takeScreenshot(url: string, filePath: string): Promise<void> {
-  await execFileAsync(
-    "bunx",
-    [
-      "playwright",
-      "screenshot",
-      "--browser",
-      "chromium",
-      "--device",
-      "Desktop Chrome",
-      "--full-page",
-      "--timeout",
-      "30000",
-      "--wait-for-timeout",
-      "1500",
-      url,
-      filePath,
-    ],
-    {
-      cwd: rootDir,
-      env: process.env,
-    },
+let screenshotRuntimePromise: Promise<ScreenshotRuntimeModule> | null = null;
+let screenshotSessionPromise: Promise<ScreenshotSession> | null = null;
+
+function resolvePlaywrightModuleUrl(): string {
+  const bunModulesDir = path.join(rootDir, "node_modules", ".bun");
+  const playwrightEntry = readdirSync(bunModulesDir).find((entry) =>
+    entry.startsWith("playwright@"),
   );
+  if (!playwrightEntry) {
+    throw new Error(
+      `could not locate playwright runtime under ${bunModulesDir}`,
+    );
+  }
+  return pathToFileURL(
+    path.join(
+      bunModulesDir,
+      playwrightEntry,
+      "node_modules",
+      "playwright",
+      "index.mjs",
+    ),
+  ).href;
+}
+
+async function loadScreenshotRuntime(): Promise<ScreenshotRuntimeModule> {
+  screenshotRuntimePromise ??= import(
+    resolvePlaywrightModuleUrl()
+  ) as Promise<ScreenshotRuntimeModule>;
+  return screenshotRuntimePromise;
+}
+
+async function getScreenshotSession(): Promise<ScreenshotSession> {
+  screenshotSessionPromise ??= (async () => {
+    const runtime = await loadScreenshotRuntime();
+    const device = runtime.devices?.["Desktop Chrome"] ?? {};
+    const viewportWidth = Number.parseInt(
+      process.env.PM_SOAK_SCREENSHOT_WIDTH ?? "",
+      10,
+    );
+    const viewportHeight = Number.parseInt(
+      process.env.PM_SOAK_SCREENSHOT_HEIGHT ?? "",
+      10,
+    );
+    const browser = await runtime.chromium.launch({
+      headless: false,
+    });
+    const context = await browser.newContext({
+      ...device,
+      viewport:
+        Number.isFinite(viewportWidth) &&
+        viewportWidth > 0 &&
+        Number.isFinite(viewportHeight) &&
+        viewportHeight > 0
+          ? {
+              width: viewportWidth,
+              height: viewportHeight,
+            }
+          : ((device.viewport as { width: number; height: number } | undefined) ??
+            {
+              width: 1920,
+              height: 1280,
+            }),
+      ignoreHTTPSErrors: true,
+    });
+    return {
+      browser,
+      context,
+      pages: new Map(),
+    };
+  })();
+  return screenshotSessionPromise;
+}
+
+async function getScreenshotPage(
+  target: ScreenshotTarget,
+): Promise<ScreenshotSession["pages"] extends Map<string, infer T> ? T : never> {
+  const session = await getScreenshotSession();
+  const pageKey = target.pageKey ?? target.name;
+  const existing = session.pages.get(pageKey);
+  if (existing && existing.isClosed?.() !== true) {
+    if (existing.url() !== target.url) {
+      await existing.goto(target.url, {
+        waitUntil: "domcontentloaded",
+        timeout: 30_000,
+      });
+      await existing.waitForTimeout(1_500);
+    }
+    return existing;
+  }
+
+  const page = await session.context.newPage();
+  await page.goto(target.url, {
+    waitUntil: "domcontentloaded",
+    timeout: 30_000,
+  });
+  await page.waitForTimeout(1_500);
+  session.pages.set(pageKey, page);
+  return page;
+}
+
+async function takeScreenshot(
+  target: ScreenshotTarget,
+  filePath: string,
+): Promise<ScreenshotCaptureResult> {
+  const page = await getScreenshotPage(target);
+  await page.bringToFront?.().catch(() => undefined);
+  await page.waitForLoadState("domcontentloaded", { timeout: 5_000 }).catch(
+    () => undefined,
+  );
+  await page.waitForTimeout(1_000);
+
+  let selectorClip: SelectorClip | null = null;
+  let embeddedFrameMeta: EmbeddedFrameMeta | null = null;
+
+  if (target.selector) {
+    const selectorState = (await page.evaluate((selector) => {
+      const element = document.querySelector(selector);
+      if (!element) {
+        return null;
+      }
+      const rect = element.getBoundingClientRect();
+      const clip =
+        rect.width > 0 && rect.height > 0
+          ? {
+              x: Math.max(0, Math.floor(rect.left)),
+              y: Math.max(0, Math.floor(rect.top)),
+              width: Math.max(1, Math.ceil(rect.width)),
+              height: Math.max(1, Math.ceil(rect.height)),
+            }
+          : null;
+      if (!(element instanceof HTMLIFrameElement)) {
+        return {
+          clip,
+          iframe: null,
+        };
+      }
+      return {
+        clip,
+        iframe: {
+          src: element.getAttribute("src") ?? "",
+          title: element.getAttribute("title") ?? "",
+        },
+      };
+    }, target.selector)) as
+      | {
+          clip: SelectorClip | null;
+          iframe: { src: string; title: string } | null;
+        }
+      | null;
+
+    selectorClip = selectorState?.clip ?? null;
+    if (selectorClip) {
+      await page.screenshot({
+        path: filePath,
+        clip: selectorClip,
+      });
+    } else {
+      await page.screenshot({
+        path: filePath,
+        fullPage: target.fullPage ?? true,
+      });
+    }
+
+    if (selectorState?.iframe?.src) {
+      const embeddedFrame = page
+        .frames()
+        .find((frame) => frame.url() === selectorState.iframe?.src);
+      if (embeddedFrame) {
+        embeddedFrameMeta = (await embeddedFrame.evaluate(() => ({
+          href: location.href,
+          title: document.title,
+          bodyPreview: (document.body?.innerText ?? "").slice(0, 2_000),
+          streamReady:
+            (window as typeof window & { __HYPERSCAPE_STREAM_READY__?: unknown })
+              .__HYPERSCAPE_STREAM_READY__ ?? null,
+          rendererHealth:
+            (
+              window as typeof window & {
+                __HYPERSCAPE_STREAM_RENDERER_HEALTH__?: unknown;
+              }
+            ).__HYPERSCAPE_STREAM_RENDERER_HEALTH__ ?? null,
+          canvasCount: document.querySelectorAll("canvas").length,
+        }))) as EmbeddedFrameMeta;
+      }
+    }
+  } else {
+    await page.screenshot({
+      path: filePath,
+      fullPage: target.fullPage ?? true,
+    });
+  }
+
+  const meta = (await page.evaluate(() => {
+    const bodyPreview = (document.body?.innerText ?? "").slice(0, 2_000);
+    const iframeSrcs = Array.from(document.querySelectorAll("iframe"))
+      .map((frame) => frame.getAttribute("src") ?? "")
+      .slice(0, 8);
+    const streamReady =
+      (window as typeof window & { __HYPERSCAPE_STREAM_READY__?: unknown })
+        .__HYPERSCAPE_STREAM_READY__ ?? null;
+    const rendererHealth = (
+      window as typeof window & {
+        __HYPERSCAPE_STREAM_RENDERER_HEALTH__?: unknown;
+      }
+    ).__HYPERSCAPE_STREAM_RENDERER_HEALTH__ ?? null;
+    return {
+      href: location.href,
+      title: document.title,
+      bodyPreview,
+      iframeSrcs,
+      streamReady,
+      rendererHealth,
+    };
+  })) as Record<string, JsonValue>;
+
+  meta.selectorClip = selectorClip;
+  meta.embeddedFrame = embeddedFrameMeta;
+
+  return {
+    target: target.name,
+    filePath,
+    meta,
+  };
+}
+
+async function closeScreenshotSession(): Promise<void> {
+  if (!screenshotSessionPromise) {
+    return;
+  }
+  const session = await screenshotSessionPromise.catch(() => null);
+  screenshotSessionPromise = null;
+  screenshotRuntimePromise = null;
+  if (!session) {
+    return;
+  }
+  for (const page of session.pages.values()) {
+    if (page.isClosed?.() === true) {
+      continue;
+    }
+    await page.close({ runBeforeUnload: true }).catch(() => undefined);
+  }
+  await session.context.close().catch(() => undefined);
+  await session.browser.close().catch(() => undefined);
+}
+
+type LocalCapturePayload = {
+  capturedAt: string;
+  sourceDuelKey: string | null;
+  liveDuelKey: string | null;
+  recentSettlementDuelKey: string | null;
+  sourceEpoch: number | null;
+  sourceSeq: number | null;
+  rendererHealth: RendererHealth | null;
+  aligned: boolean;
+  snapshot: ChainSnapshot | null;
+  meta?: Record<string, JsonValue>;
+};
+
+function buildLocalCapturePayload(
+  snapshot: ChainSnapshot | null,
+  meta: Record<string, JsonValue> = {},
+): LocalCapturePayload {
+  const sourceDuelKey = snapshot
+    ? currentSourceBetSyncDuelKey(snapshot.sourceBetSyncState) ??
+      currentStreamDuelKey(snapshot.streamState)
+    : null;
+  const liveDuelKey = snapshot
+    ? currentOverviewLiveDuelKey(snapshot.overview) ??
+      currentActiveDuelKey(snapshot.active)
+    : null;
+  const recentSettlementDuelKey = snapshot
+    ? currentOverviewRecentSettlementDuelKey(snapshot.overview)
+    : null;
+  return {
+    capturedAt: nowIso(),
+    sourceDuelKey,
+    liveDuelKey,
+    recentSettlementDuelKey,
+    sourceEpoch: currentSourceEpoch(snapshot),
+    sourceSeq: currentSourceSeq(snapshot),
+    rendererHealth: currentRendererHealth(snapshot),
+    aligned: duelKeysAligned(sourceDuelKey, liveDuelKey),
+    snapshot,
+    meta,
+  };
 }
 
 async function captureScreenshots(
@@ -513,18 +1080,17 @@ async function captureScreenshots(
   label: string,
   targets: ScreenshotTarget[],
   screenshotsEnabled: boolean,
-): Promise<string[]> {
+): Promise<ScreenshotCaptureResult[]> {
   if (!screenshotsEnabled || targets.length === 0) {
     return [];
   }
 
-  const written: string[] = [];
+  const written: ScreenshotCaptureResult[] = [];
   const screenshotDir = path.join(artifactRoot, "screenshots");
   mkdirSync(screenshotDir, { recursive: true });
   for (const target of targets) {
     const filePath = path.join(screenshotDir, `${label}.${target.name}.png`);
-    await takeScreenshot(target.url, filePath);
-    written.push(filePath);
+    written.push(await takeScreenshot(target, filePath));
   }
   return written;
 }
@@ -543,17 +1109,22 @@ async function recordContextEvent(
     payload,
   );
   try {
-    const files = await captureScreenshots(
+    const captures = await captureScreenshots(
       context.artifactRoot,
       baseName,
       targets,
       context.screenshotsEnabled,
     );
-    if (files.length > 0) {
+    if (captures.length > 0) {
       writeJsonArtifact(
         context.artifactRoot,
         path.join("events", `${baseName}.screenshots.json`),
-        files,
+        captures.map((capture) => capture.filePath),
+      );
+      writeJsonArtifact(
+        context.artifactRoot,
+        path.join("events", `${baseName}.screenshots.meta.json`),
+        captures,
       );
     }
   } catch (error) {
@@ -562,6 +1133,7 @@ async function recordContextEvent(
       path.join("events", `${baseName}.screenshot-error.json`),
       { error: String(error) },
     );
+    throw error;
   }
   return detailPath;
 }
@@ -607,15 +1179,107 @@ function safeSlug(value: string): string {
 
 function localScreenshotTargets(): ScreenshotTarget[] {
   const targets: ScreenshotTarget[] = [];
-  const hyperscapes = optionalEnv("HYPERSCAPES_UI_URL");
-  const hyperbet = optionalEnv("HYPERBET_UI_URL");
-  if (hyperscapes) {
-    targets.push({ name: "hyperscapes", url: hyperscapes });
-  }
-  if (hyperbet) {
-    targets.push({ name: "hyperbet", url: hyperbet });
-  }
+  const hyperscapes =
+    optionalEnv("HYPERSCAPES_UI_URL") ??
+    "http://127.0.0.1:3333/stream.html?disableBridgeCapture=1";
+  const hyperbet =
+    optionalEnv("HYPERBET_UI_URL") ?? "http://127.0.0.1:4179/?debug";
+  targets.push({ name: "hyperscapes", url: hyperscapes });
+  targets.push({ name: "hyperbet", url: hyperbet });
+  targets.push({
+    name: "hyperbet-stream",
+    url: hyperbet,
+    selector: 'iframe[title="Live Stream"]',
+    fullPage: false,
+    pageKey: "hyperbet",
+  });
   return targets;
+}
+
+function localReconcileTarget(): { url: string; key: string | null } {
+  const url =
+    optionalEnv("PM_SOAK_RECONCILE_PUBLISH_URL") ??
+    optionalEnv("STREAM_PUBLISH_URL") ??
+    "http://127.0.0.1:8080/api/streaming/state/publish";
+  const key =
+    optionalEnv("PM_SOAK_RECONCILE_PUBLISH_KEY") ??
+    optionalEnv("STREAM_PUBLISH_KEY") ??
+    optionalEnv("ARENA_EXTERNAL_BET_WRITE_KEY") ??
+    optionalEnv("E2E_ARENA_WRITE_KEY");
+  return { url, key };
+}
+
+async function reconcileLocalStreamState(
+  snapshot: ChainSnapshot,
+  context: LocalContext,
+): Promise<boolean> {
+  const { url, key } = localReconcileTarget();
+  if (!key) {
+    await recordIncident(
+      context,
+      "local",
+      "duel_key_drift_no_publish_key",
+      "stream and active market duel keys diverged, but no publish key is configured for reconciliation",
+      {
+        sourceDuelKey: currentStreamDuelKey(snapshot.streamState),
+        liveDuelKey:
+          currentOverviewLiveDuelKey(snapshot.overview) ??
+          currentActiveDuelKey(snapshot.active),
+        targetUrl: url,
+      },
+      context.screenshotTargets,
+    );
+    return false;
+  }
+
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-arena-write-key": key,
+    },
+    body: JSON.stringify(snapshot.streamState ?? {}),
+  });
+
+  const bodyText = await response.text();
+  if (!response.ok) {
+    throw new Error(
+      `local stream reconciliation failed: ${response.status} ${response.statusText}: ${bodyText}`,
+    );
+  }
+
+  await recordContextEvent(
+    context,
+    "local-reconcile",
+    {
+      reconciledAt: nowIso(),
+      targetUrl: url,
+      sourceDuelKey: currentStreamDuelKey(snapshot.streamState),
+      liveDuelKey:
+        currentOverviewLiveDuelKey(snapshot.overview) ??
+        currentActiveDuelKey(snapshot.active),
+      body: bodyText,
+    },
+    context.screenshotTargets,
+  );
+
+  return true;
+}
+
+async function recordLocalContextEvent(
+  context: LocalContext,
+  label: string,
+  snapshot: ChainSnapshot,
+  extra: Record<string, JsonValue> = {},
+): Promise<string> {
+  return recordContextEvent(
+    context,
+    label,
+    {
+      ...buildLocalCapturePayload(snapshot, extra),
+    },
+    context.screenshotTargets,
+  );
 }
 
 function stagedPagesTarget(chain: SupportedChain): ScreenshotTarget | null {
@@ -628,32 +1292,90 @@ function stagedPagesTarget(chain: SupportedChain): ScreenshotTarget | null {
 }
 
 async function fetchLocalSnapshot(): Promise<{
+  chain: "local";
   streamState: StreamState | null;
   active: PredictionMarketsResponse | null;
+  overview: PredictionMarketsOverviewResponse | null;
+  syncStatus: SyncStatusResponse | null;
+  sourceBetSyncState: BetSyncBootstrapStateResponse | null;
+  sourceRtmpStatus: SourceRtmpStatusResponse | null;
   status: KeeperStatusResponse | null;
   botHealth: BotHealthResponse | null;
   buildInfo: BuildInfo | null;
   fetchedAtMs: number;
 }> {
   const fetchedAtMs = Date.now();
-  const streamStateUrl = optionalEnv("STREAM_STATE_URL") ?? "http://127.0.0.1:8080/api/streaming/state";
+  const sourceBetSyncToken =
+    optionalEnv("SOURCE_BET_SYNC_BEARER_TOKEN") ??
+    optionalEnv("STREAMING_VIEWER_ACCESS_TOKEN");
+  const sourceStreamStateUrl =
+    optionalEnv("SOURCE_STREAM_STATE_URL") ??
+    optionalEnv("STREAM_STATE_URL") ??
+    "http://127.0.0.1:5555/api/streaming/state";
+  const sourceBetSyncStateUrl =
+    optionalEnv("SOURCE_BET_SYNC_STATE_URL") ??
+    "http://127.0.0.1:5555/api/internal/bet-sync/state";
+  const sourceRtmpStatusUrl =
+    optionalEnv("SOURCE_RTMP_STATUS_URL") ??
+    "http://127.0.0.1:5555/api/streaming/rtmp/status";
   const activeMarketsUrl =
     optionalEnv("ACTIVE_MARKETS_URL") ??
     "http://127.0.0.1:8080/api/arena/prediction-markets/active";
-  const statusUrl = optionalEnv("KEEPER_STATUS_URL") ?? "http://127.0.0.1:8080/status";
+  const overviewMarketsUrl =
+    optionalEnv("OVERVIEW_MARKETS_URL") ??
+    "http://127.0.0.1:8080/api/arena/prediction-markets/overview";
+  const statusUrl =
+    optionalEnv("KEEPER_STATUS_URL") ?? "http://127.0.0.1:8080/status";
   const botHealthUrl =
-    optionalEnv("KEEPER_BOT_HEALTH_URL") ?? "http://127.0.0.1:8080/api/keeper/bot-health";
+    optionalEnv("KEEPER_BOT_HEALTH_URL") ??
+    "http://127.0.0.1:8080/api/keeper/bot-health";
+  const syncStatusUrl =
+    optionalEnv("SYNC_STATUS_URL") ?? "http://127.0.0.1:8080/api/sync/status";
   const buildInfoUrl = optionalEnv("HYPERBET_BUILD_INFO_URL");
 
-  const [streamState, active, status, botHealth, buildInfo] = await Promise.all([
-    requestJson<StreamState>(streamStateUrl),
-    requestJson<PredictionMarketsResponse>(activeMarketsUrl),
-    requestJson<KeeperStatusResponse>(statusUrl),
-    requestJson<BotHealthResponse>(botHealthUrl),
-    buildInfoUrl ? requestJson<BuildInfo>(buildInfoUrl) : Promise.resolve(null),
-  ]);
+  const [
+    streamState,
+    sourceBetSyncState,
+    sourceRtmpStatus,
+    active,
+    overview,
+    syncStatus,
+    status,
+    botHealth,
+    buildInfo,
+  ] =
+    await Promise.all([
+      requestJson<StreamState>(sourceStreamStateUrl),
+      requestJsonOrNull<BetSyncBootstrapStateResponse>(
+        sourceBetSyncStateUrl,
+        {
+          headers: buildAuthHeadersFromEnv(sourceBetSyncToken),
+        },
+      ),
+      requestJsonOrNull<SourceRtmpStatusResponse>(sourceRtmpStatusUrl),
+      requestJson<PredictionMarketsResponse>(activeMarketsUrl),
+      requestJsonOrNull<PredictionMarketsOverviewResponse>(overviewMarketsUrl),
+      requestJsonOrNull<SyncStatusResponse>(syncStatusUrl),
+      requestJson<KeeperStatusResponse>(statusUrl),
+      requestJson<BotHealthResponse>(botHealthUrl),
+      buildInfoUrl
+        ? requestJson<BuildInfo>(buildInfoUrl)
+        : Promise.resolve(null),
+    ]);
 
-  return { streamState, active, status, botHealth, buildInfo, fetchedAtMs };
+  return {
+    chain: "local",
+    streamState,
+    sourceBetSyncState,
+    sourceRtmpStatus,
+    active,
+    overview,
+    syncStatus,
+    status,
+    botHealth,
+    buildInfo,
+    fetchedAtMs,
+  };
 }
 
 function stagedKeeperUrls(chain: SupportedChain): {
@@ -663,27 +1385,40 @@ function stagedKeeperUrls(chain: SupportedChain): {
   const upper = chain.toUpperCase();
   return {
     pagesUrl: normalizeUrl(requiredEnv(`HYPERBET_${upper}_PAGES_STAGING_URL`)),
-    keeperUrl: normalizeUrl(requiredEnv(`HYPERBET_${upper}_KEEPER_STAGING_URL`)),
+    keeperUrl: normalizeUrl(
+      requiredEnv(`HYPERBET_${upper}_KEEPER_STAGING_URL`),
+    ),
   };
 }
 
-async function fetchStagedChainSnapshot(chain: SupportedChain): Promise<ChainSnapshot> {
+async function fetchStagedChainSnapshot(
+  chain: SupportedChain,
+): Promise<ChainSnapshot> {
   const urls = stagedKeeperUrls(chain);
   const fetchedAtMs = Date.now();
-  const [buildInfo, status, active, botHealth, streamState] = await Promise.all([
-    requestJson<BuildInfo>(`${urls.pagesUrl}/build-info.json`),
-    requestJson<KeeperStatusResponse>(`${urls.keeperUrl}/status`),
-    requestJson<PredictionMarketsResponse>(
-      `${urls.keeperUrl}/api/arena/prediction-markets/active`,
-    ),
-    requestJson<BotHealthResponse>(`${urls.keeperUrl}/api/keeper/bot-health`),
-    requestJson<StreamState>(`${urls.keeperUrl}/api/streaming/state`),
-  ]);
+  const [buildInfo, status, active, overview, syncStatus, botHealth, streamState] =
+    await Promise.all([
+      requestJson<BuildInfo>(`${urls.pagesUrl}/build-info.json`),
+      requestJson<KeeperStatusResponse>(`${urls.keeperUrl}/status`),
+      requestJson<PredictionMarketsResponse>(
+        `${urls.keeperUrl}/api/arena/prediction-markets/active`,
+      ),
+      requestJsonOrNull<PredictionMarketsOverviewResponse>(
+        `${urls.keeperUrl}/api/arena/prediction-markets/overview`,
+      ),
+      requestJsonOrNull<SyncStatusResponse>(`${urls.keeperUrl}/api/sync/status`),
+      requestJson<BotHealthResponse>(`${urls.keeperUrl}/api/keeper/bot-health`),
+      requestJson<StreamState>(`${urls.keeperUrl}/api/streaming/state`),
+    ]);
   return {
     chain,
     buildInfo,
     status,
     active,
+    overview,
+    syncStatus,
+    sourceBetSyncState: null,
+    sourceRtmpStatus: null,
     botHealth,
     streamState,
     fetchedAtMs,
@@ -692,14 +1427,22 @@ async function fetchStagedChainSnapshot(chain: SupportedChain): Promise<ChainSna
 
 async function runLocalSoak(args: MonitorArgs): Promise<void> {
   const context: LocalContext = {
+    mode: "local",
     artifactRoot: args.artifactRoot,
     screenshotsEnabled: (process.env.PM_SOAK_SCREENSHOTS ?? "true") !== "false",
     screenshotTargets: localScreenshotTargets(),
     incidents: [],
     captureIndex: 0,
+    streamDuelKey: null,
+    activeDuelKey: null,
+    recentSettlementDuelKey: null,
+    driftPolls: 0,
+    reconcileAttempts: 0,
   };
   const startedAtMs = Date.now();
-  const deadline = startedAtMs + args.durationMin * 60_000;
+  const deadline = args.follow
+    ? Number.POSITIVE_INFINITY
+    : startedAtMs + args.durationMin * 60_000;
 
   const cycles: LocalCycleRecord[] = [];
   let currentCycle: LocalCycleRecord | null = null;
@@ -707,6 +1450,11 @@ async function runLocalSoak(args: MonitorArgs): Promise<void> {
   let idlePolls = 0;
   let pollIndex = 0;
   let bothUiReachable = true;
+  let lastSnapshot: ChainSnapshot | null = null;
+  let driftConsecutivePolls = 0;
+  let driftHandled = false;
+  let rendererDegradedPolls = 0;
+  let syncDegradedPolls = 0;
 
   await recordContextEvent(
     context,
@@ -716,24 +1464,116 @@ async function runLocalSoak(args: MonitorArgs): Promise<void> {
       durationMin: args.durationMin,
       pollMs: args.pollMs,
       baselineCycleMs: BASELINE_DUEL_CYCLE_MS,
+      follow: args.follow,
     },
     context.screenshotTargets,
   );
 
-  while (Date.now() < deadline) {
+  while (Date.now() < deadline && !stopping) {
     pollIndex += 1;
     try {
       const snapshot = await fetchLocalSnapshot();
+      lastSnapshot = snapshot;
+      const sourceDuelKey =
+        currentSourceBetSyncDuelKey(snapshot.sourceBetSyncState) ??
+        currentStreamDuelKey(snapshot.streamState);
+      const liveDuelKey =
+        currentOverviewLiveDuelKey(snapshot.overview) ??
+        currentActiveDuelKey(snapshot.active);
+      const recentSettlementDuelKey = currentOverviewRecentSettlementDuelKey(
+        snapshot.overview,
+      );
+      const rendererHealth = currentRendererHealth(snapshot);
+      const aligned = duelKeysAligned(sourceDuelKey, liveDuelKey);
+      context.streamDuelKey = sourceDuelKey;
+      context.activeDuelKey = liveDuelKey;
+      context.recentSettlementDuelKey = recentSettlementDuelKey;
+
       writeJsonArtifact(
         context.artifactRoot,
         path.join("polls", `${String(pollIndex).padStart(5, "0")}.json`),
-        snapshot,
+        {
+          ...snapshot,
+          sourceDuelKey,
+          liveDuelKey,
+          recentSettlementDuelKey,
+          sourceEpoch: currentSourceEpoch(snapshot),
+          sourceSeq: currentSourceSeq(snapshot),
+          rendererHealth,
+          aligned,
+        },
       );
 
       const cycleId = currentCycleId(snapshot.streamState, snapshot.active);
-      const duelKey = currentDuelKey(snapshot.streamState, snapshot.active);
-      const phase = currentPhase(snapshot.streamState, snapshot.active);
+      const duelKey =
+        liveDuelKey ??
+        sourceDuelKey ??
+        currentDuelKey(snapshot.streamState, snapshot.active);
+      const phase =
+        currentSourceBetSyncPhase(snapshot.sourceBetSyncState) ??
+        currentPhase(snapshot.streamState, snapshot.active);
       const marketCount = snapshot.active?.markets?.length ?? 0;
+      const driftRelevant = marketCount > 0 || phase !== "IDLE";
+      const rendererSignoffRelevant = phase !== "IDLE" || marketCount > 0;
+      const syncDegradedReason =
+        snapshot.syncStatus?.degradedReason &&
+        snapshot.syncStatus.degradedReason !== rendererHealth?.degradedReason
+          ? snapshot.syncStatus.degradedReason
+          : null;
+
+      if (rendererSignoffRelevant && rendererHealth?.ready === false) {
+        rendererDegradedPolls += 1;
+        if (rendererDegradedPolls >= 2) {
+          currentCycle?.incidents.push("renderer_unhealthy");
+          await recordIncident(
+            context,
+            "local",
+            "renderer_unhealthy",
+            `standalone source renderer is degraded: ${rendererHealth.degradedReason || "unknown"}`,
+            {
+              sourceDuelKey,
+              liveDuelKey,
+              recentSettlementDuelKey,
+              sourceEpoch: currentSourceEpoch(snapshot),
+              sourceSeq: currentSourceSeq(snapshot),
+              rendererHealth,
+              syncStatus: snapshot.syncStatus,
+            },
+            context.screenshotTargets,
+          );
+          throw new Error(
+            `local renderer unhealthy during active duel: ${rendererHealth.degradedReason || "unknown"}`,
+          );
+        }
+      } else {
+        rendererDegradedPolls = 0;
+      }
+
+      if (rendererSignoffRelevant && syncDegradedReason) {
+        syncDegradedPolls += 1;
+        if (syncDegradedPolls >= 2) {
+          currentCycle?.incidents.push("sync_status_degraded");
+          await recordIncident(
+            context,
+            "local",
+            "sync_status_degraded",
+            `keeper sync status is degraded: ${syncDegradedReason}`,
+            {
+              sourceDuelKey,
+              liveDuelKey,
+              recentSettlementDuelKey,
+              sourceEpoch: currentSourceEpoch(snapshot),
+              sourceSeq: currentSourceSeq(snapshot),
+              rendererHealth,
+              syncStatus: snapshot.syncStatus,
+            },
+            context.screenshotTargets,
+          );
+          throw new Error(`local sync status degraded: ${syncDegradedReason}`);
+        }
+      } else {
+        syncDegradedPolls = 0;
+      }
 
       if (phase === "IDLE") {
         idlePolls += 1;
@@ -747,16 +1587,125 @@ async function runLocalSoak(args: MonitorArgs): Promise<void> {
           "local",
           "idle_seed_required",
           "local Hyperscapes duel stream is still IDLE; create and start two local agents before the soak clock starts",
-          snapshot,
+          {
+            ...snapshot,
+            sourceDuelKey,
+            liveDuelKey,
+            recentSettlementDuelKey,
+            aligned,
+          },
           context.screenshotTargets,
         );
-        throw new Error("local duel stream remained IDLE; seed local agents before running the soak");
+        throw new Error(
+          "local duel stream remained IDLE; seed local agents before running the soak",
+        );
+      }
+
+      if (driftRelevant && !aligned) {
+        driftConsecutivePolls += 1;
+        context.driftPolls = driftConsecutivePolls;
+        const driftCode =
+          snapshot.syncStatus?.applyLagMs != null &&
+          snapshot.syncStatus.applyLagMs > 0
+            ? "consumer_lag"
+            : "source_feed_lag";
+        currentCycle?.incidents.push(driftCode);
+
+        if (!driftHandled) {
+          await recordLocalContextEvent(
+            context,
+            `local-${driftCode}-${driftConsecutivePolls}`,
+            snapshot,
+            {
+              pollIndex,
+              driftConsecutivePolls,
+              driftCode,
+            },
+          );
+        }
+
+        if (driftConsecutivePolls >= 2) {
+          if (!driftHandled) {
+            driftHandled = true;
+            context.driftPolls = driftConsecutivePolls;
+            const reconciled = await reconcileLocalStreamState(
+              snapshot,
+              context,
+            );
+            context.reconcileAttempts += reconciled ? 1 : 0;
+            if (reconciled) {
+              const refreshed = await fetchLocalSnapshot();
+              const refreshedStreamDuelKey = currentStreamDuelKey(
+                refreshed.streamState,
+              );
+              const refreshedLiveDuelKey = currentOverviewLiveDuelKey(
+                refreshed.overview,
+              ) ?? currentActiveDuelKey(refreshed.active);
+              const refreshedAligned = duelKeysAligned(
+                refreshedStreamDuelKey,
+                refreshedLiveDuelKey,
+              );
+              if (!refreshedAligned) {
+                await recordIncident(
+                  context,
+                  "local",
+                  "source_feed_lag_persisted",
+                  "source and live market duel keys still diverged after local-only repair",
+                  {
+                    before: {
+                      sourceDuelKey,
+                      liveDuelKey,
+                    },
+                    after: {
+                      sourceDuelKey: refreshedStreamDuelKey,
+                      liveDuelKey: refreshedLiveDuelKey,
+                    },
+                  },
+                  context.screenshotTargets,
+                );
+                throw new Error(
+                  "local duel key drift persisted after local-only repair",
+                );
+              }
+
+              context.streamDuelKey = refreshedStreamDuelKey;
+              context.activeDuelKey = refreshedLiveDuelKey;
+              context.recentSettlementDuelKey =
+                currentOverviewRecentSettlementDuelKey(refreshed.overview);
+              driftConsecutivePolls = 0;
+              context.driftPolls = 0;
+              driftHandled = false;
+              await recordLocalContextEvent(
+                context,
+                "local-duel-repaired",
+                refreshed,
+                {
+                  reconciled: true,
+                  sourceDuelKey: refreshedStreamDuelKey,
+                  liveDuelKey: refreshedLiveDuelKey,
+                },
+              );
+              continue;
+            }
+
+            throw new Error("local duel key drift could not be repaired");
+          }
+
+          throw new Error(
+            "local duel key drift persisted beyond the allowed poll window",
+          );
+        }
+      } else {
+        driftConsecutivePolls = 0;
+        context.driftPolls = 0;
+        driftHandled = false;
       }
 
       if (!currentCycle || currentCycle.cycleId !== cycleId) {
         if (currentCycle) {
           currentCycle.endedAtMs = snapshot.fetchedAtMs;
-          currentCycle.durationMs = currentCycle.endedAtMs - currentCycle.startedAtMs;
+          currentCycle.durationMs =
+            currentCycle.endedAtMs - currentCycle.startedAtMs;
           cycles.push(currentCycle);
         }
         currentCycle = {
@@ -770,24 +1719,42 @@ async function runLocalSoak(args: MonitorArgs): Promise<void> {
           marketCountMax: marketCount,
           incidents: [],
         };
-        await recordContextEvent(
+        await recordLocalContextEvent(
           context,
           `local-cycle-${cycleId}`,
           snapshot,
-          context.screenshotTargets,
+          {
+            cycleId,
+            sourceDuelKey,
+            liveDuelKey,
+            recentSettlementDuelKey,
+            aligned,
+            phase,
+            marketCount,
+          },
         );
       }
 
-      currentCycle.marketCountMax = Math.max(currentCycle.marketCountMax, marketCount);
+      currentCycle.marketCountMax = Math.max(
+        currentCycle.marketCountMax,
+        marketCount,
+      );
       if (phase && phase !== previousPhase) {
         if (currentCycle.phases[currentCycle.phases.length - 1] !== phase) {
           currentCycle.phases.push(phase);
         }
-        await recordContextEvent(
+        await recordLocalContextEvent(
           context,
           `local-phase-${phase}`,
           snapshot,
-          context.screenshotTargets,
+          {
+            cycleId,
+            sourceDuelKey,
+            liveDuelKey,
+            recentSettlementDuelKey,
+            aligned,
+            marketCount,
+          },
         );
       }
 
@@ -799,7 +1766,13 @@ async function runLocalSoak(args: MonitorArgs): Promise<void> {
           "local",
           "keeper_unhealthy",
           "local keeper status or bot-health endpoint reported not-ok",
-          snapshot,
+          {
+            ...snapshot,
+            sourceDuelKey,
+            liveDuelKey,
+            recentSettlementDuelKey,
+            aligned,
+          },
           context.screenshotTargets,
         );
       }
@@ -810,9 +1783,18 @@ async function runLocalSoak(args: MonitorArgs): Promise<void> {
         "local",
         "poll_failed",
         String(error),
-        { poll: pollIndex },
+        {
+          poll: pollIndex,
+          sourceDuelKey: context.streamDuelKey,
+          liveDuelKey: context.activeDuelKey,
+          recentSettlementDuelKey: context.recentSettlementDuelKey,
+          aligned: duelKeysAligned(context.streamDuelKey, context.activeDuelKey),
+        },
         context.screenshotTargets,
       );
+      if (args.follow && lastSnapshot) {
+        driftConsecutivePolls = 0;
+      }
     }
 
     await sleep(args.pollMs);
@@ -837,11 +1819,17 @@ async function runLocalSoak(args: MonitorArgs): Promise<void> {
     }
   }
 
+  const requiredCycles = args.follow
+    ? 1
+    : args.durationMin >= DEFAULT_LOCAL_DURATION_MIN
+      ? 8
+      : 1;
   const pass =
     context.incidents.length === 0 &&
-    cycles.length >= (args.durationMin >= DEFAULT_LOCAL_DURATION_MIN ? 8 : 1) &&
+    cycles.length >= requiredCycles &&
     cycleDurationsMs.every(
-      (value) => Math.abs(value - BASELINE_DUEL_CYCLE_MS) <= LOCAL_CYCLE_DRIFT_MS,
+      (value) =>
+        Math.abs(value - BASELINE_DUEL_CYCLE_MS) <= LOCAL_CYCLE_DRIFT_MS,
     ) &&
     bothUiReachable;
 
@@ -852,9 +1840,15 @@ async function runLocalSoak(args: MonitorArgs): Promise<void> {
     durationMs: Date.now() - startedAtMs,
     pollMs: args.pollMs,
     artifactRoot: context.artifactRoot,
+    follow: args.follow,
     cyclesObserved: cycles.length,
     cycleDurationsMs,
     bothUiReachable,
+    streamDuelKey: context.streamDuelKey,
+    activeDuelKey: context.activeDuelKey,
+    recentSettlementDuelKey: context.recentSettlementDuelKey,
+    driftPolls: context.driftPolls,
+    reconcileAttempts: context.reconcileAttempts,
     incidents: context.incidents,
     pass,
   };
@@ -888,7 +1882,9 @@ async function runLocalSoak(args: MonitorArgs): Promise<void> {
   );
 
   if (!pass) {
-    throw new Error("local PM soak failed; inspect output/playwright/pm-soak summary and incident artifacts");
+    throw new Error(
+      "local PM soak failed; inspect output/playwright/pm-soak summary and incident artifacts",
+    );
   }
 }
 
@@ -906,14 +1902,18 @@ type StagedRuntimeState = {
 
 async function runStagedSoak(args: MonitorArgs): Promise<void> {
   const context: StagedContext = {
+    mode: "staged",
     artifactRoot: args.artifactRoot,
     screenshotsEnabled: (process.env.PM_SOAK_SCREENSHOTS ?? "true") !== "false",
     incidents: [],
     captureIndex: 0,
     milestoneScreenshots: new Set<string>(),
-    canaryTradesEnabled: (process.env.PM_SOAK_ENABLE_CANARY_TRADES ?? "true") !== "false",
+    canaryTradesEnabled:
+      (process.env.PM_SOAK_ENABLE_CANARY_TRADES ?? "true") !== "false",
     chainScreenshots: {
-      solana: args.chains.includes("solana") ? stagedPagesTarget("solana") : null,
+      solana: args.chains.includes("solana")
+        ? stagedPagesTarget("solana")
+        : null,
       bsc: args.chains.includes("bsc") ? stagedPagesTarget("bsc") : null,
       avax: args.chains.includes("avax") ? stagedPagesTarget("avax") : null,
     },
@@ -957,8 +1957,13 @@ async function runStagedSoak(args: MonitorArgs): Promise<void> {
   let pollIndex = 0;
   while (Date.now() < deadline) {
     pollIndex += 1;
-    const snapshots = await Promise.allSettled(args.chains.map((chain) => fetchStagedChainSnapshot(chain)));
-    const pollPayload: Record<string, unknown> = { fetchedAt: nowIso(), pollIndex };
+    const snapshots = await Promise.allSettled(
+      args.chains.map((chain) => fetchStagedChainSnapshot(chain)),
+    );
+    const pollPayload: Record<string, unknown> = {
+      fetchedAt: nowIso(),
+      pollIndex,
+    };
     for (let index = 0; index < snapshots.length; index += 1) {
       const chain = args.chains[index];
       const result = snapshots[index];
@@ -976,7 +1981,13 @@ async function runStagedSoak(args: MonitorArgs): Promise<void> {
 
       const snapshot = result.value;
       pollPayload[chain] = snapshot;
-      await processStagedSnapshot(args, context, stateByChain.get(chain)!, snapshot, screenshotsFor(chain));
+      await processStagedSnapshot(
+        args,
+        context,
+        stateByChain.get(chain)!,
+        snapshot,
+        screenshotsFor(chain),
+      );
     }
     writeJsonArtifact(
       context.artifactRoot,
@@ -1005,10 +2016,14 @@ async function runStagedSoak(args: MonitorArgs): Promise<void> {
     const summary = chainSummary[chain];
     summary.cyclesObserved = state.cycles.length;
     for (const cycle of state.cycles) {
-      if (cycle.openAtMs != null) summary.openLagMs.push(cycle.openAtMs - cycle.startedAtMs);
-      if (cycle.quotesAtMs != null && cycle.openAtMs != null) summary.quoteLagMs.push(cycle.quotesAtMs - cycle.openAtMs);
-      if (cycle.lockAtMs != null && cycle.betCloseTimeMs != null) summary.lockLagMs.push(cycle.lockAtMs - cycle.betCloseTimeMs);
-      if (cycle.proposalAtMs != null && cycle.resolutionAtMs != null) summary.proposalLagMs.push(cycle.proposalAtMs - cycle.resolutionAtMs);
+      if (cycle.openAtMs != null)
+        summary.openLagMs.push(cycle.openAtMs - cycle.startedAtMs);
+      if (cycle.quotesAtMs != null && cycle.openAtMs != null)
+        summary.quoteLagMs.push(cycle.quotesAtMs - cycle.openAtMs);
+      if (cycle.lockAtMs != null && cycle.betCloseTimeMs != null)
+        summary.lockLagMs.push(cycle.lockAtMs - cycle.betCloseTimeMs);
+      if (cycle.proposalAtMs != null && cycle.resolutionAtMs != null)
+        summary.proposalLagMs.push(cycle.proposalAtMs - cycle.resolutionAtMs);
       if (cycle.terminalAtMs != null) summary.finalizedCycles += 1;
       if (cycle.trade) {
         summary.tradeAttempts += 1;
@@ -1023,9 +2038,15 @@ async function runStagedSoak(args: MonitorArgs): Promise<void> {
           cycle.duelKey,
           cycle.startedAtMs,
           cycle.openAtMs != null ? cycle.openAtMs - cycle.startedAtMs : "",
-          cycle.quotesAtMs != null && cycle.openAtMs != null ? cycle.quotesAtMs - cycle.openAtMs : "",
-          cycle.lockAtMs != null && cycle.betCloseTimeMs != null ? cycle.lockAtMs - cycle.betCloseTimeMs : "",
-          cycle.proposalAtMs != null && cycle.resolutionAtMs != null ? cycle.proposalAtMs - cycle.resolutionAtMs : "",
+          cycle.quotesAtMs != null && cycle.openAtMs != null
+            ? cycle.quotesAtMs - cycle.openAtMs
+            : "",
+          cycle.lockAtMs != null && cycle.betCloseTimeMs != null
+            ? cycle.lockAtMs - cycle.betCloseTimeMs
+            : "",
+          cycle.proposalAtMs != null && cycle.resolutionAtMs != null
+            ? cycle.proposalAtMs - cycle.resolutionAtMs
+            : "",
           cycle.trade ? "yes" : "no",
           cycle.trade?.matched ? "yes" : "no",
           cycle.trade?.clearedAtMs != null ? "yes" : "no",
@@ -1035,7 +2056,8 @@ async function runStagedSoak(args: MonitorArgs): Promise<void> {
     }
   }
 
-  const requiredClaims = args.durationMin >= DEFAULT_STAGED_DURATION_MIN ? 3 : 0;
+  const requiredClaims =
+    args.durationMin >= DEFAULT_STAGED_DURATION_MIN ? 3 : 0;
   const pass =
     context.incidents.length === 0 &&
     args.chains.every((chain) => {
@@ -1044,7 +2066,9 @@ async function runStagedSoak(args: MonitorArgs): Promise<void> {
         summary.openLagMs.every((value) => value <= OPEN_LAG_BUDGET_MS) &&
         summary.quoteLagMs.every((value) => value <= QUOTE_LAG_BUDGET_MS) &&
         summary.lockLagMs.every((value) => value <= LOCK_LAG_BUDGET_MS) &&
-        summary.proposalLagMs.every((value) => value <= PROPOSAL_LAG_BUDGET_MS) &&
+        summary.proposalLagMs.every(
+          (value) => value <= PROPOSAL_LAG_BUDGET_MS,
+        ) &&
         summary.claimClears >= requiredClaims
       );
     });
@@ -1063,7 +2087,10 @@ async function runStagedSoak(args: MonitorArgs): Promise<void> {
   };
 
   writeJsonArtifact(context.artifactRoot, "summary.json", summary);
-  writeFileSync(path.join(context.artifactRoot, "cycles.csv"), `${csvRows.join("\n")}\n`);
+  writeFileSync(
+    path.join(context.artifactRoot, "cycles.csv"),
+    `${csvRows.join("\n")}\n`,
+  );
   await recordContextEvent(
     context,
     "staged-final",
@@ -1072,7 +2099,9 @@ async function runStagedSoak(args: MonitorArgs): Promise<void> {
   );
 
   if (!pass) {
-    throw new Error("staged PM soak failed; inspect .ci-artifacts/pm-soak/summary.json and incident artifacts");
+    throw new Error(
+      "staged PM soak failed; inspect .ci-artifacts/pm-soak/summary.json and incident artifacts",
+    );
   }
 }
 
@@ -1100,16 +2129,22 @@ async function processStagedSnapshot(
 ): Promise<void> {
   const duelKey = currentDuelKey(snapshot.streamState, snapshot.active);
   const phase = currentPhase(snapshot.streamState, snapshot.active);
-  const market = snapshot.active?.markets.find((candidate) => candidate.chainKey === snapshot.chain) ?? null;
+  const market =
+    snapshot.active?.markets.find(
+      (candidate) => candidate.chainKey === snapshot.chain,
+    ) ?? null;
   const statusChain =
     snapshot.status?.predictionMarkets?.chains?.find(
       (candidate) => candidate.chainKey === snapshot.chain,
     ) ?? null;
   const health =
     (statusChain?.health as KeeperMarketHealth | null | undefined) ??
-    snapshot.botHealth?.health?.markets?.find((candidate) => candidate.chainKey === snapshot.chain) ??
+    snapshot.botHealth?.health?.markets?.find(
+      (candidate) => candidate.chainKey === snapshot.chain,
+    ) ??
     null;
-  const lifecycle = statusChain?.lifecycleStatus ?? market?.lifecycleStatus ?? "UNKNOWN";
+  const lifecycle =
+    statusChain?.lifecycleStatus ?? market?.lifecycleStatus ?? "UNKNOWN";
   const nowMs = snapshot.fetchedAtMs;
 
   if (!state.current || state.current.duelKey !== duelKey) {
@@ -1121,7 +2156,10 @@ async function processStagedSnapshot(
       duelKey,
       duelId: snapshot.active?.duel?.duelId ?? null,
       startedAtMs: nowMs,
-      betCloseTimeMs: snapshot.active?.duel?.betCloseTime ?? statusChain?.betCloseTime ?? null,
+      betCloseTimeMs:
+        snapshot.active?.duel?.betCloseTime ??
+        statusChain?.betCloseTime ??
+        null,
       resolutionAtMs: null,
       openAtMs: null,
       quotesAtMs: null,
@@ -1147,7 +2185,8 @@ async function processStagedSnapshot(
   }
 
   const current = state.current;
-  current.betCloseTimeMs = snapshot.active?.duel?.betCloseTime ?? current.betCloseTimeMs;
+  current.betCloseTimeMs =
+    snapshot.active?.duel?.betCloseTime ?? current.betCloseTimeMs;
 
   if (phase !== state.lastPhase) {
     state.lastPhase = phase;
@@ -1182,7 +2221,11 @@ async function processStagedSnapshot(
     );
   }
 
-  if (hasTwoSidedQuotes(health) && current.quotesAtMs == null && lifecycle === "OPEN") {
+  if (
+    hasTwoSidedQuotes(health) &&
+    current.quotesAtMs == null &&
+    lifecycle === "OPEN"
+  ) {
     current.quotesAtMs = nowMs;
     await maybeRecordMilestone(
       context,
@@ -1192,7 +2235,11 @@ async function processStagedSnapshot(
     );
   }
 
-  if (current.betCloseTimeMs != null && lifecycle !== "OPEN" && current.lockAtMs == null) {
+  if (
+    current.betCloseTimeMs != null &&
+    lifecycle !== "OPEN" &&
+    current.lockAtMs == null
+  ) {
     current.lockAtMs = nowMs;
     await maybeRecordMilestone(
       context,
@@ -1216,7 +2263,11 @@ async function processStagedSnapshot(
     current.terminalAtMs = nowMs;
   }
 
-  if (!state.openLagIncident && nowMs - current.startedAtMs > OPEN_LAG_BUDGET_MS && current.openAtMs == null) {
+  if (
+    !state.openLagIncident &&
+    nowMs - current.startedAtMs > OPEN_LAG_BUDGET_MS &&
+    current.openAtMs == null
+  ) {
     state.openLagIncident = true;
     current.incidents.push("market_missing_after_open_budget");
     await recordIncident(
@@ -1283,7 +2334,11 @@ async function processStagedSnapshot(
     );
   }
 
-  if (lifecycle === "OPEN" && (health?.quoteAgeMs ?? null) != null && Number(health?.quoteAgeMs ?? 0) > args.pollMs * 2) {
+  if (
+    lifecycle === "OPEN" &&
+    (health?.quoteAgeMs ?? null) != null &&
+    Number(health?.quoteAgeMs ?? 0) > args.pollMs * 2
+  ) {
     state.staleQuotePolls += 1;
   } else {
     state.staleQuotePolls = 0;
@@ -1403,7 +2458,9 @@ async function executeCanaryTrade(
   intent: CanaryIntent,
 ): Promise<TradeRecord> {
   if (!snapshot.active?.duel?.duelKey) {
-    throw new Error(`${snapshot.chain} active duel key missing for canary trade`);
+    throw new Error(
+      `${snapshot.chain} active duel key missing for canary trade`,
+    );
   }
   if (snapshot.chain === "solana") {
     return executeSolanaCanaryTrade(snapshot, intent);
@@ -1411,7 +2468,10 @@ async function executeCanaryTrade(
   return executeEvmCanaryTrade(snapshot, intent);
 }
 
-function requiredEvmEnv(chain: Exclude<SupportedChain, "solana">, suffix: string): string {
+function requiredEvmEnv(
+  chain: Exclude<SupportedChain, "solana">,
+  suffix: string,
+): string {
   return requiredEnv(`HYPERBET_${chain.toUpperCase()}_STAGING_${suffix}`);
 }
 
@@ -1421,14 +2481,15 @@ async function executeEvmCanaryTrade(
 ): Promise<TradeRecord> {
   const chain = snapshot.chain as Exclude<SupportedChain, "solana">;
   const rpcUrl = requiredEvmEnv(chain, "RPC_URL");
-  const privateKey = requiredEvmEnv(chain, "CANARY_PRIVATE_KEY") as `0x${string}`;
-  const deployment = resolveBettingEvmDeploymentForChain(
+  const privateKey = requiredEvmEnv(
     chain,
-    "testnet",
-  );
+    "CANARY_PRIVATE_KEY",
+  ) as `0x${string}`;
+  const deployment = resolveBettingEvmDeploymentForChain(chain, "testnet");
   const clobAddress =
-    (optionalEnv(`HYPERBET_${chain.toUpperCase()}_STAGING_GOLD_CLOB_ADDRESS`) as Address | null) ??
-    (deployment.goldClobAddress as Address);
+    (optionalEnv(
+      `HYPERBET_${chain.toUpperCase()}_STAGING_GOLD_CLOB_ADDRESS`,
+    ) as Address | null) ?? (deployment.goldClobAddress as Address);
   const account = privateKeyToAccount(privateKey);
   const publicClient = createPublicClient({ transport: http(rpcUrl) });
   const walletClient = createWalletClient({
@@ -1436,7 +2497,8 @@ async function executeEvmCanaryTrade(
     transport: http(rpcUrl),
   });
 
-  const duelKey = `0x${snapshot.active!.duel.duelKey.replace(/^0x/i, "")}` as Hash;
+  const duelKey =
+    `0x${snapshot.active!.duel.duelKey.replace(/^0x/i, "")}` as Hash;
   const market = await publicClient.readContract({
     address: clobAddress,
     abi: GOLD_CLOB_ABI,
@@ -1444,15 +2506,25 @@ async function executeEvmCanaryTrade(
     args: [duelKey, MARKET_KIND_DUEL_WINNER],
   });
 
-  const bestBid = Number((market as { bestBid?: bigint | number }).bestBid ?? 0);
-  const bestAsk = Number((market as { bestAsk?: bigint | number }).bestAsk ?? 1000);
+  const bestBid = Number(
+    (market as { bestBid?: bigint | number }).bestBid ?? 0,
+  );
+  const bestAsk = Number(
+    (market as { bestAsk?: bigint | number }).bestAsk ?? 1000,
+  );
   const side = intent === "YES" ? BUY_SIDE : SELL_SIDE;
   const price = intent === "YES" ? bestAsk : bestBid;
-  if ((intent === "YES" && !(price > 0 && price < 1000)) || (intent === "NO" && !(price > 0 && price < 1000))) {
+  if (
+    (intent === "YES" && !(price > 0 && price < 1000)) ||
+    (intent === "NO" && !(price > 0 && price < 1000))
+  ) {
     throw new Error(`${chain} has no executable ${intent} quote`);
   }
 
-  const amount = BigInt(optionalEnv(`PM_SOAK_${chain.toUpperCase()}_CANARY_AMOUNT`) ?? DEFAULT_EVM_CANARY_AMOUNT.toString());
+  const amount = BigInt(
+    optionalEnv(`PM_SOAK_${chain.toUpperCase()}_CANARY_AMOUNT`) ??
+      DEFAULT_EVM_CANARY_AMOUNT.toString(),
+  );
   const value = quoteOrderValue(side, price, amount);
   const txRef = await walletClient.writeContract({
     chain: undefined,
@@ -1460,7 +2532,14 @@ async function executeEvmCanaryTrade(
     address: clobAddress,
     abi: GOLD_CLOB_ABI,
     functionName: "placeOrder",
-    args: [duelKey, MARKET_KIND_DUEL_WINNER, side, price, amount, ORDER_FLAG_IOC],
+    args: [
+      duelKey,
+      MARKET_KIND_DUEL_WINNER,
+      side,
+      price,
+      amount,
+      ORDER_FLAG_IOC,
+    ],
     value,
   });
   await publicClient.waitForTransactionReceipt({ hash: txRef });
@@ -1518,21 +2597,31 @@ function hasNonZeroValues(record: Record<string, string>): boolean {
 async function claimEvmExposure(
   snapshot: ChainSnapshot,
   trade: TradeRecord,
-): Promise<{ syncTxRef: string | null; claimTxRef: string | null; cleared: boolean; residual: Record<string, string> }> {
+): Promise<{
+  syncTxRef: string | null;
+  claimTxRef: string | null;
+  cleared: boolean;
+  residual: Record<string, string>;
+}> {
   const chain = snapshot.chain as Exclude<SupportedChain, "solana">;
   const rpcUrl = requiredEvmEnv(chain, "RPC_URL");
-  const privateKey = requiredEvmEnv(chain, "CANARY_PRIVATE_KEY") as `0x${string}`;
+  const privateKey = requiredEvmEnv(
+    chain,
+    "CANARY_PRIVATE_KEY",
+  ) as `0x${string}`;
   const deployment = resolveBettingEvmDeploymentForChain(chain, "testnet");
   const clobAddress =
-    (optionalEnv(`HYPERBET_${chain.toUpperCase()}_STAGING_GOLD_CLOB_ADDRESS`) as Address | null) ??
-    (deployment.goldClobAddress as Address);
+    (optionalEnv(
+      `HYPERBET_${chain.toUpperCase()}_STAGING_GOLD_CLOB_ADDRESS`,
+    ) as Address | null) ?? (deployment.goldClobAddress as Address);
   const account = privateKeyToAccount(privateKey);
   const publicClient = createPublicClient({ transport: http(rpcUrl) });
   const walletClient = createWalletClient({
     account,
     transport: http(rpcUrl),
   });
-  const duelKey = `0x${snapshot.active!.duel.duelKey.replace(/^0x/i, "")}` as Hash;
+  const duelKey =
+    `0x${snapshot.active!.duel.duelKey.replace(/^0x/i, "")}` as Hash;
   const marketKey = await publicClient.readContract({
     address: clobAddress,
     abi: GOLD_CLOB_ABI,
@@ -1603,7 +2692,11 @@ function bnLikeToBigInt(value: unknown): bigint {
   if (typeof value === "number") {
     return BigInt(value);
   }
-  if (value && typeof value === "object" && "toString" in (value as { toString?: unknown })) {
+  if (
+    value &&
+    typeof value === "object" &&
+    "toString" in (value as { toString?: unknown })
+  ) {
     return BigInt(String((value as { toString: () => string }).toString()));
   }
   return 0n;
@@ -1611,13 +2704,14 @@ function bnLikeToBigInt(value: unknown): bigint {
 
 async function buildSolanaRemainingAccounts(
   clobProgram: ReturnType<typeof createPrograms>["goldClobMarket"],
-  marketState: PublicKey,
+  marketState: SolanaPublicKey,
   side: number,
   price: number,
   amountLamports: bigint,
 ): Promise<AccountMeta[]> {
   const metas: AccountMeta[] = [];
-  const marketAccount = await clobProgram.account.marketState.fetch(marketState);
+  const marketAccount =
+    await clobProgram.account.marketState.fetch(marketState);
   const oppositeSide = side === SIDE_BID ? SIDE_ASK : SIDE_BID;
   let remaining = amountLamports;
   let boundary =
@@ -1656,9 +2750,13 @@ async function buildSolanaRemainingAccounts(
     }
 
     while (remaining > 0n && currentHead > 0n && currentLevelOpen > 0n) {
-      const orderPda = findOrderPda(clobProgram.programId, marketState, currentHead);
+      const orderPda = findOrderPda(
+        clobProgram.programId,
+        marketState,
+        currentHead,
+      );
       const order = await clobProgram.account.order.fetch(orderPda);
-      const maker = order.maker as PublicKey;
+      const maker = order.maker as SolanaPublicKey;
       const makerBalancePda = findUserBalancePda(
         clobProgram.programId,
         marketState,
@@ -1669,7 +2767,8 @@ async function buildSolanaRemainingAccounts(
         { pubkey: makerBalancePda, isSigner: false, isWritable: true },
       );
 
-      const orderRemaining = bnLikeToBigInt(order.amount) - bnLikeToBigInt(order.filled);
+      const orderRemaining =
+        bnLikeToBigInt(order.amount) - bnLikeToBigInt(order.filled);
       if (orderRemaining <= 0n || !order.active) {
         break;
       }
@@ -1698,18 +2797,26 @@ async function executeSolanaCanaryTrade(
   intent: CanaryIntent,
 ): Promise<TradeRecord> {
   const rpcUrl = requiredEnv("HYPERBET_SOLANA_STAGING_RPC_URL");
-  const trader = readKeypair(requiredEnv("HYPERBET_SOLANA_STAGING_CANARY_KEYPAIR"));
+  const trader = readKeypair(
+    requiredEnv("HYPERBET_SOLANA_STAGING_CANARY_KEYPAIR"),
+  );
   process.env.SOLANA_RPC_URL = rpcUrl;
   process.env.SOLANA_CLUSTER = "devnet";
 
   const programs = createPrograms(trader);
   const clobProgram = programs.goldClobMarket;
   const marketState = new PublicKey(
-    snapshot.active?.markets.find((candidate) => candidate.chainKey === "solana")?.marketRef ?? "",
+    snapshot.active?.markets.find(
+      (candidate) => candidate.chainKey === "solana",
+    )?.marketRef ?? "",
   );
   const duelKeyHex = snapshot.active?.duel?.duelKey?.replace(/^0x/i, "") ?? "";
-  const duelState = findDuelStatePda(FIGHT_ORACLE_PROGRAM_ID, duelKeyHexToBytes(duelKeyHex));
-  const marketAccount = await clobProgram.account.marketState.fetch(marketState);
+  const duelState = findDuelStatePda(
+    FIGHT_ORACLE_PROGRAM_ID,
+    duelKeyHexToBytes(duelKeyHex),
+  );
+  const marketAccount =
+    await clobProgram.account.marketState.fetch(marketState);
   const side = intent === "YES" ? SIDE_BID : SIDE_ASK;
   const price =
     intent === "YES"
@@ -1720,7 +2827,8 @@ async function executeSolanaCanaryTrade(
   }
 
   const amountLamports = BigInt(
-    optionalEnv("PM_SOAK_SOLANA_CANARY_LAMPORTS") ?? DEFAULT_SOLANA_CANARY_LAMPORTS.toString(),
+    optionalEnv("PM_SOAK_SOLANA_CANARY_LAMPORTS") ??
+      DEFAULT_SOLANA_CANARY_LAMPORTS.toString(),
   );
   const nextOrderId = bnLikeToBigInt(marketAccount.nextOrderId);
   const configPda = findMarketConfigPda(clobProgram.programId);
@@ -1751,7 +2859,12 @@ async function executeSolanaCanaryTrade(
       duelState,
       userBalance,
       newOrder: findOrderPda(clobProgram.programId, marketState, nextOrderId),
-      restingLevel: findPriceLevelPda(clobProgram.programId, marketState, side, price),
+      restingLevel: findPriceLevelPda(
+        clobProgram.programId,
+        marketState,
+        side,
+        price,
+      ),
       config: configPda,
       treasury: config.treasury,
       marketMaker: config.marketMaker,
@@ -1763,7 +2876,8 @@ async function executeSolanaCanaryTrade(
     .signers([trader])
     .rpc();
 
-  const after = await clobProgram.account.userBalance.fetchNullable(userBalance);
+  const after =
+    await clobProgram.account.userBalance.fetchNullable(userBalance);
   const residual = normalizeSolanaBalance(after);
   const matched = hasNonZeroValues(residual);
 
@@ -1803,18 +2917,30 @@ function normalizeSolanaBalance(balance: unknown): Record<string, string> {
 async function claimSolanaExposure(
   snapshot: ChainSnapshot,
   trade: TradeRecord,
-): Promise<{ syncTxRef: string | null; claimTxRef: string | null; cleared: boolean; residual: Record<string, string> }> {
+): Promise<{
+  syncTxRef: string | null;
+  claimTxRef: string | null;
+  cleared: boolean;
+  residual: Record<string, string>;
+}> {
   const rpcUrl = requiredEnv("HYPERBET_SOLANA_STAGING_RPC_URL");
-  const trader = readKeypair(requiredEnv("HYPERBET_SOLANA_STAGING_CANARY_KEYPAIR"));
+  const trader = readKeypair(
+    requiredEnv("HYPERBET_SOLANA_STAGING_CANARY_KEYPAIR"),
+  );
   process.env.SOLANA_RPC_URL = rpcUrl;
   process.env.SOLANA_CLUSTER = "devnet";
   const programs = createPrograms(trader);
   const clobProgram = programs.goldClobMarket;
   const marketState = new PublicKey(
-    snapshot.active?.markets.find((candidate) => candidate.chainKey === "solana")?.marketRef ?? "",
+    snapshot.active?.markets.find(
+      (candidate) => candidate.chainKey === "solana",
+    )?.marketRef ?? "",
   );
   const duelKeyHex = snapshot.active?.duel?.duelKey?.replace(/^0x/i, "") ?? "";
-  const duelState = findDuelStatePda(FIGHT_ORACLE_PROGRAM_ID, duelKeyHexToBytes(duelKeyHex));
+  const duelState = findDuelStatePda(
+    FIGHT_ORACLE_PROGRAM_ID,
+    duelKeyHexToBytes(duelKeyHex),
+  );
   const configPda = findMarketConfigPda(clobProgram.programId);
   const config = await clobProgram.account.marketConfig.fetch(configPda);
   const userBalance = findUserBalancePda(
@@ -1826,7 +2952,12 @@ async function claimSolanaExposure(
     await clobProgram.account.userBalance.fetchNullable(userBalance),
   );
   if (!hasNonZeroValues(before)) {
-    return { syncTxRef: null, claimTxRef: null, cleared: true, residual: before };
+    return {
+      syncTxRef: null,
+      claimTxRef: null,
+      cleared: true,
+      residual: before,
+    };
   }
 
   let syncTxRef: string | null = null;
@@ -1871,18 +3002,42 @@ async function claimSolanaExposure(
 async function claimCanaryExposure(
   snapshot: ChainSnapshot,
   trade: TradeRecord,
-): Promise<{ syncTxRef: string | null; claimTxRef: string | null; cleared: boolean; residual: Record<string, string> }> {
+): Promise<{
+  syncTxRef: string | null;
+  claimTxRef: string | null;
+  cleared: boolean;
+  residual: Record<string, string>;
+}> {
   if (snapshot.chain === "solana") {
     return claimSolanaExposure(snapshot, trade);
   }
   return claimEvmExposure(snapshot, trade);
 }
 
+let stopping = false;
+
+async function shutdown(signal: string): Promise<void> {
+  if (stopping) {
+    return;
+  }
+  stopping = true;
+  console.log(`[pm-soak] received ${signal}, stopping soak loop`);
+}
+
+process.on("SIGINT", () => {
+  void shutdown("SIGINT");
+});
+
+process.on("SIGTERM", () => {
+  void shutdown("SIGTERM");
+});
+
 async function main(): Promise<void> {
   const args = parseArgs();
   writeJsonArtifact(args.artifactRoot, "metadata.json", {
     startedAt: nowIso(),
     mode: args.mode,
+    follow: args.follow,
     chains: args.chains,
     durationMin: args.durationMin,
     pollMs: args.pollMs,
@@ -1897,7 +3052,14 @@ async function main(): Promise<void> {
   await runStagedSoak(args);
 }
 
-main().catch((error) => {
-  console.error(`[pm-soak] failed: ${String(error)}`);
-  process.exit(1);
-});
+main()
+  .catch((error) => {
+    console.error(`[pm-soak] failed: ${String(error)}`);
+    process.exitCode = 1;
+  })
+  .finally(async () => {
+    await closeScreenshotSession().catch(() => undefined);
+    if ((process.exitCode ?? 0) !== 0) {
+      process.exit(process.exitCode ?? 1);
+    }
+  });

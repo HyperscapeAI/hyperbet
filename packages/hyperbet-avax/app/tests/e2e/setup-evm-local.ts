@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -19,6 +20,7 @@ import goldClobArtifact from "../../../../evm-contracts/out/GoldClob.sol/GoldClo
 
 type E2eState = Record<string, unknown> & {
   currentDuelKeyHex?: string;
+  evmDuelId?: string;
   evmRpcUrl?: string;
   evmChainId?: number;
   evmHeadlessAddress?: string;
@@ -36,7 +38,7 @@ type E2eState = Record<string, unknown> & {
 };
 
 const DEFAULT_RPC_URL = "http://127.0.0.1:8545";
-const DEFAULT_CHAIN_ID = 97;
+const DEFAULT_CHAIN_ID = 43113;
 const DEFAULT_ADMIN_PRIVATE_KEY =
   "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
 const DEFAULT_ANVIL_MNEMONIC =
@@ -47,6 +49,7 @@ const SELL_SIDE = 2;
 const DUEL_STATUS_BETTING_OPEN = 2;
 const ORDER_FLAG_GTC = 0x01;
 const DUEL_ORACLE_DISPUTE_WINDOW_SECONDS = 3_600;
+const E2E_BET_WINDOW_SECONDS = 3_600n;
 
 type EvmArtifact = {
   abi: unknown[];
@@ -76,8 +79,16 @@ function ensureHex32(value: string, label: string): `0x${string}` {
   return `0x${normalized}`;
 }
 
-function hashLabel(label: string): `0x${string}` {
-  return keccak256(stringToHex(label));
+function hashParticipantLabel(label: string): `0x${string}` {
+  return `0x${createHash("sha256").update(label).digest("hex")}`;
+}
+
+function parseTimestampMsEnv(name: string): bigint | null {
+  const raw = process.env[name]?.trim();
+  if (!raw) return null;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0) return null;
+  return BigInt(Math.floor(parsed / 1000));
 }
 
 function quoteCost(side: number, price: number, amount: bigint): bigint {
@@ -139,6 +150,7 @@ async function main(): Promise<void> {
   const adminPrivateKey =
     process.env.E2E_EVM_ADMIN_PRIVATE_KEY || DEFAULT_ADMIN_PRIVATE_KEY;
   const makerPrivateKey = process.env.E2E_EVM_MAKER_PRIVATE_KEY || "";
+  const reuseDeployment = process.env.E2E_EVM_REUSE_DEPLOYMENT === "true";
   const seedNoOrderPrice = Number(
     process.env.E2E_EVM_SEED_NO_ORDER_PRICE || 600,
   );
@@ -173,10 +185,7 @@ async function main(): Promise<void> {
         accountIndex: 0,
         addressIndex: 1,
       });
-  const finalizerAccount = mnemonicToAccount(DEFAULT_ANVIL_MNEMONIC, {
-    accountIndex: 0,
-    addressIndex: 2,
-  });
+  const finalizerAccount = adminAccount;
   const challengerAccount = mnemonicToAccount(DEFAULT_ANVIL_MNEMONIC, {
     accountIndex: 0,
     addressIndex: 3,
@@ -219,81 +228,117 @@ async function main(): Promise<void> {
   const existingState = (await readJson<E2eState>(statePath)) || {};
   const latestBlock = await publicClient.getBlock({ blockTag: "latest" });
   const duelKey = ensureHex32(
-    existingState.currentDuelKeyHex ||
+    process.env.E2E_EVM_DUEL_KEY ||
+      existingState.currentDuelKeyHex ||
       keccak256(stringToHex("hyperbet-e2e-evm:local")),
     "currentDuelKeyHex",
   );
-  const duelBetOpenTs = latestBlock.timestamp - 15n;
-  const duelBetCloseTs = duelBetOpenTs + 300n;
-  const duelStartTs = duelBetCloseTs + 60n;
+  const duelId =
+    process.env.E2E_EVM_DUEL_ID ||
+    existingState.evmDuelId ||
+    String(existingState.evmMatchId ?? 1);
+  const participantAId =
+    process.env.E2E_EVM_AGENT1_ID?.trim() || "e2e-evm-agent-a";
+  const participantBId =
+    process.env.E2E_EVM_AGENT2_ID?.trim() || "e2e-evm-agent-b";
+  const duelBetOpenTs =
+    parseTimestampMsEnv("E2E_EVM_BET_OPEN_TIME_MS") ??
+    latestBlock.timestamp - 15n;
+  const duelBetCloseTs =
+    parseTimestampMsEnv("E2E_EVM_BET_CLOSE_TIME_MS") ??
+    duelBetOpenTs + E2E_BET_WINDOW_SECONDS;
+  const duelStartTs = (() => {
+    const sourceFightStartTs = parseTimestampMsEnv("E2E_EVM_FIGHT_START_TIME_MS");
+    if (sourceFightStartTs == null) {
+      return duelBetCloseTs;
+    }
+    return sourceFightStartTs > duelBetCloseTs
+      ? sourceFightStartTs
+      : duelBetCloseTs;
+  })();
+  let tokenDeployTx = "";
+  let oracleDeployTx = "";
+  let clobDeployTx = "";
+  let mintTx = "";
+  let goldTokenAddress = existingState.evmGoldTokenAddress as Address | undefined;
+  let oracleAddress = existingState.evmOracleAddress as Address | undefined;
+  let goldClobAddress = existingState.evmGoldClobAddress as Address | undefined;
 
-  const tokenDeployTx = await walletClient.deployContract({
-    abi: mockErc20Artifact.abi,
-    bytecode: resolveArtifactBytecode(mockErc20Artifact as EvmArtifact),
-    args: ["Mock Gold", "GOLD"],
-    nonce: consumeNonce(),
-  });
-  const tokenDeployReceipt = await publicClient.waitForTransactionReceipt({
-    hash: tokenDeployTx,
-  });
-  const goldTokenAddress = tokenDeployReceipt.contractAddress;
-  if (!goldTokenAddress) {
-    throw new Error("Token deployment did not return contract address");
+  if (!reuseDeployment) {
+    tokenDeployTx = await walletClient.deployContract({
+      abi: mockErc20Artifact.abi,
+      bytecode: resolveArtifactBytecode(mockErc20Artifact as EvmArtifact),
+      args: ["Mock Gold", "GOLD"],
+      nonce: consumeNonce(),
+    });
+    const tokenDeployReceipt = await publicClient.waitForTransactionReceipt({
+      hash: tokenDeployTx as `0x${string}`,
+    });
+    goldTokenAddress = tokenDeployReceipt.contractAddress ?? undefined;
+    if (!goldTokenAddress) {
+      throw new Error("Token deployment did not return contract address");
+    }
+
+    oracleDeployTx = await walletClient.deployContract({
+      abi: duelOutcomeOracleArtifact.abi,
+      bytecode: resolveArtifactBytecode(
+        duelOutcomeOracleArtifact as EvmArtifact,
+      ),
+      args: [
+        adminAccount.address,
+        adminAccount.address,
+        finalizerAccount.address,
+        challengerAccount.address,
+        adminAccount.address,
+        DUEL_ORACLE_DISPUTE_WINDOW_SECONDS,
+      ],
+      nonce: consumeNonce(),
+    });
+    const oracleDeployReceipt = await publicClient.waitForTransactionReceipt({
+      hash: oracleDeployTx as `0x${string}`,
+    });
+    oracleAddress = oracleDeployReceipt.contractAddress ?? undefined;
+    if (!oracleAddress) {
+      throw new Error("Duel oracle deployment did not return contract address");
+    }
+
+    clobDeployTx = await walletClient.deployContract({
+      abi: goldClobArtifact.abi,
+      bytecode: resolveArtifactBytecode(goldClobArtifact as EvmArtifact),
+      args: [
+        adminAccount.address,
+        adminAccount.address,
+        oracleAddress,
+        adminAccount.address,
+        adminAccount.address,
+        adminAccount.address,
+      ],
+      nonce: consumeNonce(),
+    });
+    const clobDeployReceipt = await publicClient.waitForTransactionReceipt({
+      hash: clobDeployTx as `0x${string}`,
+    });
+    goldClobAddress = clobDeployReceipt.contractAddress ?? undefined;
+    if (!goldClobAddress) {
+      throw new Error("GoldClob deployment did not return contract address");
+    }
+
+    mintTx = await walletClient.writeContract({
+      address: goldTokenAddress as Address,
+      abi: mockErc20Artifact.abi,
+      functionName: "mint",
+      args: [adminAccount.address, parseUnits("100000", 18)],
+      account: adminAccount,
+      nonce: consumeNonce(),
+    });
+    await publicClient.waitForTransactionReceipt({ hash: mintTx as `0x${string}` });
+  } else {
+    if (!goldTokenAddress || !oracleAddress || !goldClobAddress) {
+      throw new Error(
+        "Reuse deployment requested but cached EVM contract addresses are missing",
+      );
+    }
   }
-
-  const oracleDeployTx = await walletClient.deployContract({
-    abi: duelOutcomeOracleArtifact.abi,
-    bytecode: resolveArtifactBytecode(
-      duelOutcomeOracleArtifact as EvmArtifact,
-    ),
-    args: [
-      adminAccount.address,
-      adminAccount.address,
-      finalizerAccount.address,
-      challengerAccount.address,
-      adminAccount.address,
-      DUEL_ORACLE_DISPUTE_WINDOW_SECONDS,
-    ],
-    nonce: consumeNonce(),
-  });
-  const oracleDeployReceipt = await publicClient.waitForTransactionReceipt({
-    hash: oracleDeployTx,
-  });
-  const oracleAddress = oracleDeployReceipt.contractAddress;
-  if (!oracleAddress) {
-    throw new Error("Duel oracle deployment did not return contract address");
-  }
-
-  const clobDeployTx = await walletClient.deployContract({
-    abi: goldClobArtifact.abi,
-    bytecode: resolveArtifactBytecode(goldClobArtifact as EvmArtifact),
-    args: [
-      adminAccount.address,
-      adminAccount.address,
-      oracleAddress,
-      adminAccount.address,
-      adminAccount.address,
-      adminAccount.address,
-    ],
-    nonce: consumeNonce(),
-  });
-  const clobDeployReceipt = await publicClient.waitForTransactionReceipt({
-    hash: clobDeployTx,
-  });
-  const goldClobAddress = clobDeployReceipt.contractAddress;
-  if (!goldClobAddress) {
-    throw new Error("GoldClob deployment did not return contract address");
-  }
-
-  const mintTx = await walletClient.writeContract({
-    address: goldTokenAddress as Address,
-    abi: mockErc20Artifact.abi,
-    functionName: "mint",
-    args: [adminAccount.address, parseUnits("100000", 18)],
-    account: adminAccount,
-    nonce: consumeNonce(),
-  });
-  await publicClient.waitForTransactionReceipt({ hash: mintTx });
 
   const upsertDuelTx = await walletClient.writeContract({
     address: oracleAddress as Address,
@@ -301,8 +346,8 @@ async function main(): Promise<void> {
     functionName: "upsertDuel",
     args: [
       duelKey,
-      hashLabel("e2e-evm-agent-a"),
-      hashLabel("e2e-evm-agent-b"),
+      hashParticipantLabel(participantAId),
+      hashParticipantLabel(participantBId),
       duelBetOpenTs,
       duelBetCloseTs,
       duelStartTs,
@@ -390,11 +435,13 @@ async function main(): Promise<void> {
   env.VITE_E2E_EVM_PRIVATE_KEY = adminPrivateKey;
   env.VITE_E2E_EVM_ADDRESS = adminAccount.address;
   env.VITE_E2E_EVM_DUEL_KEY = duelKey.replace(/^0x/i, "");
-  env.VITE_E2E_EVM_DUEL_ID = String(existingState.evmMatchId ?? 1);
+  env.VITE_E2E_EVM_DUEL_ID = duelId;
   await fs.writeFile(envPath, serializeDotEnv(env), "utf8");
 
   const state: E2eState = {
     ...existingState,
+    currentDuelKeyHex: duelKey.replace(/^0x/i, ""),
+    evmDuelId: duelId,
     evmRpcUrl: rpcUrl,
     evmChainId: chainId,
     evmHeadlessAddress: adminAccount.address,
@@ -405,7 +452,7 @@ async function main(): Promise<void> {
     evmMarketKey: marketKey,
     evmOracleAddress: oracleAddress,
     evmAdminPrivateKey: adminPrivateKey,
-    evmFinalizerPrivateKey: finalizerAccount.getHdKey().privateKey,
+    evmFinalizerPrivateKey: adminPrivateKey,
     evmSeedNoPrice: seedNoOrderPrice,
     evmSeedYesPrice: seedYesOrderPrice,
     evmSeedOrderAmount: seedOrderAmountUi,
@@ -421,6 +468,7 @@ async function main(): Promise<void> {
         evmHeadlessAddress: adminAccount.address,
         evmGoldTokenAddress: goldTokenAddress,
         evmGoldClobAddress: goldClobAddress,
+        evmDuelId: duelId,
         evmDuelKeyHex: duelKey,
         evmMarketKey: marketKey,
         evmOracleAddress: oracleAddress,

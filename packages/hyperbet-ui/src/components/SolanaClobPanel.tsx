@@ -58,6 +58,7 @@ import {
   EMPTY_PREDICTION_MARKET_WALLET_SNAPSHOT,
   type PredictionMarketWalletSnapshot,
 } from "../lib/predictionMarketUiState";
+import { derivePredictionMarketClaimUi } from "../lib/predictionMarketClaimUi";
 import { recordPredictionMarketTrade } from "../lib/predictionMarketTracking";
 import { useStreamingState } from "../spectator/useStreamingState";
 import {
@@ -429,9 +430,15 @@ export function SolanaClobPanel({
         connectWalletToClaim: "连接钱包后即可领取",
         claimComplete: "领取完成",
         claimFailed: (message: string) => `领取失败：${message}`,
-        claimReady: "可领取结算",
+        claimWinningsTitle: "领取收益",
+        claimRefundTitle: "领取退款",
         claimLocked: "暂无可领取结算",
-        claimHelp: "对局结算后，可在这里领取胜出份额或取消退款。",
+        claimHelp: "对局结算后，可在这里领取获胜份额。",
+        claimRefundHelp: "若本局取消，可在这里领取退回资金。",
+        claimCleanupTitle: "清理已结算仓位",
+        claimCleanupHelp: "若本局已判定负方，可在这里清理残留仓位状态。",
+        claim: "领取",
+        clearPosition: "清理仓位",
         limitPrice: "限价",
         hideAdminPanel: "隐藏管理面板",
         showAdminPanel: "显示管理面板",
@@ -470,10 +477,16 @@ export function SolanaClobPanel({
         connectWalletToClaim: "Connect wallet to claim",
         claimComplete: "Claim complete",
         claimFailed: (message: string) => `Claim failed: ${message}`,
-        claimReady: "Claim available",
+        claimWinningsTitle: "Claim winnings",
+        claimRefundTitle: "Claim refund",
         claimLocked: "Nothing claimable yet",
-        claimHelp:
-          "Once the duel resolves, claim winning shares or cancelled refunds here.",
+        claimHelp: "Once the duel resolves, claim your winning shares here.",
+        claimRefundHelp: "If the duel is cancelled, claim your refund here.",
+        claimCleanupTitle: "Clear resolved position",
+        claimCleanupHelp:
+          "If this market resolved against you, clear the stale position state here.",
+        claim: "Claim",
+        clearPosition: "Clear position",
         limitPrice: "Limit price",
         hideAdminPanel: "Hide Admin Panel",
         showAdminPanel: "Show Admin Panel",
@@ -1296,6 +1309,11 @@ export function SolanaClobPanel({
     yesPool + noPool > 0n ? Number((yesPool * 100n) / (yesPool + noPool)) : 50;
   const noPercent = 100 - yesPercent;
   const canClaim = uiState.canClaim;
+  const claimUi = derivePredictionMarketClaimUi(copy, uiState.claimKind, canClaim);
+  const claimValueText =
+    canClaim && uiState.claimableAmount > 0n
+      ? `${fmtAmount(uiState.claimableAmount).toFixed(3)} SOL`
+      : null;
   const marketStateText = activeMarket?.marketState.toBase58() ?? "-";
   const lifecycleDebugText = [
     `duelKey=${lifecycleMarket?.duelKey ?? lifecycleDuel?.duelKey ?? duelKeyHex ?? "-"}`,
@@ -1380,32 +1398,86 @@ export function SolanaClobPanel({
             <span>{duelLabel}</span>
           </div>
 
-          <button
-            data-testid={isE2eMode ? "solana-clob-claim-payout" : undefined}
-            type="button"
-            onClick={() => void handleClaim()}
-            disabled={!canClaim}
-            style={buttonStyle(
-              canClaim
-                ? "#0f3f2b"
-                : "var(--hm-panel-claim-idle-bg, linear-gradient(180deg, rgba(255,255,255,0.05) 0%, rgba(255,255,255,0.02) 100%))",
-              canClaim
-                ? "rgba(34,197,94,0.35)"
-                : "var(--hm-panel-claim-idle-border, rgba(255,255,255,0.08))",
-              !canClaim,
-            )}
-          >
-            {canClaim ? copy.claimReady : copy.claimLocked}
-          </button>
-          <div
-            style={{
-              fontSize: 11,
-              color: "var(--hm-panel-subtle-text, rgba(255,255,255,0.48))",
-              lineHeight: 1.45,
-            }}
-          >
-            {copy.claimHelp}
-          </div>
+          {canClaim ? (
+            <div
+              style={{
+                display: "grid",
+                gap: 8,
+                padding: "12px",
+                borderRadius: "var(--hm-radius)",
+                border: "1px solid rgba(52,211,153,0.26)",
+                background:
+                  "linear-gradient(180deg, rgba(16,92,53,0.14) 0%, rgba(12,67,39,0.08) 100%)",
+                boxShadow:
+                  "inset 0 1px 0 rgba(255,255,255,0.05), 0 10px 22px rgba(0,0,0,0.14)",
+              }}
+            >
+              <div
+                style={{
+                  display: "grid",
+                  gap: 4,
+                  minWidth: 0,
+                }}
+              >
+                <span
+                  style={{
+                    fontSize: 9,
+                    fontWeight: 800,
+                    letterSpacing: 1,
+                    textTransform: "uppercase",
+                    color: "rgba(167,243,208,0.82)",
+                    fontFamily: "var(--hm-font-display)",
+                  }}
+                >
+                  {copy.adminStatus}
+                </span>
+                <span
+                  style={{
+                    fontSize: compact ? 12 : 13,
+                    fontWeight: 700,
+                    color: "var(--hm-text, #f8fafc)",
+                    lineHeight: 1.4,
+                    minWidth: 0,
+                    overflowWrap: "anywhere",
+                  }}
+                >
+                  {claimUi.title}
+                </span>
+                {claimValueText ? (
+                  <span
+                    style={{
+                      fontSize: 11,
+                      fontWeight: 700,
+                      color: "rgba(167,243,208,0.88)",
+                      fontFamily: "var(--hm-font-mono)",
+                    }}
+                  >
+                    {claimValueText}
+                  </span>
+                ) : null}
+                <span
+                  style={{
+                    fontSize: 11,
+                    color: "var(--hm-panel-subtle-text, rgba(255,255,255,0.48))",
+                    lineHeight: 1.45,
+                    minWidth: 0,
+                    overflowWrap: "anywhere",
+                  }}
+                >
+                  {claimUi.helpText}
+                </span>
+              </div>
+
+              <button
+                data-testid={isE2eMode ? "solana-clob-claim-payout" : undefined}
+                type="button"
+                onClick={() => void handleClaim()}
+                style={buttonStyle("#0f3f2b", "rgba(34,197,94,0.35)", false)}
+              >
+                {claimUi.buttonLabel}
+              </button>
+            </div>
+          ) : null}
         </div>
       </PredictionMarketPanel>
       <div
