@@ -912,7 +912,7 @@ export function EvmBettingPanel({
       );
       setLastOrderTx(tx);
       await publicClient?.waitForTransactionReceipt({ hash: tx });
-      await recordPredictionMarketTrade({
+      const trackingInput = {
         chainKey: chainConfig.chainId,
         bettorWallet: effectiveAddress,
         sourceAsset: nativeSymbol,
@@ -924,7 +924,7 @@ export function EvmBettingPanel({
           effectiveLifecycleMarket?.marketRef ?? marketMeta?.marketKey ?? duelKey,
         duelKey: duelKeyHex,
         duelId,
-      });
+      } as const;
       setOptimisticPosition((current) =>
         addPositionDelta(
           mergePositionSnapshots(position, current),
@@ -932,7 +932,9 @@ export function EvmBettingPanel({
         ),
       );
       setStatus(copy.orderPlaced);
-      await refreshData();
+      setIsSubmitting(false);
+      void recordPredictionMarketTrade(trackingInput);
+      void refreshData();
     } catch (error) {
       setStatus(copy.orderFailed((error as Error).message));
     } finally {
@@ -1095,6 +1097,7 @@ export function EvmBettingPanel({
         onPlaceBet={() => void handlePlaceOrder()}
         isWalletReady={walletConnected}
         programsReady={programsReady}
+        isSubmitting={isSubmitting}
         agent1Name={cycleAgent1}
         agent2Name={cycleAgent2}
         isEvm
