@@ -333,7 +333,11 @@ async function main() {
   }
   console.log("  Minted tokens to all participants");
 
-  // ── Deploy AMM (Router + MockUSD + libraries via forge) ───────────────
+  // ── Deploy AMM (Router + MockUSD) ──────────────────────────────────────
+  // Router exceeds 24KB EIP-170 limit when libraries are inlined.
+  // Must deploy Math + SwapMath as external libraries via forge, then link.
+  // Key: --constructor-args MUST be last flag (forge CLI parser is greedy).
+
   const { execSync } = await import("node:child_process");
   const evmContractsDir = path.resolve(process.cwd(), "packages/evm-contracts");
   const forgeEnv = { ...process.env, PATH: `/opt/homebrew/bin:${process.env.HOME}/.bun/bin:${process.env.PATH}` };
@@ -342,7 +346,7 @@ async function main() {
   let routerAddress: Address | null = null;
   let musdAddress: Address | null = null;
   try {
-    // MockUSD
+    // MockUSD via viem
     const musdHash = await admin.wallet.deployContract({
       abi: mockUsdArtifact.abi, bytecode: resolveBytecode(mockUsdArtifact), args: [],
       nonce: await nonce(admin.address),
@@ -359,7 +363,10 @@ async function main() {
       });
     }
 
-    // Deploy Math + SwapMath + Router via forge (library linking required)
+    // Invalidate nonces before forge deploys
+    nonce.invalidateAll();
+
+    // Deploy Math + SwapMath + Router via forge (--constructor-args LAST per foundry-rs/foundry#770)
     const mathOut = execSync(
       `forge create contracts/lvr_amm/lib/Math.sol:Math --rpc-url ${config.bscRpc} --private-key ${adminPk} --broadcast --json`,
       { cwd: evmContractsDir, env: forgeEnv, encoding: "utf8" },
@@ -372,16 +379,22 @@ async function main() {
     );
     const swapMathAddr = JSON.parse(swapOut).deployedTo;
 
+    // forge create: CONTRACT must come before --constructor-args (greedy flag eats it otherwise)
     const routerOut = execSync(
       `forge create contracts/lvr_amm/Router.sol:Router` +
-      ` --rpc-url ${config.bscRpc} --private-key ${adminPk} --broadcast --json` +
+      ` --rpc-url ${config.bscRpc}` +
+      ` --private-key ${adminPk}` +
+      ` --broadcast --json` +
       ` --libraries contracts/lvr_amm/lib/Math.sol:Math:${mathAddr}` +
       ` --libraries contracts/lvr_amm/lib/SwapMath.sol:SwapMath:${swapMathAddr}` +
-      ` --constructor-args ${musdAddress} ${admin.address} 200 ${admin.address} ${oracleAddress}`,
+      ` --constructor-args ${musdAddress} ${oracleAddress} ${admin.address} 200 ${admin.address}`,
       { cwd: evmContractsDir, env: forgeEnv, encoding: "utf8" },
     );
     routerAddress = JSON.parse(routerOut).deployedTo as Address;
     console.log(`  AMM Router: ${routerAddress}`);
+
+    // Invalidate nonces after forge deploys
+    nonce.invalidateAll();
 
     // Approve Router for all participants
     for (const acct of [admin, mm, yesBettor, noBettor]) {
@@ -393,9 +406,8 @@ async function main() {
     console.log("  AMM approvals set");
   } catch (err: any) {
     console.log(`  AMM deploy failed (non-fatal): ${err.message?.slice(0, 80)}`);
+    nonce.invalidateAll();
   }
-  // Forge deploys bypass the nonce tracker — invalidate all cached nonces
-  nonce.invalidateAll();
 
   // ── Deploy Perps (SkillOracle + AgentPerpEngine) ──────────────────────
   let skillOracleAddress: Address | null = null;
@@ -1341,6 +1353,17 @@ async function main() {
 
     // Revert to base snapshot — resets time, nonces, balances
     await revertAndResnap();
+
+    // Refresh perps oracle timestamp (reverted to deploy-time, now stale)
+    // Industry standard: GMX/Synthetix refresh oracle feeds after each revert
+    if (skillOracleAddress) {
+      try {
+        await reporter.wallet.writeContract({
+          address: skillOracleAddress, abi: skillOracleArtifact.abi, functionName: "updateAgentSkill",
+          args: [perpAgentId, 1500, 200], nonce: await nonce(reporter.address),
+        });
+      } catch {}
+    }
   }
 
   // ── Cleanup ─────────────────────────────────────────────────────────────
