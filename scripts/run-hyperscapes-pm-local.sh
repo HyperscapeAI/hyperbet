@@ -140,6 +140,13 @@ HYPERSCAPES_UI_URL="${HYPERSCAPES_UI_URL:-${DEFAULT_STREAM_URL}}"
 HYPERBET_UI_URL="${HYPERBET_UI_URL:-http://127.0.0.1:${APP_PORT}/?debug}"
 OPEN_LOCAL_UI="${OPEN_LOCAL_UI:-true}"
 CAPTURE_LOCAL_UI_FLOW="${CAPTURE_LOCAL_UI_FLOW:-true}"
+PM_E2E_MONITOR="${PM_E2E_MONITOR:-$CAPTURE_LOCAL_UI_FLOW}"
+PM_E2E_FULL_SOAK="${PM_E2E_FULL_SOAK:-false}"
+PM_SOAK_LOCAL_DURATION_MIN="${PM_SOAK_LOCAL_DURATION_MIN:-25}"
+PM_SOAK_POLL_MS="${PM_SOAK_POLL_MS:-5000}"
+PM_E2E_HARNESS_DURATION_MIN="${PM_E2E_HARNESS_DURATION_MIN:-$PM_SOAK_LOCAL_DURATION_MIN}"
+PM_E2E_HARNESS_GAME_URL="${PM_E2E_HARNESS_GAME_URL:-${GAME_HTTP_URL}}"
+PM_E2E_HARNESS_BSC_RPC_URL="${PM_E2E_HARNESS_BSC_RPC_URL:-${LOCAL_BSC_RPC_URL}}"
 LOCAL_CORS_ORIGINS="${CORS_ORIGINS:-http://127.0.0.1:3333,http://localhost:3333,http://127.0.0.1:4179,http://localhost:4179}"
 WRITER_KEYS_READY="false"
 KEEPER_BOT_DEFAULT="true"
@@ -175,6 +182,7 @@ KEEPER_PID=""
 APP_PID=""
 CAPTURE_PID=""
 EVM_SEED_FOLLOW_PID=""
+PM_E2E_HARNESS_PID=""
 
 cleanup() {
   local exit_code=$?
@@ -213,6 +221,11 @@ cleanup() {
   if [[ -n "$EVM_SEED_FOLLOW_PID" ]] && kill -0 "$EVM_SEED_FOLLOW_PID" >/dev/null 2>&1; then
     kill "$EVM_SEED_FOLLOW_PID" >/dev/null 2>&1 || true
     wait "$EVM_SEED_FOLLOW_PID" >/dev/null 2>&1 || true
+  fi
+
+  if [[ -n "$PM_E2E_HARNESS_PID" ]] && kill -0 "$PM_E2E_HARNESS_PID" >/dev/null 2>&1; then
+    kill "$PM_E2E_HARNESS_PID" >/dev/null 2>&1 || true
+    wait "$PM_E2E_HARNESS_PID" >/dev/null 2>&1 || true
   fi
 
   exit "$exit_code"
@@ -764,7 +777,7 @@ if [[ "$OPEN_LOCAL_UI" == "true" ]]; then
   open_url "$HYPERBET_UI_URL"
 fi
 
-if [[ "$CAPTURE_LOCAL_UI_FLOW" == "true" ]]; then
+if [[ "$PM_E2E_MONITOR" == "true" ]]; then
   echo "[pm-local] starting local PM follow monitor"
   (
     cd "$ROOT"
@@ -786,9 +799,26 @@ if [[ "$CAPTURE_LOCAL_UI_FLOW" == "true" ]]; then
       PERPS_MARKETS_URL="${KEEPER_URL}/api/perps/markets" \
       PERPS_ORACLE_HISTORY_URL="${KEEPER_URL}/api/perps/oracle-history" \
       BUN_BIN="$BUN_BIN" \
-      "$NODE_BIN" --import tsx scripts/pm-soak-monitor.ts --mode=local --follow --duration-min="${PM_SOAK_LOCAL_DURATION_MIN:-25}" --poll-ms="${PM_SOAK_POLL_MS:-5000}"
+      "$NODE_BIN" --import tsx scripts/pm-soak-monitor.ts --mode=local --follow --duration-min="${PM_SOAK_LOCAL_DURATION_MIN}" --poll-ms="${PM_SOAK_POLL_MS}"
   ) &
   CAPTURE_PID=$!
+fi
+
+if [[ "$PM_E2E_FULL_SOAK" == "true" ]]; then
+  if [[ "$PM_LOCAL_EVM_MODE" != "anvil" ]]; then
+    echo "[pm-local] full e2e soak requested, but PM_LOCAL_EVM_MODE must be anvil" >&2
+    exit 1
+  fi
+
+  echo "[pm-local] starting local PM-AMM + perps harness soak"
+  (
+    cd "$ROOT"
+    "$BUN_BIN" run scripts/soak-harness.ts \
+      --duration-min="$PM_E2E_HARNESS_DURATION_MIN" \
+      --bsc-rpc="$PM_E2E_HARNESS_BSC_RPC_URL" \
+      --game-url="$PM_E2E_HARNESS_GAME_URL"
+  ) &
+  PM_E2E_HARNESS_PID=$!
 fi
 
 cat <<EOF
@@ -812,6 +842,11 @@ cat <<EOF
   - This local runner defaults to skipping Hyperscapes MUD chain bootstrap and
     running the duel server in development mode because Hyperbet consumes the
     duel telemetry API, not the sibling repo's local anvil world.
+  monitor:             ${PM_E2E_MONITOR}
+  e2e-full-soak:        ${PM_E2E_FULL_SOAK}
+  e2e-harness-duration: ${PM_E2E_HARNESS_DURATION_MIN}
+  e2e-harness-game-url: ${PM_E2E_HARNESS_GAME_URL}
+  e2e-harness-bsc-rpc:  ${PM_E2E_HARNESS_BSC_RPC_URL}
 EOF
 
 while true; do
@@ -825,6 +860,10 @@ while true; do
   fi
   if [[ -n "$APP_PID" ]] && ! kill -0 "$APP_PID" >/dev/null 2>&1; then
     wait "$APP_PID"
+    exit $?
+  fi
+  if [[ -n "$PM_E2E_HARNESS_PID" ]] && ! kill -0 "$PM_E2E_HARNESS_PID" >/dev/null 2>&1; then
+    wait "$PM_E2E_HARNESS_PID"
     exit $?
   fi
   if [[ -n "$EVM_SEED_FOLLOW_PID" ]] && ! kill -0 "$EVM_SEED_FOLLOW_PID" >/dev/null 2>&1; then
