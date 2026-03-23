@@ -149,9 +149,19 @@ The script:
 5. opens both local UIs by default:
    - Hyperscapes stream UI: `http://127.0.0.1:3333/stream.html`
    - Hyperbet EVM UI: `http://127.0.0.1:4179/?debug`
-6. starts the PM soak follow monitor in the background, which records JSON
+6. can start the PM soak follow monitor in the background, which records JSON
    state plus paired UI screenshots into:
    - `output/playwright/pm-soak/<timestamp>/`
+
+Monitor and harness controls are now explicit:
+- `PM_E2E_MONITOR=true|false` toggles `scripts/pm-soak-monitor.ts`
+- `PM_E2E_FULL_SOAK=true|false` toggles `scripts/soak-harness.ts`
+
+`PM_E2E_MONITOR` defaults to the value of `CAPTURE_LOCAL_UI_FLOW`.
+
+When you enable `PM_E2E_FULL_SOAK=true`, the runner also starts
+`scripts/soak-harness.ts` so the same local session executes an additional
+PM-AMM + perps path against local BSC and active stream cycles.
 
 The PM soak monitor records key incidences automatically:
 
@@ -199,6 +209,18 @@ HYPERSCAPES_SKIP_CHAIN_SETUP=false bash scripts/run-hyperscapes-pm-local.sh
 HYPERSCAPES_DUEL_NODE_ENV=production JWT_SECRET=... bash scripts/run-hyperscapes-pm-local.sh
 OPEN_LOCAL_UI=false bash scripts/run-hyperscapes-pm-local.sh
 CAPTURE_LOCAL_UI_FLOW=false bash scripts/run-hyperscapes-pm-local.sh
+PM_E2E_MONITOR=true \
+PM_E2E_FULL_SOAK=true \
+PM_SOAK_LOCAL_DURATION_MIN=25 \
+PM_E2E_HARNESS_DURATION_MIN=25 \
+bash scripts/run-hyperscapes-pm-local.sh
+
+# Full E2E without local monitor/UI capture:
+OPEN_LOCAL_UI=false \
+PM_E2E_MONITOR=false \
+PM_E2E_FULL_SOAK=true \
+PM_E2E_HARNESS_DURATION_MIN=25 \
+bash scripts/run-hyperscapes-pm-local.sh
 ```
 
 ## Acceptance

@@ -21,6 +21,11 @@ The local lane is the fastest way to debug the real game-to-keeper-to-UI
 integration path because it keeps Hyperscapes, the keeper service, and both UIs
 under direct operator control.
 
+For full stack coverage in a single local run, `run-hyperscapes-pm-local.sh`
+can also launch the `scripts/soak-harness.ts` workload when
+`PM_E2E_FULL_SOAK=true`, which drives PM-AMM + perps action paths on local
+BSC while the monitor checks stream/keeper synchronization.
+
 The staged lane is the authoritative betting/MM soak because it exercises the
 deployed contracts/programs and the staged writer authority without copying
 privileged reporter/operator/finalizer keys onto a laptop.
@@ -108,6 +113,30 @@ Local pass bar:
 - cycle durations stay within reasonable drift of the `185s` baseline
 - both local UIs remain reachable
 - the evidence bundle contains initial, phase-change, and final screenshots
+
+For a full e2e PM stack run (prediction markets + monitor + AMM/perps
+workload), run monitor and harness explicitly:
+
+```bash
+cd /Users/mac/Desktop/hyperbet/.claude/worktrees/blissful-golick
+PM_E2E_MONITOR=true \
+PM_SOAK_LOCAL_DURATION_MIN=25 \
+PM_E2E_FULL_SOAK=true \
+PM_E2E_HARNESS_DURATION_MIN=25 \
+OPEN_LOCAL_UI=false \
+bash scripts/run-hyperscapes-pm-local.sh
+```
+
+If you want harness-only execution (no monitor), keep `PM_E2E_MONITOR=false`:
+
+```bash
+cd /Users/mac/Desktop/hyperbet/.claude/worktrees/blissful-golick
+PM_E2E_MONITOR=false \
+PM_E2E_FULL_SOAK=true \
+PM_E2E_HARNESS_DURATION_MIN=25 \
+OPEN_LOCAL_UI=false \
+bash scripts/run-hyperscapes-pm-local.sh
+```
 
 ## Staged Lane
 
