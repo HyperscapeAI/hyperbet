@@ -1,0 +1,352 @@
+[
+  {
+    "cycle": 1,
+    "duelKey": "0x99be97a92edc21fbbc1461baacaf6e941844d035a8c374e5c2bb8620a2a6801f",
+    "startedAt": 1774242192363,
+    "endedAt": 1774242249490,
+    "phases": [
+      "FIGHTING",
+      "ANNOUNCEMENT",
+      "RESOLUTION"
+    ],
+    "clobOrders": 4,
+    "clobFills": 0,
+    "claims": 3,
+    "incidents": [],
+    "balanceSheet": {
+      "clobContractBalance": "0",
+      "totalDeposited": "10.4",
+      "totalClaimed": "0",
+      "discrepancy": "0"
+    }
+  },
+  {
+    "cycle": 2,
+    "duelKey": "0x9f2843b2931cc23c59494e8a791261a709bf9643d4a0fc6fac40ca3bc1cf89f6",
+    "startedAt": 1774242249490,
+    "endedAt": 1774242320655,
+    "phases": [
+      "COUNTDOWN",
+      "FIGHTING",
+      "RESOLUTION"
+    ],
+    "clobOrders": 4,
+    "clobFills": 0,
+    "claims": 3,
+    "incidents": [],
+    "balanceSheet": {
+      "clobContractBalance": "0",
+      "totalDeposited": "20.8",
+      "totalClaimed": "0",
+      "discrepancy": "0"
+    }
+  },
+  {
+    "cycle": 3,
+    "duelKey": "0x605197aa61b5e0df5b5c32ae83c437797bdbeae8151b6d538bbbfb0b5c5d46cc",
+    "startedAt": 1774242320655,
+    "endedAt": 1774242461912,
+    "phases": [
+      "ANNOUNCEMENT",
+      "COUNTDOWN",
+      "FIGHTING",
+      "RESOLUTION"
+    ],
+    "clobOrders": 4,
+    "clobFills": 0,
+    "claims": 3,
+    "incidents": [],
+    "balanceSheet": {
+      "clobContractBalance": "0",
+      "totalDeposited": "31.2",
+      "totalClaimed": "0",
+      "discrepancy": "0"
+    }
+  },
+  {
+    "cycle": 4,
+    "duelKey": "0x173e5f1207426524333bbf39c0277a0be46551b1a2a71a4c1f68267d2dedd503",
+    "startedAt": 1774242461912,
+    "endedAt": 1774242563133,
+    "phases": [
+      "ANNOUNCEMENT",
+      "COUNTDOWN",
+      "FIGHTING",
+      "RESOLUTION"
+    ],
+    "clobOrders": 4,
+    "clobFills": 0,
+    "claims": 3,
+    "incidents": [],
+    "balanceSheet": {
+      "clobContractBalance": "0",
+      "totalDeposited": "41.6",
+      "totalClaimed": "0",
+      "discrepancy": "0"
+    }
+  },
+  {
+    "cycle": 5,
+    "duelKey": "0x5d7f46860883fb81deca430120e3804c951da2f3804792b1d9ee0c3cca191f1e",
+    "startedAt": 1774242563133,
+    "endedAt": 1774242720412,
+    "phases": [
+      "ANNOUNCEMENT",
+      "COUNTDOWN",
+      "FIGHTING",
+      "RESOLUTION"
+    ],
+    "clobOrders": 4,
+    "clobFills": 0,
+    "claims": 3,
+    "incidents": [],
+    "balanceSheet": {
+      "clobContractBalance": "0",
+      "totalDeposited": "52",
+      "totalClaimed": "0",
+      "discrepancy": "0"
+    }
+  },
+  {
+    "cycle": 6,
+    "duelKey": "0x834c49152094783181201d3c927096869f21e4c29923e008d7c16128a9c1749b",
+    "startedAt": 1774242720412,
+    "endedAt": 1774242843701,
+    "phases": [
+      "ANNOUNCEMENT",
+      "COUNTDOWN",
+      "FIGHTING",
+      "RESOLUTION"
+    ],
+    "clobOrders": 4,
+    "clobFills": 0,
+    "claims": 3,
+    "incidents": [],
+    "balanceSheet": {
+      "clobContractBalance": "0",
+      "totalDeposited": "62.4",
+      "totalClaimed": "0",
+      "discrepancy": "0"
+    }
+  },
+  {
+    "cycle": 7,
+    "duelKey": "0x975b9474087ff43a0870aa16612fbd6dc1201d796acaefdf479fc924b72a1660",
+    "startedAt": 1774242843702,
+    "endedAt": 1774242959032,
+    "phases": [
+      "ANNOUNCEMENT",
+      "COUNTDOWN",
+      "FIGHTING",
+      "RESOLUTION"
+    ],
+    "clobOrders": 4,
+    "clobFills": 0,
+    "claims": 3,
+    "incidents": [],
+    "balanceSheet": {
+      "clobContractBalance": "0",
+      "totalDeposited": "72.8",
+      "totalClaimed": "0",
+      "discrepancy": "0"
+    }
+  },
+  {
+    "cycle": 8,
+    "duelKey": "0x347099b4a6c035fbe61a8278b119d0de224d339526edfe34dabfdafda2005966",
+    "startedAt": 1774242959032,
+    "endedAt": 1774243050236,
+    "phases": [
+      "ANNOUNCEMENT",
+      "COUNTDOWN",
+      "FIGHTING",
+      "RESOLUTION"
+    ],
+    "clobOrders": 4,
+    "clobFills": 0,
+    "claims": 3,
+    "incidents": [],
+    "balanceSheet": {
+      "clobContractBalance": "0",
+      "totalDeposited": "83.2",
+      "totalClaimed": "0",
+      "discrepancy": "0"
+    }
+  },
+  {
+    "cycle": 9,
+    "duelKey": "0x404733fce56825a93b97bf36fb2eadf56f4940218228cce8297ce9267ca637c1",
+    "startedAt": 1774243050236,
+    "endedAt": 1774243233517,
+    "phases": [
+      "ANNOUNCEMENT",
+      "COUNTDOWN",
+      "FIGHTING",
+      "RESOLUTION"
+    ],
+    "clobOrders": 4,
+    "clobFills": 0,
+    "claims": 3,
+    "incidents": [],
+    "balanceSheet": {
+      "clobContractBalance": "0",
+      "totalDeposited": "93.6",
+      "totalClaimed": "0",
+      "discrepancy": "0"
+    }
+  },
+  {
+    "cycle": 10,
+    "duelKey": "0xd8eb451dbb03d67589e26167919a08b0a6d58227cd5e4944d6a3d4dae263239e",
+    "startedAt": 1774243233517,
+    "endedAt": 1774243344762,
+    "phases": [
+      "ANNOUNCEMENT",
+      "COUNTDOWN",
+      "FIGHTING",
+      "RESOLUTION"
+    ],
+    "clobOrders": 4,
+    "clobFills": 0,
+    "claims": 3,
+    "incidents": [],
+    "balanceSheet": {
+      "clobContractBalance": "0",
+      "totalDeposited": "104",
+      "totalClaimed": "0",
+      "discrepancy": "0"
+    }
+  },
+  {
+    "cycle": 11,
+    "duelKey": "0xd01133e4edf551e67f37879c8f187e0fd360074dd9d3f6db9da524f7fc3fe224",
+    "startedAt": 1774243344763,
+    "endedAt": 1774243440015,
+    "phases": [
+      "ANNOUNCEMENT",
+      "COUNTDOWN",
+      "FIGHTING",
+      "RESOLUTION"
+    ],
+    "clobOrders": 4,
+    "clobFills": 0,
+    "claims": 3,
+    "incidents": [],
+    "balanceSheet": {
+      "clobContractBalance": "0",
+      "totalDeposited": "114.4",
+      "totalClaimed": "0",
+      "discrepancy": "0"
+    }
+  },
+  {
+    "cycle": 12,
+    "duelKey": "0x4f8453d91386b171676cd67363b1bec06792d5027ce0623d184ff1c50a48cf0c",
+    "startedAt": 1774243440015,
+    "endedAt": 1774243563270,
+    "phases": [
+      "ANNOUNCEMENT",
+      "COUNTDOWN",
+      "FIGHTING",
+      "RESOLUTION"
+    ],
+    "clobOrders": 4,
+    "clobFills": 0,
+    "claims": 3,
+    "incidents": [],
+    "balanceSheet": {
+      "clobContractBalance": "0",
+      "totalDeposited": "124.8",
+      "totalClaimed": "0",
+      "discrepancy": "0"
+    }
+  },
+  {
+    "cycle": 13,
+    "duelKey": "0xaeb997c4ca7908469b853ee610c3508cfb6391aab981ec573ca965ef434cff46",
+    "startedAt": 1774243563270,
+    "endedAt": 1774243666499,
+    "phases": [
+      "ANNOUNCEMENT",
+      "COUNTDOWN",
+      "FIGHTING",
+      "RESOLUTION"
+    ],
+    "clobOrders": 4,
+    "clobFills": 0,
+    "claims": 3,
+    "incidents": [],
+    "balanceSheet": {
+      "clobContractBalance": "0",
+      "totalDeposited": "135.2",
+      "totalClaimed": "0",
+      "discrepancy": "0"
+    }
+  },
+  {
+    "cycle": 14,
+    "duelKey": "0x124c69fe1fa8f00c2ef3a5864b203d8f15c40b6fcb5cf591f5fbe960ef037905",
+    "startedAt": 1774243666499,
+    "endedAt": 1774243767755,
+    "phases": [
+      "ANNOUNCEMENT",
+      "COUNTDOWN",
+      "FIGHTING",
+      "RESOLUTION"
+    ],
+    "clobOrders": 4,
+    "clobFills": 0,
+    "claims": 3,
+    "incidents": [],
+    "balanceSheet": {
+      "clobContractBalance": "0",
+      "totalDeposited": "145.6",
+      "totalClaimed": "0",
+      "discrepancy": "0"
+    }
+  },
+  {
+    "cycle": 15,
+    "duelKey": "0x85642f6dccef6f55cd4e6420a981c1ddc1dbf9918c6fedc94e35bf0d3113c0fc",
+    "startedAt": 1774243767756,
+    "endedAt": 1774243895042,
+    "phases": [
+      "ANNOUNCEMENT",
+      "COUNTDOWN",
+      "FIGHTING",
+      "RESOLUTION"
+    ],
+    "clobOrders": 4,
+    "clobFills": 0,
+    "claims": 3,
+    "incidents": [],
+    "balanceSheet": {
+      "clobContractBalance": "0",
+      "totalDeposited": "156",
+      "totalClaimed": "0",
+      "discrepancy": "0"
+    }
+  },
+  {
+    "cycle": 16,
+    "duelKey": "0x94744c2e65e909281c7c34306492a52be7bd45b88b76cb30909427c16f284f12",
+    "startedAt": 1774243895042,
+    "endedAt": 1774244000290,
+    "phases": [
+      "ANNOUNCEMENT",
+      "COUNTDOWN",
+      "FIGHTING",
+      "RESOLUTION"
+    ],
+    "clobOrders": 4,
+    "clobFills": 0,
+    "claims": 3,
+    "incidents": [],
+    "balanceSheet": {
+      "clobContractBalance": "0",
+      "totalDeposited": "166.4",
+      "totalClaimed": "0",
+      "discrepancy": "0"
+    }
+  }
+]
