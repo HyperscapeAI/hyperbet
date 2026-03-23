@@ -47,3 +47,4 @@ __pycache__/
 poetry.lock
 packages/market-maker-bot/simulations/
 docs/plans/
+output/
