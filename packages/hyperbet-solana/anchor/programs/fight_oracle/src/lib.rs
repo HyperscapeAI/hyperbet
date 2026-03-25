@@ -206,6 +206,7 @@ pub mod fight_oracle {
         metadata_uri: String,
     ) -> Result<()> {
         require!(!ctx.accounts.oracle_config.paused, ErrorCode::OraclePaused);
+        require!(metadata_uri.len() <= 200, ErrorCode::MetadataUriTooLong);
         let duel_state = &mut ctx.accounts.duel_state;
         require!(
             duel_state.status != DuelStatus::Resolved && duel_state.status != DuelStatus::Cancelled,
@@ -232,6 +233,7 @@ pub mod fight_oracle {
         metadata_uri: String,
     ) -> Result<()> {
         require!(!ctx.accounts.oracle_config.paused, ErrorCode::OraclePaused);
+        require!(metadata_uri.len() <= 200, ErrorCode::MetadataUriTooLong);
         require!(
             winner == MarketSide::A || winner == MarketSide::B,
             ErrorCode::InvalidWinner
@@ -290,6 +292,7 @@ pub mod fight_oracle {
         metadata_uri: String,
     ) -> Result<()> {
         require!(!ctx.accounts.oracle_config.paused, ErrorCode::OraclePaused);
+        require!(metadata_uri.len() <= 200, ErrorCode::MetadataUriTooLong);
         let duel_state = &mut ctx.accounts.duel_state;
         let oracle_config = &ctx.accounts.oracle_config;
         require!(
@@ -329,6 +332,7 @@ pub mod fight_oracle {
         metadata_uri: String,
     ) -> Result<()> {
         require!(!ctx.accounts.oracle_config.paused, ErrorCode::OraclePaused);
+        require!(metadata_uri.len() <= 200, ErrorCode::MetadataUriTooLong);
         let duel_state = &mut ctx.accounts.duel_state;
         require!(
             duel_state.status == DuelStatus::Challenged,
@@ -389,6 +393,7 @@ pub mod fight_oracle {
         metadata_uri: String,
     ) -> Result<()> {
         require!(!ctx.accounts.oracle_config.paused, ErrorCode::OraclePaused);
+        require!(metadata_uri.len() <= 200, ErrorCode::MetadataUriTooLong);
         let duel_state = &mut ctx.accounts.duel_state;
         let oracle_config = &ctx.accounts.oracle_config;
         require!(

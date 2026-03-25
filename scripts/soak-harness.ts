@@ -5,6 +5,7 @@
  * duel cycle against local Anvil chains + live Hyperscapes game server.
  *
  * Usage:
+ *   anvil --port 18545 --chain-id 97 --block-time 1 --accounts 20 --balance 10000 --code-size-limit 49152
  *   bun run scripts/soak-harness.ts --duration-min=30 --bsc-rpc=http://localhost:18545
  */
 import { createHash } from "node:crypto";
@@ -247,6 +248,19 @@ async function main() {
     return result;
   }
 
+  // Manual receipt polling — bypasses viem's watchBlockNumber which breaks after evm_revert
+  // (viem's prevBlockNumber watermark doesn't reset when block numbers go backward)
+  async function waitReceipt(hash: Hash, retries = 100, delay = 200): Promise<TransactionReceipt> {
+    for (let i = 0; i < retries; i++) {
+      try {
+        return await pub.getTransactionReceipt({ hash });
+      } catch {
+        await new Promise(r => setTimeout(r, delay));
+      }
+    }
+    throw new Error(`Receipt not found for ${hash} after ${retries} retries`);
+  }
+
   function logEvent(evt: SoakEvent) {
     eventsStream.write(JSON.stringify(evt, (_, v) => typeof v === "bigint" ? v.toString() : v) + "\n");
     const status = evt.success ? "✓" : "✗";
@@ -297,7 +311,7 @@ async function main() {
       args,
       nonce: await nonce(admin.address),
     });
-    const receipt = await pub.waitForTransactionReceipt({ hash });
+    const receipt = await waitReceipt(hash);
     if (!receipt.contractAddress) throw new Error("Deploy failed: no address");
     console.log(`  Deployed ${receipt.contractAddress} (${receipt.gasUsed} gas)`);
     return receipt.contractAddress;
@@ -351,7 +365,7 @@ async function main() {
       abi: mockUsdArtifact.abi, bytecode: resolveBytecode(mockUsdArtifact), args: [],
       nonce: await nonce(admin.address),
     });
-    const musdReceipt = await pub.waitForTransactionReceipt({ hash: musdHash });
+    const musdReceipt = await waitReceipt(musdHash);
     musdAddress = musdReceipt.contractAddress!;
     console.log(`  AMM MockUSD: ${musdAddress}`);
 
@@ -420,7 +434,7 @@ async function main() {
       abi: mockErc20Artifact.abi, bytecode: resolveBytecode(mockErc20Artifact), args: ["Mock Margin", "MARGIN"],
       nonce: await nonce(admin.address),
     });
-    const marginReceipt = await pub.waitForTransactionReceipt({ hash: marginHash });
+    const marginReceipt = await waitReceipt(marginHash);
     perpMarginAddress = marginReceipt.contractAddress!;
 
     // SkillOracle
@@ -429,7 +443,7 @@ async function main() {
       args: [parseUnits("1", 18), 120, admin.address, reporter.address, admin.address], // basePrice, maxDelay, admin, reporter, pauser
       nonce: await nonce(admin.address),
     });
-    const soReceipt = await pub.waitForTransactionReceipt({ hash: soHash });
+    const soReceipt = await waitReceipt(soHash);
     skillOracleAddress = soReceipt.contractAddress!;
     console.log(`  Perps SkillOracle: ${skillOracleAddress}`);
 
@@ -439,7 +453,7 @@ async function main() {
       args: [skillOracleAddress, perpMarginAddress, parseUnits("1000000", 18), admin.address, admin.address, admin.address],
       nonce: await nonce(admin.address),
     });
-    const peReceipt = await pub.waitForTransactionReceipt({ hash: peHash });
+    const peReceipt = await waitReceipt(peHash);
     perpEngineAddress = peReceipt.contractAddress!;
     console.log(`  Perps Engine: ${perpEngineAddress}`);
 
@@ -656,7 +670,7 @@ async function main() {
         gas: 500_000n,
         nonce: await nonce(reporter.address),
       });
-      await pub.waitForTransactionReceipt({ hash: upsertHash });
+      await waitReceipt(upsertHash);
       logEvent({
         cycle: cycleNum, phase: currentPhase, timestamp: Date.now(),
         actor: "reporter", action: "upsertDuel", txHash: upsertHash,
@@ -672,7 +686,7 @@ async function main() {
         args: [duelKey, MARKET_KIND],
         nonce: await nonce(admin.address),
       });
-      await pub.waitForTransactionReceipt({ hash: createMktHash });
+      await waitReceipt(createMktHash);
       logEvent({
         cycle: cycleNum, phase: currentPhase, timestamp: Date.now(),
         actor: "admin", action: "createMarketForDuel", txHash: createMktHash,
@@ -733,7 +747,7 @@ async function main() {
           nonce: await nonce(address),
         });
         const receipt = await timedRpc(pub, `placeOrder.${actor}`, () =>
-          pub.waitForTransactionReceipt({ hash }));
+          waitReceipt(hash));
         clobOrders++;
         totalDeposited += cost + fee + fee;
 
@@ -782,12 +796,14 @@ async function main() {
     if (routerAddress && musdAddress) {
       try {
         // Create AMM market for this duel
+        // Router.create(title, description, resolutionSource, duelKey, isDynamic, duration, collateralIn)
+        // Use static market (isDynamic=false) to avoid ZScoreOutOfBounds from liquidity decay
         const createHash = await admin.wallet.writeContract({
           address: routerAddress, abi: routerArtifact.abi, functionName: "create",
-          args: [`soak-amm-${cycleNum}`, `AMM cycle ${cycleNum}`, betCloseTs, parseUnits("100", 18), true],
+          args: [`soak-amm-${cycleNum}`, `AMM cycle ${cycleNum}`, "soak-harness", duelKey, false, 3600n, parseUnits("1000", 18)],
           nonce: await nonce(admin.address),
         });
-        const createReceipt = await pub.waitForTransactionReceipt({ hash: createHash });
+        const createReceipt = await waitReceipt(createHash);
         saveReceipt(evidenceDir, cycleNum, "admin", "amm-create", createReceipt);
 
         // Get the market address from Router.getAllMarkets()
@@ -796,29 +812,35 @@ async function main() {
         }) as Address[];
         const ammMarketAddr = allMarkets[allMarkets.length - 1];
 
-        // YES bettor buys YES
+        // YES bettor buys YES (small relative to 1000 mUSD liquidity to avoid z-score overflow)
         const buyYesHash = await yesBettor.wallet.writeContract({
           address: routerAddress, abi: routerArtifact.abi, functionName: "buyYes",
-          args: [ammMarketAddr, parseUnits("10", 18), 0n], nonce: await nonce(yesBettor.address),
+          args: [ammMarketAddr, parseUnits("5", 18), 0n], nonce: await nonce(yesBettor.address),
         });
-        const buyYesReceipt = await pub.waitForTransactionReceipt({ hash: buyYesHash });
+        const buyYesReceipt = await waitReceipt(buyYesHash);
         saveReceipt(evidenceDir, cycleNum, "yesBettor", "amm-buyYes", buyYesReceipt);
         logEvent({ cycle: cycleNum, phase: "AMM", timestamp: Date.now(), actor: "yesBettor",
           action: "amm.buyYes", txHash: buyYesHash, gasUsed: Number(buyYesReceipt.gasUsed),
           blockNumber: Number(buyYesReceipt.blockNumber), success: true, error: null, details: {} });
 
-        // NO bettor buys NO
-        const buyNoHash = await noBettor.wallet.writeContract({
-          address: routerAddress, abi: routerArtifact.abi, functionName: "buyNo",
-          args: [ammMarketAddr, parseUnits("10", 18), 0n], nonce: await nonce(noBettor.address),
-        });
-        const buyNoReceipt = await pub.waitForTransactionReceipt({ hash: buyNoHash });
-        saveReceipt(evidenceDir, cycleNum, "noBettor", "amm-buyNo", buyNoReceipt);
-        logEvent({ cycle: cycleNum, phase: "AMM", timestamp: Date.now(), actor: "noBettor",
-          action: "amm.buyNo", txHash: buyNoHash, gasUsed: Number(buyNoReceipt.gasUsed),
-          blockNumber: Number(buyNoReceipt.blockNumber), success: true, error: null, details: {} });
+        // NO bettor buys NO (small relative to 1000 mUSD liquidity to avoid z-score overflow)
+        try {
+          const buyNoHash = await noBettor.wallet.writeContract({
+            address: routerAddress, abi: routerArtifact.abi, functionName: "buyNo",
+            args: [ammMarketAddr, parseUnits("5", 18), 0n], nonce: await nonce(noBettor.address),
+          });
+          const buyNoReceipt = await waitReceipt(buyNoHash);
+          saveReceipt(evidenceDir, cycleNum, "noBettor", "amm-buyNo", buyNoReceipt);
+          logEvent({ cycle: cycleNum, phase: "AMM", timestamp: Date.now(), actor: "noBettor",
+            action: "amm.buyNo", txHash: buyNoHash, gasUsed: Number(buyNoReceipt.gasUsed),
+            blockNumber: Number(buyNoReceipt.blockNumber), success: true, error: null, details: {} });
+        } catch (buyNoErr: any) {
+          logEvent({ cycle: cycleNum, phase: "AMM", timestamp: Date.now(), actor: "noBettor",
+            action: "amm.buyNo", txHash: null, gasUsed: 0, blockNumber: 0,
+            success: false, error: buyNoErr.message?.slice(0, 150), details: {} });
+        }
 
-        // Snapshot AMM reserves
+        // Snapshot AMM reserves (always, even if buyNo failed)
         const details = await pub.readContract({
           address: ammMarketAddr, abi: lvrMarketArtifact.abi, functionName: "getMarketDetails",
         }) as any[];
@@ -843,7 +865,7 @@ async function main() {
           args: [perpAgentId, parseUnits("100", 18), parseUnits("5", 18)], // 100 margin, 5 size
           nonce: await nonce(perpsLong.address),
         });
-        const longReceipt = await pub.waitForTransactionReceipt({ hash: longHash });
+        const longReceipt = await waitReceipt(longHash);
         saveReceipt(evidenceDir, cycleNum, "perpsLong", "modifyPosition-open", longReceipt);
         logEvent({ cycle: cycleNum, phase: "PERPS", timestamp: Date.now(), actor: "perpsLong",
           action: "perps.openLong", txHash: longHash, gasUsed: Number(longReceipt.gasUsed),
@@ -855,7 +877,7 @@ async function main() {
           args: [perpAgentId, parseUnits("100", 18), parseUnits("-5", 18)], // 100 margin, -5 size (short)
           nonce: await nonce(perpsShort.address),
         });
-        const shortReceipt = await pub.waitForTransactionReceipt({ hash: shortHash });
+        const shortReceipt = await waitReceipt(shortHash);
         saveReceipt(evidenceDir, cycleNum, "perpsShort", "modifyPosition-open", shortReceipt);
         logEvent({ cycle: cycleNum, phase: "PERPS", timestamp: Date.now(), actor: "perpsShort",
           action: "perps.openShort", txHash: shortHash, gasUsed: Number(shortReceipt.gasUsed),
@@ -867,7 +889,7 @@ async function main() {
           args: [perpAgentId, 0n, parseUnits("-5", 18)], // close long
           nonce: await nonce(perpsLong.address),
         });
-        await pub.waitForTransactionReceipt({ hash: closeLongHash });
+        await waitReceipt(closeLongHash);
         logEvent({ cycle: cycleNum, phase: "PERPS", timestamp: Date.now(), actor: "perpsLong",
           action: "perps.closeLong", txHash: closeLongHash, gasUsed: 0, blockNumber: 0,
           success: true, error: null, details: {} });
@@ -877,7 +899,7 @@ async function main() {
           args: [perpAgentId, 0n, parseUnits("5", 18)], // close short
           nonce: await nonce(perpsShort.address),
         });
-        await pub.waitForTransactionReceipt({ hash: closeShortHash });
+        await waitReceipt(closeShortHash);
         logEvent({ cycle: cycleNum, phase: "PERPS", timestamp: Date.now(), actor: "perpsShort",
           action: "perps.closeShort", txHash: closeShortHash, gasUsed: 0, blockNumber: 0,
           success: true, error: null, details: {} });
@@ -927,7 +949,7 @@ async function main() {
     const treasuryBalBefore = await pub.getBalance({ address: admin.address });
     const mmBalBefore = await pub.getBalance({ address: mm.address });
 
-    // ── Phase 2b: Warp past bet close window (absolute timestamp) ─────
+    // ── Phase 2b: Warp past bet close window (absolute) ───────────────
 
     try {
       await fetch(config.bscRpc, {
@@ -1017,7 +1039,7 @@ async function main() {
         gas: 500_000n,
         nonce: await nonce(reporter.address),
       });
-      const lockReceipt = await pub.waitForTransactionReceipt({ hash: lockHash });
+      const lockReceipt = await waitReceipt(lockHash);
       if (lockReceipt.status !== "success") {
         incident(`lockDuel tx reverted`, cycleNum);
         cycleIncidents.push("lock_reverted");
@@ -1052,7 +1074,7 @@ async function main() {
         gas: 500_000n,
         nonce: await nonce(reporter.address),
       });
-      await pub.waitForTransactionReceipt({ hash: proposeHash });
+      await waitReceipt(proposeHash);
       logEvent({
         cycle: cycleNum, phase: "SETTLEMENT", timestamp: Date.now(),
         actor: "reporter", action: "proposeResult",
@@ -1065,7 +1087,7 @@ async function main() {
       cycleIncidents.push("propose_failed");
     }
 
-    // Warp past dispute window (absolute — proposedAt is from the block where proposeResult mined)
+    // Warp past dispute window (absolute — read proposedAt from latest block)
     const postProposeBlock = await pub.getBlock({ blockTag: "latest" });
     const proposedAt = Number(postProposeBlock.timestamp);
     try {
@@ -1091,7 +1113,7 @@ async function main() {
         gas: 500_000n,
         nonce: await nonce(reporter.address),
       });
-      const finalizeReceipt = await pub.waitForTransactionReceipt({ hash: finalizeHash });
+      const finalizeReceipt = await waitReceipt(finalizeHash);
       const finalizeOk = finalizeReceipt.status === "success";
       logEvent({
         cycle: cycleNum, phase: "SETTLEMENT", timestamp: Date.now(),
@@ -1140,7 +1162,7 @@ async function main() {
         args: [duelKey, MARKET_KIND],
         nonce: await nonce(admin.address),
       });
-      await pub.waitForTransactionReceipt({ hash: syncHash });
+      await waitReceipt(syncHash);
       logEvent({
         cycle: cycleNum, phase: "CLAIM", timestamp: Date.now(),
         actor: "admin", action: "syncMarketFromOracle",
@@ -1173,7 +1195,7 @@ async function main() {
           nonce: await nonce(address),
         });
         const receipt = await timedRpc(pub, `claim.${label}`, () =>
-          pub.waitForTransactionReceipt({ hash: claimHash }));
+          waitReceipt(claimHash));
         const balAfter = await pub.getBalance({ address });
         const gasCost = receipt.gasUsed * (receipt.effectiveGasPrice ?? 0n);
         const payout = balAfter - balBefore + gasCost;
@@ -1238,7 +1260,7 @@ async function main() {
           gas: 200_000n, nonce: liqNonce,
         });
         // Tx was sent — check receipt for revert
-        const negReceipt = await pub.waitForTransactionReceipt({ hash: negHash });
+        const negReceipt = await waitReceipt(negHash);
         if (negReceipt.status === "reverted") {
           negSettlePass = true;
           saveNegativeTest(evidenceDir, cycleNum, "unauthorizedSettle", {
