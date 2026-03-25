@@ -895,7 +895,16 @@ contract GoldClob is AccessControl, ReentrancyGuard {
         return market.bestBid > 0 && market.bestBid >= price;
     }
 
-    // L-2: Accepts ETH for market vault operations. Bare transfers without
-    // placeOrder context are unrecoverable — consider adding a sweep function.
+    // L-2: Accepts ETH for market vault operations.
     receive() external payable {}
+
+    event SweepETH(address indexed to, uint256 amount);
+
+    function sweepETH(address payable to) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        uint256 bal = address(this).balance;
+        require(bal > 0, "NothingToSweep");
+        (bool ok, ) = to.call{value: bal}("");
+        require(ok, "TransferFailed");
+        emit SweepETH(to, bal);
+    }
 }

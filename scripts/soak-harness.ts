@@ -485,7 +485,7 @@ async function main() {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ jsonrpc: "2.0", method: "evm_snapshot", params: [], id: 999 }),
   });
-  const baseSnapshotId = (await baseSnapshotRes.json() as any).result;
+  let baseSnapshotId = (await baseSnapshotRes.json() as any).result;
   console.log(`  Base snapshot: ${baseSnapshotId}`);
 
   async function revertAndResnap(): Promise<void> {
@@ -500,10 +500,9 @@ async function main() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ jsonrpc: "2.0", method: "evm_snapshot", params: [], id: 1001 }),
     });
-    const newId = (await resnap.json() as any).result;
+    baseSnapshotId = (await resnap.json() as any).result;
     // Invalidate all cached nonces since state reverted
     nonce.invalidateAll();
-    return;
   }
 
   // ── SSE stream consumer ─────────────────────────────────────────────────
@@ -1179,6 +1178,7 @@ async function main() {
         const gasCost = receipt.gasUsed * (receipt.effectiveGasPrice ?? 0n);
         const payout = balAfter - balBefore + gasCost;
         claimPayouts[label] = payout;
+        totalClaimed += payout;
         claimsExecuted++;
 
         saveReceipt(evidenceDir, cycleNum, label, "claim", receipt);
@@ -1341,7 +1341,7 @@ async function main() {
         clobContractBalance: formatUnits(clobBalance, 18),
         totalDeposited: formatUnits(totalDeposited, 18),
         totalClaimed: formatUnits(totalClaimed, 18),
-        discrepancy: "0",
+        discrepancy: formatUnits(clobBalance - (totalDeposited - totalClaimed), 18),
       },
     };
     cycles.push(cycleSummary);
