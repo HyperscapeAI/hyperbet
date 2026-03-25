@@ -597,12 +597,6 @@ let betSyncReplayMode: BetSyncReplayMode =
   (betSyncCheckpoint.lastAppliedSeq > 0 ? "live" : "bootstrap");
 let betSyncReplayUntilSeq: number | null = null;
 
-if (!predictionMarketsOverview) {
-  persistPredictionMarketsOverview(
-    derivePredictionMarketsOverview(loadKeeperBotHealthSnapshot(), streamState, null),
-  );
-}
-
 const parsers: {
   solana: ParserState;
   bsc: ParserState;
@@ -629,6 +623,12 @@ const parsers: {
     snapshot: null,
   },
 };
+
+if (!predictionMarketsOverview) {
+  persistPredictionMarketsOverview(
+    derivePredictionMarketsOverview(loadKeeperBotHealthSnapshot(), streamState, null),
+  );
+}
 
 const bscRpcUrl = (
   process.env.BSC_RPC_URL ||
