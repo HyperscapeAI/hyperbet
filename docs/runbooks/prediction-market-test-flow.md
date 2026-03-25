@@ -1,7 +1,9 @@
 # Prediction-Market Test Flow
 
+> **TL;DR:** The correct phase-1 test model is hybrid. Use local Hyperscapes plus local keeper and UI for fast debugging, but treat `Solana devnet`, `BSC testnet`, and `AVAX Fuji` as the canonical non-mainnet contract and program surfaces. Final signoff is full-product staged proof plus soak for `PM`, `perps`, and internal `AMM`, not PM-only screenshots.
+
 This runbook defines the correct testing strategy for the current
-`Hyperscapes -> Hyperbet -> deployed testnet contracts` stack.
+`Hyperscapes -> Hyperbet -> deployed non-mainnet contracts and programs` stack.
 
 The short answer is:
 
@@ -122,7 +124,7 @@ Use this lane for release evidence, not for first-pass debugging.
 
 Components:
 
-- deployed testnet PM contracts/programs
+- deployed testnet PM, AMM, and perps contracts/programs
 - staged or workflow-driven deployment/verification
 - staged keeper/game wiring or GH-held privileged execution
 
@@ -130,13 +132,13 @@ Use when:
 
 - producing Stage A evidence
 - proving deployment and governance state
-- proving launch-critical flows end to end
+- proving launch-critical `pm`, `perps`, and `amm` flows end to end
 - collecting screenshots, tx hashes, verification receipts, and final signoff
 
 Primary docs:
 
-- [PM Launch Execution Plan](/Users/mac/Desktop/hyperbet/.claude/worktrees/blissful-golick/docs/release/pm-launch-execution-plan.md)
-- [Testnet Operations Ledger](/Users/mac/Desktop/hyperbet/.claude/worktrees/blissful-golick/docs/release/testnet-operations-ledger.md)
+- [PM Launch Execution Plan](../release/pm-launch-execution-plan.md)
+- [Testnet Operations Ledger](../release/testnet-operations-ledger.md)
 
 ## Recommended Order
 
@@ -156,7 +158,7 @@ For this repo, the standard decision should be:
 - **Canonical chain truth:** deployed BSC Testnet, AVAX Fuji, Solana devnet
 - **Canonical engineering integration:** local Hyperscapes + local Hyperbet
   keeper/UI over that testnet truth
-- **Canonical release signoff:** staged/deployed full-stack testnet lane
+- **Canonical release signoff:** staged full-product proof and soak lane
 
 ## Practical Rule
 

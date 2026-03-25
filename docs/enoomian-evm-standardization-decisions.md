@@ -1,5 +1,7 @@
 # Enoomian EVM Standardization Decisions
 
+> **TL;DR:** Historical decision log for the `enoomian/prediction-market-sprint-base` EVM standardization work. Status: closed. Useful as architecture history, but not the current branch or launch authority. Current release truth lives in the launch execution plan, freeze tracker, and chain registry.
+
 This document records the authoritative keep/adapt/reject decisions for the
 `hyperbet-evm-parity-sweep` assimilation work as it has been standardized onto
 the local `enoomian/prediction-market-sprint-base`.

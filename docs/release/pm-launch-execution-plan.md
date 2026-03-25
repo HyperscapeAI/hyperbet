@@ -1,6 +1,6 @@
 # PM Launch Execution Plan
 
-> **TL;DR:** Testnet-first, mainnet-is-ceremony model. Phase 0 proves everything on testnets with exhaustive integration, scenario, and simulation evidence — mainnet is a mechanical replay. Phase 1 hardens AMM on the frozen PM base. Phase 2 integrates AMM with the PM stack. PR #19 is excluded from the launch-critical merge train.
+> **TL;DR:** Phase-1 launch scope is `Solana + BSC + AVAX`, with user-facing `PM/CLOB duels` and `perps/models`, plus `AMM` as an internal market-maker/liquidity engine. Testnet/staging still prove the system first, but the active implementation train is now a single branch on `audit/develop-pm-hardening`, not a multi-branch PM-only merge tree.
 
 ---
 
@@ -9,13 +9,10 @@
 ```
 main
   └── develop
-        └── enoomian/pm16-17-20-21 (convergence, PR #27 → develop)
-              └── release/pm-gates-closeout (Phase 0)
-                    ├── feature/pm-amm-hardening-v1 (Phase 1, after Phase 0 merges)
-                    └── feature/pm-amm-integration-v1 (Phase 2, after Phase 1 merges)
+        └── audit/develop-pm-hardening
 ```
 
-**PR #19 (`feat/amm-swap-fees`)** stays open as reference. Do NOT merge into any launch-critical branch.
+`audit/develop-pm-hardening` is the only active implementation branch for launch-critical closeout work. Do not split remaining launch scope across side branches unless a later release explicitly chooses to do that again.
 
 ---
 
@@ -27,9 +24,9 @@ Every deployment, governance action, integration test, and scenario simulation i
 
 ## Phase 0 — Get PM Gates True
 
-**Branch:** `release/pm-gates-closeout`
-**Parent:** `enoomian/pm16-17-20-21` (after PR #27 merges to develop)
-**Goal:** Prove the entire deployment, governance, and integration pipeline on testnets. Capture exhaustive evidence. Make mainnet deployment a mechanical ceremony.
+**Branch:** `audit/develop-pm-hardening`
+**Parent:** `develop`
+**Goal:** Prove the entire phase-1 deployment, governance, and integration pipeline on staging/testnets for PM + AMM + perps. Capture exhaustive evidence. Make mainnet deployment a mechanical ceremony.
 
 ### Stage A — Testnet Proving Ground (Engineering)
 
@@ -37,22 +34,26 @@ Everything in Stage A is executed by engineering on testnets with test funds. No
 
 #### WS 0.1A — Testnet Deployment
 
-- [ ] Materialize the Stage A deploy env from [`testnet-operations-ledger.md`](/Users/mac/Desktop/hyperbet/.claude/worktrees/blissful-golick/docs/release/testnet-operations-ledger.md) through [`scripts/export-stage-a-env.sh`](/Users/mac/Desktop/hyperbet/.claude/worktrees/blissful-golick/scripts/export-stage-a-env.sh) before running testnet deployment workflows; while the workflow remains branch-only, Stage A is kicked by push on `enoomian/pm16-17-20-21`
+- [ ] Materialize the Stage A deploy env from [`testnet-operations-ledger.md`](testnet-operations-ledger.md) through [`scripts/export-stage-a-env.sh`](../../scripts/export-stage-a-env.sh) before running `bun run stagea:local` or the GitHub non-mainnet workflows
 - [ ] Deploy `TimelockController` on BSC Testnet
 - [ ] Deploy `TimelockController` on AVAX Fuji
 - [ ] Deploy Safe multisig (3-of-3) on BSC Testnet
 - [ ] Deploy Safe multisig (3-of-3) on AVAX Fuji
 - [ ] Deploy v3 PM contracts via CREATE2 with timelock as admin on BSC Testnet
 - [ ] Deploy v3 PM contracts via CREATE2 with timelock as admin on AVAX Fuji
+- [ ] Deploy AMM router + frozen fee config on BSC Testnet
+- [ ] Deploy AMM router + frozen fee config on AVAX Fuji
+- [ ] Deploy perps `SkillOracle` + `AgentPerpEngine` on BSC Testnet
+- [ ] Deploy perps `SkillOracle` + `AgentPerpEngine` on AVAX Fuji
 - [ ] Verify CREATE2 addresses are identical across both EVM testnets
-- [ ] Deploy Solana PM programs on devnet (`fight_oracle` + `gold_clob_market`; perps excluded from Stage A)
-- [ ] Initialize Solana PM oracle + market config on devnet
+- [ ] Deploy Solana launch programs on devnet (`fight_oracle` + `gold_clob_market` + `lvr_amm` + `gold_perps_market`)
+- [ ] Initialize Solana oracle + CLOB + AMM + perps config on devnet
 - [ ] Transfer Solana devnet upgrade authority to test multisig
 - [ ] Execute `freeze_oracle_config` on Solana devnet
-- [ ] Execute `freeze_config` on Solana devnet
+- [ ] Execute `freeze_config` on Solana devnet for PM, AMM, and perps
 - [ ] Record all testnet tx hashes in evidence bundle
 
-**Acceptance:** Both EVM testnets (BSC + AVAX) + Solana devnet deployed for PM scope. Base is out of scope for this Stage A lane.
+**Acceptance:** Both EVM testnets (BSC + AVAX) + Solana devnet deployed for full phase-1 scope. Base is out of scope for this Stage A lane.
 
 #### WS 0.2A — Testnet Registry Population
 
@@ -70,7 +71,7 @@ Everything in Stage A is executed by engineering on testnets with test funds. No
 
 Build a script that validates a deployment is correct. Run it on testnet. Run it again on mainnet later.
 
-- [ ] Create [`packages/evm-contracts/scripts/verify-deployment.ts`](/Users/mac/Desktop/hyperbet/.claude/worktrees/blissful-golick/packages/evm-contracts/scripts/verify-deployment.ts) that takes a chain config and checks:
+- [ ] Use and extend [`packages/evm-contracts/scripts/verify-deployment.ts`](../../packages/evm-contracts/scripts/verify-deployment.ts) so it takes a chain config and checks:
   - [ ] Contracts deployed at expected CREATE2 addresses (`getCode` != `0x`)
   - [ ] Oracle constructor args match: admin, reporter, finalizer, challenger, pauser, disputeWindow
   - [ ] CLOB constructor args match: admin, operator, oracle, treasury, marketMaker, pauser
@@ -80,7 +81,7 @@ Build a script that validates a deployment is correct. Run it on testnet. Run it
   - [ ] Timelock is `DEFAULT_ADMIN_ROLE` holder
   - [ ] Fee config matches expected snapshot values
   - [ ] Dispute window == 3600 (or expected value)
-- [ ] Create [`packages/hyperbet-solana/scripts/verify-deployment.ts`](/Users/mac/Desktop/hyperbet/.claude/worktrees/blissful-golick/packages/hyperbet-solana/scripts/verify-deployment.ts) that checks:
+- [ ] Use and extend [`packages/hyperbet-solana/scripts/verify-deployment.ts`](../../packages/hyperbet-solana/scripts/verify-deployment.ts) so it checks:
   - [ ] Program deployed at expected address
   - [ ] OracleConfig authority matches expected pubkey
   - [ ] OracleConfig `config_frozen == true`

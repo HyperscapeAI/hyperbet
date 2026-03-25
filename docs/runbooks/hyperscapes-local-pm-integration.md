@@ -1,5 +1,7 @@
 # Hyperscapes Local PM Integration
 
+> **TL;DR:** This is the fastest local debug lane for the real `Hyperscapes -> Hyperbet` integration. It uses local Hyperscapes plus local keeper and UI, and it can optionally drive local BSC and AVAX write paths with anvil-backed deployments. It is not the final signoff lane; release signoff still comes from staged proof and soak.
+
 This is the local integration path for prediction markets against the real
 Hyperscapes duel stack. It does **not** seed synthetic markets and it does
 **not** treat the game server as the Hyperbet API.
@@ -106,9 +108,9 @@ There are two separate wallet classes:
    - used by the UI for order placement and claims
    - private keys stay local under `keys/local-smoke/`
    - public addresses are tracked in
-     [local-smoke-wallets.json](/Users/mac/Desktop/hyperbet/.claude/worktrees/blissful-golick/docs/release/evidence/local-smoke-wallets.json)
+     [local-smoke-wallets.json](../release/evidence/local-smoke-wallets.json)
    - GitHub can fund them through
-     [fund-local-smoke-wallets.yml](/Users/mac/Desktop/hyperbet/.claude/worktrees/blissful-golick/.github/workflows/fund-local-smoke-wallets.yml)
+     [fund-local-smoke-wallets.yml](../../.github/workflows/fund-local-smoke-wallets.yml)
 
 2. Keeper writer wallets
    - required for deployed testnet market automation
@@ -176,10 +178,10 @@ The PM soak monitor records key incidences automatically:
 
 The runner auto-loads these gitignored local env files when present:
 
-- `/Users/mac/Desktop/hyperbet/.claude/worktrees/blissful-golick/.env.stage-a.testnet.local`
-- `/Users/mac/Desktop/hyperbet/.claude/worktrees/blissful-golick/.env.testnet.local`
-- `/Users/mac/Desktop/hyperbet/.claude/worktrees/blissful-golick/packages/hyperbet-evm/keeper/.env`
-- `/Users/mac/Desktop/hyperbet/.claude/worktrees/blissful-golick/packages/hyperbet-evm/app/.env.local`
+- `<repo-root>/.env.stage-a.testnet.local`
+- `<repo-root>/.env.testnet.local`
+- `<repo-root>/packages/hyperbet-evm/keeper/.env`
+- `<repo-root>/packages/hyperbet-evm/app/.env.local`
 
 Relevant writer env names:
 

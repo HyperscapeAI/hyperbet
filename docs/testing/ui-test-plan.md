@@ -1,12 +1,16 @@
 # Prediction Market — UI Test Plan
 
-Manual tests for QA testers. Each test must be performed in a browser against a running local stack.
+> **TL;DR:** This manual UI checklist is supplemental QA coverage. It is not the only launch-signoff artifact. The current phase-1 signoff model combines this manual UI work with staged proof, soak, `verify-chains`, and deterministic AMM/perps gates. Remaining skipped UI-only cases are treated as replaced coverage, not as “zero skipped UI tests.”
+
+Manual tests for QA testers. Each test must be performed in a browser against a
+running local stack.
 
 ## Setup
 
 1. Start Hyperscapes: game server on `localhost:5555`, client on `localhost:3333`
 2. Start Anvil: `anvil --port 18545 --chain-id 97 --block-time 2 --accounts 20 --balance 10000`
-3. Run soak harness (seeds contracts + places bets): `bun run scripts/soak-harness.ts --duration-min=5`
+3. Run soak harness (seeds contracts and exercises PM, AMM, and perps paths):
+   `bun run pm:soak:harness -- --duration-min=5`
 4. Start keeper: set `GAME_URL=http://localhost:5555`, `BSC_RPC_URL=http://localhost:18545`, contract addresses from soak output
 5. Start frontend: `cd packages/hyperbet-bsc/app && bun run dev` with `.env.e2e` pointing to keeper + Anvil
 

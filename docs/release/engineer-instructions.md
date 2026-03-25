@@ -1,5 +1,7 @@
 # Engineer Instructions
 
+> **TL;DR:** Historical handoff document from the earlier five-lane sprint-base execution model. Status: closed. Keep this as planning history, not as the current launch instruction set. Current execution is consolidated on `audit/develop-pm-hardening`.
+
 This document is the direct handoff for the five parallel release lanes on
 `enoomian/prediction-market-sprint-base`.
 
