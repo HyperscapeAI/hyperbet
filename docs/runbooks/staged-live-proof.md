@@ -1,7 +1,9 @@
 # Staged Live Proof
 
-Use this runbook to execute the manual staging proof rail for Gate 14A / Gate
-23.
+> **TL;DR:** Staged proof is the launch-scope off-mainnet signoff lane for `PM`, `perps`, and internal `AMM` across `Solana`, `BSC`, and `AVAX`. The proof codepaths are merged, but as of 2026-03-25 the GitHub `staging` environment and `HYPERBET_*_STAGING_*` vars and secrets are still not provisioned, so live staged proof remains blocked on environment setup rather than missing repo code.
+
+Use this runbook to execute the manual staging proof rail for phase-1 release
+signoff.
 
 This runbook does **not** change production topology. It validates the staged
 Solana, BSC, and AVAX rails using the same deployed shape as production:
@@ -11,13 +13,14 @@ Solana, BSC, and AVAX rails using the same deployed shape as production:
 - staged AVAX Pages + staged AVAX keeper
 - external staged duel/stream source
 - keeper-proxied RPC
+- launch-scope canary writes for `PM`, `perps`, and internal `AMM`
 
 ## Symptoms
 
 - You need to prove that the staged prediction-market stack is healthy before a
   reviewer or operator sign-off.
 - You need machine-readable evidence for staged build, keeper, lifecycle,
-  proxy, env-audit, and canary write behavior.
+  proxy, env-audit, and launch-scope canary write behavior.
 
 ## Detection And Verification
 
@@ -47,12 +50,23 @@ bun run staged:proof -- --mode=canary-write --target=bsc
 bun run staged:proof -- --mode=canary-write --target=avax
 ```
 
+Each `canary-write` artifact now emits one nested result per chain:
+
+- `pm`: controlled duel publish, market open, place/cancel/sync/claim cleanup
+- `perps`: oracle update, bounded open, bounded close, zeroed position check
+- `amm`: headless internal MM market create/discover, bounded trade, reserve delta
+
 GitHub manual workflow:
 
 - workflow: `Staged Live Proof`
 - inputs:
   - `mode=read-only|canary-write`
   - `target=all|solana|bsc|avax`
+
+Current blocker:
+
+- the workflow is ready, but a real GitHub `staging` environment and the
+  required `HYPERBET_*_STAGING_*` vars and secrets still need to be provisioned
 
 ## Immediate Containment
 
@@ -61,9 +75,8 @@ GitHub manual workflow:
   other chain until the failure is understood.
 - If AVAX staging env audit fails, stop there and fix the staging contract
   before attempting canary writes.
-- The staged proof workflow now prechecks AVAX canonical mainnet registry truth; when
-  AVAX mainnet addresses are still placeholder, `workflow_dispatch` target `avax`
-  or `all` will fail fast until canonical values are committed.
+- Staged proof is an off-mainnet launch rehearsal. It does **not** require
+  canonical mainnet registry truth to exist first.
 
 ## Exact Recovery Steps
 
@@ -90,8 +103,13 @@ GitHub manual workflow:
    - `HYPERBET_AVAX_RAILWAY_STAGING_PROJECT_ID`
    - `HYPERBET_AVAX_RAILWAY_STAGING_ENVIRONMENT_ID`
    - `HYPERBET_AVAX_RAILWAY_STAGING_KEEPER_SERVICE_ID`
-2. Confirm proof secrets are present in the staging environment:
+2. Confirm proof vars and secrets are present in the staging environment:
    - `HYPERBET_SOLANA_STAGING_RPC_URL`
+   - `HYPERBET_SOLANA_STAGING_CLUSTER` (default `devnet` if omitted)
+   - `HYPERBET_SOLANA_STAGING_FIGHT_ORACLE_PROGRAM_ID` when staging does not use the canonical devnet oracle id
+   - `HYPERBET_SOLANA_STAGING_GOLD_CLOB_PROGRAM_ID`
+   - `HYPERBET_SOLANA_STAGING_GOLD_AMM_PROGRAM_ID`
+   - `HYPERBET_SOLANA_STAGING_GOLD_PERPS_PROGRAM_ID`
    - `HYPERBET_BSC_STAGING_RPC_URL`
    - `HYPERBET_AVAX_STAGING_RPC_URL`
    - `HYPERBET_SOLANA_STAGING_STREAM_PUBLISH_KEY`
@@ -103,39 +121,55 @@ GitHub manual workflow:
    - `HYPERBET_SOLANA_STAGING_CANARY_KEYPAIR`
    - `HYPERBET_BSC_STAGING_REPORTER_PRIVATE_KEY`
    - `HYPERBET_BSC_STAGING_CANARY_PRIVATE_KEY`
+   - `HYPERBET_BSC_STAGING_ADMIN_PRIVATE_KEY`
+   - `HYPERBET_BSC_STAGING_MARKET_OPERATOR_PRIVATE_KEY` when distinct from the admin
    - `HYPERBET_BSC_STAGING_DUEL_ORACLE_ADDRESS`
    - `HYPERBET_BSC_STAGING_GOLD_CLOB_ADDRESS`
+   - `HYPERBET_BSC_STAGING_GOLD_AMM_ROUTER_ADDRESS`
+   - `HYPERBET_BSC_STAGING_MUSD_TOKEN_ADDRESS`
+   - `HYPERBET_BSC_STAGING_GOLD_TOKEN_ADDRESS`
+   - `HYPERBET_BSC_STAGING_SKILL_ORACLE_ADDRESS`
+   - `HYPERBET_BSC_STAGING_PERP_ENGINE_ADDRESS`
    - `HYPERBET_AVAX_STAGING_REPORTER_PRIVATE_KEY`
    - `HYPERBET_AVAX_STAGING_CANARY_PRIVATE_KEY`
+   - `HYPERBET_AVAX_STAGING_ADMIN_PRIVATE_KEY`
+   - `HYPERBET_AVAX_STAGING_MARKET_OPERATOR_PRIVATE_KEY` when distinct from the admin
    - `HYPERBET_AVAX_STAGING_DUEL_ORACLE_ADDRESS`
    - `HYPERBET_AVAX_STAGING_GOLD_CLOB_ADDRESS`
+   - `HYPERBET_AVAX_STAGING_GOLD_AMM_ROUTER_ADDRESS`
+   - `HYPERBET_AVAX_STAGING_MUSD_TOKEN_ADDRESS`
+   - `HYPERBET_AVAX_STAGING_GOLD_TOKEN_ADDRESS`
+   - `HYPERBET_AVAX_STAGING_SKILL_ORACLE_ADDRESS`
+   - `HYPERBET_AVAX_STAGING_PERP_ENGINE_ADDRESS`
    - `HYPERBET_AVAX_STAGING_CHAIN_ID`
-3. Run `read-only` proof first.
-4. If read-only succeeds, run `canary-write` separately for Solana, BSC, and
+3. Pre-fund the canary wallets with native gas and the reused staging tokens they need:
+   - Solana canary keypair needs SOL for PM/perps/AMM writes
+   - BSC canary wallet needs native gas plus `mUSD` and the perps margin token
+   - AVAX canary wallet needs native gas plus `mUSD` and the perps margin token
+   - BSC/AVAX admin and market-operator wallets need native gas, and the admin wallet must hold enough `mUSD` to seed one AMM canary market
+4. Run `read-only` proof first.
+5. If read-only succeeds, run `canary-write` separately for Solana, BSC, and
    AVAX.
-5. Inspect the generated artifact bundle:
+6. Inspect the generated artifact bundle:
    - `.ci-artifacts/staged-live-proof/summary.json`
    - `solana/*`
    - `bsc/*`
    - `avax/*`
    - `verify-chains.json`
-6. If a chain fails:
+7. If a chain fails:
    - collect the failing payloads and tx hashes/signatures
    - verify the staged duel source and keeper `/status`
    - verify the keeper proxy paths
-   - verify the canary wallet funds
+   - verify the canary, admin, and operator wallet funds
 
 ## Success Criteria
 
 - Solana read-only proof passes.
 - BSC read-only proof passes.
 - AVAX read-only proof passes.
-- Solana canary write proof completes with visible lifecycle change and
-  claim/refund cleanup.
-- BSC canary write proof completes with visible lifecycle change and
-  claim/refund cleanup.
-- AVAX canary write proof completes with visible lifecycle change and
-  claim/refund cleanup.
+- Solana canary write proof completes for `pm`, `perps`, and `amm`.
+- BSC canary write proof completes for `pm`, `perps`, and `amm`.
+- AVAX canary write proof completes for `pm`, `perps`, and `amm`.
 - `verify:chains` passes for Solana, BSC, and AVAX.
 - AVAX staging app and keeper env audits pass.
 
@@ -145,14 +179,18 @@ GitHub manual workflow:
 - `/status` is not healthy on a staged keeper.
 - `/api/arena/prediction-markets/active` or `/api/keeper/bot-health` is
   inconsistent with the expected staged duel.
-- A canary order lands on chain but lifecycle never reflects it.
-- Claim/refund does not clear state after controlled cancel/resolve.
+- A `pm`, `perps`, or `amm` canary tx lands on chain but the expected runtime
+  state transition never appears.
+- Claim/refund does not clear PM state after controlled cancel/resolve.
+- A perps canary position does not close back to zero.
+- An AMM canary trade does not move reserves or mint inventory to the canary wallet.
 - AVAX staging env audit fails or points at the wrong chain or contract.
 
 ## Evidence To Capture Before Escalation
 
 - full `summary.json` artifact
 - the per-chain JSON payloads under `solana/`, `bsc/`, and `avax/`
+- the per-surface canary artifacts under `solana/canary.*.json`, `bsc/canary.*.json`, and `avax/canary.*.json`
 - tx signatures/hashes for the canary writes
 - `verify-chains.json`
 - `avax/env-audit.json`

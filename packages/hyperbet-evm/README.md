@@ -1,164 +1,59 @@
 # Hyperbet EVM
 
-Additive EVM runtime package and canonical EVM app-shell direction for
-Hyperbet.
+> **TL;DR:** This package is the shared EVM app and keeper runtime for `BSC`, `AVAX`, and the non-blocking `Base` add-chain lane. Phase-1 launch-critical EVM chains are `BSC` and `AVAX`. The shared EVM launch product is `PM/CLOB duels + perps/models`, with `AMM` as an internal engine. Canonical deploy truth still lives in the chain registry, not in package-local manifests.
 
-This package is part of the current EVM standardization effort. On the local
-sprint-base standardization path, it should be understood as:
+## What This Package Is
 
-- the canonical EVM app shell
-- an additive shared EVM runtime package
-- a canonicalized additive EVM keeper/backend surface
+- shared EVM app shell
+- shared EVM keeper runtime
+- common frontend and backend surface used by BSC and AVAX
+- optional add-chain runtime for Base
 
-The authoritative runtime/deploy model still lives in:
+## Phase-1 Scope
 
-- `@hyperbet/chain-registry` for current chain/runtime truth
-- the hardened EVM keeper model now shared with `packages/hyperbet-evm/keeper`
-- the current CI/deploy/proof rails for release hardening
+- launch-blocking EVM chains:
+  - `BSC`
+  - `AVAX`
+- non-blocking add-chain lane:
+  - `Base`
 
-For the current keep/adapt/reject decisions, see:
+## Deploy And Verify Model
 
-- `docs/enoomian-evm-standardization-decisions.md`
+EVM deployment and verification live in `packages/evm-contracts`.
 
-## What this includes
+The current full-product sequence is:
 
-- `app`: shared EVM app shell for wallet connect, market creation, bet
-  placement, settlement, and claiming across supported EVM chains
-- `keeper`: canonicalized additive EVM keeper/runtime package on the local
-  sprint-base standardization path
-- `packages/hyperbet-deployments/contracts.json`: additive deployment
-  materialization for convergence work; it is not a replacement for the sprint
-  branch's authoritative chain/deployment registry
+1. PM CREATE2 deployment
+2. AMM deployment
+3. perps deployment
+4. full-product verification
+5. registry population from final receipts only
 
-## EVM Chain Configuration
-
-- **Mainnet**: Base, BSC, and Avalanche
-- **Testnet**: Base Sepolia, BSC Testnet, and Avalanche Fuji
-
-Current deployment/runtime truth still comes from the sprint branch's existing
-registry and deploy model. `packages/hyperbet-deployments/contracts.json` is an
-additive manifest for the convergence effort and should be treated as
-subordinate to that source of truth until the standardization work is complete.
-
-## UI E2E tests
-
-From `packages/hyperbet-evm/app`:
-
-```bash
-bun run test:e2e
-```
-
-What this command does:
-
-- compiles EVM contracts
-- starts local Anvil for EVM
-- deploys local `MockERC20` + `GoldClob` and seeds an open EVM duel market
-- starts the additive EVM keeper service against local seeded data
-- runs the additive EVM Playwright smoke test against the Vite app
-
-The app runs in `--mode e2e` with generated `/app/.env.e2e`.
-
-## Run the Vite app
+## Key Commands
 
 From `packages/hyperbet-evm`:
 
 ```bash
 bun run dev
+bun run test:e2e:local
+bun run keeper:service
+bun run keeper:bot
 ```
 
-Raw app-only local mode:
+Representative EVM deploys:
 
 ```bash
-bun run dev:app-local
+bun run --cwd packages/evm-contracts deploy:create2:bsc-testnet
+bun run --cwd packages/evm-contracts deploy:amm:bsc-testnet
+bun run --cwd packages/evm-contracts deploy:perps:bsc-testnet
+node --import tsx packages/evm-contracts/scripts/verify-deployment.ts --network bscTestnet
 ```
 
-For mainnet mode:
+## Canonical Truth
 
-```bash
-bun run dev:mainnet
-```
-
-For testnet mode:
-
-```bash
-bun run dev:testnet
-```
-
-Build:
-
-```bash
-bun run build
-bun run build:testnet
-bun run build:mainnet
-```
-
-## Keeper
-
-From `packages/hyperbet-evm/keeper`:
-
-```bash
-bun install
-bun run bot
-```
-
-Important:
-
-- this keeper package is canonized locally against the hardened current
-  sprint-branch keeper model
-- deploy adoption and wrapper retirement still follow the existing sprint
-  operational model
-- the decision log above is the authoritative status record for that work
-
-## Deployment prep
-
-Preflight the repo before touching real chains:
-
-```bash
-bun run deploy:preflight:testnet
-bun run deploy:preflight:mainnet
-```
-
-Deploy EVM GoldClob contracts to the desired EVM chain:
-
-```bash
-bun run deploy:evm:base-sepolia
-bun run deploy:evm:bsc-testnet
-bun run deploy:evm:avax-fuji
-bun run deploy:evm:base
-bun run deploy:evm:bsc
-bun run deploy:evm:avax
-```
-
-The EVM deploy script writes a receipt to
-`packages/evm-contracts/deployments/<network>.json` and may update additive
-deployment manifests used for convergence work.
-
-Perps deployment can also bootstrap live markets in one pass via env:
-
-- `PERPS_MARGIN_TOKEN_ADDRESS`: ERC20 collateral token
-- `PERPS_FUNDING_VELOCITY`: optional funding velocity override
-- `PERPS_OWNER_ADDRESS`: optional final owner for `SkillOracle` and `AgentPerpEngine`
-- `PERPS_REPORTER_ADDRESS`: optional oracle publisher allowed to push skill updates
-- `PERPS_BOOTSTRAP_MARKETS_JSON`: optional JSON array of markets to seed
-
-Example:
-
-```json
-[
-  {
-    "agentId": "MODEL_A",
-    "mu": 1500,
-    "sigma": 50,
-    "insuranceFund": "10000",
-    "status": "ACTIVE"
-  }
-]
-```
-
-Private env files stay local:
-
-- `packages/hyperbet-evm/.env.mainnet`
-- `packages/hyperbet-evm/.env.testnet`
-- `packages/hyperbet-evm/app/.env.mainnet`
-
-These should hold RPC URLs, signer paths, and private API keys. They should not be treated as public deployment metadata.
+- authoritative runtime and deployment truth:
+  `packages/hyperbet-chain-registry/src/index.ts`
+- canonical EVM receipt writer:
+  `packages/evm-contracts/scripts/deployment-receipt.ts`
+- package-local manifests and env files are convenience surfaces, not canonical
+  launch truth

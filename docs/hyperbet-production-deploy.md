@@ -1,5 +1,7 @@
 # Hyperbet Production Deploy (Cloudflare + Railway)
 
+> **TL;DR:** This is the production and staged topology for the phase-1 launch product. Launch-blocking chains are `Solana`, `BSC`, and `AVAX`; `Base` remains a non-blocking add-chain lane. The deployment topology is in place, but as of 2026-03-25 real staged proof and soak remain blocked because GitHub does not yet have a provisioned `staging` environment or the required `HYPERBET_*_STAGING_*` vars and secrets.
+
 This is the recommended production topology for the Hyperbet stack in this repo.
 
 Operator runbooks are in [docs/runbooks/README.md](runbooks/README.md).
@@ -12,7 +14,10 @@ Operator runbooks are in [docs/runbooks/README.md](runbooks/README.md).
 - DDoS/WAF/edge cache: Cloudflare proxy in front of the betting API
 - Contracts/state: Solana + EVM (configured by env vars below, proxied server-side)
 
-AVAX now has repo-backed Pages and keeper deployment workflows, but production rollout is still blocked until canonical AVAX deployment addresses are committed to the shared chain registry, staged proof artifacts are captured for the target environment, and the real AVAX governance/operator wallets are provisioned.
+Production rollout is still blocked until canonical launch-chain deployment
+truth exists in the shared chain registry for `Solana`, `BSC`, and `AVAX`,
+staged proof artifacts are captured for the target environment, and the real
+governance and operator wallets are provisioned.
 
 ## Staging Rail
 
@@ -35,6 +40,15 @@ Manual staging deploys use the same workflows as production through
 - `Deploy Hyperbet AVAX Keeper`
 
 Select `environment=staging` when dispatching the relevant workflow.
+
+Current audited GitHub state:
+
+- repo-level deploy and testnet secrets exist
+- no GitHub `staging` environment exists yet
+- no `HYPERBET_*_STAGING_*` vars or secrets are provisioned yet
+
+That means the code path is ready, but staged proof and staged soak remain
+operationally blocked until staging is provisioned.
 
 Required staging vars are:
 
@@ -62,19 +76,47 @@ Required staging vars are:
 - `HYPERBET_AVAX_STAGING_CHAIN_ID`
 - `HYPERBET_AVAX_STAGING_GOLD_CLOB_ADDRESS`
 
-Required AVAX staged proof vars/secrets used by Gate 14A:
+Required staged proof vars/secrets used by the launch-scope proof rail:
 
+- `HYPERBET_STAGED_PROOF_DUEL_ID`
+- `HYPERBET_STAGED_PROOF_DUEL_KEY`
+- `HYPERBET_SOLANA_STAGING_CLUSTER`
+- `HYPERBET_SOLANA_STAGING_RPC_URL`
+- `HYPERBET_SOLANA_STAGING_GOLD_CLOB_PROGRAM_ID`
+- `HYPERBET_SOLANA_STAGING_GOLD_AMM_PROGRAM_ID`
+- `HYPERBET_SOLANA_STAGING_GOLD_PERPS_PROGRAM_ID`
+- `HYPERBET_SOLANA_STAGING_STREAM_PUBLISH_KEY`
+- `HYPERBET_SOLANA_STAGING_ORACLE_AUTHORITY_KEYPAIR`
+- `HYPERBET_SOLANA_STAGING_CANARY_KEYPAIR`
+- `HYPERBET_BSC_STAGING_RPC_URL`
+- `HYPERBET_BSC_STAGING_REPORTER_PRIVATE_KEY`
+- `HYPERBET_BSC_STAGING_CANARY_PRIVATE_KEY`
+- `HYPERBET_BSC_STAGING_ADMIN_PRIVATE_KEY`
+- `HYPERBET_BSC_STAGING_MARKET_OPERATOR_PRIVATE_KEY`
+- `HYPERBET_BSC_STAGING_DUEL_ORACLE_ADDRESS`
+- `HYPERBET_BSC_STAGING_GOLD_CLOB_ADDRESS`
+- `HYPERBET_BSC_STAGING_GOLD_AMM_ROUTER_ADDRESS`
+- `HYPERBET_BSC_STAGING_MUSD_TOKEN_ADDRESS`
+- `HYPERBET_BSC_STAGING_GOLD_TOKEN_ADDRESS`
+- `HYPERBET_BSC_STAGING_SKILL_ORACLE_ADDRESS`
+- `HYPERBET_BSC_STAGING_PERP_ENGINE_ADDRESS`
+- `HYPERBET_BSC_STAGING_STREAM_PUBLISH_KEY`
 - `HYPERBET_AVAX_STAGING_RPC_URL`
 - `HYPERBET_AVAX_STAGING_REPORTER_PRIVATE_KEY`
 - `HYPERBET_AVAX_STAGING_CANARY_PRIVATE_KEY`
+- `HYPERBET_AVAX_STAGING_ADMIN_PRIVATE_KEY`
+- `HYPERBET_AVAX_STAGING_MARKET_OPERATOR_PRIVATE_KEY`
 - `HYPERBET_AVAX_STAGING_DUEL_ORACLE_ADDRESS`
 - `HYPERBET_AVAX_STAGING_GOLD_CLOB_ADDRESS`
+- `HYPERBET_AVAX_STAGING_GOLD_AMM_ROUTER_ADDRESS`
+- `HYPERBET_AVAX_STAGING_MUSD_TOKEN_ADDRESS`
+- `HYPERBET_AVAX_STAGING_GOLD_TOKEN_ADDRESS`
+- `HYPERBET_AVAX_STAGING_SKILL_ORACLE_ADDRESS`
+- `HYPERBET_AVAX_STAGING_PERP_ENGINE_ADDRESS`
 - `HYPERBET_AVAX_STAGING_STREAM_PUBLISH_KEY`
 - `HYPERBET_AVAX_RAILWAY_STAGING_PROJECT_ID`
 - `HYPERBET_AVAX_RAILWAY_STAGING_ENVIRONMENT_ID`
 - `HYPERBET_AVAX_RAILWAY_STAGING_KEEPER_SERVICE_ID`
-- `HYPERBET_STAGED_PROOF_DUEL_ID`
-- `HYPERBET_STAGED_PROOF_DUEL_KEY`
 
 AVAX rollout remains blocked until canonical deployment truth exists in the shared chain registry and the effective AVAX wallet/signer set is in place. The staging/prod rail is present so proof and release packaging can use one consistent contract once those addresses are committed.
 
