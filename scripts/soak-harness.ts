@@ -75,6 +75,13 @@ type CycleSummary = {
     totalClaimed: string;
     discrepancy: string;
   };
+  perps: {
+    liquidations: number;
+    longPnl: string;
+    shortPnl: string;
+    insuranceDelta: string;
+    badDebtDelta: string;
+  };
 };
 
 type MemorySnapshot = {
@@ -508,6 +515,18 @@ async function main() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ jsonrpc: "2.0", method: "evm_revert", params: [baseSnapshotId], id: 1000 }),
     });
+    // After revert, reset auto-mine and advance one block to ensure clean state.
+    // The dispute window time warp can leave Anvil in manual-mine mode.
+    await fetch(config.bscRpc, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ jsonrpc: "2.0", method: "evm_setAutomine", params: [true], id: 1002 }),
+    });
+    await fetch(config.bscRpc, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ jsonrpc: "2.0", method: "evm_mine", params: [], id: 1003 }),
+    });
     // Snapshot IDs are single-use — must re-snapshot after revert
     const resnap = await fetch(config.bscRpc, {
       method: "POST",
@@ -856,16 +875,29 @@ async function main() {
       }
     }
 
-    // ── Perps trades ──────────────────────────────────────────────────
+    // ── Perps: open positions (held through resolution) ────────────────
+    let perpsLongOpen = false;
+    let perpsShortOpen = false;
+    let perpsInsuranceBefore = 0n;
+    let perpsBadDebtBefore = 0n;
     if (perpEngineAddress && skillOracleAddress) {
       try {
-        // Long opens position
+        // Snapshot insurance fund before cycle
+        const mktPre = await pub.readContract({
+          address: perpEngineAddress, abi: agentPerpEngineArtifact.abi, functionName: "markets",
+          args: [perpAgentId],
+        }) as any;
+        perpsInsuranceBefore = BigInt(mktPre[9] ?? 0);
+        perpsBadDebtBefore = BigInt(mktPre[10] ?? 0);
+
+        // Long opens position — margin sized to survive oracle swings
         const longHash = await perpsLong.wallet.writeContract({
           address: perpEngineAddress, abi: agentPerpEngineArtifact.abi, functionName: "modifyPosition",
-          args: [perpAgentId, parseUnits("100", 18), parseUnits("5", 18)], // 100 margin, 5 size
+          args: [perpAgentId, parseUnits("200", 18), parseUnits("5", 18)], // 200 margin, 5 size
           nonce: await nonce(perpsLong.address),
         });
         const longReceipt = await waitReceipt(longHash);
+        perpsLongOpen = true;
         saveReceipt(evidenceDir, cycleNum, "perpsLong", "modifyPosition-open", longReceipt);
         logEvent({ cycle: cycleNum, phase: "PERPS", timestamp: Date.now(), actor: "perpsLong",
           action: "perps.openLong", txHash: longHash, gasUsed: Number(longReceipt.gasUsed),
@@ -874,48 +906,23 @@ async function main() {
         // Short opens position
         const shortHash = await perpsShort.wallet.writeContract({
           address: perpEngineAddress, abi: agentPerpEngineArtifact.abi, functionName: "modifyPosition",
-          args: [perpAgentId, parseUnits("100", 18), parseUnits("-5", 18)], // 100 margin, -5 size (short)
+          args: [perpAgentId, parseUnits("200", 18), parseUnits("-5", 18)], // 200 margin, -5 size
           nonce: await nonce(perpsShort.address),
         });
         const shortReceipt = await waitReceipt(shortHash);
+        perpsShortOpen = true;
         saveReceipt(evidenceDir, cycleNum, "perpsShort", "modifyPosition-open", shortReceipt);
         logEvent({ cycle: cycleNum, phase: "PERPS", timestamp: Date.now(), actor: "perpsShort",
           action: "perps.openShort", txHash: shortHash, gasUsed: Number(shortReceipt.gasUsed),
           blockNumber: Number(shortReceipt.blockNumber), success: true, error: null, details: {} });
 
-        // Close both after a small delay
-        const closeLongHash = await perpsLong.wallet.writeContract({
-          address: perpEngineAddress, abi: agentPerpEngineArtifact.abi, functionName: "modifyPosition",
-          args: [perpAgentId, 0n, parseUnits("-5", 18)], // close long
-          nonce: await nonce(perpsLong.address),
-        });
-        await waitReceipt(closeLongHash);
-        logEvent({ cycle: cycleNum, phase: "PERPS", timestamp: Date.now(), actor: "perpsLong",
-          action: "perps.closeLong", txHash: closeLongHash, gasUsed: 0, blockNumber: 0,
-          success: true, error: null, details: {} });
-
-        const closeShortHash = await perpsShort.wallet.writeContract({
-          address: perpEngineAddress, abi: agentPerpEngineArtifact.abi, functionName: "modifyPosition",
-          args: [perpAgentId, 0n, parseUnits("5", 18)], // close short
-          nonce: await nonce(perpsShort.address),
-        });
-        await waitReceipt(closeShortHash);
-        logEvent({ cycle: cycleNum, phase: "PERPS", timestamp: Date.now(), actor: "perpsShort",
-          action: "perps.closeShort", txHash: closeShortHash, gasUsed: 0, blockNumber: 0,
-          success: true, error: null, details: {} });
-
-        // Snapshot perps balance sheet
-        const mktData = await pub.readContract({
-          address: perpEngineAddress, abi: agentPerpEngineArtifact.abi, functionName: "markets",
-          args: [perpAgentId],
-        }) as any;
-        saveSnapshot(evidenceDir, cycleNum, "perps-post-trades", {
-          vaultBalance: mktData[8]?.toString(), insuranceFund: mktData[9]?.toString(),
-          badDebt: mktData[10]?.toString(), openPositions: Number(mktData[11]),
+        saveSnapshot(evidenceDir, cycleNum, "perps-positions-opened", {
+          longMargin: "200", longSize: "5", shortMargin: "200", shortSize: "-5",
+          insuranceFund: perpsInsuranceBefore.toString(),
         });
       } catch (err: any) {
         logEvent({ cycle: cycleNum, phase: "PERPS", timestamp: Date.now(), actor: "perps",
-          action: "perps.trade", txHash: null, gasUsed: 0, blockNumber: 0,
+          action: "perps.open", txHash: null, gasUsed: 0, blockNumber: 0,
           success: false, error: err.message?.slice(0, 150), details: {} });
       }
     }
@@ -1311,6 +1318,165 @@ async function main() {
       });
     } catch (e: any) { console.log(`  [snapshot] post-claims failed: ${e.message?.slice(0, 60)}`); }
 
+    // ── Phase 5b: Perps post-resolution lifecycle ─────────────────────
+    let perpsLiquidations = 0;
+    let perpsInsuranceAfter = 0n;
+    let perpsBadDebtAfter = 0n;
+    let perpsLongPnl = 0n;
+    let perpsShortPnl = 0n;
+
+    if (perpEngineAddress && skillOracleAddress && (perpsLongOpen || perpsShortOpen)) {
+      // Step 1: Update SkillOracle based on duel winner (oracle-driven price shock)
+      // Winner's skill μ goes up, loser's goes down — this shifts the perps mark price
+      const winnerMu = currentWinner === "A" ? 1800 : 1200;
+      try {
+        await reporter.wallet.writeContract({
+          address: skillOracleAddress, abi: skillOracleArtifact.abi, functionName: "updateAgentSkill",
+          args: [perpAgentId, winnerMu, 0], nonce: await nonce(reporter.address),
+        });
+        logEvent({ cycle: cycleNum, phase: "PERPS_SETTLEMENT", timestamp: Date.now(), actor: "reporter",
+          action: "perps.updateSkillOracle", txHash: null, gasUsed: 0, blockNumber: 0,
+          success: true, error: null, details: { winnerMu, winner: currentWinner } });
+      } catch (err: any) {
+        logEvent({ cycle: cycleNum, phase: "PERPS_SETTLEMENT", timestamp: Date.now(), actor: "reporter",
+          action: "perps.updateSkillOracle", txHash: null, gasUsed: 0, blockNumber: 0,
+          success: false, error: err.message?.slice(0, 150), details: {} });
+      }
+
+      // Step 2: Check position health and attempt liquidations
+      for (const { wallet, address: addr, label, isOpen } of [
+        { ...perpsLong, label: "perpsLong", isOpen: perpsLongOpen },
+        { ...perpsShort, label: "perpsShort", isOpen: perpsShortOpen },
+      ]) {
+        if (!isOpen) continue;
+        try {
+          const health = await pub.readContract({
+            address: perpEngineAddress, abi: agentPerpEngineArtifact.abi,
+            functionName: "getPositionHealth", args: [perpAgentId, addr],
+          }) as any;
+          const liquidatable = !!health[5]; // health.liquidatable
+          const equity = BigInt(health[3] ?? 0); // health.equity
+
+          saveSnapshot(evidenceDir, cycleNum, `perps-health-${label}`, {
+            markPrice: health[0]?.toString(), notional: health[1]?.toString(),
+            unrealizedPnl: health[2]?.toString(), equity: equity.toString(),
+            maintenanceMargin: health[4]?.toString(), liquidatable,
+          });
+
+          if (liquidatable) {
+            try {
+              const liqHash = await liquidator.wallet.writeContract({
+                address: perpEngineAddress, abi: agentPerpEngineArtifact.abi,
+                functionName: "liquidate", args: [perpAgentId, addr],
+                nonce: await nonce(liquidator.address),
+              });
+              const liqReceipt = await waitReceipt(liqHash);
+              perpsLiquidations++;
+              saveReceipt(evidenceDir, cycleNum, label, "liquidation", liqReceipt);
+              logEvent({ cycle: cycleNum, phase: "PERPS_SETTLEMENT", timestamp: Date.now(),
+                actor: "liquidator", action: `perps.liquidate.${label}`,
+                txHash: liqHash, gasUsed: Number(liqReceipt.gasUsed),
+                blockNumber: Number(liqReceipt.blockNumber), success: true, error: null,
+                details: { equity: equity.toString() } });
+            } catch (err: any) {
+              logEvent({ cycle: cycleNum, phase: "PERPS_SETTLEMENT", timestamp: Date.now(),
+                actor: "liquidator", action: `perps.liquidate.${label}`,
+                txHash: null, gasUsed: 0, blockNumber: 0,
+                success: false, error: err.message?.slice(0, 150), details: {} });
+            }
+          }
+        } catch (err: any) {
+          logEvent({ cycle: cycleNum, phase: "PERPS_SETTLEMENT", timestamp: Date.now(),
+            actor: label, action: "perps.healthCheck",
+            txHash: null, gasUsed: 0, blockNumber: 0,
+            success: false, error: err.message?.slice(0, 150), details: {} });
+        }
+      }
+
+      // Step 3: Close remaining open positions and track PnL
+      for (const { wallet, address: addr, label, isOpenRef } of [
+        { ...perpsLong, label: "perpsLong", isOpenRef: "long" as const },
+        { ...perpsShort, label: "perpsShort", isOpenRef: "short" as const },
+      ]) {
+        try {
+          const pos = await pub.readContract({
+            address: perpEngineAddress, abi: agentPerpEngineArtifact.abi,
+            functionName: "positions", args: [perpAgentId, addr],
+          }) as any;
+          const size = BigInt(pos[0] ?? 0);
+          if (size === 0n) continue; // already liquidated or closed
+
+          const marginBefore = await pub.readContract({
+            address: perpEngineAddress as Address, abi: agentPerpEngineArtifact.abi,
+            functionName: "getPositionHealth", args: [perpAgentId, addr],
+          }) as any;
+          const equityBefore = BigInt(marginBefore[3] ?? 0);
+
+          const closeHash = await wallet.writeContract({
+            address: perpEngineAddress, abi: agentPerpEngineArtifact.abi,
+            functionName: "modifyPosition", args: [perpAgentId, 0n, -size],
+            nonce: await nonce(addr),
+          });
+          await waitReceipt(closeHash);
+
+          // PnL = equity at close - original margin (200e18)
+          const pnl = equityBefore - parseUnits("200", 18);
+          if (isOpenRef === "long") perpsLongPnl = pnl;
+          else perpsShortPnl = pnl;
+
+          logEvent({ cycle: cycleNum, phase: "PERPS_SETTLEMENT", timestamp: Date.now(),
+            actor: label, action: `perps.close.${isOpenRef}`,
+            txHash: closeHash, gasUsed: 0, blockNumber: 0,
+            success: true, error: null,
+            details: { pnl: pnl.toString(), equity: equityBefore.toString() } });
+        } catch (err: any) {
+          logEvent({ cycle: cycleNum, phase: "PERPS_SETTLEMENT", timestamp: Date.now(),
+            actor: label, action: `perps.close.${isOpenRef}`,
+            txHash: null, gasUsed: 0, blockNumber: 0,
+            success: false, error: err.message?.slice(0, 150), details: {} });
+        }
+      }
+
+      // Step 4: Snapshot insurance fund after cycle
+      try {
+        const mktPost = await pub.readContract({
+          address: perpEngineAddress, abi: agentPerpEngineArtifact.abi, functionName: "markets",
+          args: [perpAgentId],
+        }) as any;
+        perpsInsuranceAfter = BigInt(mktPost[9] ?? 0);
+        perpsBadDebtAfter = BigInt(mktPost[10] ?? 0);
+
+        const insuranceDelta = perpsInsuranceAfter - perpsInsuranceBefore;
+        const badDebtDelta = perpsBadDebtAfter - perpsBadDebtBefore;
+
+        saveSnapshot(evidenceDir, cycleNum, "perps-settlement-summary", {
+          insuranceBefore: perpsInsuranceBefore.toString(),
+          insuranceAfter: perpsInsuranceAfter.toString(),
+          insuranceDelta: insuranceDelta.toString(),
+          badDebtBefore: perpsBadDebtBefore.toString(),
+          badDebtAfter: perpsBadDebtAfter.toString(),
+          badDebtDelta: badDebtDelta.toString(),
+          liquidations: perpsLiquidations,
+          longPnl: perpsLongPnl.toString(),
+          shortPnl: perpsShortPnl.toString(),
+          openPositionsRemaining: Number(mktPost[14] ?? 0),
+        });
+
+        // Incident: insurance fund depleted
+        if (perpsInsuranceAfter === 0n && perpsInsuranceBefore > 0n) {
+          incident("Perps insurance fund depleted to zero", cycleNum);
+          cycleIncidents.push("perps_insurance_depleted");
+        }
+        // Incident: new bad debt
+        if (badDebtDelta > 0n) {
+          incident(`Perps bad debt increased by ${formatUnits(badDebtDelta, 18)}`, cycleNum);
+          cycleIncidents.push("perps_bad_debt");
+        }
+
+        console.log(`  [perps] liq=${perpsLiquidations} longPnl=${formatUnits(perpsLongPnl, 18)} shortPnl=${formatUnits(perpsShortPnl, 18)} ins=${formatUnits(insuranceDelta, 18)}`);
+      } catch {}
+    }
+
     // ── Phase 6: Reconciliation ───────────────────────────────────────
 
     let clobBalance = 0n;
@@ -1364,6 +1530,13 @@ async function main() {
         totalDeposited: formatUnits(totalDeposited, 18),
         totalClaimed: formatUnits(totalClaimed, 18),
         discrepancy: formatUnits(clobBalance - (totalDeposited - totalClaimed), 18),
+      },
+      perps: {
+        liquidations: perpsLiquidations,
+        longPnl: formatUnits(perpsLongPnl, 18),
+        shortPnl: formatUnits(perpsShortPnl, 18),
+        insuranceDelta: formatUnits(perpsInsuranceAfter - perpsInsuranceBefore, 18),
+        badDebtDelta: formatUnits(perpsBadDebtAfter - perpsBadDebtBefore, 18),
       },
     };
     cycles.push(cycleSummary);
@@ -1501,6 +1674,8 @@ async function main() {
   console.log(`  CLOB orders:   ${totalOrders}`);
   console.log(`  CLOB fills:    ${totalFills}`);
   console.log(`  Claims:        ${totalClaims}`);
+  const totalPerpsLiqs = cycles.reduce((s, c) => s + c.perps.liquidations, 0);
+  console.log(`  Perps liqs:    ${totalPerpsLiqs}`);
   console.log(`  Incidents:     ${incidents.length}`);
   console.log(`  Memory growth: ${memGrowthFactor.toFixed(2)}x`);
   console.log(`  Output:        ${outDir}`);
