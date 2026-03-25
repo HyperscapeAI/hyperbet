@@ -900,7 +900,7 @@ contract GoldClob is AccessControl, ReentrancyGuard {
 
     event SweepETH(address indexed to, uint256 amount);
 
-    function sweepETH(address payable to) external onlyRole(DEFAULT_ADMIN_ROLE) {
+    function sweepETH(address payable to) external onlyRole(DEFAULT_ADMIN_ROLE) nonReentrant {
         uint256 bal = address(this).balance;
         require(bal > 0, "NothingToSweep");
         (bool ok, ) = to.call{value: bal}("");

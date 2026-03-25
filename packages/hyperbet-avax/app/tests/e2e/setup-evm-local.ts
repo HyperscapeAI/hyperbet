@@ -50,6 +50,8 @@ const DUEL_STATUS_BETTING_OPEN = 2;
 const ORDER_FLAG_GTC = 0x01;
 const DUEL_ORACLE_DISPUTE_WINDOW_SECONDS = 3_600;
 const E2E_BET_WINDOW_SECONDS = 3_600n;
+const SEED_ORDERS =
+  (process.env.E2E_EVM_SEED_ORDERS || "true") !== "false";
 
 type EvmArtifact = {
   abi: unknown[];
@@ -375,54 +377,58 @@ async function main(): Promise<void> {
     functionName: "marketKey",
     args: [duelKey, MARKET_KIND_DUEL_WINNER],
   })) as `0x${string}`;
+  let seedNoOrderTx: `0x${string}` | null = null;
+  let seedYesOrderTx: `0x${string}` | null = null;
 
-  const seedNoOrderTx = await makerWalletClient.writeContract({
-    address: goldClobAddress as Address,
-    abi: goldClobArtifact.abi,
-    functionName: "placeOrder",
-    args: [
-      duelKey,
-      MARKET_KIND_DUEL_WINNER,
-      SELL_SIDE,
-      seedNoOrderPrice,
-      parseUnits(seedOrderAmountUi, 18),
-      ORDER_FLAG_GTC,
-    ],
-    value: (() => {
-      const amount = parseUnits(seedOrderAmountUi, 18);
-      const cost = quoteCost(SELL_SIDE, seedNoOrderPrice, amount);
-      const tradeTreasuryFee = cost / 100n;
-      const tradeMarketMakerFee = cost / 100n;
-      return cost + tradeTreasuryFee + tradeMarketMakerFee;
-    })(),
-    account: makerAccount,
-    nonce: consumeMakerNonce(),
-  });
-  await publicClient.waitForTransactionReceipt({ hash: seedNoOrderTx });
+  if (SEED_ORDERS) {
+    seedNoOrderTx = await makerWalletClient.writeContract({
+      address: goldClobAddress as Address,
+      abi: goldClobArtifact.abi,
+      functionName: "placeOrder",
+      args: [
+        duelKey,
+        MARKET_KIND_DUEL_WINNER,
+        SELL_SIDE,
+        seedNoOrderPrice,
+        parseUnits(seedOrderAmountUi, 18),
+        ORDER_FLAG_GTC,
+      ],
+      value: (() => {
+        const amount = parseUnits(seedOrderAmountUi, 18);
+        const cost = quoteCost(SELL_SIDE, seedNoOrderPrice, amount);
+        const tradeTreasuryFee = cost / 100n;
+        const tradeMarketMakerFee = cost / 100n;
+        return cost + tradeTreasuryFee + tradeMarketMakerFee;
+      })(),
+      account: makerAccount,
+      nonce: consumeMakerNonce(),
+    });
+    await publicClient.waitForTransactionReceipt({ hash: seedNoOrderTx });
 
-  const seedYesOrderTx = await makerWalletClient.writeContract({
-    address: goldClobAddress as Address,
-    abi: goldClobArtifact.abi,
-    functionName: "placeOrder",
-    args: [
-      duelKey,
-      MARKET_KIND_DUEL_WINNER,
-      BUY_SIDE,
-      seedYesOrderPrice,
-      parseUnits(seedOrderAmountUi, 18),
-      ORDER_FLAG_GTC,
-    ],
-    value: (() => {
-      const amount = parseUnits(seedOrderAmountUi, 18);
-      const cost = quoteCost(BUY_SIDE, seedYesOrderPrice, amount);
-      const tradeTreasuryFee = cost / 100n;
-      const tradeMarketMakerFee = cost / 100n;
-      return cost + tradeTreasuryFee + tradeMarketMakerFee;
-    })(),
-    account: makerAccount,
-    nonce: consumeMakerNonce(),
-  });
-  await publicClient.waitForTransactionReceipt({ hash: seedYesOrderTx });
+    seedYesOrderTx = await makerWalletClient.writeContract({
+      address: goldClobAddress as Address,
+      abi: goldClobArtifact.abi,
+      functionName: "placeOrder",
+      args: [
+        duelKey,
+        MARKET_KIND_DUEL_WINNER,
+        BUY_SIDE,
+        seedYesOrderPrice,
+        parseUnits(seedOrderAmountUi, 18),
+        ORDER_FLAG_GTC,
+      ],
+      value: (() => {
+        const amount = parseUnits(seedOrderAmountUi, 18);
+        const cost = quoteCost(BUY_SIDE, seedYesOrderPrice, amount);
+        const tradeTreasuryFee = cost / 100n;
+        const tradeMarketMakerFee = cost / 100n;
+        return cost + tradeTreasuryFee + tradeMarketMakerFee;
+      })(),
+      account: makerAccount,
+      nonce: consumeMakerNonce(),
+    });
+    await publicClient.waitForTransactionReceipt({ hash: seedYesOrderTx });
+  }
 
   const env = await readEnv(envPath);
   env.VITE_AVAX_RPC_URL = rpcUrl;

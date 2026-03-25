@@ -549,10 +549,37 @@ const invitedWalletsByWallet: Map<
   string,
   Set<string>
 > = _db.invitedWalletsByWallet;
-const referralFeeShareGoldByWallet: Map<string, number> =
-  _db.referralFeeShareGoldByWallet;
-const treasuryFeesFromReferralsByWallet: Map<string, number> =
-  _db.treasuryFeesFromReferralsByWallet;
+  const referralFeeShareGoldByWallet: Map<string, number> =
+    _db.referralFeeShareGoldByWallet;
+  const treasuryFeesFromReferralsByWallet: Map<string, number> =
+    _db.treasuryFeesFromReferralsByWallet;
+
+const parsers: {
+  solana: ParserState;
+  bsc: ParserState;
+  base: ParserState;
+  avax: ParserState;
+} = {
+  solana: {
+    enabled: false,
+    lastSuccessAt: null,
+    lastError: null,
+    snapshot: null,
+  },
+  bsc: { enabled: false, lastSuccessAt: null, lastError: null, snapshot: null },
+  base: {
+    enabled: false,
+    lastSuccessAt: null,
+    lastError: null,
+    snapshot: null,
+  },
+  avax: {
+    enabled: false,
+    lastSuccessAt: null,
+    lastError: null,
+    snapshot: null,
+  },
+};
 
 function parseStoredJson(raw: string | null): unknown | null {
   if (!raw) return null;
