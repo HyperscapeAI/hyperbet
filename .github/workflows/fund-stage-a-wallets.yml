@@ -16,8 +16,9 @@ on:
         options:
           - bsc
           - avax
+          - solana
       recipients:
-        description: "Comma-separated address=amount pairs, e.g. 0xabc...=0.10ether,0xdef...=0.02ether"
+        description: "Comma-separated address=amount pairs. EVM example: 0xabc...=0.10ether. Solana example: Base58Pubkey=1.25 or Base58Pubkey=ALL"
         required: true
         type: string
 
@@ -45,6 +46,9 @@ jobs:
             avax)
               echo "RPC=$AVAX_FUJI_RPC" >> "$GITHUB_ENV"
               ;;
+            solana)
+              echo "RPC=devnet" >> "$GITHUB_ENV"
+              ;;
             *)
               echo "Unsupported chain: $TARGET_CHAIN" >&2
               exit 1
@@ -54,17 +58,66 @@ jobs:
       - name: Fund recipients
         env:
           DEPLOYER_KEY: ${{ secrets.TESTNET_DEPLOYER_PRIVATE_KEY }}
+          TESTNET_SOLANA_DEPLOYER_KEYPAIR: ${{ secrets.TESTNET_SOLANA_DEPLOYER_KEYPAIR }}
         run: |
           set -euo pipefail
+          echo "Recipients: $RECIPIENTS"
+          IFS=',' read -r -a TARGETS <<< "$RECIPIENTS"
+
+          if [[ "$TARGET_CHAIN" == "solana" ]]; then
+            if [[ -z "${TESTNET_SOLANA_DEPLOYER_KEYPAIR:-}" ]]; then
+              echo "TESTNET_SOLANA_DEPLOYER_KEYPAIR is not available to this workflow" >&2
+              exit 1
+            fi
+
+            wallet_file="$(mktemp)"
+            trap 'rm -f "$wallet_file"' EXIT
+            printf '%s' "$TESTNET_SOLANA_DEPLOYER_KEYPAIR" > "$wallet_file"
+            chmod 600 "$wallet_file"
+            deployer_address="$(solana-keygen pubkey "$wallet_file")"
+            echo "Deployer address: $deployer_address"
+
+            if [[ "${#TARGETS[@]}" -gt 1 ]]; then
+              for target in "${TARGETS[@]}"; do
+                value="${target#*=}"
+                value="${value//[[:space:]]/}"
+                if [[ "$value" == "ALL" ]]; then
+                  echo "Solana ALL transfer supports exactly one recipient" >&2
+                  exit 1
+                fi
+              done
+            fi
+
+            for target in "${TARGETS[@]}"; do
+              address="${target%%=*}"
+              value="${target#*=}"
+              address="${address//[[:space:]]/}"
+              value="${value//[[:space:]]/}"
+
+              if [[ -z "$value" || "$value" == "$target" ]]; then
+                echo "Invalid amount pair: $target" >&2
+                exit 1
+              fi
+
+              echo "Sending $value SOL to $address on $TARGET_CHAIN"
+              solana transfer \
+                "$address" \
+                "$value" \
+                --url "$RPC" \
+                --keypair "$wallet_file" \
+                --allow-unfunded-recipient \
+                --use-rpc
+            done
+            exit 0
+          fi
+
           if [[ -z "${DEPLOYER_KEY:-}" ]]; then
             echo "TESTNET_DEPLOYER_PRIVATE_KEY is not available to this workflow" >&2
             exit 1
           fi
+
           DEPLOYER_ADDRESS="$(cast wallet address --private-key "$DEPLOYER_KEY")"
           echo "Deployer address: $DEPLOYER_ADDRESS"
-          echo "Recipients: $RECIPIENTS"
-
-          IFS=',' read -r -a TARGETS <<< "$RECIPIENTS"
           NONCE="$(cast nonce "$DEPLOYER_ADDRESS" --rpc-url "$RPC")"
 
           for i in "${!TARGETS[@]}"; do
@@ -96,6 +149,15 @@ jobs:
         run: |
           set -euo pipefail
           IFS=',' read -r -a TARGETS <<< "$RECIPIENTS"
+          if [[ "$TARGET_CHAIN" == "solana" ]]; then
+            for target in "${TARGETS[@]}"; do
+              address="${target%%=*}"
+              address="${address//[[:space:]]/}"
+              echo "$address: $(solana balance "$address" --url "$RPC")"
+            done
+            exit 0
+          fi
+
           for target in "${TARGETS[@]}"; do
             address="${target%%=*}"
             address="${address//[[:space:]]/}"
