@@ -30,8 +30,14 @@ jobs:
       TARGET_CHAIN: ${{ github.event_name == 'workflow_dispatch' && inputs.chain || 'bsc' }}
       RECIPIENTS: ${{ github.event_name == 'workflow_dispatch' && inputs.recipients || '0x4f2714dc431dc948B5B138Ef9b998e943568DE4d=0.20ether' }}
     steps:
-      - name: Install Foundry
-        uses: foundry-rs/foundry-toolchain@v1
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup funding toolchain
+        uses: ./.github/actions/setup-hyperbet
+        with:
+          install-foundry: "true"
+          install-solana: "true"
 
       - name: Resolve chain RPC
         env:
