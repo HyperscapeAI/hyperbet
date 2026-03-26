@@ -1,6 +1,11 @@
 name: Fund Stage A Wallets
 
 on:
+  push:
+    branches:
+      - audit/develop-pm-hardening
+    paths:
+      - .github/workflows/fund-stage-a-wallets.yml
   workflow_dispatch:
     inputs:
       chain:
@@ -21,8 +26,8 @@ jobs:
     name: Fund Stage A wallets
     runs-on: ubuntu-latest
     env:
-      TARGET_CHAIN: ${{ inputs.chain }}
-      RECIPIENTS: ${{ inputs.recipients }}
+      TARGET_CHAIN: ${{ github.event_name == 'workflow_dispatch' && inputs.chain || 'bsc' }}
+      RECIPIENTS: ${{ github.event_name == 'workflow_dispatch' && inputs.recipients || '0x4f2714dc431dc948B5B138Ef9b998e943568DE4d=0.20ether' }}
     steps:
       - name: Install Foundry
         uses: foundry-rs/foundry-toolchain@v1
