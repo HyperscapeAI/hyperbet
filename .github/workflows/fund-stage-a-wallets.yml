@@ -1,0 +1,98 @@
+name: Fund Stage A Wallets
+
+on:
+  workflow_dispatch:
+    inputs:
+      chain:
+        description: "Target chain"
+        required: true
+        type: choice
+        default: bsc
+        options:
+          - bsc
+          - avax
+      recipients:
+        description: "Comma-separated address=amount pairs, e.g. 0xabc...=0.10ether,0xdef...=0.02ether"
+        required: true
+        type: string
+
+jobs:
+  fund-stage-a-wallets:
+    name: Fund Stage A wallets
+    runs-on: ubuntu-latest
+    env:
+      TARGET_CHAIN: ${{ inputs.chain }}
+      RECIPIENTS: ${{ inputs.recipients }}
+    steps:
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+
+      - name: Resolve chain RPC
+        env:
+          BSC_TESTNET_RPC: ${{ secrets.BSC_TESTNET_RPC }}
+          AVAX_FUJI_RPC: ${{ secrets.AVAX_FUJI_RPC }}
+        run: |
+          set -euo pipefail
+          case "$TARGET_CHAIN" in
+            bsc)
+              echo "RPC=$BSC_TESTNET_RPC" >> "$GITHUB_ENV"
+              ;;
+            avax)
+              echo "RPC=$AVAX_FUJI_RPC" >> "$GITHUB_ENV"
+              ;;
+            *)
+              echo "Unsupported chain: $TARGET_CHAIN" >&2
+              exit 1
+              ;;
+          esac
+
+      - name: Fund recipients
+        env:
+          DEPLOYER_KEY: ${{ secrets.TESTNET_DEPLOYER_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${DEPLOYER_KEY:-}" ]]; then
+            echo "TESTNET_DEPLOYER_PRIVATE_KEY is not available to this workflow" >&2
+            exit 1
+          fi
+          DEPLOYER_ADDRESS="$(cast wallet address --private-key "$DEPLOYER_KEY")"
+          echo "Deployer address: $DEPLOYER_ADDRESS"
+          echo "Recipients: $RECIPIENTS"
+
+          IFS=',' read -r -a TARGETS <<< "$RECIPIENTS"
+          NONCE="$(cast nonce "$DEPLOYER_ADDRESS" --rpc-url "$RPC")"
+
+          for i in "${!TARGETS[@]}"; do
+            target="${TARGETS[$i]}"
+            address="${target%%=*}"
+            value="${target#*=}"
+            address="${address//[[:space:]]/}"
+            value="${value//[[:space:]]/}"
+
+            if [[ ! "$address" =~ ^0x[a-fA-F0-9]{40}$ ]]; then
+              echo "Invalid address: $address" >&2
+              exit 1
+            fi
+            if [[ -z "$value" || "$value" == "$target" ]]; then
+              echo "Invalid amount pair: $target" >&2
+              exit 1
+            fi
+
+            current_nonce="$((NONCE + i))"
+            echo "Sending $value to $address on $TARGET_CHAIN (nonce $current_nonce)"
+            cast send "$address" \
+              --value "$value" \
+              --rpc-url "$RPC" \
+              --private-key "$DEPLOYER_KEY" \
+              --nonce "$current_nonce"
+          done
+
+      - name: Verify recipient balances
+        run: |
+          set -euo pipefail
+          IFS=',' read -r -a TARGETS <<< "$RECIPIENTS"
+          for target in "${TARGETS[@]}"; do
+            address="${target%%=*}"
+            address="${address//[[:space:]]/}"
+            echo "$address: $(cast balance "$address" --rpc-url "$RPC" --ether)"
+          done
