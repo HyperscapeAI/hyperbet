@@ -61,6 +61,7 @@ type ReadOnlyChainResult = {
   buildInfo: BuildInfo;
   status: KeeperStatus;
   predictionMarkets: PredictionMarketsResponse;
+  perpsMarkets: unknown;
   botHealth: BotHealth;
   streamState: unknown;
   duelContext: unknown;
@@ -80,39 +81,14 @@ type AuditResult = {
   output: string;
 };
 
-type SolanaCanaryResult = {
-  duelId: string;
-  duelKeyHex: string;
-  marketRef: string;
-  upsertTx: string;
-  placeOrderTx: string;
-  cancelTx: string;
-  syncTx: string;
-  claimTx: string;
-};
+type CanarySurfaceResult = Record<string, string | null>;
 
-type BscCanaryResult = {
+type ChainCanaryResult = {
   duelId: string;
   duelKeyHex: string;
-  marketRef: string;
-  openTx: string;
-  createMarketTx: string;
-  placeOrderTx: string;
-  cancelTx: string;
-  syncTx: string;
-  claimTx: string;
-};
-
-type AvaxCanaryResult = {
-  duelId: string;
-  duelKeyHex: string;
-  marketRef: string;
-  openTx: string;
-  createMarketTx: string;
-  placeOrderTx: string;
-  cancelTx: string;
-  syncTx: string;
-  claimTx: string;
+  pm: CanarySurfaceResult;
+  perps: CanarySurfaceResult;
+  amm: CanarySurfaceResult;
 };
 
 type ProofSummary = {
@@ -128,9 +104,9 @@ type ProofSummary = {
     avax?: ReadOnlyChainResult;
   };
   canary?: {
-    solana?: SolanaCanaryResult;
-    bsc?: BscCanaryResult;
-    avax?: AvaxCanaryResult;
+    solana?: ChainCanaryResult;
+    bsc?: ChainCanaryResult;
+    avax?: ChainCanaryResult;
   };
   verifyChains?: CheckResult[];
   avaxEnvAudit?: {
@@ -319,6 +295,11 @@ async function runReadOnly(chain: SupportedChain): Promise<ReadOnlyChainResult> 
     undefined,
     `${chain}/prediction-markets.json`,
   );
+  const perpsMarkets = await requestJson<unknown>(
+    `${urls.keeperUrl}/api/perps/markets`,
+    undefined,
+    `${chain}/perps-markets.json`,
+  );
   const botHealth = await requestJson<BotHealth>(
     `${urls.keeperUrl}/api/keeper/bot-health`,
     undefined,
@@ -352,6 +333,7 @@ async function runReadOnly(chain: SupportedChain): Promise<ReadOnlyChainResult> 
     buildInfo,
     status,
     predictionMarkets,
+    perpsMarkets,
     botHealth,
     streamState,
     duelContext,
@@ -456,25 +438,68 @@ function runVerifyChains(readOnly: {
   if (readOnly.solana) {
     chains.push("solana");
     env.SOLANA_VERIFY_RPC_URL = requireEnv("HYPERBET_SOLANA_STAGING_RPC_URL");
-    if (readOnly.solana.canonicalMarket?.programId) {
-      env.SOLANA_VERIFY_PROGRAM_ID = readOnly.solana.canonicalMarket.programId;
-    }
+    env.SOLANA_VERIFY_GOLD_CLOB_PROGRAM_ID =
+      readOnly.solana.canonicalMarket?.programId ||
+      requireEnv("HYPERBET_SOLANA_STAGING_GOLD_CLOB_PROGRAM_ID");
+    env.SOLANA_VERIFY_PROGRAM_ID = env.SOLANA_VERIFY_GOLD_CLOB_PROGRAM_ID;
+    env.SOLANA_VERIFY_GOLD_AMM_PROGRAM_ID = requireEnv(
+      "HYPERBET_SOLANA_STAGING_GOLD_AMM_PROGRAM_ID",
+    );
+    env.SOLANA_VERIFY_GOLD_PERPS_PROGRAM_ID = requireEnv(
+      "HYPERBET_SOLANA_STAGING_GOLD_PERPS_PROGRAM_ID",
+    );
   }
 
   if (readOnly.bsc) {
     chains.push("bsc");
     env.BSC_STAGING_RPC_URL = requireEnv("HYPERBET_BSC_STAGING_RPC_URL");
-    if (readOnly.bsc.canonicalMarket?.contractAddress) {
-      env.BSC_STAGING_GOLD_CLOB_ADDRESS = readOnly.bsc.canonicalMarket.contractAddress;
-    }
+    env.BSC_STAGING_DUEL_ORACLE_ADDRESS = requireEnv(
+      "HYPERBET_BSC_STAGING_DUEL_ORACLE_ADDRESS",
+    );
+    env.BSC_STAGING_GOLD_CLOB_ADDRESS =
+      readOnly.bsc.canonicalMarket?.contractAddress ||
+      requireEnv("HYPERBET_BSC_STAGING_GOLD_CLOB_ADDRESS");
+    env.BSC_STAGING_GOLD_AMM_ROUTER_ADDRESS = requireEnv(
+      "HYPERBET_BSC_STAGING_GOLD_AMM_ROUTER_ADDRESS",
+    );
+    env.BSC_STAGING_MUSD_TOKEN_ADDRESS = requireEnv(
+      "HYPERBET_BSC_STAGING_MUSD_TOKEN_ADDRESS",
+    );
+    env.BSC_STAGING_GOLD_TOKEN_ADDRESS = requireEnv(
+      "HYPERBET_BSC_STAGING_GOLD_TOKEN_ADDRESS",
+    );
+    env.BSC_STAGING_SKILL_ORACLE_ADDRESS = requireEnv(
+      "HYPERBET_BSC_STAGING_SKILL_ORACLE_ADDRESS",
+    );
+    env.BSC_STAGING_PERP_ENGINE_ADDRESS = requireEnv(
+      "HYPERBET_BSC_STAGING_PERP_ENGINE_ADDRESS",
+    );
   }
 
   if (readOnly.avax) {
     chains.push("avax");
     env.AVAX_STAGING_RPC_URL = requireEnv("HYPERBET_AVAX_STAGING_RPC_URL");
-    if (readOnly.avax.canonicalMarket?.contractAddress) {
-      env.AVAX_STAGING_GOLD_CLOB_ADDRESS = readOnly.avax.canonicalMarket.contractAddress;
-    }
+    env.AVAX_STAGING_DUEL_ORACLE_ADDRESS = requireEnv(
+      "HYPERBET_AVAX_STAGING_DUEL_ORACLE_ADDRESS",
+    );
+    env.AVAX_STAGING_GOLD_CLOB_ADDRESS =
+      readOnly.avax.canonicalMarket?.contractAddress ||
+      requireEnv("HYPERBET_AVAX_STAGING_GOLD_CLOB_ADDRESS");
+    env.AVAX_STAGING_GOLD_AMM_ROUTER_ADDRESS = requireEnv(
+      "HYPERBET_AVAX_STAGING_GOLD_AMM_ROUTER_ADDRESS",
+    );
+    env.AVAX_STAGING_MUSD_TOKEN_ADDRESS = requireEnv(
+      "HYPERBET_AVAX_STAGING_MUSD_TOKEN_ADDRESS",
+    );
+    env.AVAX_STAGING_GOLD_TOKEN_ADDRESS = requireEnv(
+      "HYPERBET_AVAX_STAGING_GOLD_TOKEN_ADDRESS",
+    );
+    env.AVAX_STAGING_SKILL_ORACLE_ADDRESS = requireEnv(
+      "HYPERBET_AVAX_STAGING_SKILL_ORACLE_ADDRESS",
+    );
+    env.AVAX_STAGING_PERP_ENGINE_ADDRESS = requireEnv(
+      "HYPERBET_AVAX_STAGING_PERP_ENGINE_ADDRESS",
+    );
   }
 
   const results = runJsonCommand<CheckResult[]>(
@@ -519,34 +544,56 @@ function runAvaxEnvAudits(): ProofSummary["avaxEnvAudit"] {
   return { app, keeper };
 }
 
-function runSolanaCanary(): SolanaCanaryResult {
-  const result = runJsonCommand<SolanaCanaryResult>(
+function writeCanaryArtifacts(
+  chain: SupportedChain,
+  result: ChainCanaryResult,
+): void {
+  writeJsonArtifact(artifactRoot, `${chain}/canary.json`, result);
+  writeJsonArtifact(artifactRoot, `${chain}/canary.pm.json`, result.pm);
+  writeJsonArtifact(artifactRoot, `${chain}/canary.perps.json`, result.perps);
+  writeJsonArtifact(artifactRoot, `${chain}/canary.amm.json`, result.amm);
+}
+
+function runSolanaCanary(): ChainCanaryResult {
+  const result = runJsonCommand<ChainCanaryResult>(
     "solana-canary",
     "bun",
     ["--bun", "packages/hyperbet-solana/keeper/src/staged-proof-solana.ts"],
   );
-  writeJsonArtifact(artifactRoot, "solana/canary.json", result);
+  writeCanaryArtifacts("solana", result);
   return result;
 }
 
-function runBscCanary(): BscCanaryResult {
-  const result = runJsonCommand<BscCanaryResult>(
+function runBscCanary(): ChainCanaryResult {
+  const result = runJsonCommand<ChainCanaryResult>(
     "bsc-canary",
     "bun",
     ["--bun", "packages/hyperbet-bsc/keeper/src/staged-proof-bsc.ts"],
   );
-  writeJsonArtifact(artifactRoot, "bsc/canary.json", result);
+  writeCanaryArtifacts("bsc", result);
   return result;
 }
 
-function runAvaxCanary(): AvaxCanaryResult {
-  const result = runJsonCommand<AvaxCanaryResult>(
+function runAvaxCanary(): ChainCanaryResult {
+  const result = runJsonCommand<ChainCanaryResult>(
     "avax-canary",
     "bun",
     ["--bun", "packages/hyperbet-avax/keeper/src/staged-proof-avax.ts"],
   );
-  writeJsonArtifact(artifactRoot, "avax/canary.json", result);
+  writeCanaryArtifacts("avax", result);
   return result;
+}
+
+function summarizeCanarySurface(result: ChainCanaryResult): string {
+  const pmLabel =
+    result.pm.claimTx ?? result.pm.syncTx ?? result.pm.placeOrderTx ?? "missing";
+  const perpsLabel =
+    result.perps.closePositionTx ??
+    result.perps.openPositionTx ??
+    result.perps.updateOracleTx ??
+    "missing";
+  const ammLabel = result.amm.buyTx ?? result.amm.createMarketTx ?? "missing";
+  return `pm=${pmLabel} perps=${perpsLabel} amm=${ammLabel}`;
 }
 
 function humanSummary(summary: ProofSummary): string {
@@ -572,15 +619,13 @@ function humanSummary(summary: ProofSummary): string {
     );
   }
   if (summary.canary?.solana) {
-    lines.push(`solana canary ok: claim=${summary.canary.solana.claimTx}`);
+    lines.push(`solana canary ok: ${summarizeCanarySurface(summary.canary.solana)}`);
   }
   if (summary.canary?.bsc) {
-    lines.push(`bsc canary ok: claim=${summary.canary.bsc.claimTx}`);
+    lines.push(`bsc canary ok: ${summarizeCanarySurface(summary.canary.bsc)}`);
   }
   if (summary.canary?.avax) {
-    lines.push(
-      `avax canary ok: claim=${summary.canary.avax.claimTx}`,
-    );
+    lines.push(`avax canary ok: ${summarizeCanarySurface(summary.canary.avax)}`);
   }
   if (summary.avaxEnvAudit) {
     lines.push(

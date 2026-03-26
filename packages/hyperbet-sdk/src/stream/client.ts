@@ -1,13 +1,30 @@
-import WebSocket from "ws";
+type WebSocketLike = {
+  on: (
+    event: "message" | "error" | "close",
+    listener: (...args: any[]) => void,
+  ) => void;
+  close: () => void;
+};
+
+type WebSocketCtor = new (url: string) => WebSocketLike;
+
+type GlobalWithWebSocket = {
+  WebSocket?: WebSocketCtor;
+};
 
 export class HyperbetStreamClient {
-    private ws: WebSocket | null = null;
+    private ws: WebSocketLike | null = null;
     public callbacks: Array<(data: any) => void> = [];
 
     constructor(public url: string) {}
 
     public connect() {
-        this.ws = new WebSocket(this.url);
+        const ctor = (globalThis as unknown as GlobalWithWebSocket).WebSocket;
+        if (!ctor) {
+            throw new Error("WebSocket is not available in this environment.");
+        }
+
+        this.ws = new ctor(this.url);
         
         this.ws.on("message", (data) => {
             try {

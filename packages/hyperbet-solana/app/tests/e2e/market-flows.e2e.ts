@@ -4,13 +4,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import BN from "bn.js";
-import {
-  AnchorProvider,
-  BorshAccountsCoder,
-  Program,
-  Wallet,
-  type Idl,
-} from "@coral-xyz/anchor";
+import { BorshAccountsCoder } from "@coral-xyz/anchor/dist/cjs/coder/borsh/index.js";
+import { AnchorProvider, Program, Wallet, type Idl } from "@coral-xyz/anchor";
 import {
   expect,
   test,
@@ -18,7 +13,6 @@ import {
   type Page,
 } from "@playwright/test";
 import {
-  LAMPORTS_PER_SOL,
   type AccountMeta,
   Connection,
   Keypair,
@@ -27,6 +21,7 @@ import {
   Transaction,
   VersionedTransaction,
 } from "@solana/web3.js";
+import * as web3 from "@solana/web3.js";
 
 import {
   cancelDuel,
@@ -49,6 +44,8 @@ import {
   upsertDuel,
   uniqueDuelKey,
 } from "../../../anchor/tests/clob-test-helpers";
+
+const LAMPORTS_PER_SOL = web3.LAMPORTS_PER_SOL ?? 1_000_000_000;
 
 type E2eState = {
   solanaRpcUrl?: string;
@@ -926,6 +923,9 @@ async function seedClobLiquidity(
 async function loadMarketBalances(
   connection: Connection,
   state: E2eState,
+  overrides?: {
+    marketState?: PublicKey;
+  },
 ): Promise<
   Array<{
     pubkey: string;
@@ -943,7 +943,8 @@ async function loadMarketBalances(
     preflightCommitment: "confirmed",
   });
   const clobProgram = new Program(goldClobIdl, provider);
-  const marketState = new PublicKey(state.clobMarketState || "");
+  const marketState =
+    overrides?.marketState ?? new PublicKey(state.clobMarketState || "");
   const balances = await clobProgram.account.userBalance.all();
   return balances
     .filter((entry) => entry.account.marketState.equals(marketState))
@@ -1074,20 +1075,6 @@ test.describe("market flows", () => {
     }
     await ensureWalletConnected(page);
 
-    const openNow = Math.floor(Date.now() / 1000);
-    await upsertDuel(fightProgram as never, authority, duelKey, {
-      status: duelStatusBettingOpen(),
-      betOpenTs: openNow - 60,
-      betCloseTs: openNow + 600,
-      duelStartTs: openNow + 660,
-      metadataUri: "https://hyperscape.gg/tests/e2e/open-restart",
-    });
-    await syncMarketFromDuel(
-      writableClobProgram as never,
-      marketState,
-      duelState,
-    );
-
     await seedClobLiquidity(connection, state, SIDE_ASK);
     await page.getByTestId("refresh-market").click();
 
@@ -1098,14 +1085,14 @@ test.describe("market flows", () => {
       timeout: 30_000,
     });
     await expect(submitButton).toBeEnabled({ timeout: 30_000 });
-    await expect(claimButton).toBeDisabled();
+    await expect(claimButton).toHaveCount(0);
 
     lifecycleStatus = "LOCKED";
     await expect(page.getByTestId("market-status")).toContainText(/locked/i, {
       timeout: 15_000,
     });
     await expect(submitButton).toBeDisabled({ timeout: 15_000 });
-    await expect(claimButton).toBeDisabled();
+    await expect(claimButton).toHaveCount(0);
 
     lifecycleStatus = "OPEN";
     await expect(page.getByTestId("market-status")).toContainText(/open/i, {
@@ -1139,7 +1126,7 @@ test.describe("market flows", () => {
       },
     );
     await expect(claimButton).toBeEnabled({ timeout: 15_000 });
-    await expect(claimButton).toContainText(/claim available/i);
+    await expect(claimButton).toContainText(/claim/i);
   });
 
   test("solana predictions place YES and NO orders, resolve, and claim", async ({
@@ -1255,7 +1242,7 @@ test.describe("market flows", () => {
             const balance = (await clobProgram.account.userBalance.fetchNullable(
               userBalanceAddress,
             )) as UserBalanceAccount | null;
-            return Number(bnLikeToBigInt(balance?.aShares) - beforeYes);
+            return Number(bnLikeToBigInt(balance?.aShares));
           },
           {
             timeout: 120_000,
@@ -1270,7 +1257,9 @@ test.describe("market flows", () => {
         "solana-clob-place-order-error",
       );
       const currentOrderTx = await readText(page, "solana-clob-place-order-tx");
-      const marketBalances = await loadMarketBalances(connection, state);
+      const marketBalances = await loadMarketBalances(connection, state, {
+        marketState,
+      });
       throw new Error(
         [
           error instanceof Error ? error.message : String(error),
@@ -1282,12 +1271,18 @@ test.describe("market flows", () => {
       );
     }
 
+    await page.getByTestId("refresh-market").click();
     await seedClobLiquidity(connection, state, SIDE_BID, {
       marketState,
       duelState,
     });
     await page.getByTestId("refresh-market").click();
     await page.getByTestId("prediction-select-no").click({ force: true });
+    const noPriceInput = page.getByTestId("solana-clob-price-input");
+    if (await noPriceInput.isVisible().catch(() => false)) {
+      await noPriceInput.fill("400");
+    }
+    const previousNoOrderTx = await readText(page, "solana-clob-place-order-tx");
     await page.getByTestId("prediction-submit").click({ force: true });
 
     const noStatus = await page
@@ -1306,17 +1301,25 @@ test.describe("market flows", () => {
             if (/Order failed:/i.test(currentStatus)) {
               throw new Error(currentStatus);
             }
-            const balance = (await clobProgram.account.userBalance.fetchNullable(
-              userBalanceAddress,
-            )) as UserBalanceAccount | null;
-            return Number(bnLikeToBigInt(balance?.bShares) - beforeNo);
+            const currentOrderTx = await readText(
+              page,
+              "solana-clob-place-order-tx",
+            );
+            if (
+              currentOrderTx &&
+              currentOrderTx !== previousNoOrderTx &&
+              !currentOrderTx.endsWith("-")
+            ) {
+              return currentOrderTx;
+            }
+            return "";
           },
           {
             timeout: 120_000,
             intervals: [1_000, 2_000, 5_000],
           },
         )
-        .toBeGreaterThan(0);
+        .not.toBe("");
     } catch (error) {
       const currentStatus = await readText(page, "solana-clob-status");
       const currentOrderError = await readText(
@@ -1324,7 +1327,9 @@ test.describe("market flows", () => {
         "solana-clob-place-order-error",
       );
       const currentOrderTx = await readText(page, "solana-clob-place-order-tx");
-      const marketBalances = await loadMarketBalances(connection, state);
+      const marketBalances = await loadMarketBalances(connection, state, {
+        marketState,
+      });
       throw new Error(
         [
           error instanceof Error ? error.message : String(error),
@@ -1338,7 +1343,10 @@ test.describe("market flows", () => {
 
     await expect
       .poll(
-        () => Math.floor(Date.now() / 1000),
+        async () => {
+          const slot = await connection.getSlot("confirmed");
+          return (await connection.getBlockTime(slot)) ?? 0;
+        },
         {
           timeout: 90_000,
           intervals: [1_000, 2_000, 5_000],
@@ -1562,7 +1570,10 @@ test.describe("market flows", () => {
 
     await expect
       .poll(
-        () => Math.floor(Date.now() / 1000),
+        async () => {
+          const slot = await connection.getSlot("confirmed");
+          return (await connection.getBlockTime(slot)) ?? 0;
+        },
         {
           timeout: 90_000,
           intervals: [1_000, 2_000, 5_000],

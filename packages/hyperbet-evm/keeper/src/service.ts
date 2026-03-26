@@ -624,33 +624,6 @@ let betSyncReplayMode: BetSyncReplayMode =
   (betSyncCheckpoint.lastAppliedSeq > 0 ? "live" : "bootstrap");
 let betSyncReplayUntilSeq: number | null = null;
 
-const parsers: {
-  solana: ParserState;
-  bsc: ParserState;
-  base: ParserState;
-  avax: ParserState;
-} = {
-  solana: {
-    enabled: false,
-    lastSuccessAt: null,
-    lastError: null,
-    snapshot: null,
-  },
-  bsc: { enabled: false, lastSuccessAt: null, lastError: null, snapshot: null },
-  base: {
-    enabled: false,
-    lastSuccessAt: null,
-    lastError: null,
-    snapshot: null,
-  },
-  avax: {
-    enabled: false,
-    lastSuccessAt: null,
-    lastError: null,
-    snapshot: null,
-  },
-};
-
 if (!predictionMarketsOverview) {
   persistPredictionMarketsOverview(
     derivePredictionMarketsOverview(loadKeeperBotHealthSnapshot(), streamState, null),

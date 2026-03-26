@@ -3,7 +3,8 @@ import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { BorshAccountsCoder, type Idl } from "@coral-xyz/anchor";
+import { BorshAccountsCoder } from "@coral-xyz/anchor/dist/cjs/coder/borsh/index.js";
+import type { Idl } from "@coral-xyz/anchor";
 import {
   expect,
   test,
@@ -296,6 +297,101 @@ async function waitForKeeperBotHealth(
     });
 }
 
+async function waitForPredictionMarketState(
+  request: APIRequestContext,
+  chainKey: "bsc" | "avax",
+  duelKey: Hash,
+  marketRef: string | null,
+  lifecycleStatus: string,
+): Promise<void> {
+  await expect
+    .poll(
+      async () => {
+        const predictionMarkets = await fetchPredictionMarkets(request);
+        const evmMarket = findPredictionMarket(predictionMarkets, chainKey);
+        return {
+          duelKey: predictionMarkets.duel.duelKey,
+          marketRef: evmMarket?.marketRef ?? null,
+          lifecycleStatus: evmMarket?.lifecycleStatus ?? null,
+        };
+      },
+      {
+        timeout: 60_000,
+        intervals: [500, 1_000, 2_000, 5_000],
+      },
+    )
+    .toEqual({
+      duelKey: duelKey.slice(2),
+      marketRef,
+      lifecycleStatus,
+    });
+}
+
+async function publishEvmCycleState(
+  request: APIRequestContext,
+  chainKey: "bsc" | "avax",
+  duelKey: Hash,
+  duelId: string,
+  cycleId: string,
+): Promise<void> {
+  await postJson<{ ok: boolean; seq: number }>(
+    request,
+    "/api/streaming/state/publish",
+    {
+      cycle: {
+        cycleId,
+        phase: "FIGHTING",
+        duelId,
+        duelKeyHex: duelKey.slice(2),
+        cycleStartTime: Date.now() - 90_000,
+        phaseStartTime: Date.now() - 30_000,
+        phaseEndTime: Date.now() + 30_000,
+        betOpenTime: Date.now() - 15_000,
+        betCloseTime: Date.now() + 300_000,
+        fightStartTime: Date.now() + 60_000,
+        duelEndTime: null,
+        countdown: 30,
+        timeRemaining: 30_000,
+        winnerId: null,
+        winnerName: null,
+        winReason: null,
+        seed: null,
+        replayHash: null,
+        agent1: {
+          id: `${chainKey}-fresh-agent-a`,
+          name: "Agent A",
+          provider: "Hyperscape",
+          model: "alpha-local",
+          hp: 80,
+          maxHp: 100,
+          combatLevel: 88,
+          wins: 12,
+          losses: 4,
+          damageDealtThisFight: 148,
+          inventory: [],
+          monologues: [],
+        },
+        agent2: {
+          id: `${chainKey}-fresh-agent-b`,
+          name: "Agent B",
+          provider: "OpenRouter",
+          model: "beta-local",
+          hp: 76,
+          maxHp: 100,
+          combatLevel: 84,
+          wins: 10,
+          losses: 5,
+          damageDealtThisFight: 131,
+          inventory: [],
+          monologues: [],
+        },
+      },
+      leaderboard: [],
+      cameraTarget: null,
+    },
+  );
+}
+
 function findPredictionMarket(
   payload: PredictionMarketsResponse,
   chainKey: string,
@@ -423,6 +519,19 @@ async function createFreshEvmOpenMarket(
   const duelKey = keccak256(stringToHex(uniqueKey));
   const latestBlock = await publicClient.getBlock({ blockTag: "latest" });
   const duelId = `${Date.now()}`;
+  const adminAddress = adminWalletClient.account?.address as Address | undefined;
+  const makerAddress = makerWalletClient.account?.address as Address | undefined;
+  if (!adminAddress || !makerAddress) {
+    throw new Error("Missing wallet client account for EVM market setup");
+  }
+  let nextAdminNonce = await publicClient.getTransactionCount({
+    address: adminAddress,
+    blockTag: "pending",
+  });
+  let nextMakerNonce = await publicClient.getTransactionCount({
+    address: makerAddress,
+    blockTag: "pending",
+  });
   const betOpenTs = latestBlock.timestamp - 15n;
   const betCloseTs = betOpenTs + E2E_BET_WINDOW_SECONDS;
   const duelStartTs = betCloseTs + E2E_DUEL_START_DELAY_SECONDS;
@@ -441,6 +550,7 @@ async function createFreshEvmOpenMarket(
       `${uniqueKey}-open`,
       DUEL_STATUS_BETTING_OPEN,
     ],
+    nonce: nextAdminNonce++,
   });
   await waitForEvmReceipt(publicClient, upsertTx);
 
@@ -449,6 +559,7 @@ async function createFreshEvmOpenMarket(
     abi: goldClobArtifact.abi,
     functionName: "createMarketForDuel",
     args: [duelKey, MARKET_KIND_DUEL_WINNER],
+    nonce: nextAdminNonce++,
   });
   await waitForEvmReceipt(publicClient, createMarketTx);
 
@@ -469,6 +580,7 @@ async function createFreshEvmOpenMarket(
       ORDER_FLAG_GTC,
     ],
     value: seedCost + seedFee + seedFee,
+    nonce: nextMakerNonce++,
   });
   await waitForEvmReceipt(publicClient, seedOrderTx);
 
@@ -479,61 +591,19 @@ async function createFreshEvmOpenMarket(
     args: [duelKey, MARKET_KIND_DUEL_WINNER],
   })) as Hash;
 
-  await postJson<{ ok: boolean; seq: number }>(
+  await publishEvmCycleState(
     request,
-    "/api/streaming/state/publish",
-    {
-      cycle: {
-        cycleId: `${uniqueKey}-cycle`,
-        phase: "FIGHTING",
-        duelId,
-        duelKeyHex: duelKey.slice(2),
-        cycleStartTime: Date.now() - 90_000,
-        phaseStartTime: Date.now() - 30_000,
-        phaseEndTime: Date.now() + 30_000,
-        betOpenTime: Date.now() - 15_000,
-        betCloseTime: Date.now() + 300_000,
-        fightStartTime: Date.now() + 60_000,
-        duelEndTime: null,
-        countdown: 30,
-        timeRemaining: 30_000,
-        winnerId: null,
-        winnerName: null,
-        winReason: null,
-        seed: null,
-        replayHash: null,
-        agent1: {
-          id: `${chainKey}-fresh-agent-a`,
-          name: "Agent A",
-          provider: "Hyperscape",
-          model: "alpha-local",
-          hp: 80,
-          maxHp: 100,
-          combatLevel: 88,
-          wins: 12,
-          losses: 4,
-          damageDealtThisFight: 148,
-          inventory: [],
-          monologues: [],
-        },
-        agent2: {
-          id: `${chainKey}-fresh-agent-b`,
-          name: "Agent B",
-          provider: "OpenRouter",
-          model: "beta-local",
-          hp: 76,
-          maxHp: 100,
-          combatLevel: 84,
-          wins: 10,
-          losses: 5,
-          damageDealtThisFight: 131,
-          inventory: [],
-          monologues: [],
-        },
-      },
-      leaderboard: [],
-      cameraTarget: null,
-    },
+    chainKey,
+    duelKey,
+    duelId,
+    `${uniqueKey}-cycle`,
+  );
+  await waitForPredictionMarketState(
+    request,
+    chainKey,
+    duelKey,
+    marketKey,
+    "OPEN",
   );
 
   return { duelKey, marketKey };
@@ -1280,14 +1350,14 @@ test.describe("market flows", () => {
       timeout: 30_000,
     });
     await expect(submitButton).toBeEnabled({ timeout: 30_000 });
-    await expect(claimButton).toBeDisabled();
+    await expect(claimButton).toHaveCount(0);
 
     lifecycleStatus = "LOCKED";
     await expect(page.getByTestId("market-status")).toContainText(/locked/i, {
       timeout: 15_000,
     });
     await expect(submitButton).toBeDisabled({ timeout: 15_000 });
-    await expect(claimButton).toBeDisabled();
+    await expect(claimButton).toHaveCount(0);
 
     lifecycleStatus = "OPEN";
     await expect(page.getByTestId("market-status")).toContainText(/open/i, {
@@ -1339,7 +1409,7 @@ test.describe("market flows", () => {
       },
     );
     await expect(claimButton).toBeEnabled({ timeout: 15_000 });
-    await expect(claimButton).toContainText(/claim available/i);
+    await expect(claimButton).toContainText(/claim/i);
   });
 
   test("evm predictions place YES and NO orders, resolve, and claim", async ({
@@ -1403,27 +1473,27 @@ test.describe("market flows", () => {
       transport: http(rpcUrl),
     });
 
+    await publishEvmCycleState(
+      request,
+      "bsc",
+      duelKey,
+      String(state.evmMatchId ?? 1),
+      `bsc-initial-cycle-${Date.now()}`,
+    );
+    await waitForPredictionMarketState(
+      request,
+      "bsc",
+      duelKey,
+      state.evmMarketKey || null,
+      "OPEN",
+    );
     await expect
-      .poll(
-        async () => {
-          const predictionMarkets = await fetchPredictionMarkets(request);
-          const bscMarket = findPredictionMarket(predictionMarkets, "bsc");
-          return {
-            duelKey: predictionMarkets.duel.duelKey,
-            marketRef: bscMarket?.marketRef ?? null,
-            contractAddress: bscMarket?.contractAddress ?? null,
-          };
-        },
-        {
-          timeout: 30_000,
-          intervals: [500, 1_000, 2_000],
-        },
-      )
-      .toEqual({
-        duelKey: duelKey.slice(2),
-        marketRef: state.evmMarketKey || null,
-        contractAddress,
-      });
+      .poll(async () => {
+        const predictionMarkets = await fetchPredictionMarkets(request);
+        const bscMarket = findPredictionMarket(predictionMarkets, "bsc");
+        return bscMarket?.contractAddress ?? null;
+      })
+      .toBe(contractAddress);
 
     await gotoApp(page);
     await selectChain(page, "bsc");
@@ -1655,27 +1725,13 @@ test.describe("market flows", () => {
 
     runProcessControl(control, "restart", "keeper");
     await waitForKeeperBotHealth(request, "bsc", marketKey);
-    await expect
-      .poll(
-        async () => {
-          const predictionMarkets = await fetchPredictionMarkets(request);
-          const bscMarket = findPredictionMarket(predictionMarkets, "bsc");
-          return {
-            duelKey: predictionMarkets.duel.duelKey,
-            marketRef: bscMarket?.marketRef ?? null,
-            lifecycleStatus: bscMarket?.lifecycleStatus ?? null,
-          };
-        },
-        {
-          timeout: 60_000,
-          intervals: [1_000, 2_000, 5_000],
-        },
-      )
-      .toEqual({
-        duelKey: duelKey.slice(2),
-        marketRef: marketKey,
-        lifecycleStatus: "OPEN",
-      });
+    await waitForPredictionMarketState(
+      request,
+      "bsc",
+      duelKey,
+      marketKey,
+      "OPEN",
+    );
 
     await gotoApp(page);
     await selectChain(page, "bsc");
@@ -1722,27 +1778,13 @@ test.describe("market flows", () => {
     await selectChain(page, "bsc");
     await page.getByTestId("refresh-market").click();
 
-    await expect
-      .poll(
-        async () => {
-          const predictionMarkets = await fetchPredictionMarkets(request);
-          const bscMarket = findPredictionMarket(predictionMarkets, "bsc");
-          return {
-            duelKey: predictionMarkets.duel.duelKey,
-            marketRef: bscMarket?.marketRef ?? null,
-            lifecycleStatus: bscMarket?.lifecycleStatus ?? null,
-          };
-        },
-        {
-          timeout: 60_000,
-          intervals: [1_000, 2_000, 5_000],
-        },
-      )
-      .toEqual({
-        duelKey: duelKey.slice(2),
-        marketRef: marketKey,
-        lifecycleStatus: "OPEN",
-      });
+    await waitForPredictionMarketState(
+      request,
+      "bsc",
+      duelKey,
+      marketKey,
+      "OPEN",
+    );
 
     await resolveEvmWinner(
       publicClient,

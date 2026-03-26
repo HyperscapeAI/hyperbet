@@ -19,11 +19,17 @@ KEEPER_PID_FILE="$APP_DIR/.e2e-keeper.pid"
 SOLANA_PROXY_ENV_FILE="$APP_DIR/.e2e-solana-proxy.env"
 KEEPER_ENV_FILE="$APP_DIR/.e2e-keeper.env"
 PROGRAM_ORACLE_ID="B5mRCRDJk9BrnH7regMWW5mpTQ8QG1CcCGSnDxMt8hmo"
-PROGRAM_MARKET_ID="EoZdHN8U3qWQje48ToxB1SLWjucsFGqcWaRUJQYX3eoT"
+PROGRAM_MARKET_ID="6YjWiway8kaSjwtAinJxqWPvV3DqBVapDWAsSEZjjmbP"
 PROGRAM_CLOB_ID="DYtd7AoyTX2tbmZ8vpC3mxZgqTpyaDei4TFXZukWBJEf"
 APP_PORT="${E2E_APP_PORT:-4181}"
 GAME_API_PORT="${E2E_GAME_API_PORT:-5555}"
 GAME_API_URL="http://127.0.0.1:${GAME_API_PORT}"
+PW_HEADLESS="${PW_HEADLESS:-1}"
+PW_WEBGPU_ARGS="${PW_WEBGPU_ARGS:---enable-unsafe-webgpu}"
+if [[ "$(uname -s)" == "Darwin" && -z "${PW_BROWSER_CHANNEL:-}" ]]; then
+  PW_BROWSER_CHANNEL="chrome"
+fi
+export PW_HEADLESS PW_WEBGPU_ARGS PW_BROWSER_CHANNEL
 KEEPER_DB_PATH="${E2E_KEEPER_DB_PATH:-$APP_DIR/.e2e-keeper.sqlite}"
 KEEPER_STATUS_DIR="$KEEPER_DIR/.status"
 KEEPER_BOT_HEALTH_PATH="$KEEPER_STATUS_DIR/keeper-bot-health.json"
@@ -191,6 +197,7 @@ SOLANA_PROXY_PID=""
 KEEPER_PID=""
 
 cleanup() {
+  local exit_code=$?
   kill_pid_file_process "$APP_PID_FILE"
   kill_pid_file_process "$KEEPER_PID_FILE"
   kill_pid_file_process "$SOLANA_PROXY_PID_FILE"
@@ -203,6 +210,8 @@ cleanup() {
     "$SOLANA_PROXY_ENV_FILE" \
     "$KEEPER_ENV_FILE" \
     "$CONTROL_PATH"
+  trap - EXIT
+  exit "$exit_code"
 }
 trap cleanup EXIT
 
@@ -427,7 +436,7 @@ run_with_retries \
     E2E_SOLANA_WS_URL="$SOLANA_WS_URL" \
     E2E_BROWSER_SOLANA_RPC_URL="$SOLANA_PROXY_URL" \
     E2E_BROWSER_SOLANA_WS_URL="$SOLANA_PROXY_WS_URL" \
-    E2E_SOLANA_BOOTSTRAP_KEYPAIR="$SOLANA_BOOTSTRAP_KEYPAIR" \
+    E2E_SOLANA_BOOTSTRAP_KEYPAIR="$BOOTSTRAP_WALLET_PATH" \
     bun run "$APP_DIR/tests/e2e/setup-localnet.ts"
 
 echo "[e2e] seeding keeper database"

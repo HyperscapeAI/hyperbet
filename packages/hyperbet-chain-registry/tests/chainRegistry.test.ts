@@ -3,15 +3,35 @@ import { describe, expect, test } from "bun:test";
 import {
   BETTING_DEPLOYMENTS,
   BETTING_EVM_CHAIN_ORDER,
+  BETTING_LAUNCH_EVM_CHAIN_ORDER,
+  BETTING_LAUNCH_SOLANA_CLUSTER,
   defaultRpcUrlForEvmNetwork,
+  getMissingBettingEvmAmmFields,
   getMissingBettingEvmCanonicalFields,
+  getMissingBettingEvmFullProductFields,
   getMissingBettingEvmGovernanceFields,
+  getMissingBettingEvmPerpsFields,
+  getMissingBettingEvmReleaseFields,
+  getMissingBettingSolanaAmmFields,
+  getMissingBettingSolanaCanonicalFields,
+  getMissingBettingSolanaFullProductFields,
+  getMissingBettingSolanaPerpsFields,
+  getMissingBettingSolanaReleaseFields,
+  isBettingEvmDeploymentAmmReady,
   isPredictionMarketInFlightResolutionStatus,
   isPredictionMarketLifecycleStatus,
   isPredictionMarketQuotableStatus,
   isPredictionMarketTerminalStatus,
   isBettingEvmDeploymentCanonicalReady,
+  isBettingEvmDeploymentFullProductReady,
   isBettingEvmDeploymentGovernanceReady,
+  isBettingEvmDeploymentPerpsReady,
+  isBettingEvmDeploymentReleaseReady,
+  isBettingSolanaDeploymentAmmReady,
+  isBettingSolanaDeploymentCanonicalReady,
+  isBettingSolanaDeploymentFullProductReady,
+  isBettingSolanaDeploymentPerpsReady,
+  isBettingSolanaDeploymentReleaseReady,
   normalizeChainKey,
   normalizePredictionMarketDuelKeyHex,
   normalizePredictionMarketLifecycleMetadata,
@@ -21,6 +41,7 @@ import {
   resolveBettingEvmDefaults,
   resolveBettingEvmDeploymentForChain,
   resolveBettingEvmRuntimeEnv,
+  resolveBettingSolanaDeployment,
   resolveLifecycleFromEvmDuelStatus,
   resolveLifecycleFromEvmStatus,
   resolveLifecycleFromSolanaDuelStatus,
@@ -51,6 +72,11 @@ describe("chain registry", () => {
 
   test("exposes a canonical chain order for shared UI iteration", () => {
     expect(BETTING_EVM_CHAIN_ORDER).toEqual(["bsc", "base", "avax"]);
+  });
+
+  test("separates launch-blocking chains from later add-chain promotion", () => {
+    expect(BETTING_LAUNCH_SOLANA_CLUSTER).toBe("mainnet-beta");
+    expect(BETTING_LAUNCH_EVM_CHAIN_ORDER).toEqual(["bsc", "avax"]);
   });
 
   test("resolves deployments by chain without package-local branching", () => {
@@ -85,15 +111,126 @@ describe("chain registry", () => {
       ]);
   });
 
+  test("tracks full-product readiness separately from PM-core canonical readiness", () => {
+    expect(isBettingEvmDeploymentCanonicalReady(BETTING_DEPLOYMENTS.evm.bsc)).toBe(
+      true,
+    );
+    expect(isBettingEvmDeploymentAmmReady(BETTING_DEPLOYMENTS.evm.bsc)).toBe(
+      false,
+    );
+    expect(isBettingEvmDeploymentPerpsReady(BETTING_DEPLOYMENTS.evm.bsc)).toBe(
+      false,
+    );
+    expect(
+      getMissingBettingEvmAmmFields(BETTING_DEPLOYMENTS.evm.bsc),
+    ).toEqual(["goldAmmRouterAddress", "mUsdTokenAddress"]);
+    expect(
+      getMissingBettingEvmPerpsFields(BETTING_DEPLOYMENTS.evm.bsc),
+    ).toEqual(["goldTokenAddress", "skillOracleAddress", "perpEngineAddress"]);
+    expect(
+      isBettingEvmDeploymentFullProductReady(BETTING_DEPLOYMENTS.evm.base),
+    ).toBe(false);
+    expect(
+      getMissingBettingEvmFullProductFields(BETTING_DEPLOYMENTS.evm.base),
+    ).toEqual([
+      "goldAmmRouterAddress",
+      "mUsdTokenAddress",
+      "goldTokenAddress",
+      "skillOracleAddress",
+      "perpEngineAddress",
+    ]);
+    expect(
+      isBettingEvmDeploymentReleaseReady(BETTING_DEPLOYMENTS.evm.avax),
+    ).toBe(false);
+    expect(
+      getMissingBettingEvmReleaseFields(BETTING_DEPLOYMENTS.evm.avax),
+    ).toEqual([
+      "duelOracleAddress",
+      "goldClobAddress",
+      "adminAddress",
+      "marketOperatorAddress",
+      "treasuryAddress",
+      "marketMakerAddress",
+      "goldAmmRouterAddress",
+      "mUsdTokenAddress",
+      "goldTokenAddress",
+      "skillOracleAddress",
+      "perpEngineAddress",
+      "reporterAddress",
+      "finalizerAddress",
+      "challengerAddress",
+      "timelockAddress",
+      "multisigAddress",
+      "emergencyCouncilAddress",
+    ]);
+  });
+
+  test("tracks Solana full-product readiness separately from PM-core readiness", () => {
+    const solanaMainnet = resolveBettingSolanaDeployment("mainnet-beta");
+    expect(isBettingSolanaDeploymentCanonicalReady(solanaMainnet)).toBe(true);
+    expect(getMissingBettingSolanaCanonicalFields(solanaMainnet)).toEqual([]);
+    expect(isBettingSolanaDeploymentAmmReady(solanaMainnet)).toBe(false);
+    expect(getMissingBettingSolanaAmmFields(solanaMainnet)).toEqual([
+      "goldAmmMarketProgramId",
+    ]);
+    expect(isBettingSolanaDeploymentPerpsReady(solanaMainnet)).toBe(true);
+    expect(getMissingBettingSolanaPerpsFields(solanaMainnet)).toEqual([]);
+    expect(isBettingSolanaDeploymentFullProductReady(solanaMainnet)).toBe(
+      false,
+    );
+    expect(getMissingBettingSolanaFullProductFields(solanaMainnet)).toEqual([
+      "goldAmmMarketProgramId",
+    ]);
+    expect(isBettingSolanaDeploymentReleaseReady(solanaMainnet)).toBe(false);
+    expect(getMissingBettingSolanaReleaseFields(solanaMainnet)).toEqual([
+      "goldAmmMarketProgramId",
+    ]);
+  });
+
+  test("treats fully populated Solana mainnet deployments as launch-ready", () => {
+    const solanaMainnetReady = {
+      ...BETTING_DEPLOYMENTS.solana["mainnet-beta"],
+      goldAmmMarketProgramId: "BGmzj676aVzRaJ3Hb9BJRYrjtXuhzoc1YTFA6wcucUNF",
+    };
+
+    expect(isBettingSolanaDeploymentCanonicalReady(solanaMainnetReady)).toBe(
+      true,
+    );
+    expect(getMissingBettingSolanaCanonicalFields(solanaMainnetReady)).toEqual(
+      [],
+    );
+    expect(isBettingSolanaDeploymentAmmReady(solanaMainnetReady)).toBe(true);
+    expect(getMissingBettingSolanaAmmFields(solanaMainnetReady)).toEqual([]);
+    expect(isBettingSolanaDeploymentPerpsReady(solanaMainnetReady)).toBe(true);
+    expect(getMissingBettingSolanaPerpsFields(solanaMainnetReady)).toEqual([]);
+    expect(isBettingSolanaDeploymentFullProductReady(solanaMainnetReady)).toBe(
+      true,
+    );
+    expect(getMissingBettingSolanaFullProductFields(solanaMainnetReady)).toEqual(
+      [],
+    );
+    expect(isBettingSolanaDeploymentReleaseReady(solanaMainnetReady)).toBe(
+      true,
+    );
+    expect(getMissingBettingSolanaReleaseFields(solanaMainnetReady)).toEqual(
+      [],
+    );
+  });
+
   test("treats fully populated AVAX deployments as canonical-ready", () => {
     const mainnetReady = {
       ...BETTING_DEPLOYMENTS.evm.avax,
       duelOracleAddress: "0x1111111111111111111111111111111111111111",
       goldClobAddress: "0x2222222222222222222222222222222222222222",
+      goldAmmRouterAddress: "0x2323232323232323232323232323232323232323",
+      mUsdTokenAddress: "0x2424242424242424242424242424242424242424",
       adminAddress: "0x3333333333333333333333333333333333333333",
       marketOperatorAddress: "0x4444444444444444444444444444444444444444",
       treasuryAddress: "0x5555555555555555555555555555555555555555",
       marketMakerAddress: "0x6666666666666666666666666666666666666666",
+      goldTokenAddress: "0x6767676767676767676767676767676767676767",
+      skillOracleAddress: "0x6868686868686868686868686868686868686868",
+      perpEngineAddress: "0x6969696969696969696969696969696969696969",
       reporterAddress: "0x7777777777777777777777777777777777777777",
       finalizerAddress: "0x8888888888888888888888888888888888888888",
       challengerAddress: "0x9999999999999999999999999999999999999999",
@@ -105,10 +242,15 @@ describe("chain registry", () => {
       ...BETTING_DEPLOYMENTS.evm.avaxFuji,
       duelOracleAddress: "0x1111111111111111111111111111111111111111",
       goldClobAddress: "0x2222222222222222222222222222222222222222",
+      goldAmmRouterAddress: "0x2323232323232323232323232323232323232323",
+      mUsdTokenAddress: "0x2424242424242424242424242424242424242424",
       adminAddress: "0x3333333333333333333333333333333333333333",
       marketOperatorAddress: "0x4444444444444444444444444444444444444444",
       treasuryAddress: "0x5555555555555555555555555555555555555555",
       marketMakerAddress: "0x6666666666666666666666666666666666666666",
+      goldTokenAddress: "0x6767676767676767676767676767676767676767",
+      skillOracleAddress: "0x6868686868686868686868686868686868686868",
+      perpEngineAddress: "0x6969696969696969696969696969696969696969",
       reporterAddress: "0x7777777777777777777777777777777777777777",
       finalizerAddress: "0x8888888888888888888888888888888888888888",
       challengerAddress: "0x9999999999999999999999999999999999999999",
@@ -119,12 +261,28 @@ describe("chain registry", () => {
 
     expect(isBettingEvmDeploymentCanonicalReady(mainnetReady)).toBe(true);
     expect(getMissingBettingEvmCanonicalFields(mainnetReady)).toEqual([]);
+    expect(isBettingEvmDeploymentAmmReady(mainnetReady)).toBe(true);
+    expect(getMissingBettingEvmAmmFields(mainnetReady)).toEqual([]);
+    expect(isBettingEvmDeploymentPerpsReady(mainnetReady)).toBe(true);
+    expect(getMissingBettingEvmPerpsFields(mainnetReady)).toEqual([]);
+    expect(isBettingEvmDeploymentFullProductReady(mainnetReady)).toBe(true);
+    expect(getMissingBettingEvmFullProductFields(mainnetReady)).toEqual([]);
     expect(isBettingEvmDeploymentGovernanceReady(mainnetReady)).toBe(true);
     expect(getMissingBettingEvmGovernanceFields(mainnetReady)).toEqual([]);
+    expect(isBettingEvmDeploymentReleaseReady(mainnetReady)).toBe(true);
+    expect(getMissingBettingEvmReleaseFields(mainnetReady)).toEqual([]);
     expect(isBettingEvmDeploymentCanonicalReady(fujiReady)).toBe(true);
     expect(getMissingBettingEvmCanonicalFields(fujiReady)).toEqual([]);
+    expect(isBettingEvmDeploymentAmmReady(fujiReady)).toBe(true);
+    expect(getMissingBettingEvmAmmFields(fujiReady)).toEqual([]);
+    expect(isBettingEvmDeploymentPerpsReady(fujiReady)).toBe(true);
+    expect(getMissingBettingEvmPerpsFields(fujiReady)).toEqual([]);
+    expect(isBettingEvmDeploymentFullProductReady(fujiReady)).toBe(true);
+    expect(getMissingBettingEvmFullProductFields(fujiReady)).toEqual([]);
     expect(isBettingEvmDeploymentGovernanceReady(fujiReady)).toBe(true);
     expect(getMissingBettingEvmGovernanceFields(fujiReady)).toEqual([]);
+    expect(isBettingEvmDeploymentReleaseReady(fujiReady)).toBe(true);
+    expect(getMissingBettingEvmReleaseFields(fujiReady)).toEqual([]);
   });
 
   test("tracks AVAX mainnet as pending and AVAX Fuji as canonically addressed", () => {

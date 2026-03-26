@@ -7,7 +7,7 @@ use fight_oracle::{
     self, DuelState as OracleDuelState, DuelStatus as OracleDuelStatus, MarketSide,
 };
 
-declare_id!("DYtd7AoyTX2tbmZ8vpC3mxZgqTpyaDei4TFXZukWBJEf");
+declare_id!("3QUVoaKJqo1rg9eXe7vyFewJrY75NWdtH8JZfvTb79Uy");
 
 const CONFIG_SEED: &[u8] = b"config";
 const MARKET_SEED: &[u8] = b"market";

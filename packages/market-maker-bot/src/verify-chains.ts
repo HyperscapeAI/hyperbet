@@ -13,17 +13,25 @@ import { normalizeAddress } from "./index.ts";
 
 dotenv.config();
 
-const DEFAULT_SOLANA_PROGRAM_ID =
-  process.env.SOLANA_VERIFY_PROGRAM_ID ||
-  process.env.GOLD_CLOB_MARKET_PROGRAM_ID ||
-  process.env.SOLANA_ARENA_MARKET_PROGRAM_ID ||
-  resolveBettingSolanaDeployment("mainnet-beta").goldClobMarketProgramId;
-const DEFAULT_SOLANA_RPC_URL =
-  process.env.SOLANA_VERIFY_RPC_URL ||
-  process.env.SOLANA_RPC_URL ||
-  "https://api.mainnet-beta.solana.com";
-
-const EVM_CLOB_ABI = ["function feeBps() view returns (uint256)"];
+const EVM_CLOB_ABI = [
+  "function duelOracle() view returns (address)",
+  "function feeBps() view returns (uint256)",
+] as const;
+const EVM_AMM_ABI = [
+  "function duelOracle() view returns (address)",
+  "function mUSD() view returns (address)",
+  "function configFrozen() view returns (bool)",
+] as const;
+const EVM_SKILL_ORACLE_ABI = [
+  "function oraclePaused() view returns (bool)",
+  "function maxOracleDelay() view returns (uint256)",
+] as const;
+const EVM_PERP_ENGINE_ABI = [
+  "function oracle() view returns (address)",
+  "function marginToken() view returns (address)",
+  "function tradingPaused() view returns (bool)",
+  "function marketCreationPaused() view returns (bool)",
+] as const;
 
 export type CheckResult = {
   chain: BettingEvmChain | "solana";
@@ -32,6 +40,27 @@ export type CheckResult = {
 };
 
 type DeploymentMode = "production" | "staging";
+
+type EvmSurfaceCheck = {
+  chain: BettingEvmChain;
+  rpcUrl: string;
+  expectedChainId: bigint;
+  duelOracleAddress: string;
+  goldClobAddress: string;
+  goldAmmRouterAddress: string;
+  mUsdTokenAddress: string;
+  goldTokenAddress: string;
+  skillOracleAddress: string;
+  perpEngineAddress: string;
+  perpMarginTokenAddress: string;
+};
+
+type SolanaSurfaceCheck = {
+  rpcUrl: string;
+  goldClobProgramId: string;
+  goldAmmProgramId: string;
+  goldPerpsProgramId: string;
+};
 
 export function validateConfiguredAddress(
   rawAddress: string,
@@ -57,12 +86,16 @@ export function validateConfiguredAddress(
   }
 }
 
-export const verifyEvmChain = async (params: {
-  chain: BettingEvmChain;
-  rpcUrl: string;
-  expectedChainId: bigint;
-  clobAddress: string;
-}): Promise<CheckResult> => {
+async function waitForCode(
+  provider: ethers.JsonRpcProvider,
+  address: string,
+): Promise<string> {
+  return provider.getCode(address);
+}
+
+export const verifyEvmChain = async (
+  params: EvmSurfaceCheck,
+): Promise<CheckResult> => {
   try {
     const provider = new ethers.JsonRpcProvider(params.rpcUrl);
     const network = await provider.getNetwork();
@@ -74,21 +107,100 @@ export const verifyEvmChain = async (params: {
       };
     }
 
-    const code = await provider.getCode(params.clobAddress);
-    if (code === "0x") {
+    const [
+      duelOracleCode,
+      clobCode,
+      ammCode,
+      mUsdCode,
+      goldTokenCode,
+      skillOracleCode,
+      perpEngineCode,
+    ] = await Promise.all([
+      waitForCode(provider, params.duelOracleAddress),
+      waitForCode(provider, params.goldClobAddress),
+      waitForCode(provider, params.goldAmmRouterAddress),
+      waitForCode(provider, params.mUsdTokenAddress),
+      waitForCode(provider, params.goldTokenAddress),
+      waitForCode(provider, params.skillOracleAddress),
+      waitForCode(provider, params.perpEngineAddress),
+    ]);
+
+    if (
+      duelOracleCode === "0x" ||
+      clobCode === "0x" ||
+      ammCode === "0x" ||
+      mUsdCode === "0x" ||
+      goldTokenCode === "0x" ||
+      skillOracleCode === "0x" ||
+      perpEngineCode === "0x"
+    ) {
       return {
         chain: params.chain,
         ok: false,
-        details: `no contract at ${params.clobAddress}`,
+        details: "one or more full-product contracts are missing on-chain",
       };
     }
 
-    const clob = new ethers.Contract(params.clobAddress, EVM_CLOB_ABI, provider);
-    const feeBps = (await clob.feeBps()) as bigint;
+    const clob = new ethers.Contract(params.goldClobAddress, EVM_CLOB_ABI, provider);
+    const amm = new ethers.Contract(params.goldAmmRouterAddress, EVM_AMM_ABI, provider);
+    const skillOracle = new ethers.Contract(
+      params.skillOracleAddress,
+      EVM_SKILL_ORACLE_ABI,
+      provider,
+    );
+    const perpEngine = new ethers.Contract(
+      params.perpEngineAddress,
+      EVM_PERP_ENGINE_ABI,
+      provider,
+    );
+
+    const [
+      clobOracle,
+      clobFeeBps,
+      ammOracle,
+      ammMUsd,
+      ammFrozen,
+      oraclePaused,
+      oracleMaxDelay,
+      perpOracle,
+      perpMarginToken,
+      perpTradingPaused,
+      perpMarketCreationPaused,
+    ] = await Promise.all([
+      clob.duelOracle(),
+      clob.feeBps(),
+      amm.duelOracle(),
+      amm.mUSD(),
+      amm.configFrozen(),
+      skillOracle.oraclePaused(),
+      skillOracle.maxOracleDelay(),
+      perpEngine.oracle(),
+      perpEngine.marginToken(),
+      perpEngine.tradingPaused(),
+      perpEngine.marketCreationPaused(),
+    ]);
+
+    const ok =
+      ethers.getAddress(clobOracle) === ethers.getAddress(params.duelOracleAddress) &&
+      ethers.getAddress(ammOracle) === ethers.getAddress(params.duelOracleAddress) &&
+      ethers.getAddress(ammMUsd) === ethers.getAddress(params.mUsdTokenAddress) &&
+      ethers.getAddress(perpOracle) === ethers.getAddress(params.skillOracleAddress) &&
+      ethers.getAddress(perpMarginToken) ===
+        ethers.getAddress(params.perpMarginTokenAddress) &&
+      ammFrozen === true &&
+      oraclePaused === false &&
+      perpTradingPaused === false &&
+      perpMarketCreationPaused === false;
+
     return {
       chain: params.chain,
-      ok: true,
-      details: `chainId=${network.chainId.toString()} clob=${params.clobAddress} feeBps=${feeBps.toString()}`,
+      ok,
+      details:
+        `chainId=${network.chainId.toString()} ` +
+        `oracle=${params.duelOracleAddress} clob=${params.goldClobAddress} ` +
+        `clobFeeBps=${clobFeeBps.toString()} amm=${params.goldAmmRouterAddress} ` +
+        `ammFrozen=${String(ammFrozen)} skillOracleDelay=${oracleMaxDelay.toString()} ` +
+        `perpEngine=${params.perpEngineAddress}`,
     };
   } catch (error) {
     return {
@@ -99,35 +211,72 @@ export const verifyEvmChain = async (params: {
   }
 };
 
-export const verifySolanaChain = async (params: {
-  rpcUrl: string;
-  programId: string;
-}): Promise<CheckResult> => {
+export const verifySolanaChain = async (
+  params: SolanaSurfaceCheck,
+): Promise<CheckResult> => {
   try {
     const connection = new Connection(params.rpcUrl, "confirmed");
-    const programId = new PublicKey(params.programId);
-    const [version, programInfo] = await Promise.all([
+    const goldClobProgramId = new PublicKey(params.goldClobProgramId);
+    const goldAmmProgramId = new PublicKey(params.goldAmmProgramId);
+    const goldPerpsProgramId = new PublicKey(params.goldPerpsProgramId);
+
+    const [version, clobInfo, ammInfo, perpsInfo] = await Promise.all([
       connection.getVersion(),
-      connection.getAccountInfo(programId, "confirmed"),
+      connection.getAccountInfo(goldClobProgramId, "confirmed"),
+      connection.getAccountInfo(goldAmmProgramId, "confirmed"),
+      connection.getAccountInfo(goldPerpsProgramId, "confirmed"),
     ]);
-    if (!programInfo?.executable) {
+
+    if (!clobInfo?.executable || !ammInfo?.executable || !perpsInfo?.executable) {
       return {
         chain: "solana",
         ok: false,
-        details: `rpc=${params.rpcUrl} program ${programId.toBase58()} missing or not executable`,
+        details: "one or more Solana launch programs are missing or not executable",
       };
     }
 
-    const [configPda] = PublicKey.findProgramAddressSync(
+    const [clobConfigPda] = PublicKey.findProgramAddressSync(
       [Buffer.from("config", "utf8")],
-      programId,
+      goldClobProgramId,
     );
-    const configInfo = await connection.getAccountInfo(configPda, "confirmed");
+    const [ammAdminPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("admin_state", "utf8")],
+      goldAmmProgramId,
+    );
+    const [ammConfigPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("amm_config", "utf8")],
+      goldAmmProgramId,
+    );
+    const [perpsConfigPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("config", "utf8")],
+      goldPerpsProgramId,
+    );
+
+    const [clobConfigInfo, ammAdminInfo, ammConfigInfo, perpsConfigInfo] =
+      await Promise.all([
+        connection.getAccountInfo(clobConfigPda, "confirmed"),
+        connection.getAccountInfo(ammAdminPda, "confirmed"),
+        connection.getAccountInfo(ammConfigPda, "confirmed"),
+        connection.getAccountInfo(perpsConfigPda, "confirmed"),
+      ]);
+
+    const ok =
+      Boolean(clobConfigInfo) &&
+      Boolean(ammAdminInfo) &&
+      Boolean(ammConfigInfo) &&
+      Boolean(perpsConfigInfo);
     const coreVersion = version["solana-core"] ?? "unknown";
+
     return {
       chain: "solana",
-      ok: true,
-      details: `rpc=${params.rpcUrl} program=${programId.toBase58()} configPda=${configInfo ? "present" : "missing"} core=${coreVersion}`,
+      ok,
+      details:
+        `rpc=${params.rpcUrl} clob=${goldClobProgramId.toBase58()} ` +
+        `amm=${goldAmmProgramId.toBase58()} perps=${goldPerpsProgramId.toBase58()} ` +
+        `clobConfig=${clobConfigInfo ? "present" : "missing"} ` +
+        `ammAdmin=${ammAdminInfo ? "present" : "missing"} ` +
+        `ammConfig=${ammConfigInfo ? "present" : "missing"} ` +
+        `perpsConfig=${perpsConfigInfo ? "present" : "missing"} core=${coreVersion}`,
     };
   } catch (error) {
     return {
@@ -142,8 +291,10 @@ function expectedChainIdEnvVar(chain: BettingEvmChain): string {
   return `${chain.toUpperCase()}_EXPECTED_CHAIN_ID`;
 }
 
-function parseDeployment(args: string[]): DeploymentMode {
-  const argValue = args.find((arg) => arg.startsWith("--deployment="))?.slice("--deployment=".length);
+function parseDeployment(args: Array<string>): DeploymentMode {
+  const argValue = args
+    .find((arg) => arg.startsWith("--deployment="))
+    ?.slice("--deployment=".length);
   const envValue = process.env.HYPERBET_VERIFY_DEPLOYMENT?.trim();
   const value = argValue || envValue || "production";
   if (value !== "production" && value !== "staging") {
@@ -164,14 +315,7 @@ function firstNonEmptyValue(...values: Array<string | undefined>): string | null
 
 function resolveStagingEvmCheck(
   chain: BettingEvmChain,
-):
-  | {
-      chain: BettingEvmChain;
-      rpcUrl: string;
-      expectedChainId: bigint;
-      clobAddress: string;
-    }
-  | CheckResult {
+): EvmSurfaceCheck | CheckResult {
   const chainUpper = chain.toUpperCase();
   const deployment = resolveBettingEvmDeploymentForChain(chain, "mainnet-beta");
   const rpcUrl = firstNonEmptyValue(
@@ -186,35 +330,187 @@ function resolveStagingEvmCheck(
     };
   }
 
-  const addressValidation = validateConfiguredAddress(
-    firstNonEmptyValue(
+  const addressFields = {
+    duelOracleAddress: firstNonEmptyValue(
+      process.env[`ORACLE_CONTRACT_ADDRESS_${chainUpper}_STAGING`],
+      process.env[`${chainUpper}_STAGING_DUEL_ORACLE_ADDRESS`],
+    ),
+    goldClobAddress: firstNonEmptyValue(
       process.env[`CLOB_CONTRACT_ADDRESS_${chainUpper}_STAGING`],
       process.env[`${chainUpper}_STAGING_GOLD_CLOB_ADDRESS`],
-      "",
-    ) ?? "",
-    "goldClobAddress",
-  );
-  if ("details" in addressValidation) {
-    return {
-      chain,
-      ok: false,
-      details: addressValidation.details,
-    };
-  }
+    ),
+    goldAmmRouterAddress: firstNonEmptyValue(
+      process.env[`AMM_ROUTER_ADDRESS_${chainUpper}_STAGING`],
+      process.env[`${chainUpper}_STAGING_GOLD_AMM_ROUTER_ADDRESS`],
+    ),
+    mUsdTokenAddress: firstNonEmptyValue(
+      process.env[`MUSD_TOKEN_ADDRESS_${chainUpper}_STAGING`],
+      process.env[`${chainUpper}_STAGING_MUSD_TOKEN_ADDRESS`],
+    ),
+    goldTokenAddress: firstNonEmptyValue(
+      process.env[`GOLD_TOKEN_ADDRESS_${chainUpper}_STAGING`],
+      process.env[`${chainUpper}_STAGING_GOLD_TOKEN_ADDRESS`],
+    ),
+    skillOracleAddress: firstNonEmptyValue(
+      process.env[`SKILL_ORACLE_ADDRESS_${chainUpper}_STAGING`],
+      process.env[`${chainUpper}_STAGING_SKILL_ORACLE_ADDRESS`],
+    ),
+    perpEngineAddress: firstNonEmptyValue(
+      process.env[`PERP_ENGINE_ADDRESS_${chainUpper}_STAGING`],
+      process.env[`${chainUpper}_STAGING_PERP_ENGINE_ADDRESS`],
+    ),
+    perpMarginTokenAddress: firstNonEmptyValue(
+      process.env[`PERP_MARGIN_TOKEN_ADDRESS_${chainUpper}_STAGING`],
+      process.env[`${chainUpper}_STAGING_PERP_MARGIN_TOKEN_ADDRESS`],
+      process.env[`GOLD_TOKEN_ADDRESS_${chainUpper}_STAGING`],
+      process.env[`${chainUpper}_STAGING_GOLD_TOKEN_ADDRESS`],
+    ),
+  };
 
-  const expectedChainId = BigInt(
-    firstNonEmptyValue(
-      process.env[expectedChainIdEnvVar(chain)],
-      process.env[`${chainUpper}_STAGING_CHAIN_ID`],
-      `${deployment.chainId}`,
-    )!,
-  );
+  for (const [fieldName, rawAddress] of Object.entries(addressFields)) {
+    const validation = validateConfiguredAddress(rawAddress ?? "", fieldName);
+    if ("details" in validation) {
+      return {
+        chain,
+        ok: false,
+        details: validation.details,
+      };
+    }
+  }
 
   return {
     chain,
     rpcUrl,
-    expectedChainId,
-    clobAddress: addressValidation.address,
+    expectedChainId: BigInt(
+      firstNonEmptyValue(
+        process.env[expectedChainIdEnvVar(chain)],
+        process.env[`${chainUpper}_STAGING_CHAIN_ID`],
+        `${deployment.chainId}`,
+      )!,
+    ),
+    duelOracleAddress: normalizeAddress(addressFields.duelOracleAddress!),
+    goldClobAddress: normalizeAddress(addressFields.goldClobAddress!),
+    goldAmmRouterAddress: normalizeAddress(addressFields.goldAmmRouterAddress!),
+    mUsdTokenAddress: normalizeAddress(addressFields.mUsdTokenAddress!),
+    goldTokenAddress: normalizeAddress(addressFields.goldTokenAddress!),
+    skillOracleAddress: normalizeAddress(addressFields.skillOracleAddress!),
+    perpEngineAddress: normalizeAddress(addressFields.perpEngineAddress!),
+    perpMarginTokenAddress: normalizeAddress(addressFields.perpMarginTokenAddress!),
+  };
+}
+
+function resolveProductionEvmCheck(
+  chain: BettingEvmChain,
+): EvmSurfaceCheck | CheckResult {
+  try {
+    const runtime = resolveBettingEvmRuntimeEnv(chain, "mainnet-beta", process.env);
+    const deployment = resolveBettingEvmDeploymentForChain(chain, "mainnet-beta");
+    const addresses = {
+      duelOracleAddress: runtime.duelOracleAddress,
+      goldClobAddress: runtime.goldClobAddress,
+      goldAmmRouterAddress: runtime.goldAmmRouterAddress,
+      mUsdTokenAddress: runtime.mUsdTokenAddress,
+      goldTokenAddress: deployment.goldTokenAddress,
+      skillOracleAddress: deployment.skillOracleAddress,
+      perpEngineAddress: deployment.perpEngineAddress,
+      perpMarginTokenAddress: deployment.goldTokenAddress,
+    };
+
+    for (const [fieldName, rawAddress] of Object.entries(addresses)) {
+      const validation = validateConfiguredAddress(rawAddress, fieldName);
+      if ("details" in validation) {
+        return {
+          chain,
+          ok: false,
+          details: validation.details,
+        };
+      }
+    }
+
+    return {
+      chain,
+      rpcUrl: runtime.rpcUrl,
+      expectedChainId: BigInt(
+        process.env[expectedChainIdEnvVar(chain)] || runtime.deployment.chainId,
+      ),
+      duelOracleAddress: normalizeAddress(addresses.duelOracleAddress),
+      goldClobAddress: normalizeAddress(addresses.goldClobAddress),
+      goldAmmRouterAddress: normalizeAddress(addresses.goldAmmRouterAddress),
+      mUsdTokenAddress: normalizeAddress(addresses.mUsdTokenAddress),
+      goldTokenAddress: normalizeAddress(addresses.goldTokenAddress),
+      skillOracleAddress: normalizeAddress(addresses.skillOracleAddress),
+      perpEngineAddress: normalizeAddress(addresses.perpEngineAddress),
+      perpMarginTokenAddress: normalizeAddress(addresses.perpMarginTokenAddress),
+    };
+  } catch (error) {
+    return {
+      chain,
+      ok: false,
+      details: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+function resolveStagingSolanaCheck(): SolanaSurfaceCheck | CheckResult {
+  const rpcUrl =
+    process.env.SOLANA_VERIFY_RPC_URL?.trim() ||
+    process.env.SOLANA_RPC_URL?.trim() ||
+    process.env.HYPERBET_SOLANA_STAGING_RPC_URL?.trim() ||
+    "";
+  if (!rpcUrl) {
+    return {
+      chain: "solana",
+      ok: false,
+      details: "SOLANA_VERIFY_RPC_URL not configured",
+    };
+  }
+
+  const goldClobProgramId =
+    process.env.SOLANA_VERIFY_GOLD_CLOB_PROGRAM_ID?.trim() ||
+    process.env.SOLANA_VERIFY_PROGRAM_ID?.trim() ||
+    process.env.HYPERBET_SOLANA_STAGING_GOLD_CLOB_PROGRAM_ID?.trim() ||
+    "";
+  const goldAmmProgramId =
+    process.env.SOLANA_VERIFY_GOLD_AMM_PROGRAM_ID?.trim() ||
+    process.env.HYPERBET_SOLANA_STAGING_GOLD_AMM_PROGRAM_ID?.trim() ||
+    "";
+  const goldPerpsProgramId =
+    process.env.SOLANA_VERIFY_GOLD_PERPS_PROGRAM_ID?.trim() ||
+    process.env.HYPERBET_SOLANA_STAGING_GOLD_PERPS_PROGRAM_ID?.trim() ||
+    "";
+
+  for (const [fieldName, rawAddress] of Object.entries({
+    goldClobProgramId,
+    goldAmmProgramId,
+    goldPerpsProgramId,
+  })) {
+    if (!rawAddress) {
+      return {
+        chain: "solana",
+        ok: false,
+        details: `${fieldName} not configured`,
+      };
+    }
+  }
+
+  return {
+    rpcUrl,
+    goldClobProgramId,
+    goldAmmProgramId,
+    goldPerpsProgramId,
+  };
+}
+
+function resolveProductionSolanaCheck(): SolanaSurfaceCheck {
+  const deployment = resolveBettingSolanaDeployment("mainnet-beta");
+  return {
+    rpcUrl:
+      process.env.SOLANA_VERIFY_RPC_URL?.trim() ||
+      process.env.SOLANA_RPC_URL?.trim() ||
+      "https://api.mainnet-beta.solana.com",
+    goldClobProgramId: deployment.goldClobMarketProgramId,
+    goldAmmProgramId: deployment.goldAmmMarketProgramId,
+    goldPerpsProgramId: deployment.goldPerpsMarketProgramId,
   };
 }
 
@@ -235,45 +531,31 @@ async function run() {
   const includeSolana = includeAll || requestedChains.has("solana");
 
   const evmChecks = evmChains.map((chain) => {
-    if (deployment === "staging") {
-      const resolved = resolveStagingEvmCheck(chain);
-      if ("ok" in resolved) {
-        return Promise.resolve(resolved);
-      }
-      return verifyEvmChain(resolved);
+    const resolved =
+      deployment === "staging"
+        ? resolveStagingEvmCheck(chain)
+        : resolveProductionEvmCheck(chain);
+    if ("ok" in resolved) {
+      return Promise.resolve(resolved);
     }
-
-    const runtime = resolveBettingEvmRuntimeEnv(chain, "mainnet-beta", process.env);
-    const addressValidation = validateConfiguredAddress(
-      runtime.goldClobAddress,
-      "goldClobAddress",
-    );
-    if ("details" in addressValidation) {
-      return Promise.resolve({
-        chain,
-        ok: false,
-        details: addressValidation.details,
-      });
-    }
-    return verifyEvmChain({
-      chain,
-      rpcUrl: runtime.rpcUrl,
-      expectedChainId: BigInt(
-        process.env[expectedChainIdEnvVar(chain)] || runtime.deployment.chainId,
-      ),
-      clobAddress: addressValidation.address,
-    });
+    return verifyEvmChain(resolved);
   });
+
+  const solanaCheck = includeSolana
+    ? (() => {
+        const resolved =
+          deployment === "staging"
+            ? resolveStagingSolanaCheck()
+            : resolveProductionSolanaCheck();
+        if ("ok" in resolved) {
+          return Promise.resolve(resolved);
+        }
+        return verifySolanaChain(resolved);
+      })()
+    : null;
+
   const results = await Promise.all(
-    [
-      ...evmChecks,
-      includeSolana
-        ? verifySolanaChain({
-            rpcUrl: DEFAULT_SOLANA_RPC_URL,
-            programId: DEFAULT_SOLANA_PROGRAM_ID,
-          })
-        : null,
-    ].filter(Boolean) as Array<Promise<CheckResult>>,
+    [...evmChecks, ...(solanaCheck ? [solanaCheck] : [])],
   );
 
   if (jsonOutput) {

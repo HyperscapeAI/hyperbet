@@ -11,6 +11,14 @@ import {
 
 type ChainKey = "solana" | "bsc" | "avax";
 
+type LocalPortConfig = {
+  appPort: string;
+  gameApiPort: string;
+  solanaRpcPort: string;
+  solanaProxyPort: string;
+  evmPort?: string;
+};
+
 type ControlFile = {
   services?: Record<
     string,
@@ -43,7 +51,10 @@ const evmRoot =
     : path.join(rootDir, "packages/evm-contracts");
 const statePath = path.join(appRoot, "tests/e2e/state.json");
 const controlPath = path.join(appRoot, "tests/e2e/control.json");
-const bootstrapKeypairPath = path.join(artifactRoot, "solana-bootstrap-keypair.json");
+const bootstrapKeypairPath = path.join(
+  "/tmp",
+  `hyperbet-${chain}-solana-bootstrap-keypair.json`,
+);
 const buildLogPath = path.join("/tmp", `hyperbet-${chain}-e2e-build.log`);
 const evmBuildLogPath = path.join("/tmp", `hyperbet-${chain}-e2e-evm-build.log`);
 const marketFlowGrepByChain: Record<ChainKey, string> = {
@@ -53,6 +64,29 @@ const marketFlowGrepByChain: Record<ChainKey, string> = {
     "evm predictions place YES and NO orders, resolve, and claim|bsc prediction markets recover after keeper and anvil restarts|bsc cancelled prediction markets refund and clear positions",
   avax:
     "evm predictions place YES and NO orders, resolve, and claim|avax prediction markets recover after keeper and anvil restarts|avax cancelled prediction markets refund and clear positions",
+};
+
+const localPortConfigByChain: Record<ChainKey, LocalPortConfig> = {
+  solana: {
+    appPort: "4281",
+    gameApiPort: "5655",
+    solanaRpcPort: "19899",
+    solanaProxyPort: "21899",
+  },
+  bsc: {
+    appPort: "4381",
+    gameApiPort: "5755",
+    solanaRpcPort: "19999",
+    solanaProxyPort: "21999",
+    evmPort: "19545",
+  },
+  avax: {
+    appPort: "4481",
+    gameApiPort: "5855",
+    solanaRpcPort: "20999",
+    solanaProxyPort: "22999",
+    evmPort: "20545",
+  },
 };
 
 async function ensureBootstrapWallet(): Promise<void> {
@@ -92,7 +126,19 @@ async function runGate(): Promise<void> {
     SOLANA_BOOTSTRAP_KEYPAIR: bootstrapKeypairPath,
     ANCHOR_WALLET: bootstrapKeypairPath,
     E2E_SKIP_PREBUILD: "true",
+    PW_HEADLESS: process.env.PW_HEADLESS ?? "1",
+    PW_WEBGPU_ARGS: process.env.PW_WEBGPU_ARGS ?? "--enable-unsafe-webgpu",
+    E2E_APP_PORT: localPortConfigByChain[chain].appPort,
+    E2E_GAME_API_PORT: localPortConfigByChain[chain].gameApiPort,
+    E2E_SOLANA_RPC_PORT: localPortConfigByChain[chain].solanaRpcPort,
+    E2E_SOLANA_PROXY_PORT: localPortConfigByChain[chain].solanaProxyPort,
   };
+  if (process.platform === "darwin") {
+    harnessEnv.PW_BROWSER_CHANNEL = process.env.PW_BROWSER_CHANNEL ?? "chrome";
+  }
+  if (localPortConfigByChain[chain].evmPort) {
+    harnessEnv.E2E_EVM_PORT = localPortConfigByChain[chain].evmPort;
+  }
 
   await prebuild(harnessEnv);
 
@@ -100,7 +146,7 @@ async function runGate(): Promise<void> {
     "bash",
     [
       "scripts/run-e2e-local.sh",
-      "tests/e2e/market-flows.spec.ts",
+      "tests/e2e/market-flows.e2e.ts",
       "--grep",
       marketFlowGrepByChain[chain],
     ],
@@ -116,7 +162,7 @@ async function runGate(): Promise<void> {
     "bash",
     [
       "scripts/run-e2e-local.sh",
-      "tests/e2e/app-tabs-and-apis.spec.ts",
+      "tests/e2e/app-tabs-and-apis.e2e.ts",
       "--grep",
       "keeper backend exposes all app-facing data endpoints",
     ],

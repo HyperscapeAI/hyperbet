@@ -97,6 +97,19 @@ emit_env "TREASURY_ADDRESS" "$TREASURY_RESOLVED"
 emit_env "MARKET_MAKER_ADDRESS" "$MARKET_MAKER_RESOLVED"
 emit_env "DISPUTE_WINDOW_SECONDS" "${DISPUTE_WINDOW_SECONDS:-3600}"
 
+for optional_name in \
+  BSC_TESTNET_MUSD_TOKEN_ADDRESS \
+  AVAX_FUJI_MUSD_TOKEN_ADDRESS \
+  BSC_TESTNET_GOLD_TOKEN_ADDRESS \
+  AVAX_FUJI_GOLD_TOKEN_ADDRESS \
+  BSC_TESTNET_PERPS_MARGIN_TOKEN_ADDRESS \
+  AVAX_FUJI_PERPS_MARGIN_TOKEN_ADDRESS
+do
+  if [[ -n "${!optional_name:-}" ]]; then
+    emit_env "$optional_name" "${!optional_name}"
+  fi
+done
+
 if [[ -n "${TIMELOCK_ADDRESS:-}" ]]; then
   emit_env "TIMELOCK_ADDRESS" "${TIMELOCK_ADDRESS}"
 fi
@@ -115,8 +128,8 @@ if [[ -n "${TESTNET_SOLANA_DEPLOYER_KEYPAIR:-}" ]]; then
   solana_authority="$(solana-keygen pubkey "$wallet_path")"
   emit_env "ANCHOR_WALLET" "$wallet_path"
   emit_env "SOLANA_STAGE_A_WALLET_PATH" "$wallet_path"
-  emit_env "SOLANA_EXPECTED_AUTHORITY" "$solana_authority"
-  emit_env "SOLANA_EXPECTED_UPGRADE_AUTHORITY" "$solana_authority"
+  emit_env "SOLANA_EXPECTED_AUTHORITY" "${SOLANA_EXPECTED_AUTHORITY:-$solana_authority}"
+  emit_env "SOLANA_EXPECTED_UPGRADE_AUTHORITY" "${SOLANA_EXPECTED_UPGRADE_AUTHORITY:-$solana_authority}"
 fi
 
 echo "resolved Stage A public addresses:"

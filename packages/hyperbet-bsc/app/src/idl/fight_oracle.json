@@ -1,5 +1,5 @@
 {
-  "address": "B5mRCRDJk9BrnH7regMWW5mpTQ8QG1CcCGSnDxMt8hmo",
+  "address": "GFdnu7kUnZGiXh4ejWiJSBCUxvq4UfdEeUv9jjFzr5EM",
   "metadata": {
     "name": "fight_oracle",
     "version": "0.1.0",
@@ -1072,6 +1072,11 @@
       "code": 6025,
       "name": "ConfigFrozen",
       "msg": "Config is permanently frozen"
+    },
+    {
+      "code": 6026,
+      "name": "MetadataUriTooLong",
+      "msg": "Metadata URI exceeds 200 byte limit"
     }
   ],
   "types": [

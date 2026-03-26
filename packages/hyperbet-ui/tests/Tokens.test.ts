@@ -1,3 +1,4 @@
+import "./setup";
 import { describe, expect, it } from "bun:test";
 
 import { normalizeUiLocale, resolveUiLocale } from "../src/i18n";

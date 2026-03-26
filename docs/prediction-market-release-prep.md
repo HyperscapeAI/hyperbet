@@ -80,6 +80,23 @@ the final package still needs:
 - final RC freeze manifest
 - external audit findings and remediation output
 
+## Gold Asset Boundary
+
+Gold is currently tracked as a separate architecture concern, not a phase-1
+launch blocker for PM, AMM, perps, or market-maker audit readiness.
+
+- the current launch protocols already settle in native assets or designated
+  collateral tokens
+- Solana still carries the meaningful `goldMint` surface
+- the long-term `Hyperscapes Gold -> Solana Gold -> future multi-chain Gold`
+  model still needs a dedicated asset architecture spec
+
+For the current-state interpretation and the follow-on spec-planning document,
+see:
+
+- [Gold current state](protocol/gold-current-state.md)
+- [Gold architecture spec plan](protocol/gold-architecture-spec-plan.md)
+
 ## Current Reviewer Checklist
 
 Reviewers should verify that the repo now reflects these truths consistently:
@@ -97,5 +114,7 @@ Reviewers should verify that the repo now reflects these truths consistently:
 - [Launch freeze tracker](release/prediction-market-launch-freeze-tracker.md)
 - [Launch-ops evidence index](release/launch-ops-evidence-index.md)
 - [Production deploy guide](hyperbet-production-deploy.md)
+- [Gold current state](protocol/gold-current-state.md)
+- [Gold architecture spec plan](protocol/gold-architecture-spec-plan.md)
 - [Runbook index](runbooks/README.md)
 - [External audit package checklist](release/external-audit-package-checklist.md)

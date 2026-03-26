@@ -129,6 +129,14 @@ From the Hyperbet repo root:
 bash scripts/run-hyperscapes-pm-local.sh
 ```
 
+Repo location discovery:
+
+- the runner first honors `HYPERSCAPES_ROOT` if you set it explicitly
+- otherwise it auto-detects common sibling locations such as:
+  - `<workspace>/.worktrees/hyperscapes-stream-bet-sync`
+  - `<workspace>/hyperscapes-stream-bet-sync`
+- if your Hyperscapes checkout was moved elsewhere, set `HYPERSCAPES_ROOT=/abs/path/to/hyperscapes-stream-bet-sync`
+
 Defaults:
 
 - Hyperscapes game/server: `http://127.0.0.1:5555`
@@ -137,6 +145,9 @@ Defaults:
 - EVM keeper chain scope: `bsc,avax`
 - Hyperscapes chain bootstrap: skipped
 - Hyperscapes node env: `development`
+- interactive UI opening: disabled by default
+- local monitor browser mode: headless by default
+- screenshot viewport: `1280x720`
 
 The script:
 
@@ -148,16 +159,30 @@ The script:
 3. starts the local Hyperbet EVM keeper service against
    `http://127.0.0.1:5555/api/streaming/state`
 4. starts the local Hyperbet EVM app pointed at the keeper service
-5. opens both local UIs by default:
-   - Hyperscapes stream UI: `http://127.0.0.1:3333/stream.html`
-   - Hyperbet EVM UI: `http://127.0.0.1:4179/?debug`
+5. keeps UI opening off by default; manual browser launch is opt-in through
+   `OPEN_LOCAL_UI=true`
 6. can start the PM soak follow monitor in the background, which records JSON
    state plus paired UI screenshots into:
    - `output/playwright/pm-soak/<timestamp>/`
+   - screenshots are captured headlessly at `1280x720` unless overridden
 
-Monitor and harness controls are now explicit:
+The default Hyperbet local page is now the normal betting surface:
+
+- `http://127.0.0.1:4179/`
+
+The `?debug=1` query is optional and only enables hidden E2E/operator controls.
+It is not required for the real local betting flow or for headless stream
+validation.
+
+Monitor and harness controls are explicit:
 - `PM_E2E_MONITOR=true|false` toggles `scripts/pm-soak-monitor.ts`
 - `PM_E2E_FULL_SOAK=true|false` toggles `scripts/soak-harness.ts`
+- `PW_HEADLESS=1` keeps Playwright headless
+- `PW_BROWSER_CHANNEL=chrome` is the preferred macOS local setting
+- `PW_WEBGPU_ARGS="--enable-unsafe-webgpu"` keeps the local stream renderer on
+  the headless WebGPU lane
+- `PM_SOAK_SCREENSHOT_WIDTH=1280`
+- `PM_SOAK_SCREENSHOT_HEIGHT=720`
 
 `PM_E2E_MONITOR` defaults to the value of `CAPTURE_LOCAL_UI_FLOW`.
 
@@ -211,6 +236,7 @@ HYPERSCAPES_SKIP_CHAIN_SETUP=false bash scripts/run-hyperscapes-pm-local.sh
 HYPERSCAPES_DUEL_NODE_ENV=production JWT_SECRET=... bash scripts/run-hyperscapes-pm-local.sh
 OPEN_LOCAL_UI=false bash scripts/run-hyperscapes-pm-local.sh
 CAPTURE_LOCAL_UI_FLOW=false bash scripts/run-hyperscapes-pm-local.sh
+HYPERBET_UI_DEBUG=true bash scripts/run-hyperscapes-pm-local.sh
 PM_E2E_MONITOR=true \
 PM_E2E_FULL_SOAK=true \
 PM_SOAK_LOCAL_DURATION_MIN=25 \

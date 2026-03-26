@@ -40,6 +40,7 @@ describe("oracle finality truth (solana)", () => {
   it("rejects settlement before terminal oracle states", async () => {
     const maker = Keypair.generate();
     const taker = Keypair.generate();
+    const setupNow = Math.floor(Date.now() / 1000);
     await Promise.all([
       airdrop(provider.connection, maker.publicKey, 5),
       airdrop(provider.connection, taker.publicKey, 5),
@@ -49,7 +50,12 @@ describe("oracle finality truth (solana)", () => {
       fightProgram,
       clobProgram,
       authority,
-      { duelKey: uniqueDuelKey("sol-nonterminal-claim") },
+      {
+        duelKey: uniqueDuelKey("sol-nonterminal-claim"),
+        betOpenTs: setupNow - 30,
+        betCloseTs: setupNow + 15,
+        duelStartTs: setupNow + 75,
+      },
     );
 
     const makerAsk = await placeClobOrder(clobProgram, {
@@ -103,11 +109,22 @@ describe("oracle finality truth (solana)", () => {
     }
 
     const now = Math.floor(Date.now() / 1000);
+    const duelStateAccount = await fightProgram.account.duelState.fetch(
+      market.duelState,
+    );
+    const lockWaitMs = Math.max(
+      0,
+      (Number(duelStateAccount.betCloseTs) - Math.floor(Date.now() / 1000) + 1) *
+        1_000,
+    );
+    if (lockWaitMs > 0) {
+      await new Promise((resolve) => setTimeout(resolve, lockWaitMs));
+    }
     await upsertDuel(fightProgram, authority, market.duelKey, {
       status: duelStatusLocked(),
-      betOpenTs: now - 120,
-      betCloseTs: now - 10,
-      duelStartTs: now - 5,
+      betOpenTs: Number(duelStateAccount.betOpenTs),
+      betCloseTs: Number(duelStateAccount.betCloseTs),
+      duelStartTs: Number(duelStateAccount.duelStartTs),
       metadataUri: "https://hyperscape.gg/tests/demo/locked",
     });
     await syncMarketFromDuel(clobProgram, market.marketState, market.duelState);
@@ -139,7 +156,10 @@ describe("oracle finality truth (solana)", () => {
     );
     await proposeDuelResult(fightProgram, authority, market.duelKey, {
       winner: marketSideA(),
-      duelEndTs: now + 5,
+      duelEndTs: Math.max(
+        Math.floor(Date.now() / 1000),
+        Number(duelStateAccount.betCloseTs),
+      ),
       metadataUri: "https://hyperscape.gg/tests/demo/proposed",
     });
     await challengeDuelResult(fightProgram, authority, market.duelKey);
@@ -188,8 +208,18 @@ describe("oracle finality truth (solana)", () => {
       metadataUri: "https://hyperscape.gg/tests/resolve/proposed",
     });
 
+    const oracleConfig = deriveOracleConfigPda(fightProgram.programId);
+    const duelState = deriveDuelStatePda(fightProgram.programId, duelKey);
     try {
-      await finalizeDuelResult(fightProgram, authority, duelKey, "too-early");
+      await fightProgram.methods
+        .finalizeResult([...duelKey], "too-early")
+        .accountsPartial({
+          finalizer: authority.publicKey,
+          oracleConfig,
+          duelState,
+        })
+        .signers([authority])
+        .rpc();
       assert.fail("finalize succeeded before dispute window expiry");
     } catch (error: unknown) {
       assert.ok(
@@ -201,8 +231,6 @@ describe("oracle finality truth (solana)", () => {
     await challengeDuelResult(fightProgram, authority, duelKey, "challenged");
 
     try {
-      const oracleConfig = deriveOracleConfigPda(fightProgram.programId);
-      const duelState = deriveDuelStatePda(fightProgram.programId, duelKey);
       await fightProgram.methods
         .finalizeResult([...duelKey], "post-challenge")
         .accountsPartial({
@@ -288,11 +316,10 @@ describe("oracle finality truth (solana)", () => {
     });
 
     const vaultAfter = await provider.connection.getBalance(market.vault);
-    const takerBalanceAfter = await clobProgram.account.userBalance.fetch(
+    const takerBalanceAfter = await provider.connection.getAccountInfo(
       takerBid.userBalance,
     );
-    assert.strictEqual(takerBalanceAfter.aShares.toString(), "0");
-    assert.strictEqual(takerBalanceAfter.aLockedLamports.toString(), "0");
+    assert.strictEqual(takerBalanceAfter, null);
     assert.strictEqual(
       BigInt(vaultBefore) - BigInt(vaultAfter),
       BigInt(takerBalanceBefore.aLockedLamports.toString()),

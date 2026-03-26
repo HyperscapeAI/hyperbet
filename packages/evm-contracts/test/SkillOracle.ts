@@ -25,8 +25,8 @@ describe("SkillOracle", () => {
     await oracle.connect(owner).updateAgentSkill(agentB, 1_400, 50);
     expect(await oracle.globalMeanMu()).to.equal(1_200n);
 
-    await oracle.connect(owner).updateAgentSkill(agentA, 1_600, 50);
-    expect(await oracle.globalMeanMu()).to.equal(1_500n);
+    await oracle.connect(owner).updateAgentSkill(agentA, 1_500, 50);
+    expect(await oracle.globalMeanMu()).to.equal(1_450n);
   });
 
   it("keeps index prices positive for agents below the mean", async () => {

@@ -1,3 +1,4 @@
+import "./setup";
 import { describe, expect, it } from "bun:test";
 
 import { simulateFight } from "../src/lib/fight";

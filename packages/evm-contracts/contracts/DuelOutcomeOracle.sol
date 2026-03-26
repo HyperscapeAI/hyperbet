@@ -389,10 +389,7 @@ contract DuelOutcomeOracle is AccessControl {
         duel.duelEndTs = proposal.duelEndTs;
         duel.metadataUri = metadataUri;
 
-        // L-1: Clean up stale proposal to reclaim storage
         bytes32 proposalId = duel.activeProposalId;
-        delete proposals[proposalId];
-        duel.activeProposalId = bytes32(0);
 
         emit DuelResolved(
             duelKey,

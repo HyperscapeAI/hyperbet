@@ -1,3 +1,4 @@
+import "./setup";
 import { describe, expect, it } from "bun:test";
 import { readdirSync } from "node:fs";
 import path from "node:path";

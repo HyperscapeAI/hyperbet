@@ -5,7 +5,7 @@
  * IDL can be found at `target/idl/lvr_amm.json`.
  */
 export type LvrAmm = {
-  "address": "Af4LMYfaBtcFFM6dBjwLYH6QJLMqEwneQ8VHfn2z7NY5",
+  "address": "12E8Lz5w8Qxyj8Fh6LgsCgPDQNJMCLMV1y43LhPrH66w",
   "metadata": {
     "name": "lvrAmm",
     "version": "0.1.0",
@@ -495,6 +495,14 @@ export type LvrAmm = {
           "type": "bool"
         },
         {
+          "name": "betPrompt",
+          "type": "string"
+        },
+        {
+          "name": "expirationAt",
+          "type": "i64"
+        },
+        {
           "name": "duelKey",
           "type": {
             "array": [
@@ -502,14 +510,6 @@ export type LvrAmm = {
               32
             ]
           }
-        },
-        {
-          "name": "betPrompt",
-          "type": "string"
-        },
-        {
-          "name": "expirationAt",
-          "type": "i64"
         }
       ]
     },
@@ -1058,190 +1058,6 @@ export type LvrAmm = {
           }
         },
         {
-          "name": "treasury",
-          "writable": true
-        },
-        {
-          "name": "treasuryYesAta",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "account",
-                "path": "treasury"
-              },
-              {
-                "kind": "const",
-                "value": [
-                  6,
-                  221,
-                  246,
-                  225,
-                  215,
-                  101,
-                  161,
-                  147,
-                  217,
-                  203,
-                  225,
-                  70,
-                  206,
-                  235,
-                  121,
-                  172,
-                  28,
-                  180,
-                  133,
-                  237,
-                  95,
-                  91,
-                  55,
-                  145,
-                  58,
-                  140,
-                  245,
-                  133,
-                  126,
-                  255,
-                  0,
-                  169
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "mintYes"
-              }
-            ],
-            "program": {
-              "kind": "const",
-              "value": [
-                140,
-                151,
-                37,
-                143,
-                78,
-                36,
-                137,
-                241,
-                187,
-                61,
-                16,
-                41,
-                20,
-                142,
-                13,
-                131,
-                11,
-                90,
-                19,
-                153,
-                218,
-                255,
-                16,
-                132,
-                4,
-                142,
-                123,
-                216,
-                219,
-                233,
-                248,
-                89
-              ]
-            }
-          }
-        },
-        {
-          "name": "treasuryNoAta",
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "account",
-                "path": "treasury"
-              },
-              {
-                "kind": "const",
-                "value": [
-                  6,
-                  221,
-                  246,
-                  225,
-                  215,
-                  101,
-                  161,
-                  147,
-                  217,
-                  203,
-                  225,
-                  70,
-                  206,
-                  235,
-                  121,
-                  172,
-                  28,
-                  180,
-                  133,
-                  237,
-                  95,
-                  91,
-                  55,
-                  145,
-                  58,
-                  140,
-                  245,
-                  133,
-                  126,
-                  255,
-                  0,
-                  169
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "mintNo"
-              }
-            ],
-            "program": {
-              "kind": "const",
-              "value": [
-                140,
-                151,
-                37,
-                143,
-                78,
-                36,
-                137,
-                241,
-                187,
-                61,
-                16,
-                41,
-                20,
-                142,
-                13,
-                131,
-                11,
-                90,
-                19,
-                153,
-                218,
-                255,
-                16,
-                132,
-                4,
-                142,
-                123,
-                216,
-                219,
-                233,
-                248,
-                89
-              ]
-            }
-          }
-        },
-        {
           "name": "tokenProgram",
           "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
         },
@@ -1337,28 +1153,6 @@ export type LvrAmm = {
           "signer": true
         },
         {
-          "name": "ammConfig",
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  97,
-                  109,
-                  109,
-                  95,
-                  99,
-                  111,
-                  110,
-                  102,
-                  105,
-                  103
-                ]
-              }
-            ]
-          }
-        },
-        {
           "name": "adminState",
           "pda": {
             "seeds": [
@@ -1407,10 +1201,35 @@ export type LvrAmm = {
           }
         },
         {
+          "name": "ammConfig",
+          "docs": [
+            "Optional to preserve the instruction interface, but required in practice for settlement validation."
+          ],
+          "optional": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  109,
+                  109,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
           "name": "duelState",
           "docs": [
-            "Optional: fight_oracle DuelState account. When provided, winner is read",
-            "from the oracle rather than trusting the caller's `side_won` argument."
+            "Optional to preserve the instruction interface, but required in practice for settlement validation."
           ],
           "optional": true
         }
@@ -1916,38 +1735,68 @@ export type LvrAmm = {
     },
     {
       "code": 6016,
+      "name": "mathOverflow",
+      "msg": "Arithmetic overflow"
+    },
+    {
+      "code": 6017,
+      "name": "insufficientReserves",
+      "msg": "Insufficient reserves for swap"
+    },
+    {
+      "code": 6018,
+      "name": "marketExpired",
+      "msg": "Market has expired"
+    },
+    {
+      "code": 6019,
+      "name": "invalidSettlementOutcome",
+      "msg": "Invalid settlement outcome"
+    },
+    {
+      "code": 6020,
       "name": "invalidAddress",
       "msg": "Invalid address (zero/default)"
     },
     {
-      "code": 6017,
+      "code": 6021,
       "name": "feeTooHigh",
       "msg": "Fee BPS exceeds maximum (1000 = 10%)"
     },
     {
-      "code": 6018,
+      "code": 6022,
       "name": "marketPaused",
       "msg": "Market is paused"
     },
     {
-      "code": 6019,
+      "code": 6023,
       "name": "configFrozen",
       "msg": "Config is frozen"
     },
     {
-      "code": 6020,
+      "code": 6024,
       "name": "invalidDuelState",
       "msg": "Invalid duel state account"
     },
     {
-      "code": 6021,
+      "code": 6025,
       "name": "missingAmmConfig",
       "msg": "AMM config account required for oracle settlement"
     },
     {
-      "code": 6022,
+      "code": 6026,
       "name": "invalidFightOracleProgram",
       "msg": "Fight oracle program mismatch"
+    },
+    {
+      "code": 6027,
+      "name": "mathConvergenceError",
+      "msg": "AMM Newton-Raphson solver did not converge"
+    },
+    {
+      "code": 6028,
+      "name": "mathFixedPointOverflow",
+      "msg": "AMM fixed-point overflow"
     }
   ],
   "types": [

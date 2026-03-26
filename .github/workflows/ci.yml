@@ -58,6 +58,30 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  repo-artifact-policy:
+    name: Repo Artifact Policy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Hyperbet toolchain
+        uses: ./.github/actions/setup-hyperbet
+
+      - name: Install root dependencies
+        run: bash scripts/ci-install-verified.sh root
+
+      - name: Enforce tracked artifact policy
+        run: bun run ci:policy:artifacts
+
+      - name: Upload artifact policy report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: repo-artifact-policy
+          path: .ci-artifacts/repo-artifact-policy
+          if-no-files-found: ignore
+
   evm-contract-validation:
     name: EVM Contract Validation
     runs-on: ubuntu-latest
