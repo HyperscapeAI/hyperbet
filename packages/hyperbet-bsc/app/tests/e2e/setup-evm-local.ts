@@ -46,6 +46,7 @@ const DEFAULT_ANVIL_MNEMONIC =
 const MARKET_KIND_DUEL_WINNER = 0;
 const BUY_SIDE = 1;
 const SELL_SIDE = 2;
+const DUEL_STATUS_NULL = 0;
 const DUEL_STATUS_BETTING_OPEN = 2;
 const ORDER_FLAG_GTC = 0x01;
 const DUEL_ORACLE_DISPUTE_WINDOW_SECONDS = 3_600;
@@ -60,6 +61,15 @@ type EvmArtifact = {
     | {
         object?: string;
       };
+};
+
+type OracleDuelState = {
+  participantAHash: `0x${string}`;
+  participantBHash: `0x${string}`;
+  status: number | bigint;
+  betOpenTs: bigint;
+  betCloseTs: bigint;
+  duelStartTs: bigint;
 };
 
 function resolveArtifactBytecode(artifact: EvmArtifact): `0x${string}` {
@@ -342,17 +352,40 @@ async function main(): Promise<void> {
     }
   }
 
+  let participantAHash = hashParticipantLabel(participantAId);
+  let participantBHash = hashParticipantLabel(participantBId);
+  let canonicalBetOpenTs = duelBetOpenTs;
+  let canonicalBetCloseTs = duelBetCloseTs;
+  let canonicalDuelStartTs = duelStartTs;
+
+  if (reuseDeployment) {
+    const existingDuel = (await publicClient.readContract({
+      address: oracleAddress as Address,
+      abi: duelOutcomeOracleArtifact.abi,
+      functionName: "getDuel",
+      args: [duelKey],
+    })) as OracleDuelState;
+    const existingStatus = Number(existingDuel.status ?? DUEL_STATUS_NULL);
+    if (existingStatus >= DUEL_STATUS_BETTING_OPEN) {
+      participantAHash = existingDuel.participantAHash;
+      participantBHash = existingDuel.participantBHash;
+      canonicalBetOpenTs = existingDuel.betOpenTs;
+      canonicalBetCloseTs = existingDuel.betCloseTs;
+      canonicalDuelStartTs = existingDuel.duelStartTs;
+    }
+  }
+
   const upsertDuelTx = await walletClient.writeContract({
     address: oracleAddress as Address,
     abi: duelOutcomeOracleArtifact.abi,
     functionName: "upsertDuel",
     args: [
       duelKey,
-      hashParticipantLabel(participantAId),
-      hashParticipantLabel(participantBId),
-      duelBetOpenTs,
-      duelBetCloseTs,
-      duelStartTs,
+      participantAHash,
+      participantBHash,
+      canonicalBetOpenTs,
+      canonicalBetCloseTs,
+      canonicalDuelStartTs,
       "hyperbet-local-evm",
       DUEL_STATUS_BETTING_OPEN,
     ],
@@ -379,8 +412,9 @@ async function main(): Promise<void> {
   })) as `0x${string}`;
   let seedNoOrderTx: `0x${string}` | null = null;
   let seedYesOrderTx: `0x${string}` | null = null;
+  const blockBeforeSeeding = await publicClient.getBlock({ blockTag: "latest" });
 
-  if (SEED_ORDERS) {
+  if (SEED_ORDERS && blockBeforeSeeding.timestamp < canonicalBetCloseTs) {
     seedNoOrderTx = await makerWalletClient.writeContract({
       address: goldClobAddress as Address,
       abi: goldClobArtifact.abi,
@@ -428,6 +462,10 @@ async function main(): Promise<void> {
       nonce: consumeMakerNonce(),
     });
     await publicClient.waitForTransactionReceipt({ hash: seedYesOrderTx });
+  } else if (SEED_ORDERS) {
+    console.warn(
+      `Skipping local seed orders because betting is already closed for duel ${duelKey}`,
+    );
   }
 
   const env = await readEnv(envPath);

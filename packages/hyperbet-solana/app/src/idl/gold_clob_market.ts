@@ -5,7 +5,7 @@
  * IDL can be found at `target/idl/gold_clob_market.json`.
  */
 export type GoldClobMarket = {
-  "address": "DYtd7AoyTX2tbmZ8vpC3mxZgqTpyaDei4TFXZukWBJEf",
+  "address": "3QUVoaKJqo1rg9eXe7vyFewJrY75NWdtH8JZfvTb79Uy",
   "metadata": {
     "name": "goldClobMarket",
     "version": "0.1.0",
@@ -872,6 +872,11 @@ export type GoldClobMarket = {
     },
     {
       "name": "syncMarketFromDuel",
+      "docs": [
+        "M-7: Intentionally NOT pause-gated. Market status must sync from oracle",
+        "even during pause so that resolved/cancelled markets can transition and",
+        "users can claim funds. Blocking sync during pause would lock user funds."
+      ],
       "discriminator": [
         235,
         180,

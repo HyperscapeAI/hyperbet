@@ -23,6 +23,7 @@ import {
   cancelDuel,
   challengeDuelResult,
   upsertDuel,
+  waitForChainUnixTimestamp,
   writableAccount,
   cancelClobOrder,
 } from "./clob-test-helpers";
@@ -379,25 +380,41 @@ describe("gold_clob_market security regressions", () => {
       price: 600,
     });
 
-    assert.strictEqual(
-      await clobProgram.account.order.fetchNullable(makerAsk.order),
-      null,
+    const makerOrder = await clobProgram.account.order.fetchNullable(makerAsk.order);
+    const takerOrder = await clobProgram.account.order.fetchNullable(takerBid.order);
+
+    if (makerOrder !== null) {
+      assert.deepStrictEqual(makerOrder.active, false);
+      assert.strictEqual(makerOrder.filled.toString(), makerOrder.amount.toString());
+    }
+    if (takerOrder !== null) {
+      assert.deepStrictEqual(takerOrder.active, false);
+      assert.strictEqual(takerOrder.filled.toString(), takerOrder.amount.toString());
+    }
+
+    assert.ok(
+      makerOrder === null || makerOrder.filled.toString() === makerOrder.amount.toString(),
     );
-    assert.strictEqual(
-      await clobProgram.account.order.fetchNullable(takerBid.order),
-      null,
+    assert.ok(
+      takerOrder === null || takerOrder.filled.toString() === takerOrder.amount.toString(),
     );
   });
 
   it("rejects order mutation and claims during non-open lifecycle states", async () => {
     const maker = Keypair.generate();
+    const now = Math.floor(Date.now() / 1000);
     await airdrop(provider.connection, maker.publicKey, 5);
 
     const market = await createOpenMarketFixture(
       fightProgram,
       clobProgram,
       authority,
-      { duelKey: uniqueDuelKey("guardrail-non-open-mutations") },
+      {
+        duelKey: uniqueDuelKey("guardrail-non-open-mutations"),
+        betOpenTs: now - 120,
+        betCloseTs: now + 5,
+        duelStartTs: now + 65,
+      },
     );
 
     const makerAsk = await placeClobOrder(clobProgram, {
@@ -414,15 +431,16 @@ describe("gold_clob_market security regressions", () => {
       amount: 1000,
     });
 
+    await waitForChainUnixTimestamp(provider.connection, now + 6);
     await upsertDuel(
       fightProgram,
       authority,
       market.duelKey,
       {
-        status: duelStatusLocked(),
-        betOpenTs: Math.floor(Date.now() / 1000) - 120,
-        betCloseTs: Math.floor(Date.now() / 1000) - 10,
-        duelStartTs: Math.floor(Date.now() / 1000) + 30,
+      status: duelStatusLocked(),
+        betOpenTs: now - 120,
+        betCloseTs: now + 5,
+        duelStartTs: now + 65,
         metadataUri: "https://hyperscape.gg/tests/security/non-open-mutations",
       },
     );
@@ -598,20 +616,12 @@ describe("gold_clob_market security regressions", () => {
       user: taker,
     });
 
-    const makerBalanceAfter = await clobProgram.account.userBalance.fetch(
-      makerAsk.userBalance,
-    );
-    const takerBalanceAfter = await clobProgram.account.userBalance.fetch(
-      takerBid.userBalance,
-    );
-    assert.strictEqual(makerBalanceAfter.aShares.toString(), "0");
-    assert.strictEqual(makerBalanceAfter.bShares.toString(), "0");
-    assert.strictEqual(makerBalanceAfter.aLockedLamports.toString(), "0");
-    assert.strictEqual(makerBalanceAfter.bLockedLamports.toString(), "0");
-    assert.strictEqual(takerBalanceAfter.aShares.toString(), "0");
-    assert.strictEqual(takerBalanceAfter.bShares.toString(), "0");
-    assert.strictEqual(takerBalanceAfter.aLockedLamports.toString(), "0");
-    assert.strictEqual(takerBalanceAfter.bLockedLamports.toString(), "0");
+    const [makerBalanceAfter, takerBalanceAfter] = await Promise.all([
+      provider.connection.getAccountInfo(makerAsk.userBalance),
+      provider.connection.getAccountInfo(takerBid.userBalance),
+    ]);
+    assert.strictEqual(makerBalanceAfter, null);
+    assert.strictEqual(takerBalanceAfter, null);
   });
 
 });

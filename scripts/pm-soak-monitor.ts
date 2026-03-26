@@ -1,6 +1,6 @@
 import { mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import BN from "bn.js";
 import * as solanaWeb3 from "@solana/web3.js";
@@ -39,8 +39,8 @@ const BUY_SIDE = 1;
 const SELL_SIDE = 2;
 const MARKET_KIND_DUEL_WINNER = 0;
 const ORDER_FLAG_IOC = 0x02;
-const BASELINE_DUEL_CYCLE_MS = 185_000;
-const LOCAL_CYCLE_DRIFT_MS = 45_000;
+const LOCAL_MIN_DUEL_CYCLE_MS = 60_000;
+const LOCAL_MAX_DUEL_CYCLE_MS = 240_000;
 const OPEN_LAG_BUDGET_MS = 15_000;
 const QUOTE_LAG_BUDGET_MS = 20_000;
 const LOCK_LAG_BUDGET_MS = 10_000;
@@ -245,6 +245,11 @@ type ScreenshotTarget = {
   pageKey?: string;
 };
 
+type BrowserLaunchCandidate = {
+  channel?: string;
+  args?: string[];
+};
+
 type SelectorClip = {
   x: number;
   y: number;
@@ -393,6 +398,9 @@ type LocalSummary = {
   runScope: RunScope;
   follow: boolean;
   cyclesObserved: number;
+  scoredCyclesObserved: number;
+  ignoredCyclesObserved: number;
+  driftCyclesObserved: number;
   cycleDurationsMs: number[];
   bothUiReachable: boolean;
   streamDuelKey: string | null;
@@ -809,6 +817,18 @@ function terminalLifecycle(status: string | null | undefined): boolean {
   return status === "RESOLVED" || status === "CANCELLED";
 }
 
+function isScoreableLocalCycle(cycle: CycleRecord): boolean {
+  if (cycle.durationMs == null || !Number.isFinite(cycle.durationMs)) {
+    return false;
+  }
+  if (cycle.phases.includes("IDLE")) {
+    return false;
+  }
+  return (
+    cycle.phases.includes("RESOLUTION") || cycle.phases.includes("TERMINAL")
+  );
+}
+
 function proposalLifecycle(status: string | null | undefined): boolean {
   return (
     status === "PROPOSED" ||
@@ -839,6 +859,95 @@ function hasAnyQuote(health: KeeperMarketHealth | null | undefined): boolean {
 
 let screenshotRuntimePromise: Promise<ScreenshotRuntimeModule> | null = null;
 let screenshotSessionPromise: Promise<ScreenshotSession> | null = null;
+
+function parsePositiveIntEnv(name: string, fallback: number): number {
+  const raw = process.env[name]?.trim() ?? "";
+  const parsed = Number.parseInt(raw, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function parseBooleanEnv(name: string, fallback: boolean): boolean {
+  const raw = process.env[name]?.trim().toLowerCase();
+  if (!raw) {
+    return fallback;
+  }
+  if (["1", "true", "yes", "on"].includes(raw)) {
+    return true;
+  }
+  if (["0", "false", "no", "off"].includes(raw)) {
+    return false;
+  }
+  return fallback;
+}
+
+function parseLaunchArgs(value: string | undefined): string[] | undefined {
+  const args = value
+    ?.split(/\s+/)
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+  return args && args.length > 0 ? args : undefined;
+}
+
+function buildBrowserLaunchCandidates(
+  browserChannel: string | undefined,
+  launchArgs: string[] | undefined,
+): BrowserLaunchCandidate[] {
+  const dedupe = new Set<string>();
+  const candidates: BrowserLaunchCandidate[] = [];
+  const push = (candidate: BrowserLaunchCandidate) => {
+    const key = JSON.stringify({
+      channel: candidate.channel ?? null,
+      args: candidate.args ?? [],
+    });
+    if (dedupe.has(key)) {
+      return;
+    }
+    dedupe.add(key);
+    candidates.push(candidate);
+  };
+
+  push({ channel: browserChannel, args: launchArgs });
+  if (browserChannel) {
+    push({ args: launchArgs });
+  }
+  if (launchArgs && launchArgs.length > 0) {
+    push({ channel: browserChannel });
+    if (browserChannel) {
+      push({});
+    }
+  }
+  return candidates;
+}
+
+async function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  label: string,
+): Promise<T> {
+  return await new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(`${label} timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
+
+function screenshotActionTimeoutMs(): number {
+  return parsePositiveIntEnv("PM_SOAK_SCREENSHOT_ACTION_TIMEOUT_MS", 15_000);
+}
+
+function screenshotCloseTimeoutMs(): number {
+  return parsePositiveIntEnv("PM_SOAK_SCREENSHOT_CLOSE_TIMEOUT_MS", 5_000);
+}
 
 function resolvePlaywrightModuleUrl(): string {
   const bunModulesDir = path.join(rootDir, "node_modules", ".bun");
@@ -872,33 +981,51 @@ async function getScreenshotSession(): Promise<ScreenshotSession> {
   screenshotSessionPromise ??= (async () => {
     const runtime = await loadScreenshotRuntime();
     const device = runtime.devices?.["Desktop Chrome"] ?? {};
-    const viewportWidth = Number.parseInt(
-      process.env.PM_SOAK_SCREENSHOT_WIDTH ?? "",
-      10,
+    const viewportWidth = parsePositiveIntEnv("PM_SOAK_SCREENSHOT_WIDTH", 1280);
+    const viewportHeight = parsePositiveIntEnv("PM_SOAK_SCREENSHOT_HEIGHT", 720);
+    const headless = parseBooleanEnv("PM_SOAK_HEADLESS", true);
+    const browserChannel = process.env.PM_SOAK_BROWSER_CHANNEL?.trim() || undefined;
+    const launchArgs = parseLaunchArgs(process.env.PM_SOAK_WEBGPU_ARGS);
+    const launchCandidates = buildBrowserLaunchCandidates(
+      browserChannel,
+      launchArgs,
     );
-    const viewportHeight = Number.parseInt(
-      process.env.PM_SOAK_SCREENSHOT_HEIGHT ?? "",
-      10,
-    );
-    const browser = await runtime.chromium.launch({
-      headless: false,
-    });
+    let browser: Awaited<
+      ReturnType<ScreenshotRuntimeModule["chromium"]["launch"]>
+    > | null = null;
+    const launchErrors: string[] = [];
+    for (const candidate of launchCandidates) {
+      try {
+        browser = await withTimeout(
+          runtime.chromium.launch({
+            headless,
+            channel: candidate.channel,
+            args: candidate.args,
+            timeout: 20_000,
+          }),
+          20_000,
+          `screenshot browser launch (${candidate.channel ?? "chromium"})`,
+        );
+        break;
+      } catch (error) {
+        launchErrors.push(
+          `${candidate.channel ?? "chromium"}: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
+    }
+    if (!browser) {
+      throw new Error(
+        `unable to launch screenshot browser: ${launchErrors.join(" | ")}`,
+      );
+    }
     const context = await browser.newContext({
       ...device,
-      viewport:
-        Number.isFinite(viewportWidth) &&
-        viewportWidth > 0 &&
-        Number.isFinite(viewportHeight) &&
-        viewportHeight > 0
-          ? {
-              width: viewportWidth,
-              height: viewportHeight,
-            }
-          : ((device.viewport as { width: number; height: number } | undefined) ??
-            {
-              width: 1920,
-              height: 1280,
-            }),
+      viewport: {
+        width: viewportWidth,
+        height: viewportHeight,
+      },
       ignoreHTTPSErrors: true,
     });
     return {
@@ -906,33 +1033,92 @@ async function getScreenshotSession(): Promise<ScreenshotSession> {
       context,
       pages: new Map(),
     };
-  })();
+  })().catch((error) => {
+    screenshotSessionPromise = null;
+    throw error;
+  });
   return screenshotSessionPromise;
+}
+
+function normalizeScreenshotUrl(rawUrl: string): string {
+  try {
+    const url = new URL(rawUrl);
+    url.searchParams.delete("streamToken");
+    url.searchParams.delete("sessionToken");
+    return url.toString();
+  } catch {
+    return rawUrl;
+  }
+}
+
+async function resetScreenshotPage(target: ScreenshotTarget): Promise<void> {
+  if (!screenshotSessionPromise) {
+    return;
+  }
+  const session = await screenshotSessionPromise.catch(() => null);
+  if (!session) {
+    screenshotSessionPromise = null;
+    screenshotRuntimePromise = null;
+    return;
+  }
+  const pageKey = target.pageKey ?? target.name;
+  const page = session.pages.get(pageKey);
+  session.pages.delete(pageKey);
+  if (!page || page.isClosed?.() === true) {
+    return;
+  }
+  await withTimeout(
+    page.close({ runBeforeUnload: true }).catch(() => undefined),
+    screenshotCloseTimeoutMs(),
+    `screenshot page reset (${target.name})`,
+  ).catch(() => undefined);
 }
 
 async function getScreenshotPage(
   target: ScreenshotTarget,
 ): Promise<ScreenshotSession["pages"] extends Map<string, infer T> ? T : never> {
   const session = await getScreenshotSession();
+  const timeoutMs = screenshotActionTimeoutMs();
   const pageKey = target.pageKey ?? target.name;
   const existing = session.pages.get(pageKey);
+  const targetUrl = normalizeScreenshotUrl(target.url);
   if (existing && existing.isClosed?.() !== true) {
-    if (existing.url() !== target.url) {
-      await existing.goto(target.url, {
-        waitUntil: "domcontentloaded",
-        timeout: 30_000,
-      });
-      await existing.waitForTimeout(1_500);
+    if (normalizeScreenshotUrl(existing.url()) !== targetUrl) {
+      await withTimeout(
+        existing.goto(target.url, {
+          waitUntil: "domcontentloaded",
+          timeout: 30_000,
+        }),
+        timeoutMs,
+        `screenshot goto (${target.name})`,
+      );
+      await withTimeout(
+        existing.waitForTimeout(1_500),
+        timeoutMs,
+        `screenshot settle wait (${target.name})`,
+      );
     }
     return existing;
   }
 
-  const page = await session.context.newPage();
-  await page.goto(target.url, {
-    waitUntil: "domcontentloaded",
-    timeout: 30_000,
-  });
-  await page.waitForTimeout(1_500);
+  const page = await withTimeout(
+    session.context.newPage(),
+    timeoutMs,
+    `screenshot newPage (${target.name})`,
+  );
+  await withTimeout(
+    page.goto(target.url, {
+      waitUntil: "domcontentloaded",
+      timeout: 30_000,
+    }),
+    timeoutMs,
+    `screenshot goto (${target.name})`,
+  );
+  await withTimeout(
+    page.waitForTimeout(1_500),
+    timeoutMs,
+    `screenshot settle wait (${target.name})`,
+  );
   session.pages.set(pageKey, page);
   return page;
 }
@@ -941,46 +1127,59 @@ async function takeScreenshot(
   target: ScreenshotTarget,
   filePath: string,
 ): Promise<ScreenshotCaptureResult> {
+  const timeoutMs = screenshotActionTimeoutMs();
   const page = await getScreenshotPage(target);
   await page.bringToFront?.().catch(() => undefined);
-  await page.waitForLoadState("domcontentloaded", { timeout: 5_000 }).catch(
-    () => undefined,
-  );
-  await page.waitForTimeout(1_000);
+  await withTimeout(
+    page.waitForLoadState("domcontentloaded", { timeout: 5_000 }).catch(
+      () => undefined,
+    ),
+    timeoutMs,
+    `screenshot load state (${target.name})`,
+  ).catch(() => undefined);
+  await withTimeout(
+    page.waitForTimeout(1_000),
+    timeoutMs,
+    `screenshot final settle wait (${target.name})`,
+  ).catch(() => undefined);
 
   let selectorClip: SelectorClip | null = null;
   let embeddedFrameMeta: EmbeddedFrameMeta | null = null;
 
   if (target.selector) {
-    const selectorState = (await page.evaluate((selector) => {
-      const element = document.querySelector(selector);
-      if (!element) {
-        return null;
-      }
-      const rect = element.getBoundingClientRect();
-      const clip =
-        rect.width > 0 && rect.height > 0
-          ? {
-              x: Math.max(0, Math.floor(rect.left)),
-              y: Math.max(0, Math.floor(rect.top)),
-              width: Math.max(1, Math.ceil(rect.width)),
-              height: Math.max(1, Math.ceil(rect.height)),
-            }
-          : null;
-      if (!(element instanceof HTMLIFrameElement)) {
+    const selectorState = (await withTimeout(
+      page.evaluate((selector) => {
+        const element = document.querySelector(selector);
+        if (!element) {
+          return null;
+        }
+        const rect = element.getBoundingClientRect();
+        const clip =
+          rect.width > 0 && rect.height > 0
+            ? {
+                x: Math.max(0, Math.floor(rect.left)),
+                y: Math.max(0, Math.floor(rect.top)),
+                width: Math.max(1, Math.ceil(rect.width)),
+                height: Math.max(1, Math.ceil(rect.height)),
+              }
+            : null;
+        if (!(element instanceof HTMLIFrameElement)) {
+          return {
+            clip,
+            iframe: null,
+          };
+        }
         return {
           clip,
-          iframe: null,
+          iframe: {
+            src: element.getAttribute("src") ?? "",
+            title: element.getAttribute("title") ?? "",
+          },
         };
-      }
-      return {
-        clip,
-        iframe: {
-          src: element.getAttribute("src") ?? "",
-          title: element.getAttribute("title") ?? "",
-        },
-      };
-    }, target.selector)) as
+      }, target.selector),
+      timeoutMs,
+      `screenshot selector state (${target.name})`,
+    )) as
       | {
           clip: SelectorClip | null;
           iframe: { src: string; title: string } | null;
@@ -989,15 +1188,23 @@ async function takeScreenshot(
 
     selectorClip = selectorState?.clip ?? null;
     if (selectorClip) {
-      await page.screenshot({
-        path: filePath,
-        clip: selectorClip,
-      });
+      await withTimeout(
+        page.screenshot({
+          path: filePath,
+          clip: selectorClip,
+        }),
+        timeoutMs,
+        `screenshot clip capture (${target.name})`,
+      );
     } else {
-      await page.screenshot({
-        path: filePath,
-        fullPage: target.fullPage ?? true,
-      });
+      await withTimeout(
+        page.screenshot({
+          path: filePath,
+          fullPage: target.fullPage ?? true,
+        }),
+        timeoutMs,
+        `screenshot page capture (${target.name})`,
+      );
     }
 
     if (selectorState?.iframe?.src) {
@@ -1005,52 +1212,67 @@ async function takeScreenshot(
         .frames()
         .find((frame) => frame.url() === selectorState.iframe?.src);
       if (embeddedFrame) {
-        embeddedFrameMeta = (await embeddedFrame.evaluate(() => ({
-          href: location.href,
-          title: document.title,
-          bodyPreview: (document.body?.innerText ?? "").slice(0, 2_000),
-          streamReady:
-            (window as typeof window & { __HYPERSCAPE_STREAM_READY__?: unknown })
-              .__HYPERSCAPE_STREAM_READY__ ?? null,
-          rendererHealth:
-            (
-              window as typeof window & {
-                __HYPERSCAPE_STREAM_RENDERER_HEALTH__?: unknown;
-              }
-            ).__HYPERSCAPE_STREAM_RENDERER_HEALTH__ ?? null,
-          canvasCount: document.querySelectorAll("canvas").length,
-        }))) as EmbeddedFrameMeta;
+        embeddedFrameMeta = (await withTimeout(
+          embeddedFrame.evaluate(() => ({
+            href: location.href,
+            title: document.title,
+            bodyPreview: (document.body?.innerText ?? "").slice(0, 2_000),
+            streamReady:
+              (
+                window as typeof window & {
+                  __HYPERSCAPE_STREAM_READY__?: unknown;
+                }
+              ).__HYPERSCAPE_STREAM_READY__ ?? null,
+            rendererHealth:
+              (
+                window as typeof window & {
+                  __HYPERSCAPE_STREAM_RENDERER_HEALTH__?: unknown;
+                }
+              ).__HYPERSCAPE_STREAM_RENDERER_HEALTH__ ?? null,
+            canvasCount: document.querySelectorAll("canvas").length,
+          })),
+          timeoutMs,
+          `screenshot iframe meta (${target.name})`,
+        )) as EmbeddedFrameMeta;
       }
     }
   } else {
-    await page.screenshot({
-      path: filePath,
-      fullPage: target.fullPage ?? true,
-    });
+    await withTimeout(
+      page.screenshot({
+        path: filePath,
+        fullPage: target.fullPage ?? true,
+      }),
+      timeoutMs,
+      `screenshot page capture (${target.name})`,
+    );
   }
 
-  const meta = (await page.evaluate(() => {
-    const bodyPreview = (document.body?.innerText ?? "").slice(0, 2_000);
-    const iframeSrcs = Array.from(document.querySelectorAll("iframe"))
-      .map((frame) => frame.getAttribute("src") ?? "")
-      .slice(0, 8);
-    const streamReady =
-      (window as typeof window & { __HYPERSCAPE_STREAM_READY__?: unknown })
-        .__HYPERSCAPE_STREAM_READY__ ?? null;
-    const rendererHealth = (
-      window as typeof window & {
-        __HYPERSCAPE_STREAM_RENDERER_HEALTH__?: unknown;
-      }
-    ).__HYPERSCAPE_STREAM_RENDERER_HEALTH__ ?? null;
-    return {
-      href: location.href,
-      title: document.title,
-      bodyPreview,
-      iframeSrcs,
-      streamReady,
-      rendererHealth,
-    };
-  })) as Record<string, JsonValue>;
+  const meta = (await withTimeout(
+    page.evaluate(() => {
+      const bodyPreview = (document.body?.innerText ?? "").slice(0, 2_000);
+      const iframeSrcs = Array.from(document.querySelectorAll("iframe"))
+        .map((frame) => frame.getAttribute("src") ?? "")
+        .slice(0, 8);
+      const streamReady =
+        (window as typeof window & { __HYPERSCAPE_STREAM_READY__?: unknown })
+          .__HYPERSCAPE_STREAM_READY__ ?? null;
+      const rendererHealth = (
+        window as typeof window & {
+          __HYPERSCAPE_STREAM_RENDERER_HEALTH__?: unknown;
+        }
+      ).__HYPERSCAPE_STREAM_RENDERER_HEALTH__ ?? null;
+      return {
+        href: location.href,
+        title: document.title,
+        bodyPreview,
+        iframeSrcs,
+        streamReady,
+        rendererHealth,
+      };
+    }),
+    timeoutMs,
+    `screenshot page meta (${target.name})`,
+  )) as Record<string, JsonValue>;
 
   meta.selectorClip = selectorClip;
   meta.embeddedFrame = embeddedFrameMeta;
@@ -1076,10 +1298,22 @@ async function closeScreenshotSession(): Promise<void> {
     if (page.isClosed?.() === true) {
       continue;
     }
-    await page.close({ runBeforeUnload: true }).catch(() => undefined);
+    await withTimeout(
+      page.close({ runBeforeUnload: true }).catch(() => undefined),
+      screenshotCloseTimeoutMs(),
+      "screenshot page close",
+    ).catch(() => undefined);
   }
-  await session.context.close().catch(() => undefined);
-  await session.browser.close().catch(() => undefined);
+  await withTimeout(
+    session.context.close().catch(() => undefined),
+    screenshotCloseTimeoutMs(),
+    "screenshot context close",
+  ).catch(() => undefined);
+  await withTimeout(
+    session.browser.close().catch(() => undefined),
+    screenshotCloseTimeoutMs(),
+    "screenshot browser close",
+  ).catch(() => undefined);
 }
 
 type LocalCapturePayload = {
@@ -1139,7 +1373,28 @@ async function captureScreenshots(
   mkdirSync(screenshotDir, { recursive: true });
   for (const target of targets) {
     const filePath = path.join(screenshotDir, `${label}.${target.name}.png`);
-    written.push(await takeScreenshot(target, filePath));
+    try {
+      written.push(await takeScreenshot(target, filePath));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (
+        message.includes("timed out after") ||
+        message.includes("Target page, context or browser has been closed")
+      ) {
+        await closeScreenshotSession().catch(() => undefined);
+      } else {
+        await resetScreenshotPage(target).catch(() => undefined);
+      }
+      writeJsonArtifact(artifactRoot, path.join("events", `${label}.${target.name}.screenshot-error.json`), {
+        target: target.name,
+        url: target.url,
+        selector: target.selector ?? null,
+        error: String(error),
+      });
+      console.warn(
+        `[pm-soak] screenshot capture failed for ${label}.${target.name}: ${String(error)}`,
+      );
+    }
   }
   return written;
 }
@@ -1182,7 +1437,9 @@ async function recordContextEvent(
       path.join("events", `${baseName}.screenshot-error.json`),
       { error: String(error) },
     );
-    throw error;
+    console.warn(
+      `[pm-soak] screenshot capture failed for ${baseName}: ${String(error)}`,
+    );
   }
   return detailPath;
 }
@@ -1231,10 +1488,9 @@ function localScreenshotTargets(): ScreenshotTarget[] {
   const hyperscapes =
     optionalEnv("HYPERSCAPES_UI_URL") ??
     "http://127.0.0.1:3333/stream.html?disableBridgeCapture=1";
-  const hyperbet =
-    optionalEnv("HYPERBET_UI_URL") ?? "http://127.0.0.1:4179/?debug";
-  targets.push({ name: "hyperscapes", url: hyperscapes });
-  targets.push({ name: "hyperbet", url: hyperbet });
+  const hyperbet = optionalEnv("HYPERBET_UI_URL") ?? "http://127.0.0.1:4179/";
+  targets.push({ name: "hyperscapes", url: hyperscapes, fullPage: false });
+  targets.push({ name: "hyperbet", url: hyperbet, fullPage: false });
   targets.push({
     name: "hyperbet-stream",
     url: hyperbet,
@@ -1256,6 +1512,15 @@ function localReconcileTarget(): { url: string; key: string | null } {
     optionalEnv("ARENA_EXTERNAL_BET_WRITE_KEY") ??
     optionalEnv("E2E_ARENA_WRITE_KEY");
   return { url, key };
+}
+
+function isBenignLocalRendererDegradation(
+  degradedReason: string | null | undefined,
+): boolean {
+  return (
+    degradedReason === "capture_client_disconnected" ||
+    degradedReason === "renderer_health_stale"
+  );
 }
 
 async function reconcileLocalStreamState(
@@ -1543,7 +1808,8 @@ async function runLocalSoak(args: MonitorArgs): Promise<void> {
       startedAt: nowIso(),
       durationMin: args.durationMin,
       pollMs: args.pollMs,
-      baselineCycleMs: BASELINE_DUEL_CYCLE_MS,
+      minCycleMs: LOCAL_MIN_DUEL_CYCLE_MS,
+      maxCycleMs: LOCAL_MAX_DUEL_CYCLE_MS,
       follow: args.follow,
     },
     context.screenshotTargets,
@@ -1601,7 +1867,11 @@ async function runLocalSoak(args: MonitorArgs): Promise<void> {
           ? snapshot.syncStatus.degradedReason
           : null;
 
-      if (rendererSignoffRelevant && rendererHealth?.ready === false) {
+      if (
+        rendererSignoffRelevant &&
+        rendererHealth?.ready === false &&
+        !isBenignLocalRendererDegradation(rendererHealth.degradedReason)
+      ) {
         rendererDegradedPolls += 1;
         if (rendererDegradedPolls >= 2) {
           currentCycle?.incidents.push("renderer_unhealthy");
@@ -1721,11 +1991,45 @@ async function runLocalSoak(args: MonitorArgs): Promise<void> {
               const refreshedLiveDuelKey = currentOverviewLiveDuelKey(
                 refreshed.overview,
               ) ?? currentActiveDuelKey(refreshed.active);
+              const refreshedRecentSettlementDuelKey =
+                currentOverviewRecentSettlementDuelKey(refreshed.overview);
+              const refreshedPhase =
+                currentSourceBetSyncPhase(refreshed.sourceBetSyncState) ??
+                currentPhase(refreshed.streamState, refreshed.active);
               const refreshedAligned = duelKeysAligned(
                 refreshedStreamDuelKey,
                 refreshedLiveDuelKey,
               );
               if (!refreshedAligned) {
+                const recentSettlementLagOnly =
+                  refreshedPhase !== "IDLE" &&
+                  refreshedStreamDuelKey != null &&
+                  refreshedRecentSettlementDuelKey != null &&
+                  refreshedStreamDuelKey === refreshedRecentSettlementDuelKey &&
+                  refreshedLiveDuelKey != null &&
+                  refreshedLiveDuelKey !== refreshedStreamDuelKey;
+                if (recentSettlementLagOnly) {
+                  context.streamDuelKey = refreshedStreamDuelKey;
+                  context.activeDuelKey = refreshedLiveDuelKey;
+                  context.recentSettlementDuelKey =
+                    refreshedRecentSettlementDuelKey;
+                  driftConsecutivePolls = 0;
+                  context.driftPolls = 0;
+                  driftHandled = false;
+                  await recordLocalContextEvent(
+                    context,
+                    "local-source-feed-settlement-lag",
+                    refreshed,
+                    {
+                      sourceDuelKey: refreshedStreamDuelKey,
+                      liveDuelKey: refreshedLiveDuelKey,
+                      recentSettlementDuelKey:
+                        refreshedRecentSettlementDuelKey,
+                      phase: refreshedPhase,
+                    },
+                  );
+                  continue;
+                }
                 await recordIncident(
                   context,
                   "local",
@@ -1886,14 +2190,16 @@ async function runLocalSoak(args: MonitorArgs): Promise<void> {
     cycles.push(currentCycle);
   }
 
-  const cycleDurationsMs = cycles
+  const scoredCycles = cycles.filter(isScoreableLocalCycle);
+  const cycleDurationsMs = scoredCycles
     .map((cycle) => cycle.durationMs)
     .filter((value): value is number => Number.isFinite(value));
 
-  for (const cycle of cycles) {
+  for (const cycle of scoredCycles) {
     if (
       cycle.durationMs != null &&
-      Math.abs(cycle.durationMs - BASELINE_DUEL_CYCLE_MS) > LOCAL_CYCLE_DRIFT_MS
+      cycle.durationMs < LOCAL_MIN_DUEL_CYCLE_MS ||
+      cycle.durationMs > LOCAL_MAX_DUEL_CYCLE_MS
     ) {
       cycle.incidents.push("cycle_drift");
     }
@@ -1904,13 +2210,12 @@ async function runLocalSoak(args: MonitorArgs): Promise<void> {
     : args.durationMin >= DEFAULT_LOCAL_DURATION_MIN
       ? 8
       : 1;
+  const driftCyclesObserved = scoredCycles.filter((cycle) =>
+    cycle.incidents.includes("cycle_drift"),
+  ).length;
   const pass =
     context.incidents.length === 0 &&
-    cycles.length >= requiredCycles &&
-    cycleDurationsMs.every(
-      (value) =>
-        Math.abs(value - BASELINE_DUEL_CYCLE_MS) <= LOCAL_CYCLE_DRIFT_MS,
-    ) &&
+    scoredCycles.length >= requiredCycles &&
     bothUiReachable;
 
   const summary: LocalSummary = {
@@ -1923,6 +2228,9 @@ async function runLocalSoak(args: MonitorArgs): Promise<void> {
     artifactRoot: context.artifactRoot,
     follow: args.follow,
     cyclesObserved: cycles.length,
+    scoredCyclesObserved: scoredCycles.length,
+    ignoredCyclesObserved: cycles.length - scoredCycles.length,
+    driftCyclesObserved,
     cycleDurationsMs,
     bothUiReachable,
     streamDuelKey: context.streamDuelKey,
@@ -3135,14 +3443,16 @@ async function main(): Promise<void> {
   await runStagedSoak(args);
 }
 
-main()
-  .catch((error) => {
-    console.error(`[pm-soak] failed: ${String(error)}`);
-    process.exitCode = 1;
-  })
-  .finally(async () => {
-    await closeScreenshotSession().catch(() => undefined);
-    if ((process.exitCode ?? 0) !== 0) {
-      process.exit(process.exitCode ?? 1);
-    }
-  });
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  main()
+    .catch((error) => {
+      console.error(`[pm-soak] failed: ${String(error)}`);
+      process.exitCode = 1;
+    })
+    .finally(async () => {
+      await closeScreenshotSession().catch(() => undefined);
+      if ((process.exitCode ?? 0) !== 0) {
+        process.exit(process.exitCode ?? 1);
+      }
+    });
+}

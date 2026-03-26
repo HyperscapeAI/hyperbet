@@ -2,13 +2,11 @@
 pragma solidity ^0.8.19;
 
 import "forge-std/Test.sol";
-import "forge-std/console.sol";
 import "../contracts/lvr_amm/Router.sol";
 import "../contracts/lvr_amm/LvrMarket.sol";
 import "../contracts/lvr_amm/MockUSD.sol";
 import "../contracts/DuelOutcomeOracle.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {Math} from "../contracts/lvr_amm/lib/Math.sol";
 import {SwapMath} from "../contracts/lvr_amm/lib/SwapMath.sol";
 
 contract LvrMarketTest is Test {
@@ -64,14 +62,9 @@ contract LvrMarketTest is Test {
             collateralIn
         );
 
-        assertEq(router.getMarketCount(), 1);
-        (address marketAddr, bytes32 id) = router.getMarketAtIndex(0);
-
-        (address mkt, uint256 liq, string memory title, ,) = router.getMarketMetadata(id);
-
-        assertEq(mkt, marketAddr);
-        assertEq(title, "Will BTC hit 100k?");
-        assertTrue(liq > 0);
+        address[] memory markets = router.getAllMarkets();
+        assertEq(markets.length, 1);
+        address marketAddr = markets[0];
 
         assertEq(mUSD.balanceOf(marketAddr), collateralIn);
 
@@ -84,7 +77,7 @@ contract LvrMarketTest is Test {
         vm.prank(admin);
         router.create("Test Market", "Desc", "Src", TEST_DUEL_KEY, true, DURATION, collateralIn);
 
-        (address marketAddr, ) = router.getMarketAtIndex(0);
+        address marketAddr = _marketAt(0);
         LvrMarket market = LvrMarket(marketAddr);
 
         uint256 buyAmount = 10 * 10**18;
@@ -108,7 +101,7 @@ contract LvrMarketTest is Test {
         vm.prank(admin);
         router.create("Test Market", "Desc", "Src", TEST_DUEL_KEY, true, DURATION, collateralIn);
 
-        (address marketAddr, ) = router.getMarketAtIndex(0);
+        address marketAddr = _marketAt(0);
         LvrMarket market = LvrMarket(marketAddr);
 
         vm.startPrank(user2);
@@ -140,6 +133,34 @@ contract LvrMarketTest is Test {
         assertEq(router.feeBps(), 100);
     }
 
+    function test_FreezeConfigBlocksFurtherFeeChanges() public {
+        vm.prank(admin);
+        router.freezeConfig();
+
+        assertTrue(router.configFrozen(), "config should be frozen");
+
+        vm.prank(admin);
+        vm.expectRevert(Router.ConfigFrozen.selector);
+        router.setFeeConfig(treasury, 100);
+    }
+
+    function test_CreateUsesFrozenFeeSnapshot() public {
+        vm.prank(admin);
+        router.setFeeConfig(treasury, 100);
+
+        vm.prank(admin);
+        router.freezeConfig();
+
+        vm.prank(admin);
+        router.create("Frozen Config", "Desc", "Src", TEST_DUEL_KEY, false, DURATION, 100 * 10**18);
+
+        address marketAddr = _lastMarketAddress();
+        LvrMarket market = LvrMarket(marketAddr);
+
+        assertEq(market.feeBps(), 100, "market should inherit frozen router fee config");
+        assertEq(market.treasuryAddress(), treasury, "market should inherit frozen router treasury");
+    }
+
     function test_CallbackFromNonMarket() public {
         vm.prank(user1);
         vm.expectRevert(Router.MarketNotAllowed.selector);
@@ -158,7 +179,7 @@ contract LvrMarketTest is Test {
 
         vm.prank(admin);
         router.create("Test Market", "Desc", "Src", TEST_DUEL_KEY, true, DURATION, collateralIn);
-        (address marketAddr, ) = router.getMarketAtIndex(0);
+        address marketAddr = _marketAt(0);
 
         vm.warp(block.timestamp + 1 hours);
 
@@ -175,7 +196,7 @@ contract LvrMarketTest is Test {
 
         vm.prank(admin);
         router.create("Test Market", "Desc", "Src", TEST_DUEL_KEY, true, DURATION, collateralIn);
-        (address marketAddr, ) = router.getMarketAtIndex(0);
+        address marketAddr = _marketAt(0);
         LvrMarket market = LvrMarket(marketAddr);
 
         // At creation, with equal reserves, price should be ~0.5
@@ -192,42 +213,26 @@ contract LvrMarketTest is Test {
     function test_SettleMarketRequiresPendingState() public {
         vm.prank(admin);
         router.create("Test Market", "Desc", "Src", TEST_DUEL_KEY, true, DURATION, 100 * 10**18);
-        (address marketAddr, ) = router.getMarketAtIndex(0);
+        address marketAddr = _marketAt(0);
 
         vm.expectRevert(bytes("Invalid Market State"));
         router.settleMarket(marketAddr);
     }
 
     function test_RedeemCollateralPaysWinningSide() public {
-        // Use static market to avoid ZScoreOutOfBounds from dynamic liquidity scaling
-        vm.prank(admin);
-        router.create("Test Market", "Desc", "Src", TEST_DUEL_KEY, false, DURATION, 100 * 10**18);
-        (address marketAddr, ) = router.getMarketAtIndex(0);
-        LvrMarket market = LvrMarket(marketAddr);
+        bytes32 duelKey = keccak256("redeem-winning-side");
+        _setupOracleDuel(duelKey);
 
-        vm.warp(block.timestamp + 1 hours);
-
-        vm.prank(user1);
-        router.buyYes(marketAddr, 5 * 10**18, 0);
-        vm.prank(user2);
-        router.buyNo(marketAddr, 5 * 10**18, 0);
-
+        (address marketAddr, LvrMarket market) = _createAndTradeStaticMarket(duelKey);
         uint256 user1Yes = IERC20(address(market.yesToken())).balanceOf(user1);
         uint256 user2No = IERC20(address(market.noToken())).balanceOf(user2);
 
+        _proposeAndFinalizeOracle(duelKey, DuelOutcomeOracle.Side.B);
         vm.warp(block.timestamp + DURATION);
-        vm.prank(admin);
-        market.adminResolve(1);
+        router.settleFromOracle(marketAddr);
 
-        vm.startPrank(user1);
-        IERC20(address(market.yesToken())).approve(address(router), user1Yes);
-        IERC20(address(market.noToken())).approve(address(router), user1Yes); // approve NO token too (callback transfers both)
-        vm.stopPrank();
-
-        vm.startPrank(user2);
-        IERC20(address(market.yesToken())).approve(address(router), user2No);
-        IERC20(address(market.noToken())).approve(address(router), user2No);
-        vm.stopPrank();
+        _approveRedeemTokens(market, user1, user1Yes, 0);
+        _approveRedeemTokens(market, user2, 0, user2No);
 
         uint256 user1Before = mUSD.balanceOf(user1);
         uint256 user2Before = mUSD.balanceOf(user2);
@@ -251,7 +256,7 @@ contract LvrMarketTest is Test {
     function test_GetPriceAfterDeadline() public {
         vm.prank(admin);
         router.create("Expiring Market", "Desc", "Src", TEST_DUEL_KEY, true, DURATION, 100 * 10**18);
-        (address marketAddr, ) = router.getMarketAtIndex(0);
+        address marketAddr = _marketAt(0);
         LvrMarket market = LvrMarket(marketAddr);
 
         // Warp past deadline
@@ -268,7 +273,7 @@ contract LvrMarketTest is Test {
         // Use static market (not dynamic) to avoid liquidity scaling issues with ZScoreOutOfBounds
         vm.prank(admin);
         router.create("Solvency Test", "Desc", "Src", TEST_DUEL_KEY, false, DURATION, 100 * 10**18);
-        (address marketAddr, ) = router.getMarketAtIndex(0);
+        address marketAddr = _marketAt(0);
         LvrMarket market = LvrMarket(marketAddr);
 
         vm.warp(block.timestamp + 1 hours);
@@ -291,92 +296,55 @@ contract LvrMarketTest is Test {
         assertTrue(totalYes + totalNo <= 2 * collateral, "Solvency violated: tokens exceed collateral");
     }
 
-    function test_AdminSlashesBondOnWrongProposal() public {
+    function test_AdminResolveSelectorRemoved() public {
         vm.prank(admin);
         router.create("Bond Slash Test", "Desc", "Src", TEST_DUEL_KEY, true, DURATION, 100 * 10**18);
-        (address marketAddr, ) = router.getMarketAtIndex(0);
-        LvrMarket market = LvrMarket(marketAddr);
-
-        vm.warp(block.timestamp + DURATION);
-
-        // user1 proposes outcome=0 (needs bond)
-        uint256 bond = market.bondValue();
-        vm.prank(user1);
-        mUSD.approve(address(router), bond);
-        vm.prank(user1);
-        router.proposerOutcome(marketAddr, 0);
-
-        // user2 disputes
-        vm.prank(user2);
-        router.dispute(marketAddr);
-
-        // Admin resolves with outcome=1 (proposer was WRONG)
-        uint256 treasuryBefore = mUSD.balanceOf(treasury);
-        uint256 proposerBefore = mUSD.balanceOf(user1);
-        vm.prank(admin);
-        market.adminResolve(1);
-
-        assertEq(mUSD.balanceOf(treasury), treasuryBefore + bond, "Bond should go to treasury (slashed)");
-        assertEq(mUSD.balanceOf(user1), proposerBefore, "Proposer should not get bond back");
+        address marketAddr = _marketAt(0);
+        (bool success, ) = marketAddr.call(abi.encodeWithSignature("adminResolve(uint256)", 1));
+        assertFalse(success, "adminResolve should not remain callable");
     }
 
-    function test_AdminReturnsBondOnCorrectProposal() public {
+    function test_SettleFromOracle_ReturnsBondOnCorrectProposal() public {
+        bytes32 duelKey = keccak256("oracle-bond-return");
+        _setupOracleDuel(duelKey);
+
         vm.prank(admin);
-        router.create("Bond Return Test", "Desc", "Src", SECOND_DUEL_KEY, true, DURATION, 100 * 10**18);
-        (address marketAddr, ) = router.getMarketAtIndex(0);
+        router.create("Bond Return Test", "Desc", "Src", duelKey, true, DURATION, 100 * 10**18);
+        address marketAddr = _lastMarketAddress();
         LvrMarket market = LvrMarket(marketAddr);
 
         vm.warp(block.timestamp + DURATION);
 
-        // user1 proposes outcome=0
         uint256 bond = market.bondValue();
         vm.prank(user1);
         mUSD.approve(address(router), bond);
         vm.prank(user1);
         router.proposerOutcome(marketAddr, 0);
 
-        // user2 disputes
-        vm.prank(user2);
-        router.dispute(marketAddr);
+        _proposeAndFinalizeOracle(duelKey, DuelOutcomeOracle.Side.A);
 
-        // Admin resolves with outcome=0 (proposer was RIGHT)
         uint256 proposerBefore = mUSD.balanceOf(user1);
-        vm.prank(admin);
-        market.adminResolve(0);
+        router.settleFromOracle(marketAddr);
 
         assertEq(mUSD.balanceOf(user1), proposerBefore + bond, "Proposer should get bond back");
     }
 
     function test_RedeemCollateralRefundsCancelledMarkets() public {
-        // Use static market to avoid ZScoreOutOfBounds from dynamic liquidity scaling
-        vm.prank(admin);
-        router.create("Cancelled Market", "Desc", "Src", SECOND_DUEL_KEY, false, DURATION, 100 * 10**18);
-        (address marketAddr, ) = router.getMarketAtIndex(0);
-        LvrMarket market = LvrMarket(marketAddr);
+        bytes32 duelKey = keccak256("cancelled-market");
+        _setupOracleDuel(duelKey);
 
-        vm.warp(block.timestamp + 1 hours);
-
-        vm.prank(user1);
-        router.buyYes(marketAddr, 5 * 10**18, 0);
-        vm.prank(user2);
-        router.buyNo(marketAddr, 5 * 10**18, 0);
-
+        (address marketAddr, LvrMarket market) = _createAndTradeStaticMarket(duelKey);
         uint256 user1Yes = IERC20(address(market.yesToken())).balanceOf(user1);
         uint256 user2No = IERC20(address(market.noToken())).balanceOf(user2);
 
-        vm.warp(block.timestamp + DURATION);
         vm.prank(admin);
-        market.adminResolve(2);
+        oracle.cancelDuel(duelKey, "cancelled-uri");
 
-        vm.startPrank(user1);
-        IERC20(address(market.yesToken())).approve(address(router), user1Yes);
-        IERC20(address(market.noToken())).approve(address(router), user1Yes);
-        vm.stopPrank();
+        vm.warp(block.timestamp + DURATION);
+        router.settleFromOracle(marketAddr);
 
-        vm.startPrank(user2);
-        IERC20(address(market.yesToken())).approve(address(router), user2No);
-        IERC20(address(market.noToken())).approve(address(router), user2No);
-        vm.stopPrank();
+        _approveRedeemTokens(market, user1, user1Yes, 0);
+        _approveRedeemTokens(market, user2, 0, user2No);
 
         uint256 user1Before = mUSD.balanceOf(user1);
         uint256 user2Before = mUSD.balanceOf(user2);
@@ -396,7 +364,7 @@ contract LvrMarketTest is Test {
     function _createAndTradeStaticMarket(bytes32 duelKey) internal returns (address marketAddr, LvrMarket market) {
         vm.prank(admin);
         router.create("Oracle Test", "Desc", "Src", duelKey, false, DURATION, 100 * 10**18);
-        (marketAddr, ) = router.getMarketAtIndex(router.getMarketCount() - 1);
+        marketAddr = _lastMarketAddress();
         market = LvrMarket(marketAddr);
 
         vm.warp(block.timestamp + 1 hours);
@@ -404,6 +372,13 @@ contract LvrMarketTest is Test {
         router.buyYes(marketAddr, 5 * 10**18, 0);
         vm.prank(user2);
         router.buyNo(marketAddr, 5 * 10**18, 0);
+    }
+
+    function _approveRedeemTokens(LvrMarket market, address holder, uint256 yesAmount, uint256 noAmount) internal {
+        vm.startPrank(holder);
+        IERC20(address(market.yesToken())).approve(address(router), yesAmount);
+        IERC20(address(market.noToken())).approve(address(router), noAmount);
+        vm.stopPrank();
     }
 
     function _setupOracleDuel(bytes32 duelKey) internal {
@@ -520,7 +495,7 @@ contract LvrMarketTest is Test {
     function test_SlippageProtection_BuyNo() public {
         vm.prank(admin);
         router.create("Slippage No", "Desc", "Src", TEST_DUEL_KEY, false, DURATION, 100 * 10**18);
-        (address marketAddr, ) = router.getMarketAtIndex(0);
+        address marketAddr = _marketAt(0);
 
         vm.warp(block.timestamp + 1 hours);
 
@@ -532,7 +507,7 @@ contract LvrMarketTest is Test {
     function test_SlippageProtection_SellYes() public {
         vm.prank(admin);
         router.create("Slippage Sell", "Desc", "Src", TEST_DUEL_KEY, false, DURATION, 100 * 10**18);
-        (address marketAddr, ) = router.getMarketAtIndex(0);
+        address marketAddr = _marketAt(0);
         LvrMarket market = LvrMarket(marketAddr);
 
         vm.warp(block.timestamp + 1 hours);
@@ -551,7 +526,7 @@ contract LvrMarketTest is Test {
     function test_SlippageProtection_SellNo() public {
         vm.prank(admin);
         router.create("Slippage SellNo", "Desc", "Src", TEST_DUEL_KEY, false, DURATION, 100 * 10**18);
-        (address marketAddr, ) = router.getMarketAtIndex(0);
+        address marketAddr = _marketAt(0);
         LvrMarket market = LvrMarket(marketAddr);
 
         vm.warp(block.timestamp + 1 hours);
@@ -569,7 +544,7 @@ contract LvrMarketTest is Test {
     function test_BuyAfterDeadlineReverts() public {
         vm.prank(admin);
         router.create("Expired", "Desc", "Src", TEST_DUEL_KEY, false, DURATION, 100 * 10**18);
-        (address marketAddr, ) = router.getMarketAtIndex(0);
+        address marketAddr = _marketAt(0);
 
         vm.warp(block.timestamp + DURATION + 1);
 
@@ -582,9 +557,12 @@ contract LvrMarketTest is Test {
 
     function test_CancellationSolvency() public {
         // Verify outcome==2 never pays more than available collateral
+        bytes32 duelKey = keccak256("solvency-cancel");
+        _setupOracleDuel(duelKey);
+
         vm.prank(admin);
-        router.create("Solvency Cancel", "Desc", "Src", TEST_DUEL_KEY, false, DURATION, 100 * 10**18);
-        (address marketAddr, ) = router.getMarketAtIndex(0);
+        router.create("Solvency Cancel", "Desc", "Src", duelKey, false, DURATION, 100 * 10**18);
+        address marketAddr = _lastMarketAddress();
         LvrMarket market = LvrMarket(marketAddr);
 
         vm.warp(block.timestamp + 1 hours);
@@ -602,10 +580,11 @@ contract LvrMarketTest is Test {
         router.sellYes(marketAddr, user1Yes / 2, 0);
         vm.stopPrank();
 
-        // Cancel the market
-        vm.warp(block.timestamp + DURATION);
         vm.prank(admin);
-        market.adminResolve(2);
+        oracle.cancelDuel(duelKey, "cancelled-uri");
+
+        vm.warp(block.timestamp + DURATION);
+        router.settleFromOracle(marketAddr);
 
         // Capture balances
         uint256 u1Yes = IERC20(address(market.yesToken())).balanceOf(user1);
@@ -638,7 +617,7 @@ contract LvrMarketTest is Test {
 
         vm.prank(admin);
         router.create("Fuzz Solvency", "Desc", "Src", TEST_DUEL_KEY, false, DURATION, 100 * 10**18);
-        (address marketAddr, ) = router.getMarketAtIndex(0);
+        address marketAddr = _marketAt(0);
         LvrMarket market = LvrMarket(marketAddr);
 
         vm.warp(block.timestamp + 1 hours);
@@ -661,7 +640,7 @@ contract LvrMarketTest is Test {
 
         vm.prank(admin);
         router.create("No Free Money", "Desc", "Src", TEST_DUEL_KEY, false, DURATION, 100 * 10**18);
-        (address marketAddr, ) = router.getMarketAtIndex(0);
+        address marketAddr = _marketAt(0);
         LvrMarket market = LvrMarket(marketAddr);
 
         vm.warp(block.timestamp + 1 hours);
@@ -690,5 +669,14 @@ contract LvrMarketTest is Test {
         // Using direct library call to test edge case
         vm.expectRevert(SwapMath.ZScoreOutOfBounds.selector);
         SwapMath.getSwapAmount(true, 1, int256(1e36), 1, int256(1e30));
+    }
+
+    function _marketAt(uint256 index) internal view returns (address) {
+        return router.getAllMarkets()[index];
+    }
+
+    function _lastMarketAddress() internal view returns (address) {
+        address[] memory markets = router.getAllMarkets();
+        return markets[markets.length - 1];
     }
 }

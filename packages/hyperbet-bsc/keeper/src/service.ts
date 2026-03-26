@@ -993,6 +993,21 @@ function applyCors(req: Request, headers: Headers): void {
   headers.set("access-control-max-age", "86400");
 }
 
+const MAX_SAFE_JSON_INTEGER = BigInt(Number.MAX_SAFE_INTEGER);
+const MIN_SAFE_JSON_INTEGER = BigInt(Number.MIN_SAFE_INTEGER);
+
+function jsonReplacer(_key: string, value: unknown): unknown {
+  if (typeof value !== "bigint") return value;
+  if (value <= MAX_SAFE_JSON_INTEGER && value >= MIN_SAFE_JSON_INTEGER) {
+    return Number(value);
+  }
+  return value.toString();
+}
+
+function jsonStringify(body: unknown): string {
+  return JSON.stringify(body, jsonReplacer);
+}
+
 function jsonResponse(
   req: Request,
   body: unknown,
@@ -1005,7 +1020,7 @@ function jsonResponse(
     ...extraHeaders,
   });
   applyCors(req, headers);
-  return new Response(JSON.stringify(body), { status, headers });
+  return new Response(jsonStringify(body), { status, headers });
 }
 
 function textResponse(
@@ -1808,7 +1823,7 @@ function sendSse(
   data: unknown,
 ): void {
   const message =
-    `id: ${id}\n` + `event: ${event}\n` + `data: ${JSON.stringify(data)}\n\n`;
+    `id: ${id}\n` + `event: ${event}\n` + `data: ${jsonStringify(data)}\n\n`;
   controller.enqueue(encoder.encode(message));
 }
 

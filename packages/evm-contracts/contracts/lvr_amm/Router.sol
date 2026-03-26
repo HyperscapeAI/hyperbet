@@ -3,7 +3,6 @@ pragma solidity ^0.8.13;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {DuelOutcomeOracle} from "../DuelOutcomeOracle.sol";
 import {LvrMarket} from "./LvrMarket.sol";
@@ -12,9 +11,10 @@ import {IMarketSellCallback} from "./interfaces/IMarketSellCallback.sol";
 import {IMarketRedeemCallback} from "./interfaces/IMarketRedeemCallback.sol";
 import {IMarketBondCallback} from "./interfaces/IMarketBondCallback.sol";
 
-contract Router is AccessControl, ReentrancyGuard, IMarketBuyCallback, IMarketSellCallback, IMarketRedeemCallback, IMarketBondCallback{
+contract Router is ReentrancyGuard, IMarketBuyCallback, IMarketSellCallback, IMarketRedeemCallback, IMarketBondCallback {
     using SafeERC20 for IERC20;
 
+    bytes32 public constant DEFAULT_ADMIN_ROLE = 0x00;
     bytes32 public constant MARKET_OPERATOR_ROLE = keccak256("MARKET_OPERATOR_ROLE");
 
     // Enhanced event with full metadata for frontend indexing
@@ -29,49 +29,44 @@ contract Router is AccessControl, ReentrancyGuard, IMarketBuyCallback, IMarketSe
         uint256 liquidity
     );
 
-    struct MarketMetadata {
-        string title;
-        string description;
-        string resolutionSource;
-    }
-
-    struct MarketInfo {
-        address market;
-        uint256 liquidity;
-        bool initialized;
-        MarketMetadata metadata;
-    }
-
-    mapping(bytes32 marketId => MarketInfo info) public markets;
-    address[] public allMarkets; // Array for enumeration
-    bytes32[] public allMarketIds; // Corresponding market IDs
+    address[] private allMarkets;
     uint256 public constant MAX_FEE_BPS = 1000; // 10% cap
 
     IERC20 public immutable mUSD; // Collateral Token
     DuelOutcomeOracle public immutable duelOracle;
+    address private immutable adminAddress;
     address public treasury;     // Protocol Treasury
     uint256 public feeBps;       // Global Swap Fee Bps
+    bool public configFrozen;
 
-    mapping(address => bool) public allowedMarkets; // Market allowlist for callbacks
+    mapping(address => bool) private allowedMarkets;
+    mapping(bytes32 => bool) private knownMarketIds;
 
+    error AccessControlUnauthorizedAccount(address account, bytes32 neededRole);
+    error InvalidMUsd();
+    error InvalidOracle();
+    error InvalidTreasury();
+    error InvalidAdmin();
     error FeeTooHigh();
+    error MarketAlreadyExists();
     error MarketNotAllowed();
     error SlippageExceeded();
+    error ConfigFrozen();
 
     event FeeConfigUpdated(address indexed treasury, uint256 feeBps);
+    event FeeConfigFrozen(address indexed admin);
 
-    constructor(address _mUSD, address _oracle, address _treasury, uint256 _feeBps, address admin){
-        require(_mUSD != address(0), "invalid mUSD");
-        require(_oracle != address(0), "invalid oracle");
-        require(_treasury != address(0) || _feeBps == 0, "invalid treasury");
-        require(admin != address(0), "invalid admin");
-        require(_feeBps <= MAX_FEE_BPS, "Fee too high");
+    constructor(address _mUSD, address _oracle, address _treasury, uint256 _feeBps, address admin) {
+        if (_mUSD == address(0)) revert InvalidMUsd();
+        if (_oracle == address(0)) revert InvalidOracle();
+        if (_treasury == address(0) && _feeBps != 0) revert InvalidTreasury();
+        if (admin == address(0)) revert InvalidAdmin();
+        if (_feeBps > MAX_FEE_BPS) revert FeeTooHigh();
         mUSD = IERC20(_mUSD);
         duelOracle = DuelOutcomeOracle(_oracle);
+        adminAddress = admin;
         treasury = _treasury;
         feeBps = _feeBps;
-        _grantRole(DEFAULT_ADMIN_ROLE, admin);
-        _grantRole(MARKET_OPERATOR_ROLE, admin);
     }
 
     modifier onlyAllowedMarket() {
@@ -79,12 +74,36 @@ contract Router is AccessControl, ReentrancyGuard, IMarketBuyCallback, IMarketSe
         _;
     }
 
-    function setFeeConfig(address _treasury, uint256 _feeBps) external onlyRole(DEFAULT_ADMIN_ROLE) {
+    function hasRole(bytes32 role, address account) public view returns (bool) {
+        if (account != adminAddress) {
+            return false;
+        }
+        return role == DEFAULT_ADMIN_ROLE || role == MARKET_OPERATOR_ROLE;
+    }
+
+    function _checkRole(bytes32 role) private view {
+        if (!hasRole(role, msg.sender)) {
+            revert AccessControlUnauthorizedAccount(msg.sender, role);
+        }
+    }
+
+    function setFeeConfig(address _treasury, uint256 _feeBps) external {
+        _checkRole(DEFAULT_ADMIN_ROLE);
+        if (configFrozen) revert ConfigFrozen();
         if (_feeBps > MAX_FEE_BPS) revert FeeTooHigh();
+        if (_treasury == address(0) && _feeBps != 0) revert InvalidTreasury();
         treasury = _treasury;
         feeBps = _feeBps;
         emit FeeConfigUpdated(_treasury, _feeBps);
     }
+
+    function freezeConfig() external {
+        _checkRole(DEFAULT_ADMIN_ROLE);
+        if (configFrozen) revert ConfigFrozen();
+        configFrozen = true;
+        emit FeeConfigFrozen(msg.sender);
+    }
+
     function create(
         string memory title, 
         string memory description,
@@ -93,13 +112,13 @@ contract Router is AccessControl, ReentrancyGuard, IMarketBuyCallback, IMarketSe
         bool isDynamic, 
         uint256 duration, 
         uint256 collateralIn
-    ) public onlyRole(MARKET_OPERATOR_ROLE) {
-        // A new market is deployed
+    ) public {
+        _checkRole(MARKET_OPERATOR_ROLE);
         bytes32 marketId = keccak256(abi.encode(title, msg.sender, block.timestamp));
-        require(!markets[marketId].initialized, "Market Already Exists");
+        if (knownMarketIds[marketId]) revert MarketAlreadyExists();
 
         LvrMarket market =
-            new LvrMarket(address(this), duelKey, address(duelOracle), isDynamic, duration, address(mUSD), msg.sender, treasury, feeBps);
+            new LvrMarket(address(this), duelKey, address(duelOracle), isDynamic, duration, address(mUSD), treasury, feeBps);
 
         // Transfer USD token to market contract
         mUSD.safeTransferFrom(msg.sender, address(market), collateralIn);
@@ -107,20 +126,9 @@ contract Router is AccessControl, ReentrancyGuard, IMarketBuyCallback, IMarketSe
 
         // Add to allowlist AFTER successful initialization to prevent callbacks to uninitialized markets
         allowedMarkets[address(market)] = true;
-
-        markets[marketId] = MarketInfo({
-            market: address(market),
-            liquidity: liquidity,
-            initialized: true,
-            metadata: MarketMetadata({
-                title: title,
-                description: description,
-                resolutionSource: resolutionSource
-            })
-        });
+        knownMarketIds[marketId] = true;
 
         allMarkets.push(address(market));
-        allMarketIds.push(marketId);
         
         emit MarketCreated(
             marketId, 
@@ -131,34 +139,6 @@ contract Router is AccessControl, ReentrancyGuard, IMarketBuyCallback, IMarketSe
             resolutionSource,
             block.timestamp + duration,
             liquidity
-        );
-    }
-
-    // View functions for frontend enumeration
-    function getMarketCount() external view returns (uint256) {
-        return allMarkets.length;
-    }
-
-    function getMarketAtIndex(uint256 index) external view returns (address market, bytes32 marketId) {
-        require(index < allMarkets.length, "Index out of bounds");
-        return (allMarkets[index], allMarketIds[index]);
-    }
-
-    function getMarketMetadata(bytes32 marketId) external view returns (
-        address market,
-        uint256 liquidity,
-        string memory title,
-        string memory description,
-        string memory resolutionSource
-    ) {
-        MarketInfo storage info = markets[marketId];
-        require(info.initialized, "Market does not exist");
-        return (
-            info.market,
-            info.liquidity,
-            info.metadata.title,
-            info.metadata.description,
-            info.metadata.resolutionSource
         );
     }
 
@@ -193,11 +173,6 @@ contract Router is AccessControl, ReentrancyGuard, IMarketBuyCallback, IMarketSe
     function proposerOutcome(address market, uint256 _outcome) public nonReentrant {
         if (!allowedMarkets[market]) revert MarketNotAllowed();
         LvrMarket(market).proposeOutcome(_outcome, msg.sender);
-    }
-
-    function dispute(address market) public nonReentrant {
-        if (!allowedMarkets[market]) revert MarketNotAllowed();
-        LvrMarket(market).dispute();
     }
 
     function settleMarket(address market) public nonReentrant {

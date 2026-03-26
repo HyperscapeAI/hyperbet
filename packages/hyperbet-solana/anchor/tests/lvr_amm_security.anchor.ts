@@ -138,9 +138,9 @@ async function createBetFixture(options?: {
       betId,
       new BN(options?.initialLiqLamports ?? 5_000_000),
       options?.isDynamic ?? false,
-      [...duelKey],
       "LVR AMM security fixture",
       new BN(expirationAt),
+      [...duelKey],
     )
     .accountsPartial({
       signer: creator.publicKey,
@@ -212,8 +212,8 @@ describe("lvr_amm security", () => {
       assert.fail("settle_bet accepted an unrelated duel PDA");
     } catch (error: unknown) {
       assert.ok(
-        hasProgramError(error, "Invalid duel state account"),
-        `expected Invalid duel state account, got ${String(error)}`,
+        hasProgramError(error, "OracleBetMismatch"),
+        `expected OracleBetMismatch, got ${String(error)}`,
       );
     }
   });
@@ -282,7 +282,7 @@ describe("lvr_amm security", () => {
     }
   });
 
-  it("allows YES holders to redeem 1:1 after a cancelled oracle duel", async () => {
+  it("redeems YES holders at 0.5:1 after a cancelled oracle duel", async () => {
     const buyer = Keypair.generate();
     const fixture = await createBetFixture({ expirationOffsetSecs: 15 });
     await airdrop(provider.connection, buyer.publicKey, 5);
@@ -353,11 +353,11 @@ describe("lvr_amm security", () => {
 
     const betBalanceAfter = await provider.connection.getBalance(fixture.bet);
     const yesBalanceAfter = await provider.connection.getTokenAccountBalance(destinationYes);
-    assert.strictEqual(betBalanceBefore - betBalanceAfter, q);
+    assert.strictEqual(betBalanceBefore - betBalanceAfter, Math.floor(q / 2));
     assert.strictEqual(Number(yesBalanceAfter.value.amount), 0);
   });
 
-  it("allows NO holders to redeem 1:1 after a cancelled oracle duel", async () => {
+  it("redeems NO holders at 0.5:1 after a cancelled oracle duel", async () => {
     const buyer = Keypair.generate();
     const fixture = await createBetFixture({ expirationOffsetSecs: 15 });
     await airdrop(provider.connection, buyer.publicKey, 5);
@@ -428,21 +428,17 @@ describe("lvr_amm security", () => {
 
     const betBalanceAfter = await provider.connection.getBalance(fixture.bet);
     const noBalanceAfter = await provider.connection.getTokenAccountBalance(destinationNo);
-    assert.strictEqual(betBalanceBefore - betBalanceAfter, q);
+    assert.strictEqual(betBalanceBefore - betBalanceAfter, Math.floor(q / 2));
     assert.strictEqual(Number(noBalanceAfter.value.amount), 0);
   });
 
-  it("rejects sells when the treasury ATA is not owned by bet.treasury", async () => {
+  it("rejects sells when the YES source ATA is not owned by the signer", async () => {
     const buyer = Keypair.generate();
     const fixture = await createBetFixture({ expirationOffsetSecs: 300 });
     await airdrop(provider.connection, buyer.publicKey, 5);
     const destinationYes = await ensureAta(fixture.mintYes, buyer.publicKey, buyer);
     const destinationNo = await ensureAta(fixture.mintNo, buyer.publicKey, buyer);
-    const treasuryNoAta = await ensureAta(
-      fixture.mintNo,
-      fixture.treasury,
-      authority,
-    );
+    const rogueYesAta = await ensureAta(fixture.mintYes, authority.publicKey, authority);
     await ammProgram.methods
       .buy(fixture.betId, 0, new BN(100_000))
       .accountsPartial({
@@ -464,48 +460,36 @@ describe("lvr_amm security", () => {
     try {
       await ammProgram.methods
         .sell(fixture.betId, 0, new BN(1))
-        .accountsStrict({
+        .accountsPartial({
           signer: buyer.publicKey,
           ammConfig: fixture.ammConfig,
           bet: fixture.bet,
           mintYes: fixture.mintYes,
           mintNo: fixture.mintNo,
-          destinationYes,
+          destinationYes: rogueYesAta,
           destinationNo,
-          treasury: fixture.treasury,
-          treasuryYesAta: destinationYes,
-          treasuryNoAta,
           tokenProgram: TOKEN_PROGRAM_ID,
           systemProgram: SystemProgram.programId,
           associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
         })
         .signers([buyer])
         .rpc();
-      assert.fail("sell accepted a treasury ATA owned by the trader");
+      assert.fail("sell accepted a YES source ATA owned by another wallet");
     } catch (error: unknown) {
       assert.ok(
-        hasProgramError(error, "ConstraintTokenOwner"),
-        `expected token owner constraint failure, got ${String(error)}`,
+        hasProgramError(error, "ConstraintAssociated") ||
+          hasProgramError(error, "ConstraintTokenOwner"),
+        `expected associated/token owner constraint failure, got ${String(error)}`,
       );
     }
   });
 
-  it("rejects sells when the treasury ATA mint does not match the fee side mint", async () => {
+  it("rejects sells when the YES source ATA mint does not match the expected mint", async () => {
     const buyer = Keypair.generate();
     const fixture = await createBetFixture({ expirationOffsetSecs: 300 });
     await airdrop(provider.connection, buyer.publicKey, 5);
     const destinationYes = await ensureAta(fixture.mintYes, buyer.publicKey, buyer);
     const destinationNo = await ensureAta(fixture.mintNo, buyer.publicKey, buyer);
-    const treasuryYesAta = await ensureAta(
-      fixture.mintYes,
-      fixture.treasury,
-      authority,
-    );
-    const treasuryNoAta = await ensureAta(
-      fixture.mintNo,
-      fixture.treasury,
-      authority,
-    );
     await ammProgram.methods
       .buy(fixture.betId, 0, new BN(100_000))
       .accountsPartial({
@@ -527,28 +511,26 @@ describe("lvr_amm security", () => {
     try {
       await ammProgram.methods
         .sell(fixture.betId, 0, new BN(1))
-        .accountsStrict({
+        .accountsPartial({
           signer: buyer.publicKey,
           ammConfig: fixture.ammConfig,
           bet: fixture.bet,
           mintYes: fixture.mintYes,
           mintNo: fixture.mintNo,
-          destinationYes,
-          destinationNo,
-          treasury: fixture.treasury,
-          treasuryYesAta: treasuryNoAta,
-          treasuryNoAta: treasuryYesAta,
+          destinationYes: destinationNo,
+          destinationNo: destinationYes,
           tokenProgram: TOKEN_PROGRAM_ID,
           systemProgram: SystemProgram.programId,
           associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
         })
         .signers([buyer])
         .rpc();
-      assert.fail("sell accepted a treasury ATA for the wrong mint");
+      assert.fail("sell accepted a YES source ATA for the wrong mint");
     } catch (error: unknown) {
       assert.ok(
-        hasProgramError(error, "ConstraintAssociated"),
-        `expected associated-token constraint failure, got ${String(error)}`,
+        hasProgramError(error, "ConstraintAssociated") ||
+          hasProgramError(error, "ConstraintTokenMint"),
+        `expected associated-token or mint constraint failure, got ${String(error)}`,
       );
     }
   });

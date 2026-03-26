@@ -24,7 +24,6 @@ contract LvrMarket is ReentrancyGuard {
     event OutcomeProposed(uint256 outcome, address indexed proposer, uint256 resolutionTimestamp);
     event MarketDisputed();
     event MarketSettled(uint256 outcome, address indexed proposer, uint256 bondReturned);
-    event MarketResolvedByAdmin(uint256 outcome, address indexed admin);
 
     event MarketBuy(address indexed buyer, bool isBuyYes, uint256 amountIn, uint256 amountOut);
     event MarketSell(address indexed seller, bool isSellYes, uint256 amountIn, uint256 amountOut);
@@ -56,7 +55,6 @@ contract LvrMarket is ReentrancyGuard {
     YesToken public yesToken;
     NoToken public noToken;
 
-    address public immutable adminAddress;
     address public immutable routerAddress;
     address public immutable collateralToken;
     DuelOutcomeOracle public immutable duelOracle;
@@ -77,7 +75,6 @@ contract LvrMarket is ReentrancyGuard {
         bool marketType_,
         uint256 duration,
         address collateral_,
-        address admin_,
         address treasury_,
         uint256 feeBps_
     ) {
@@ -85,7 +82,6 @@ contract LvrMarket is ReentrancyGuard {
         require(duelKey_ != bytes32(0), "invalid duel key");
         require(oracle_ != address(0), "invalid oracle");
         require(collateral_ != address(0), "invalid collateral");
-        require(admin_ != address(0), "invalid admin");
         require(treasury_ != address(0) || feeBps_ == 0, "invalid treasury");
 
         routerAddress = router_;
@@ -93,7 +89,6 @@ contract LvrMarket is ReentrancyGuard {
         duelOracle = DuelOutcomeOracle(oracle_);
         isDynamic = marketType_;
         collateralToken = collateral_;
-        adminAddress = admin_;
         treasuryAddress = treasury_;
         feeBps = feeBps_;
         bondValue = 50 * (10 ** IERC20Metadata(collateral_).decimals());
@@ -147,27 +142,6 @@ contract LvrMarket is ReentrancyGuard {
         IERC20(collateralToken).safeTransfer(proposer, bondValue); // Add fees and then reward the proposer
 
         emit MarketSettled(outcome, proposer, bondValue);
-    }
-
-    function adminResolve(uint256 outcomeValue) external nonReentrant {
-        require(msg.sender == adminAddress, "Only Admin can call this method");
-        require(block.timestamp >= deadline, "Market not finished");
-        require(outcomeValue <= 2, "Invalid outcome");
-        require(state == MarketState.DISPUTED || state == MarketState.OPEN, "Invalid Market State");
-
-        // Settle bond before overwriting outcome — slash if proposer was wrong
-        if (proposer != address(0)) {
-            if (state == MarketState.DISPUTED && outcome != outcomeValue) {
-                IERC20(collateralToken).safeTransfer(treasuryAddress, bondValue);
-            } else {
-                IERC20(collateralToken).safeTransfer(proposer, bondValue);
-            }
-        }
-
-        outcome = outcomeValue;
-        state = MarketState.RESOLVED;
-
-        emit MarketResolvedByAdmin(outcomeValue, msg.sender);
     }
 
     function settleFromOracle() external isRouter nonReentrant {

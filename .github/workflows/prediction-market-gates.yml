@@ -256,7 +256,7 @@ jobs:
         run: |
           echo "::warning title=AVAX Gate posture::AVAX launch gate is not promoted to required status until chain-registry production mainnet fields are canonical and staged read-only/canary-write proof artifacts are reviewed."
           echo "Evidence requirement for AVAX completion: reviewed proof bundle from both `bun run staged:proof -- --mode=read-only --target=avax` and `bun run staged:proof -- --mode=canary-write --target=avax`."
-          echo "Required AVAX staged proof inputs/secrets: HYPERBET_AVAX_STAGING_RPC_URL, HYPERBET_AVAX_STAGING_CHAIN_ID, HYPERBET_AVAX_STAGING_REPORTER_PRIVATE_KEY, HYPERBET_AVAX_STAGING_CANARY_PRIVATE_KEY, HYPERBET_AVAX_STAGING_DUEL_ORACLE_ADDRESS, HYPERBET_AVAX_STAGING_GOLD_CLOB_ADDRESS, HYPERBET_AVAX_STAGING_STREAM_PUBLISH_KEY, HYPERBET_AVAX_RAILWAY_STAGING_PROJECT_ID, HYPERBET_AVAX_RAILWAY_STAGING_ENVIRONMENT_ID, HYPERBET_AVAX_RAILWAY_STAGING_KEEPER_SERVICE_ID"
+          echo "Required AVAX staged proof inputs/secrets: HYPERBET_AVAX_STAGING_RPC_URL, HYPERBET_AVAX_STAGING_CHAIN_ID, HYPERBET_AVAX_STAGING_REPORTER_PRIVATE_KEY, HYPERBET_AVAX_STAGING_CANARY_PRIVATE_KEY, HYPERBET_AVAX_STAGING_ADMIN_PRIVATE_KEY, HYPERBET_AVAX_STAGING_MARKET_OPERATOR_PRIVATE_KEY, HYPERBET_AVAX_STAGING_DUEL_ORACLE_ADDRESS, HYPERBET_AVAX_STAGING_GOLD_CLOB_ADDRESS, HYPERBET_AVAX_STAGING_GOLD_AMM_ROUTER_ADDRESS, HYPERBET_AVAX_STAGING_MUSD_TOKEN_ADDRESS, HYPERBET_AVAX_STAGING_GOLD_TOKEN_ADDRESS, HYPERBET_AVAX_STAGING_SKILL_ORACLE_ADDRESS, HYPERBET_AVAX_STAGING_PERP_ENGINE_ADDRESS, HYPERBET_AVAX_STAGING_STREAM_PUBLISH_KEY, HYPERBET_AVAX_RAILWAY_STAGING_PROJECT_ID, HYPERBET_AVAX_RAILWAY_STAGING_ENVIRONMENT_ID, HYPERBET_AVAX_RAILWAY_STAGING_KEEPER_SERVICE_ID"
 
       - name: Run Gate 10 local E2E
         run: node --import tsx scripts/ci-gate-e2e.ts --chain=${{ matrix.chain }}
@@ -301,6 +301,116 @@ jobs:
           path: .ci-artifacts/base-add-chain-smoke
           if-no-files-found: ignore
 
+  registry-launch-gate:
+    name: Registry Launch Gate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.PREDICTION_MARKET_GATE_REF }}
+
+      - name: Setup Hyperbet toolchain
+        uses: ./.github/actions/setup-hyperbet
+
+      - name: Install dependencies
+        run: bash scripts/ci-install-verified.sh root
+
+      - name: Run launch-scope registry gate
+        run: bun run ci:gate:registry:launch
+
+      - name: Upload registry gate artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: registry-launch-gate
+          path: .ci-artifacts/registry-launch-gate
+          if-no-files-found: ignore
+
+  soak-harness-contract:
+    name: Soak Harness Evidence Contract
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.PREDICTION_MARKET_GATE_REF }}
+
+      - name: Setup Hyperbet toolchain
+        uses: ./.github/actions/setup-hyperbet
+
+      - name: Install dependencies
+        run: bash scripts/ci-install-verified.sh root
+
+      - name: Validate local soak contract
+        run: bun run ci:gate:soak:contract
+
+      - name: Upload soak contract artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: soak-harness-contract
+          path: .ci-artifacts/soak-harness-contract
+          if-no-files-found: ignore
+
+  amm-forge-gate:
+    name: AMM Forge Test Gate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.PREDICTION_MARKET_GATE_REF }}
+
+      - name: Setup Hyperbet toolchain
+        uses: ./.github/actions/setup-hyperbet
+        with:
+          install-foundry: "true"
+
+      - name: Install dependencies
+        run: bash scripts/ci-install-verified.sh root
+
+      - name: Run AMM Forge tests
+        run: bun run ci:gate:amm:evm
+
+      - name: Upload AMM Forge artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: amm-forge-gate
+          path: .ci-artifacts/amm-forge-gate
+          if-no-files-found: ignore
+
+  amm-solana-gate:
+    name: AMM Solana Build Gate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.PREDICTION_MARKET_GATE_REF }}
+
+      - name: Setup Hyperbet toolchain
+        uses: ./.github/actions/setup-hyperbet
+        with:
+          install-rust: "true"
+          install-solana: "true"
+          install-anchor: "true"
+
+      - name: Install dependencies
+        run: bash scripts/ci-install-verified.sh root
+
+      - name: Build lvr_amm program
+        run: bun run ci:gate:amm:solana
+
+      - name: Upload AMM Solana artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: amm-solana-gate
+          path: .ci-artifacts/amm-solana-gate
+          if-no-files-found: ignore
+
   perps-forge-gate:
     name: Perps Forge Test Gate
     runs-on: ubuntu-latest
@@ -319,15 +429,14 @@ jobs:
         run: bash scripts/ci-install-verified.sh root
 
       - name: Run perps Forge tests (fuzz 512)
-        working-directory: packages/evm-contracts
-        run: forge test --match-path "test/perps/*" -vvv --summary
+        run: bun run ci:gate:perps:evm
 
       - name: Upload perps Forge artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: perps-forge-gate
-          path: packages/evm-contracts/out
+          path: .ci-artifacts/perps-forge-gate
           if-no-files-found: ignore
 
   perps-solana-gate:
@@ -350,13 +459,12 @@ jobs:
         run: bash scripts/ci-install-verified.sh root
 
       - name: Build gold_perps_market program
-        working-directory: packages/hyperbet-solana/anchor
-        run: anchor build -p gold_perps_market
+        run: bun run ci:gate:perps:solana
 
       - name: Upload Solana perps build artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: perps-solana-gate
-          path: packages/hyperbet-solana/anchor/target/deploy/gold_perps_market.so
+          path: .ci-artifacts/perps-solana-gate
           if-no-files-found: ignore

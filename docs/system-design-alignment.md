@@ -27,6 +27,12 @@ still in progress:
 
 The goal is to prevent design drift while the codebase transitions from mixed chain packages into a cleaner architecture.
 
+For the current Gold asset interpretation and the planned Gold architecture
+track, see:
+
+- `docs/protocol/gold-current-state.md`
+- `docs/protocol/gold-architecture-spec-plan.md`
+
 ## Canonical Responsibilities
 
 ### Hyperscape

@@ -82,6 +82,15 @@ type CycleSummary = {
     insuranceDelta: string;
     badDebtDelta: string;
   };
+  sync: {
+    sourceSeq: number | null;
+    lastSeenSeq: number | null;
+    lastAppliedSeq: number | null;
+    applyLagMs: number | null;
+    sourceEventAgeMs: number | null;
+    replayMode: string | null;
+    degradedReason: string | null;
+  };
 };
 
 type MemorySnapshot = {
@@ -89,6 +98,64 @@ type MemorySnapshot = {
   rss: number;
   heapUsed: number;
   heapTotal: number;
+};
+
+type RendererHealth = {
+  ready?: boolean | null;
+  degradedReason?: string | null;
+  updatedAt?: number | null;
+  phase?: string | null;
+};
+
+type StreamStateSnapshot = {
+  cycle?: {
+    cycleId?: string | null;
+    phase?: string | null;
+    duelId?: string | null;
+    duelKey?: string | null;
+    duelKeyHex?: string | null;
+    winnerId?: string | null;
+    agent1?: { id?: string | null } | null;
+    agent2?: { id?: string | null } | null;
+  } | null;
+};
+
+type BetSyncSourceEvent = {
+  seq?: number | null;
+  duelId?: string | null;
+  duelKey?: string | null;
+  phase?: string | null;
+  rendererHealth?: RendererHealth | null;
+};
+
+type BetSyncBootstrapStateResponse = {
+  sourceEpoch?: number | null;
+  seq?: number | null;
+  latestSeq?: number | null;
+  duelId?: string | null;
+  duelKey?: string | null;
+  phase?: string | null;
+  rendererHealth?: RendererHealth | null;
+  latestEvent?: BetSyncSourceEvent | null;
+};
+
+type SyncStatusResponse = {
+  sourceEpoch?: number | null;
+  sourceLatestSeq?: number | null;
+  lastSeenSeq?: number | null;
+  lastAppliedSeq?: number | null;
+  applyLagMs?: number | null;
+  sourceEventAgeMs?: number | null;
+  replayMode?: string | null;
+  degradedReason?: string | null;
+  rendererHealth?: RendererHealth | null;
+};
+
+type AuthoritativeSyncSnapshot = {
+  fetchedAt: number;
+  sourceBetSyncState: BetSyncBootstrapStateResponse | null;
+  syncStatus: SyncStatusResponse | null;
+  streamState: StreamStateSnapshot | null;
 };
 
 // ─── Evidence helpers ────────────────────────────────────────────────────────
@@ -187,36 +254,79 @@ function parseArgs() {
   const args = process.argv.slice(2);
   const get = (flag: string, fallback: string) => {
     const i = args.indexOf(flag);
-    return i >= 0 && args[i + 1] ? args[i + 1] : fallback;
+    if (i >= 0 && args[i + 1]) {
+      return args[i + 1];
+    }
+    const prefix = `${flag}=`;
+    const inline = args.find((arg) => arg.startsWith(prefix));
+    return inline ? inline.slice(prefix.length) : fallback;
   };
+  const hasFlag = (flag: string) =>
+    args.includes(flag) || args.some((arg) => arg.startsWith(`${flag}=`));
+  const gameUrl = get("--game-url", "http://localhost:5555");
   return {
     durationMin: parseInt(get("--duration-min", "30"), 10),
     bscRpc: get("--bsc-rpc", "http://localhost:18545"),
-    gameUrl: get("--game-url", "http://localhost:5555"),
+    gameUrl,
+    sourceBetSyncStateUrl:
+      get(
+        "--source-bet-sync-state-url",
+        process.env.SOURCE_BET_SYNC_STATE_URL ??
+          `${gameUrl}/api/internal/bet-sync/state`,
+      ),
+    syncStatusUrl:
+      get(
+        "--sync-status-url",
+        process.env.SYNC_STATUS_URL ?? "http://127.0.0.1:8080/api/sync/status",
+      ),
+    streamStateUrl:
+      get(
+        "--stream-state-url",
+        process.env.SOURCE_STREAM_STATE_URL ??
+          process.env.STREAM_STATE_URL ??
+          `${gameUrl}/api/streaming/state`,
+      ),
+    pollMs: parseInt(
+      get("--poll-ms", process.env.PM_SOAK_POLL_MS ?? "5000"),
+      10,
+    ),
+    resetBetweenCycles:
+      hasFlag("--reset-between-cycles") ||
+      process.env.PM_SOAK_RESET_BETWEEN_CYCLES === "1",
   };
+}
+
+function buildBearerHeaders(token: string | undefined): Record<string, string> {
+  if (!token?.trim()) {
+    return {};
+  }
+  return {
+    Authorization: `Bearer ${token.trim()}`,
+  };
+}
+
+async function requestJsonOrNull<T>(
+  url: string,
+  init?: RequestInit,
+): Promise<T | null> {
+  const response = await fetch(url, init);
+  if (response.status === 404) {
+    return null;
+  }
+  if (!response.ok) {
+    throw new Error(`${url} returned ${response.status}`);
+  }
+  return (await response.json()) as T;
 }
 
 // ─── Nonce tracker ──────────────────────────────────────────────────────────
 
 function createNonceTracker(pub: PublicClient) {
-  const cache = new Map<string, number>();
   const tracker = async (address: Address): Promise<number> => {
-    const key = address.toLowerCase();
-    const cached = cache.get(key);
-    if (cached != null) {
-      cache.set(key, cached + 1);
-      return cached;
-    }
-    const fresh = await pub.getTransactionCount({ address, blockTag: "pending" });
-    cache.set(key, fresh + 1);
-    return fresh;
+    return await pub.getTransactionCount({ address, blockTag: "pending" });
   };
-  tracker.invalidate = (address: Address) => {
-    cache.delete(address.toLowerCase());
-  };
-  tracker.invalidateAll = () => {
-    cache.clear();
-  };
+  tracker.invalidate = (_address: Address) => {};
+  tracker.invalidateAll = () => {};
   return tracker;
 }
 
@@ -239,9 +349,15 @@ async function main() {
   fs.mkdirSync(evidenceDir, { recursive: true });
   const perfDir = path.join(evidenceDir, "performance");
   fs.mkdirSync(perfDir, { recursive: true });
+  const authoritativeDir = path.join(evidenceDir, "authoritative-sync");
+  fs.mkdirSync(authoritativeDir, { recursive: true });
 
   const eventsFile = path.join(outDir, "events.jsonl");
   const eventsStream = fs.createWriteStream(eventsFile, { flags: "a" });
+  const authoritativeSyncFile = path.join(authoritativeDir, "polls.jsonl");
+  const authoritativeSyncStream = fs.createWriteStream(authoritativeSyncFile, {
+    flags: "a",
+  });
   const memorySnapshots: MemorySnapshot[] = [];
   const rpcLatencyLog: RpcLatencyEntry[] = [];
   const blockTimestampLog: BlockTimestampEntry[] = [];
@@ -499,17 +615,27 @@ async function main() {
     console.log(`  Perps deploy failed (non-fatal): ${err.message?.slice(0, 80)}`);
   }
 
-  // ── Snapshot base state (contracts deployed, tokens minted, roles set) ──
-  // Revert to this after each cycle to reset time + nonces + balances.
-  const baseSnapshotRes = await fetch(config.bscRpc, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ jsonrpc: "2.0", method: "evm_snapshot", params: [], id: 999 }),
-  });
-  let baseSnapshotId = (await baseSnapshotRes.json() as any).result;
-  console.log(`  Base snapshot: ${baseSnapshotId}`);
+  // ── Optional snapshot baseline ────────────────────────────────────────
+  // Disabled by default because repeated evm_snapshot/evm_revert churn has
+  // proven fragile on local Anvil when combined with long-running soak flows.
+  let baseSnapshotId: string | null = null;
+  if (config.resetBetweenCycles) {
+    const baseSnapshotRes = await fetch(config.bscRpc, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ jsonrpc: "2.0", method: "evm_snapshot", params: [], id: 999 }),
+    });
+    baseSnapshotId = (await baseSnapshotRes.json() as any).result ?? null;
+    console.log(`  Base snapshot: ${baseSnapshotId}`);
+    nonce.invalidateAll();
+  } else {
+    console.log("  Base snapshot: disabled (running continuous multi-cycle soak state)");
+  }
 
   async function revertAndResnap(): Promise<void> {
+    if (!config.resetBetweenCycles || !baseSnapshotId) {
+      return;
+    }
     await fetch(config.bscRpc, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -533,78 +659,238 @@ async function main() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ jsonrpc: "2.0", method: "evm_snapshot", params: [], id: 1001 }),
     });
-    baseSnapshotId = (await resnap.json() as any).result;
+    baseSnapshotId = (await resnap.json() as any).result ?? null;
     // Invalidate all cached nonces since state reverted
     nonce.invalidateAll();
   }
 
-  // ── SSE stream consumer ─────────────────────────────────────────────────
+  // ── Authoritative bet-sync polling ──────────────────────────────────────
 
   let currentPhase = "UNKNOWN";
   let currentDuelKey = "";
   let currentWinner = "";
-  let lastStreamUpdate = 0;
+  let lastAuthoritativeUpdate = 0;
+  let latestAuthoritativeSync: AuthoritativeSyncSnapshot | null = null;
 
-  const sseUrl = `${config.gameUrl}/api/streaming/state/events`;
-  console.log(`\n=== Consuming SSE stream: ${sseUrl} ===`);
+  const sourceBetSyncToken =
+    process.env.SOURCE_BET_SYNC_BEARER_TOKEN ??
+    process.env.BETTING_FEED_ACCESS_TOKEN ??
+    process.env.STREAMING_VIEWER_ACCESS_TOKEN;
+  const sourceBetSyncHeaders = buildBearerHeaders(sourceBetSyncToken);
+  let authoritativePollerRunning = true;
 
-  // Background SSE reader using fetch streaming
-  let sseAbort = new AbortController();
-  async function startSseReader() {
-    while (!sseAbort.signal.aborted) {
-      try {
-        const res = await fetch(sseUrl, {
-          signal: sseAbort.signal,
-          headers: { Accept: "text/event-stream" },
-        });
-        if (!res.ok || !res.body) { await new Promise(r => setTimeout(r, 2000)); continue; }
-        const reader = res.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = "";
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split("\n");
-          buffer = lines.pop() || "";
-          for (const line of lines) {
-            if (!line.startsWith("data:")) continue;
-            try {
-              const data = JSON.parse(line.slice(5).trim());
-              if (data.error) continue; // skip "warming up" frames
-              const cycle = data.cycle || {};
-              currentPhase = cycle.phase || data.type || "UNKNOWN";
-              currentDuelKey = cycle.duelKeyHex || cycle.duelKey || "";
-              lastStreamUpdate = Date.now();
-              // Extract winner — only update if same duel
-              const a1 = cycle.agent1;
-              const a2 = cycle.agent2;
-              const thisKey = cycle.duelKeyHex || cycle.duelKey || "";
-              if (a1 && a2 && cycle.winnerId && thisKey === currentDuelKey) {
-                currentWinner = cycle.winnerId === a1.id ? "A" : "B";
-              }
-            } catch {}
-          }
-        }
-      } catch (err: any) {
-        if (sseAbort.signal.aborted) break;
-        await new Promise(r => setTimeout(r, 2000));
-      }
+  function normalizeDuelKey(value: string | null | undefined): string {
+    if (!value?.trim()) {
+      return "";
+    }
+    return value.startsWith("0x") ? value : `0x${value}`;
+  }
+
+  function normalizePhase(value: string | null | undefined): string {
+    const normalized = value?.trim().toUpperCase();
+    return normalized && normalized.length > 0 ? normalized : "UNKNOWN";
+  }
+
+  function phaseRank(phase: string): number {
+    switch (phase) {
+      case "IDLE":
+        return 0;
+      case "ANNOUNCEMENT":
+        return 1;
+      case "COUNTDOWN":
+        return 2;
+      case "FIGHTING":
+        return 3;
+      case "RESOLUTION":
+        return 4;
+      case "TERMINAL":
+        return 5;
+      default:
+        return -1;
     }
   }
-  // Fire and forget — runs in background
-  startSseReader();
 
-  // Wait for first real frame
-  const pollDeadline = Date.now() + 60_000;
-  while (lastStreamUpdate === 0 && Date.now() < pollDeadline) {
-    await new Promise((r) => setTimeout(r, 500));
+  function resolveActiveDuel(
+    sourceBetSyncState: BetSyncBootstrapStateResponse | null,
+    streamState: StreamStateSnapshot | null,
+  ): { duelKey: string; phase: string } {
+    const latestEvent = sourceBetSyncState?.latestEvent;
+    const sourceDuelKey = normalizeDuelKey(
+      latestEvent?.duelKey ?? sourceBetSyncState?.duelKey ?? null,
+    );
+    const streamDuelKey = normalizeDuelKey(
+      streamState?.cycle?.duelKeyHex ?? streamState?.cycle?.duelKey ?? null,
+    );
+    const sourcePhase = normalizePhase(
+      latestEvent?.phase ?? sourceBetSyncState?.phase ?? null,
+    );
+    const streamPhase = normalizePhase(streamState?.cycle?.phase ?? null);
+
+    if (streamDuelKey && sourceDuelKey && streamDuelKey === sourceDuelKey) {
+      return {
+        duelKey: streamDuelKey,
+        phase:
+          phaseRank(streamPhase) >= phaseRank(sourcePhase)
+            ? streamPhase
+            : sourcePhase,
+      };
+    }
+
+    if (
+      streamDuelKey &&
+      streamPhase !== "UNKNOWN" &&
+      streamPhase !== "IDLE"
+    ) {
+      return { duelKey: streamDuelKey, phase: streamPhase };
+    }
+
+    if (sourceDuelKey) {
+      return { duelKey: sourceDuelKey, phase: sourcePhase };
+    }
+
+    if (streamDuelKey) {
+      return { duelKey: streamDuelKey, phase: streamPhase };
+    }
+
+    return {
+      duelKey: "",
+      phase:
+        phaseRank(streamPhase) >= phaseRank(sourcePhase)
+          ? streamPhase
+          : sourcePhase,
+    };
   }
-  if (lastStreamUpdate === 0) {
-    console.error("Failed to connect to game server (60s timeout)");
+
+  function deriveWinner(
+    streamState: StreamStateSnapshot | null,
+    duelKey: string,
+  ): string {
+    const cycle = streamState?.cycle;
+    const cycleDuelKey = normalizeDuelKey(
+      cycle?.duelKeyHex ?? cycle?.duelKey ?? null,
+    );
+    if (!cycle || cycleDuelKey !== duelKey || !cycle.winnerId) {
+      return currentWinner;
+    }
+    if (cycle.agent1?.id && cycle.winnerId === cycle.agent1.id) {
+      return "A";
+    }
+    if (cycle.agent2?.id && cycle.winnerId === cycle.agent2.id) {
+      return "B";
+    }
+    return currentWinner;
+  }
+
+  async function pollAuthoritativeState(): Promise<void> {
+    const fetchedAt = Date.now();
+    const [sourceBetSyncStateResult, syncStatusResult, streamStateResult] =
+      await Promise.allSettled([
+        requestJsonOrNull<BetSyncBootstrapStateResponse>(
+          config.sourceBetSyncStateUrl,
+          {
+            headers: sourceBetSyncHeaders,
+          },
+        ),
+        requestJsonOrNull<SyncStatusResponse>(config.syncStatusUrl),
+        requestJsonOrNull<StreamStateSnapshot>(config.streamStateUrl),
+      ]);
+    const sourceBetSyncState =
+      sourceBetSyncStateResult.status === "fulfilled"
+        ? sourceBetSyncStateResult.value
+        : null;
+    const syncStatus =
+      syncStatusResult.status === "fulfilled" ? syncStatusResult.value : null;
+    const streamState =
+      streamStateResult.status === "fulfilled"
+        ? streamStateResult.value
+        : null;
+    if (!sourceBetSyncState && !syncStatus && !streamState) {
+      const errors = [
+        sourceBetSyncStateResult,
+        syncStatusResult,
+        streamStateResult,
+      ]
+        .filter(
+          (
+            result,
+          ): result is PromiseRejectedResult => result.status === "rejected",
+        )
+        .map((result) =>
+          result.reason instanceof Error
+            ? result.reason.message
+            : String(result.reason),
+        );
+      throw new Error(
+        errors.length > 0
+          ? errors.join("; ")
+          : "authoritative sync unavailable",
+      );
+    }
+    const { duelKey, phase } = resolveActiveDuel(sourceBetSyncState, streamState);
+    currentPhase = phase;
+    currentDuelKey = duelKey;
+    currentWinner = deriveWinner(streamState, duelKey);
+    lastAuthoritativeUpdate = fetchedAt;
+    latestAuthoritativeSync = {
+      fetchedAt,
+      sourceBetSyncState,
+      syncStatus,
+      streamState,
+    };
+    authoritativeSyncStream.write(
+      JSON.stringify({
+        fetchedAt,
+        duelKey,
+        phase,
+        winner: currentWinner || null,
+        sourceSeq:
+          sourceBetSyncState?.latestSeq ??
+          sourceBetSyncState?.seq ??
+          sourceBetSyncState?.latestEvent?.seq ??
+          null,
+        lastSeenSeq: syncStatus?.lastSeenSeq ?? null,
+        lastAppliedSeq: syncStatus?.lastAppliedSeq ?? null,
+        applyLagMs: syncStatus?.applyLagMs ?? null,
+        sourceEventAgeMs: syncStatus?.sourceEventAgeMs ?? null,
+        replayMode: syncStatus?.replayMode ?? null,
+        degradedReason:
+          syncStatus?.degradedReason ??
+          syncStatus?.rendererHealth?.degradedReason ??
+          sourceBetSyncState?.rendererHealth?.degradedReason ??
+          null,
+      }) + "\n",
+    );
+  }
+
+  async function startAuthoritativePoller(): Promise<void> {
+    while (authoritativePollerRunning) {
+      try {
+        await pollAuthoritativeState();
+      } catch (error: any) {
+        authoritativeSyncStream.write(
+          JSON.stringify({
+            fetchedAt: Date.now(),
+            error: error?.message ?? String(error),
+          }) + "\n",
+        );
+      }
+      await new Promise((resolve) => setTimeout(resolve, config.pollMs));
+    }
+  }
+
+  const authoritativePollerPromise = startAuthoritativePoller();
+
+  const pollDeadline = Date.now() + 60_000;
+  while (lastAuthoritativeUpdate === 0 && Date.now() < pollDeadline) {
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+  if (lastAuthoritativeUpdate === 0) {
+    console.error("Failed to connect to authoritative betting-sync state (60s timeout)");
     process.exit(2);
   }
-  console.log(`  Connected. Phase=${currentPhase}, DuelKey=${currentDuelKey.slice(0, 16)}...`);
+  console.log(
+    `  Connected. Phase=${currentPhase}, DuelKey=${currentDuelKey.slice(0, 18)}..., source=${config.sourceBetSyncStateUrl}`,
+  );
 
   // ── Memory monitor ────────────────────────────────────────────────────────
 
@@ -633,10 +919,11 @@ async function main() {
   let prevDuelKey = "";
   let totalDeposited = 0n;
   let totalClaimed = 0n;
+  let endedMidCycle = false;
 
   console.log(`\n=== Starting soak — ${config.durationMin} minutes ===\n`);
 
-  while (Date.now() < endAt) {
+  mainLoop: while (Date.now() < endAt) {
     // Wait for new duel (ANNOUNCEMENT phase with different duelKey)
     if (currentDuelKey === prevDuelKey || !currentDuelKey) {
       await new Promise((r) => setTimeout(r, 1000));
@@ -730,11 +1017,13 @@ async function main() {
       if (!marketExists) {
         incident(`Market created but exists=${JSON.stringify(marketData?.exists ?? marketData?.[0])} — check ABI`, cycleNum);
         cycleIncidents.push("market_not_found_after_create");
+        await revertAndResnap();
         continue;
       }
     } catch (err: any) {
       incident(`Market seed failed: ${err.message?.slice(0, 100)}`, cycleNum);
       cycleIncidents.push("seed_failed");
+      await revertAndResnap();
       continue; // Skip this cycle
     }
 
@@ -882,6 +1171,66 @@ async function main() {
     let perpsBadDebtBefore = 0n;
     if (perpEngineAddress && skillOracleAddress) {
       try {
+        if (!config.resetBetweenCycles && cycleNum > 1) {
+          const resetOracleHash = await reporter.wallet.writeContract({
+            address: skillOracleAddress,
+            abi: skillOracleArtifact.abi,
+            functionName: "updateAgentSkill",
+            args: [perpAgentId, 1500, 200],
+            nonce: await nonce(reporter.address),
+          });
+          const resetOracleReceipt = await waitReceipt(resetOracleHash);
+          saveReceipt(
+            evidenceDir,
+            cycleNum,
+            "reporter",
+            "perps-reset-skill-oracle",
+            resetOracleReceipt,
+          );
+          logEvent({
+            cycle: cycleNum,
+            phase: "PERPS",
+            timestamp: Date.now(),
+            actor: "reporter",
+            action: "perps.resetOracle",
+            txHash: resetOracleHash,
+            gasUsed: Number(resetOracleReceipt.gasUsed),
+            blockNumber: Number(resetOracleReceipt.blockNumber),
+            success: true,
+            error: null,
+            details: { mu: 1500, sigma: 200 },
+          });
+
+          const reopenHash = await admin.wallet.writeContract({
+            address: perpEngineAddress,
+            abi: agentPerpEngineArtifact.abi,
+            functionName: "setMarketStatus",
+            args: [perpAgentId, 1],
+            nonce: await nonce(admin.address),
+          });
+          const reopenReceipt = await waitReceipt(reopenHash);
+          saveReceipt(
+            evidenceDir,
+            cycleNum,
+            "admin",
+            "perps-set-active",
+            reopenReceipt,
+          );
+          logEvent({
+            cycle: cycleNum,
+            phase: "PERPS",
+            timestamp: Date.now(),
+            actor: "admin",
+            action: "perps.setActive",
+            txHash: reopenHash,
+            gasUsed: Number(reopenReceipt.gasUsed),
+            blockNumber: Number(reopenReceipt.blockNumber),
+            success: true,
+            error: null,
+            details: {},
+          });
+        }
+
         // Snapshot insurance fund before cycle
         const mktPre = await pub.readContract({
           address: perpEngineAddress, abi: agentPerpEngineArtifact.abi, functionName: "markets",
@@ -889,6 +1238,35 @@ async function main() {
         }) as any;
         perpsInsuranceBefore = BigInt(mktPre[9] ?? 0);
         perpsBadDebtBefore = BigInt(mktPre[10] ?? 0);
+
+        const refreshOracleHash = await reporter.wallet.writeContract({
+          address: skillOracleAddress,
+          abi: skillOracleArtifact.abi,
+          functionName: "updateAgentSkill",
+          args: [perpAgentId, 1_500n, 0n],
+          nonce: await nonce(reporter.address),
+        });
+        const refreshOracleReceipt = await waitReceipt(refreshOracleHash);
+        saveReceipt(
+          evidenceDir,
+          cycleNum,
+          "reporter",
+          "perps-refresh-oracle",
+          refreshOracleReceipt,
+        );
+        logEvent({
+          cycle: cycleNum,
+          phase: "PERPS",
+          timestamp: Date.now(),
+          actor: "reporter",
+          action: "perps.refreshOracle",
+          txHash: refreshOracleHash,
+          gasUsed: Number(refreshOracleReceipt.gasUsed),
+          blockNumber: Number(refreshOracleReceipt.blockNumber),
+          success: true,
+          error: null,
+          details: { price: "1500" },
+        });
 
         // Long opens position — margin sized to survive oracle swings
         const longHash = await perpsLong.wallet.writeContract({
@@ -1017,8 +1395,14 @@ async function main() {
     const resolvedOrInferred = phasesObserved.includes("RESOLUTION") ||
       currentPhase === "RESOLUTION" || currentPhase === "TERMINAL";
     if (!resolvedOrInferred) {
+      if (Date.now() >= endAt) {
+        endedMidCycle = true;
+        console.log("  Reached soak duration cap during an active duel; ending without incident");
+        break mainLoop;
+      }
       incident("Resolution timeout — duel did not resolve in 3min", cycleNum);
       cycleIncidents.push("resolution_timeout");
+      await revertAndResnap();
       continue;
     }
 
@@ -1330,16 +1714,47 @@ async function main() {
       // Winner's skill μ goes up, loser's goes down — this shifts the perps mark price
       const winnerMu = currentWinner === "A" ? 1800 : 1200;
       try {
-        await reporter.wallet.writeContract({
+        const oracleUpdateHash = await reporter.wallet.writeContract({
           address: skillOracleAddress, abi: skillOracleArtifact.abi, functionName: "updateAgentSkill",
           args: [perpAgentId, winnerMu, 0], nonce: await nonce(reporter.address),
         });
+        const oracleUpdateReceipt = await waitReceipt(oracleUpdateHash);
+        saveReceipt(evidenceDir, cycleNum, "reporter", "perps-updateSkillOracle", oracleUpdateReceipt);
         logEvent({ cycle: cycleNum, phase: "PERPS_SETTLEMENT", timestamp: Date.now(), actor: "reporter",
           action: "perps.updateSkillOracle", txHash: null, gasUsed: 0, blockNumber: 0,
           success: true, error: null, details: { winnerMu, winner: currentWinner } });
       } catch (err: any) {
         logEvent({ cycle: cycleNum, phase: "PERPS_SETTLEMENT", timestamp: Date.now(), actor: "reporter",
           action: "perps.updateSkillOracle", txHash: null, gasUsed: 0, blockNumber: 0,
+          success: false, error: err.message?.slice(0, 150), details: {} });
+      }
+
+      // Step 1b: Sync the engine to the updated oracle and freeze settlement price.
+      try {
+        const syncOracleHash = await admin.wallet.writeContract({
+          address: perpEngineAddress, abi: agentPerpEngineArtifact.abi,
+          functionName: "syncOracle", args: [perpAgentId],
+          nonce: await nonce(admin.address),
+        });
+        const syncOracleReceipt = await waitReceipt(syncOracleHash);
+        saveReceipt(evidenceDir, cycleNum, "admin", "perps-syncOracle", syncOracleReceipt);
+        logEvent({ cycle: cycleNum, phase: "PERPS_SETTLEMENT", timestamp: Date.now(), actor: "admin",
+          action: "perps.syncOracle", txHash: syncOracleHash, gasUsed: Number(syncOracleReceipt.gasUsed),
+          blockNumber: Number(syncOracleReceipt.blockNumber), success: true, error: null, details: {} });
+
+        const closeOnlyHash = await admin.wallet.writeContract({
+          address: perpEngineAddress, abi: agentPerpEngineArtifact.abi,
+          functionName: "setMarketStatus", args: [perpAgentId, 2],
+          nonce: await nonce(admin.address),
+        });
+        const closeOnlyReceipt = await waitReceipt(closeOnlyHash);
+        saveReceipt(evidenceDir, cycleNum, "admin", "perps-set-close-only", closeOnlyReceipt);
+        logEvent({ cycle: cycleNum, phase: "PERPS_SETTLEMENT", timestamp: Date.now(), actor: "admin",
+          action: "perps.setCloseOnly", txHash: closeOnlyHash, gasUsed: Number(closeOnlyReceipt.gasUsed),
+          blockNumber: Number(closeOnlyReceipt.blockNumber), success: true, error: null, details: {} });
+      } catch (err: any) {
+        logEvent({ cycle: cycleNum, phase: "PERPS_SETTLEMENT", timestamp: Date.now(), actor: "admin",
+          action: "perps.prepareSettlement", txHash: null, gasUsed: 0, blockNumber: 0,
           success: false, error: err.message?.slice(0, 150), details: {} });
       }
 
@@ -1393,7 +1808,15 @@ async function main() {
         }
       }
 
-      // Step 3: Close remaining open positions and track PnL
+      // Step 3: Close remaining open positions and track PnL.
+      // Close the losing side first so the vault is replenished before paying profits.
+      const closeCandidates: Array<{
+        wallet: WalletClient;
+        addr: Address;
+        label: string;
+        isOpenRef: "long" | "short";
+        equityBefore: bigint;
+      }> = [];
       for (const { wallet, address: addr, label, isOpenRef } of [
         { ...perpsLong, label: "perpsLong", isOpenRef: "long" as const },
         { ...perpsShort, label: "perpsShort", isOpenRef: "short" as const },
@@ -1410,31 +1833,88 @@ async function main() {
             address: perpEngineAddress as Address, abi: agentPerpEngineArtifact.abi,
             functionName: "getPositionHealth", args: [perpAgentId, addr],
           }) as any;
-          const equityBefore = BigInt(marginBefore[3] ?? 0);
-
-          const closeHash = await wallet.writeContract({
-            address: perpEngineAddress, abi: agentPerpEngineArtifact.abi,
-            functionName: "modifyPosition", args: [perpAgentId, 0n, -size],
-            nonce: await nonce(addr),
+          closeCandidates.push({
+            wallet,
+            addr,
+            label,
+            isOpenRef,
+            equityBefore: BigInt(marginBefore[3] ?? 0),
           });
-          await waitReceipt(closeHash);
-
-          // PnL = equity at close - original margin (200e18)
-          const pnl = equityBefore - parseUnits("200", 18);
-          if (isOpenRef === "long") perpsLongPnl = pnl;
-          else perpsShortPnl = pnl;
-
-          logEvent({ cycle: cycleNum, phase: "PERPS_SETTLEMENT", timestamp: Date.now(),
-            actor: label, action: `perps.close.${isOpenRef}`,
-            txHash: closeHash, gasUsed: 0, blockNumber: 0,
-            success: true, error: null,
-            details: { pnl: pnl.toString(), equity: equityBefore.toString() } });
         } catch (err: any) {
           logEvent({ cycle: cycleNum, phase: "PERPS_SETTLEMENT", timestamp: Date.now(),
             actor: label, action: `perps.close.${isOpenRef}`,
             txHash: null, gasUsed: 0, blockNumber: 0,
             success: false, error: err.message?.slice(0, 150), details: {} });
         }
+      }
+      closeCandidates.sort((a, b) => {
+        if (a.equityBefore === b.equityBefore) return 0;
+        return a.equityBefore < b.equityBefore ? -1 : 1;
+      });
+      const attemptClose = async (
+        wallet: WalletClient,
+        addr: Address,
+        label: string,
+        isOpenRef: "long" | "short",
+        equityBefore: bigint,
+        retry = false,
+      ) => {
+        try {
+          const pos = await pub.readContract({
+            address: perpEngineAddress, abi: agentPerpEngineArtifact.abi,
+            functionName: "positions", args: [perpAgentId, addr],
+          }) as any;
+          const size = BigInt(pos[0] ?? 0);
+          if (size === 0n) return true;
+
+          const closeHash = await wallet.writeContract({
+            address: perpEngineAddress, abi: agentPerpEngineArtifact.abi,
+            functionName: "modifyPosition", args: [perpAgentId, 0n, -size],
+            nonce: await nonce(addr),
+          });
+          const closeReceipt = await waitReceipt(closeHash);
+          saveReceipt(evidenceDir, cycleNum, label, `perps-close-${isOpenRef}${retry ? "-retry" : ""}`, closeReceipt);
+
+          const pnl = equityBefore - parseUnits("200", 18);
+          if (isOpenRef === "long") perpsLongPnl = pnl;
+          else perpsShortPnl = pnl;
+
+          logEvent({ cycle: cycleNum, phase: "PERPS_SETTLEMENT", timestamp: Date.now(),
+            actor: label, action: `perps.close.${isOpenRef}${retry ? ".retry" : ""}`,
+            txHash: closeHash, gasUsed: Number(closeReceipt.gasUsed), blockNumber: Number(closeReceipt.blockNumber),
+            success: true, error: null,
+            details: { pnl: pnl.toString(), equity: equityBefore.toString() } });
+          return true;
+        } catch (err: any) {
+          logEvent({ cycle: cycleNum, phase: "PERPS_SETTLEMENT", timestamp: Date.now(),
+            actor: label, action: `perps.close.${isOpenRef}${retry ? ".retry" : ""}`,
+            txHash: null, gasUsed: 0, blockNumber: 0,
+            success: false, error: err.message?.slice(0, 150), details: {} });
+          return false;
+        }
+      };
+      const retryCandidates: typeof closeCandidates = [];
+      for (const candidate of closeCandidates) {
+        const closed = await attemptClose(
+          candidate.wallet,
+          candidate.addr,
+          candidate.label,
+          candidate.isOpenRef,
+          candidate.equityBefore,
+        );
+        if (!closed) {
+          retryCandidates.push(candidate);
+        }
+      }
+      for (const candidate of retryCandidates) {
+        await attemptClose(
+          candidate.wallet,
+          candidate.addr,
+          candidate.label,
+          candidate.isOpenRef,
+          candidate.equityBefore,
+          true,
+        );
       }
 
       // Step 4: Snapshot insurance fund after cycle
@@ -1515,6 +1995,43 @@ async function main() {
       allBalances,
     });
 
+    const sourceSeq =
+      latestAuthoritativeSync?.sourceBetSyncState?.latestSeq ??
+      latestAuthoritativeSync?.sourceBetSyncState?.seq ??
+      latestAuthoritativeSync?.sourceBetSyncState?.latestEvent?.seq ??
+      null;
+    const lastSeenSeq = latestAuthoritativeSync?.syncStatus?.lastSeenSeq ?? null;
+    const lastAppliedSeq =
+      latestAuthoritativeSync?.syncStatus?.lastAppliedSeq ?? null;
+    const applyLagMs = latestAuthoritativeSync?.syncStatus?.applyLagMs ?? null;
+    const sourceEventAgeMs =
+      latestAuthoritativeSync?.syncStatus?.sourceEventAgeMs ?? null;
+    const replayMode = latestAuthoritativeSync?.syncStatus?.replayMode ?? null;
+    const degradedReason =
+      latestAuthoritativeSync?.syncStatus?.degradedReason ??
+      latestAuthoritativeSync?.syncStatus?.rendererHealth?.degradedReason ??
+      latestAuthoritativeSync?.sourceBetSyncState?.rendererHealth?.degradedReason ??
+      null;
+
+    if (
+      sourceSeq != null &&
+      lastAppliedSeq != null &&
+      lastAppliedSeq < sourceSeq
+    ) {
+      incident(
+        `Authoritative sync drift detected: applied ${lastAppliedSeq} behind source ${sourceSeq}`,
+        cycleNum,
+      );
+      cycleIncidents.push("authoritative_sync_drift");
+    }
+    if (applyLagMs != null && applyLagMs > config.pollMs * 4) {
+      incident(
+        `Authoritative sync apply lag ${applyLagMs}ms exceeds budget`,
+        cycleNum,
+      );
+      cycleIncidents.push("authoritative_sync_lag");
+    }
+
     const cycleSummary: CycleSummary = {
       cycle: cycleNum,
       duelKey: duelKey,
@@ -1538,6 +2055,15 @@ async function main() {
         insuranceDelta: formatUnits(perpsInsuranceAfter - perpsInsuranceBefore, 18),
         badDebtDelta: formatUnits(perpsBadDebtAfter - perpsBadDebtBefore, 18),
       },
+      sync: {
+        sourceSeq,
+        lastSeenSeq,
+        lastAppliedSeq,
+        applyLagMs,
+        sourceEventAgeMs,
+        replayMode,
+        degradedReason,
+      },
     };
     cycles.push(cycleSummary);
 
@@ -1549,9 +2075,8 @@ async function main() {
     // Revert to base snapshot — resets time, nonces, balances
     await revertAndResnap();
 
-    // Refresh perps oracle timestamp (reverted to deploy-time, now stale)
-    // Industry standard: GMX/Synthetix refresh oracle feeds after each revert
-    if (skillOracleAddress) {
+    // Refresh perps oracle timestamp only when a reset rewound it to deploy-time.
+    if (config.resetBetweenCycles && skillOracleAddress) {
       try {
         await reporter.wallet.writeContract({
           address: skillOracleAddress, abi: skillOracleArtifact.abi, functionName: "updateAgentSkill",
@@ -1564,8 +2089,10 @@ async function main() {
   // ── Cleanup ─────────────────────────────────────────────────────────────
 
   clearInterval(memInterval);
-  sseAbort.abort();
+  authoritativePollerRunning = false;
+  await authoritativePollerPromise;
   eventsStream.end();
+  authoritativeSyncStream.end();
 
   // Final memory snapshot
   const finalMem = process.memoryUsage();
@@ -1640,13 +2167,15 @@ async function main() {
   const totalOrders = cycles.reduce((s, c) => s + c.clobOrders, 0);
   const totalFills = cycles.reduce((s, c) => s + c.clobFills, 0);
   const totalClaims = cycles.reduce((s, c) => s + c.claims, 0);
+  const requiredCycles = Math.max(1, Math.min(5, Math.floor(config.durationMin / 5)));
 
   const summary = {
     startedAt: new Date(startedAt).toISOString(),
     endedAt: new Date().toISOString(),
     durationMin: config.durationMin,
     actualDurationMin: Math.round((Date.now() - startedAt) / 60_000),
-    cycles: cycleNum,
+    cycles: cycles.length,
+    endedMidCycle,
     totalOrders,
     totalFills,
     totalClaims,
@@ -1656,7 +2185,36 @@ async function main() {
     negativeTestsPassed: fs.readdirSync(path.join(evidenceDir, "negative-tests")).length,
     receiptsStored: fs.readdirSync(path.join(evidenceDir, "receipts")).reduce(
       (sum, dir) => sum + fs.readdirSync(path.join(evidenceDir, "receipts", dir)).length, 0),
-    pass: incidents.length === 0 && cycleNum >= 5,
+    authoritativeSync: {
+      sourceBetSyncStateUrl: config.sourceBetSyncStateUrl,
+      syncStatusUrl: config.syncStatusUrl,
+      streamStateUrl: config.streamStateUrl,
+      pollMs: config.pollMs,
+      resetBetweenCycles: config.resetBetweenCycles,
+      lastSuccessfulPollAt:
+        latestAuthoritativeSync != null
+          ? new Date(latestAuthoritativeSync.fetchedAt).toISOString()
+          : null,
+      sourceSeq:
+        latestAuthoritativeSync?.sourceBetSyncState?.latestSeq ??
+        latestAuthoritativeSync?.sourceBetSyncState?.seq ??
+        latestAuthoritativeSync?.sourceBetSyncState?.latestEvent?.seq ??
+        null,
+      lastSeenSeq: latestAuthoritativeSync?.syncStatus?.lastSeenSeq ?? null,
+      lastAppliedSeq:
+        latestAuthoritativeSync?.syncStatus?.lastAppliedSeq ?? null,
+      applyLagMs: latestAuthoritativeSync?.syncStatus?.applyLagMs ?? null,
+      sourceEventAgeMs:
+        latestAuthoritativeSync?.syncStatus?.sourceEventAgeMs ?? null,
+      replayMode: latestAuthoritativeSync?.syncStatus?.replayMode ?? null,
+      degradedReason:
+        latestAuthoritativeSync?.syncStatus?.degradedReason ??
+        latestAuthoritativeSync?.syncStatus?.rendererHealth?.degradedReason ??
+        latestAuthoritativeSync?.sourceBetSyncState?.rendererHealth
+          ?.degradedReason ??
+        null,
+    },
+    pass: incidents.length === 0 && cycles.length >= requiredCycles,
     outputDir: outDir,
   };
 

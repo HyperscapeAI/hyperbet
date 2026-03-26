@@ -1095,10 +1095,10 @@ describe("gold_clob_market (native SOL settlement)", () => {
       user: taker,
     });
 
-    const takerBalanceAfter = await clobProgram.account.userBalance.fetch(
+    const takerBalanceAfter = await provider.connection.getAccountInfo(
       takerBid.userBalance,
     );
-    assert.strictEqual(takerBalanceAfter.aShares.toString(), "0");
+    assert.strictEqual(takerBalanceAfter, null);
 
     const mmAfter = await provider.connection.getBalance(market.marketMaker);
     assert.strictEqual(mmAfter - mmBefore, 20);
@@ -1186,20 +1186,12 @@ describe("gold_clob_market (native SOL settlement)", () => {
       user: taker,
     });
 
-    const makerBalanceAfter = await clobProgram.account.userBalance.fetch(
-      makerAsk.userBalance,
-    );
-    const takerBalanceAfter = await clobProgram.account.userBalance.fetch(
-      takerBid.userBalance,
-    );
-    assert.strictEqual(makerBalanceAfter.aShares.toString(), "0");
-    assert.strictEqual(makerBalanceAfter.bShares.toString(), "0");
-    assert.strictEqual(makerBalanceAfter.aLockedLamports.toString(), "0");
-    assert.strictEqual(makerBalanceAfter.bLockedLamports.toString(), "0");
-    assert.strictEqual(takerBalanceAfter.aShares.toString(), "0");
-    assert.strictEqual(takerBalanceAfter.bShares.toString(), "0");
-    assert.strictEqual(takerBalanceAfter.aLockedLamports.toString(), "0");
-    assert.strictEqual(takerBalanceAfter.bLockedLamports.toString(), "0");
+    const [makerBalanceAfter, takerBalanceAfter] = await Promise.all([
+      provider.connection.getAccountInfo(makerAsk.userBalance),
+      provider.connection.getAccountInfo(takerBid.userBalance),
+    ]);
+    assert.strictEqual(makerBalanceAfter, null);
+    assert.strictEqual(takerBalanceAfter, null);
   });
 
   it("reclaims unmatched resting collateral after the market locks", async () => {
@@ -1367,17 +1359,11 @@ describe("gold_clob_market (native SOL settlement)", () => {
     });
 
     const [makerAfterClaim, takerAfterClaim] = await Promise.all([
-      clobProgram.account.userBalance.fetch(makerAsk.userBalance),
-      clobProgram.account.userBalance.fetch(takerBid.userBalance),
+      provider.connection.getAccountInfo(makerAsk.userBalance),
+      provider.connection.getAccountInfo(takerBid.userBalance),
     ]);
-    assert.strictEqual(makerAfterClaim.aShares.toString(), "0");
-    assert.strictEqual(makerAfterClaim.bShares.toString(), "0");
-    assert.strictEqual(makerAfterClaim.aLockedLamports.toString(), "0");
-    assert.strictEqual(makerAfterClaim.bLockedLamports.toString(), "0");
-    assert.strictEqual(takerAfterClaim.aShares.toString(), "0");
-    assert.strictEqual(takerAfterClaim.bShares.toString(), "0");
-    assert.strictEqual(takerAfterClaim.aLockedLamports.toString(), "0");
-    assert.strictEqual(takerAfterClaim.bLockedLamports.toString(), "0");
+    assert.strictEqual(makerAfterClaim, null);
+    assert.strictEqual(takerAfterClaim, null);
   });
 
   it("reclaims resolved-market remainder while preserving matched winner claims", async () => {
@@ -1463,17 +1449,14 @@ describe("gold_clob_market (native SOL settlement)", () => {
       user: maker,
     });
 
-    const makerAfterClaim = await clobProgram.account.userBalance.fetch(
+    const makerAfterClaim = await provider.connection.getAccountInfo(
       makerAsk.userBalance,
     );
     const makerOrderAfterReclaim = await clobProgram.account.order.fetch(
       makerAsk.order,
     );
     assert.strictEqual(makerOrderAfterReclaim.active, false);
-    assert.strictEqual(makerAfterClaim.aShares.toString(), "0");
-    assert.strictEqual(makerAfterClaim.bShares.toString(), "0");
-    assert.strictEqual(makerAfterClaim.aLockedLamports.toString(), "0");
-    assert.strictEqual(makerAfterClaim.bLockedLamports.toString(), "0");
+    assert.strictEqual(makerAfterClaim, null);
 
     try {
       await claimClobWinnings(clobProgram, {
@@ -1487,8 +1470,9 @@ describe("gold_clob_market (native SOL settlement)", () => {
       assert.fail("losing taker claim succeeded after maker reclaim");
     } catch (error: unknown) {
       assert.ok(
-        hasProgramError(error, "NothingToClaim"),
-        `expected NothingToClaim, got ${String(error)}`,
+        hasProgramError(error, "NothingToClaim") ||
+          hasProgramError(error, "AccountNotInitialized"),
+        `expected NothingToClaim or AccountNotInitialized, got ${String(error)}`,
       );
     }
 
@@ -1581,13 +1565,10 @@ describe("gold_clob_market (native SOL settlement)", () => {
       user: taker,
     });
 
-    const winningPositionAfter = await clobProgram.account.userBalance.fetch(
+    const winningPositionAfter = await provider.connection.getAccountInfo(
       takerBid.userBalance,
     );
-    assert.strictEqual(winningPositionAfter.aShares.toString(), "0");
-    assert.strictEqual(winningPositionAfter.bShares.toString(), "0");
-    assert.strictEqual(winningPositionAfter.aLockedLamports.toString(), "0");
-    assert.strictEqual(winningPositionAfter.bLockedLamports.toString(), "0");
+    assert.strictEqual(winningPositionAfter, null);
 
     const losingPositionAfter = await clobProgram.account.userBalance.fetch(
       makerAsk.userBalance,
@@ -1628,8 +1609,9 @@ describe("gold_clob_market (native SOL settlement)", () => {
       assert.fail("winner repeat claim succeeded");
     } catch (error: unknown) {
       assert.ok(
-        hasProgramError(error, "NothingToClaim"),
-        `expected NothingToClaim, got ${String(error)}`,
+        hasProgramError(error, "NothingToClaim") ||
+          hasProgramError(error, "AccountNotInitialized"),
+        `expected NothingToClaim or AccountNotInitialized, got ${String(error)}`,
       );
     }
 
