@@ -111,8 +111,7 @@ jobs:
                 "$value" \
                 --url "$RPC" \
                 --keypair "$wallet_file" \
-                --allow-unfunded-recipient \
-                --use-rpc
+                --allow-unfunded-recipient
             done
             exit 0
           fi
