@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import fs_node from "node:fs";
+import { request as httpRequest } from "node:http";
+import { request as httpsRequest } from "node:https";
 import path from "node:path";
 
 import {
@@ -372,7 +374,61 @@ const BET_STORE_LIMIT = Math.max(
   100,
   Number(process.env.BET_STORE_LIMIT || 5000),
 );
-const SOLANA_RPC_PROXY_URL = process.env.SOLANA_RPC_URL?.trim() || "";
+
+function firstNonEmptyString(
+  ...values: Array<string | null | undefined>
+): string {
+  for (const value of values) {
+    const trimmed = value?.trim();
+    if (trimmed) {
+      return trimmed;
+    }
+  }
+  return "";
+}
+
+function resolveAlchemyApiKey(): string {
+  return firstNonEmptyString(
+    process.env.ALCHEMY_API_KEY,
+    process.env.SOLANA_ALCHEMY_API_KEY,
+  );
+}
+
+function resolveAlchemyEvmRpcUrl(chain: "bsc" | "avax"): string {
+  const explicit = firstNonEmptyString(
+    chain === "bsc"
+      ? process.env.BSC_ALCHEMY_RPC_URL
+      : process.env.AVAX_ALCHEMY_RPC_URL,
+    chain === "bsc"
+      ? process.env.ALCHEMY_BSC_RPC_URL
+      : process.env.ALCHEMY_AVAX_RPC_URL,
+  );
+  if (explicit) {
+    return explicit;
+  }
+  const apiKey = resolveAlchemyApiKey();
+  if (!apiKey) {
+    return "";
+  }
+  return chain === "bsc"
+    ? `https://bnb-testnet.g.alchemy.com/v2/${apiKey}`
+    : `https://avax-fuji.g.alchemy.com/v2/${apiKey}`;
+}
+
+function resolveAlchemySolanaRpcUrl(): string {
+  return firstNonEmptyString(
+    process.env.SOLANA_ALCHEMY_RPC_URL,
+    process.env.ALCHEMY_SOLANA_RPC_URL,
+    resolveAlchemyApiKey()
+      ? `https://solana-devnet.g.alchemy.com/v2/${resolveAlchemyApiKey()}`
+      : "",
+  );
+}
+
+const SOLANA_RPC_PROXY_URL = firstNonEmptyString(
+  process.env.SOLANA_RPC_URL,
+  resolveAlchemySolanaRpcUrl(),
+);
 const SOLANA_RPC_PROXY_MAX_BODY_BYTES = Math.max(
   1024,
   Number(process.env.SOLANA_RPC_PROXY_MAX_BODY_BYTES || 1_000_000),
@@ -630,11 +686,13 @@ if (!predictionMarketsOverview) {
   );
 }
 
-const bscRpcUrl = (
-  process.env.BSC_RPC_URL ||
-  process.env.BSC_TESTNET_RPC ||
-  ""
-).trim();
+const bscRpcUrl = firstNonEmptyString(
+  process.env.BSC_RPC_URL,
+  process.env.BSC_TESTNET_RPC,
+  process.env.HYPERBET_BSC_TESTNET_RPC_URL,
+  process.env.HYPERBET_BSC_STAGING_RPC_URL,
+  resolveAlchemyEvmRpcUrl("bsc"),
+);
 const bscContractAddress = (
   process.env.BSC_GOLD_CLOB_ADDRESS ||
   process.env.CLOB_CONTRACT_ADDRESS_BSC ||
@@ -645,7 +703,13 @@ const baseRpcUrl = (
   process.env.BASE_SEPOLIA_RPC ||
   ""
 ).trim();
-const avaxRpcUrl = (process.env.AVAX_RPC_URL || "").trim();
+const avaxRpcUrl = firstNonEmptyString(
+  process.env.AVAX_RPC_URL,
+  process.env.AVAX_FUJI_RPC,
+  process.env.HYPERBET_AVAX_TESTNET_RPC_URL,
+  process.env.HYPERBET_AVAX_STAGING_RPC_URL,
+  resolveAlchemyEvmRpcUrl("avax"),
+);
 const baseContractAddress = (
   process.env.BASE_GOLD_CLOB_ADDRESS ||
   process.env.CLOB_CONTRACT_ADDRESS_BASE ||
@@ -1252,13 +1316,75 @@ async function fetchUpstreamText(
   target: string,
   init: RequestInit,
 ): Promise<Omit<ProxyCacheEntry, "expiresAt">> {
-  const upstream = await fetch(target, init);
-  return {
-    status: upstream.status,
-    bodyText: await upstream.text(),
-    contentType:
-      upstream.headers.get("content-type") || "application/json; charset=utf-8",
-  };
+  let lastError: unknown = null;
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    try {
+      return await postUpstreamText(target, init);
+    } catch (error) {
+      lastError = error;
+      if (attempt >= 2) {
+        throw lastError;
+      }
+      console.warn(
+        `[${nowIso()}] [proxy] retrying upstream request to ${target}: ${
+          lastError instanceof Error ? lastError.message : String(lastError)
+        }`,
+      );
+    }
+  }
+  throw lastError instanceof Error
+    ? lastError
+    : new Error(`Failed to fetch upstream response from ${target}`);
+}
+
+function postUpstreamText(
+  target: string,
+  init: RequestInit,
+): Promise<Omit<ProxyCacheEntry, "expiresAt">> {
+  return new Promise((resolve, reject) => {
+    const url = new URL(target);
+    const bodyText =
+      typeof init.body === "string" ? init.body : init.body?.toString() ?? "";
+    const headers = new Headers(init.headers);
+    headers.set("connection", "close");
+    headers.set(
+      "content-length",
+      Buffer.byteLength(bodyText, "utf8").toString(),
+    );
+
+    const requestImpl = url.protocol === "https:" ? httpsRequest : httpRequest;
+    const request = requestImpl(
+      url,
+      {
+        method: init.method ?? "POST",
+        headers: Object.fromEntries(headers.entries()),
+      },
+      (response) => {
+        const chunks: Buffer[] = [];
+        response.on("data", (chunk) => {
+          chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+        });
+        response.on("end", () => {
+          resolve({
+            status: response.statusCode ?? 502,
+            bodyText: Buffer.concat(chunks).toString("utf8"),
+            contentType:
+              typeof response.headers["content-type"] === "string"
+                ? response.headers["content-type"]
+                : "application/json; charset=utf-8",
+          });
+        });
+      },
+    );
+
+    request.setTimeout(10_000, () => {
+      request.destroy(
+        new Error(`upstream request to ${target} timed out after 10000ms`),
+      );
+    });
+    request.on("error", reject);
+    request.end(bodyText);
+  });
 }
 
 function proxyTextResponse(

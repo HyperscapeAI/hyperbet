@@ -121,6 +121,9 @@ const statePath = path.resolve(__dirname, "./state.json");
 const GAME_API_URL = (process.env.E2E_GAME_API_URL || "http://127.0.0.1:5555")
   .trim()
   .replace(/\/$/, "");
+const EXPECT_KEEPER_BOT =
+  (process.env.E2E_EXPECT_KEEPER_BOT?.trim().toLowerCase() ?? "true") !==
+  "false";
 
 const HISTORY_LABELS: Record<string, string> = {
   BET_PLACED: "Bet Placed",
@@ -325,7 +328,7 @@ test.describe("app tabs and api coverage", () => {
       })
       .toEqual({
         ok: true,
-        running: true,
+        running: EXPECT_KEEPER_BOT,
         chainKey: "solana",
         updatedAtMs: expect.any(Number),
         hasMarkets: true,
@@ -394,11 +397,11 @@ test.describe("app tabs and api coverage", () => {
   }) => {
     const state = loadState();
     const wallet = state.solanaTraderPublicKey || "";
-
-    const _streamState = await fetchJson<StreamingStateResponse>(
+    const streamState = await fetchJson<StreamingStateResponse>(
       request,
       "/api/streaming/state",
     );
+
     const points = await fetchJson<PointsResponse>(
       request,
       `/api/arena/points/${encodeURIComponent(wallet)}?scope=wallet`,
@@ -432,8 +435,6 @@ test.describe("app tabs and api coverage", () => {
       "BIDS",
     );
 
-
-
     await page.getByTestId("duels-bottom-tab-positions").click();
     await expect(
       page.getByTestId("duels-bottom-panel-positions"),
@@ -441,6 +442,29 @@ test.describe("app tabs and api coverage", () => {
     await expect(
       page.getByTestId("duels-bottom-panel-positions"),
     ).toContainText("No open positions");
+
+    await page.getByTestId("duels-bottom-tab-news").click();
+    await expect(page.getByTestId("duels-bottom-panel-news")).toBeVisible();
+    await expect(page.getByTestId("duels-bottom-panel-news")).toContainText(
+      /fighting|announcement|resolution|cancelled/i,
+    );
+
+    await page.getByTestId("duels-bottom-tab-holders").click();
+    await expect(page.getByTestId("duels-bottom-panel-holders")).toBeVisible();
+    await expect(page.getByTestId("duels-bottom-panel-holders")).toContainText(
+      streamState.cycle.agent1?.name || "",
+    );
+    await expect(page.getByTestId("duels-bottom-panel-holders")).toContainText(
+      streamState.cycle.agent2?.name || "",
+    );
+
+    await page.getByTestId("duels-bottom-tab-topTraders").click();
+    await expect(
+      page.getByTestId("duels-bottom-panel-topTraders"),
+    ).toBeVisible();
+    await expect(
+      page.getByTestId("duels-bottom-panel-topTraders"),
+    ).toContainText(streamState.leaderboard[0]?.name || "");
 
     await page
       .locator('[data-testid="points-drawer-open"]:visible')
@@ -477,6 +501,25 @@ test.describe("app tabs and api coverage", () => {
     await expect(page.getByTestId("points-leaderboard")).toContainText(
       leaderboard.leaderboard[0]?.totalPoints.toLocaleString() || "",
     );
+    if (
+      await page
+        .getByTestId("points-display-boost")
+        .isVisible()
+        .catch(() => false)
+    ) {
+      await page.getByTestId("points-display-boost").click();
+      await expect(
+        page.getByTestId("points-display-boost-popup"),
+      ).toBeVisible();
+    }
+    await page.getByTestId("points-leaderboard-scope-wallet").click();
+    await expect(page.getByTestId("points-leaderboard")).toBeVisible();
+    await page.getByTestId("points-leaderboard-scope-linked").click();
+    await expect(page.getByTestId("points-leaderboard")).toBeVisible();
+    await page.getByTestId("points-leaderboard-window-daily").click();
+    await expect(page.getByTestId("points-leaderboard")).toBeVisible();
+    await page.getByTestId("points-leaderboard-window-alltime").click();
+    await expect(page.getByTestId("points-leaderboard")).toBeVisible();
 
     await page.getByTestId("points-drawer-tab-history").click();
     await expect(page.getByTestId("points-drawer-panel-history")).toBeVisible();
@@ -487,6 +530,10 @@ test.describe("app tabs and api coverage", () => {
     await expect(page.getByTestId("points-history")).toContainText(
       `${latestHistory.totalPoints.toLocaleString()} pts`,
     );
+    await page.getByTestId("points-history-filter").selectOption("BET_PLACED");
+    await expect(page.getByTestId("points-history")).toContainText(
+      HISTORY_LABELS.BET_PLACED,
+    );
     await page.getByTestId("points-drawer-tab-referral").click();
     await expect(
       page.getByTestId("points-drawer-panel-referral"),
@@ -496,6 +543,11 @@ test.describe("app tabs and api coverage", () => {
     );
     await expect(page.getByTestId("referral-panel-referred-by")).toBeVisible();
     await expect(page.getByTestId("referral-panel-redeem-input")).toBeVisible();
+    await page.getByTestId("referral-panel-redeem-button").click();
+    await expect(page.getByTestId("referral-panel-status")).toContainText(
+      /enter an invite code/i,
+    );
+    await expect(page.getByTestId("referral-panel-link-wallets")).toBeDisabled();
 
     await page.getByTestId("points-drawer-close").click();
     await expect(page.getByTestId("points-drawer")).toBeHidden();
@@ -551,5 +603,10 @@ test.describe("app tabs and api coverage", () => {
     await expect(
       page.getByTestId("models-market-oracle-history"),
     ).not.toContainText("Waiting for keeper snapshots");
+    await page
+      .locator('[data-testid="surface-mode-duels"]:visible')
+      .first()
+      .click();
+    await expect(page.getByTestId("duels-bottom-panel-trades")).toBeVisible();
   });
 });

@@ -25,6 +25,11 @@ import {
 } from "../packages/hyperbet-solana/keeper/src/common";
 import { GOLD_CLOB_ABI } from "../packages/hyperbet-ui/src/lib/goldClobAbi";
 import { resolveArtifactRoot, rootDir, writeJsonArtifact } from "./ci-lib";
+import {
+  resolveAcceptanceUrls,
+  resolveEvmAcceptanceRuntime,
+  resolveReachableSolanaAcceptanceRuntime,
+} from "./testnet-acceptance-env";
 
 const { PublicKey, SystemProgram } = solanaWeb3;
 const { createPublicClient, createWalletClient, http } = viem;
@@ -1597,12 +1602,12 @@ async function recordLocalContextEvent(
 }
 
 function stagedPagesTarget(chain: SupportedChain): ScreenshotTarget | null {
-  const prefix = `HYPERBET_${chain.toUpperCase()}_PAGES_STAGING_URL`;
-  const url = optionalEnv(prefix);
-  if (!url) {
+  try {
+    const { pagesUrl } = resolveAcceptanceUrls(chain, process.env);
+    return { name: `${chain}-pages`, url: normalizeUrl(pagesUrl) };
+  } catch {
     return null;
   }
-  return { name: `${chain}-pages`, url: normalizeUrl(url) };
 }
 
 async function fetchLocalSnapshot(): Promise<{
@@ -1712,12 +1717,10 @@ function stagedKeeperUrls(chain: SupportedChain): {
   pagesUrl: string;
   keeperUrl: string;
 } {
-  const upper = chain.toUpperCase();
+  const urls = resolveAcceptanceUrls(chain, process.env);
   return {
-    pagesUrl: normalizeUrl(requiredEnv(`HYPERBET_${upper}_PAGES_STAGING_URL`)),
-    keeperUrl: normalizeUrl(
-      requiredEnv(`HYPERBET_${upper}_KEEPER_STAGING_URL`),
-    ),
+    pagesUrl: normalizeUrl(urls.pagesUrl),
+    keeperUrl: normalizeUrl(urls.keeperUrl),
   };
 }
 
@@ -2862,7 +2865,18 @@ function requiredEvmEnv(
   chain: Exclude<SupportedChain, "solana">,
   suffix: string,
 ): string {
-  return requiredEnv(`HYPERBET_${chain.toUpperCase()}_STAGING_${suffix}`);
+  const runtime = resolveEvmAcceptanceRuntime(chain, process.env);
+  switch (suffix) {
+    case "RPC_URL":
+      return runtime.rpcUrl;
+    case "CANARY_PRIVATE_KEY":
+      if (!runtime.canaryPrivateKey) {
+        throw new Error(`${chain} acceptance canary private key missing`);
+      }
+      return runtime.canaryPrivateKey;
+    default:
+      return requiredEnv(`HYPERBET_${chain.toUpperCase()}_STAGING_${suffix}`);
+  }
 }
 
 async function executeEvmCanaryTrade(
@@ -3186,12 +3200,14 @@ async function executeSolanaCanaryTrade(
   snapshot: ChainSnapshot,
   intent: CanaryIntent,
 ): Promise<TradeRecord> {
-  const rpcUrl = requiredEnv("HYPERBET_SOLANA_STAGING_RPC_URL");
-  const trader = readKeypair(
-    requiredEnv("HYPERBET_SOLANA_STAGING_CANARY_KEYPAIR"),
-  );
+  const runtime = await resolveReachableSolanaAcceptanceRuntime(process.env);
+  if (!runtime.canaryKeypair) {
+    throw new Error("Solana acceptance canary keypair missing");
+  }
+  const rpcUrl = runtime.rpcUrl;
+  const trader = readKeypair(runtime.canaryKeypair);
   process.env.SOLANA_RPC_URL = rpcUrl;
-  process.env.SOLANA_CLUSTER = "devnet";
+  process.env.SOLANA_CLUSTER = runtime.cluster;
 
   const programs = createPrograms(trader);
   const clobProgram = programs.goldClobMarket;
@@ -3313,12 +3329,14 @@ async function claimSolanaExposure(
   cleared: boolean;
   residual: Record<string, string>;
 }> {
-  const rpcUrl = requiredEnv("HYPERBET_SOLANA_STAGING_RPC_URL");
-  const trader = readKeypair(
-    requiredEnv("HYPERBET_SOLANA_STAGING_CANARY_KEYPAIR"),
-  );
+  const runtime = await resolveReachableSolanaAcceptanceRuntime(process.env);
+  if (!runtime.canaryKeypair) {
+    throw new Error("Solana acceptance canary keypair missing");
+  }
+  const rpcUrl = runtime.rpcUrl;
+  const trader = readKeypair(runtime.canaryKeypair);
   process.env.SOLANA_RPC_URL = rpcUrl;
-  process.env.SOLANA_CLUSTER = "devnet";
+  process.env.SOLANA_CLUSTER = runtime.cluster;
   const programs = createPrograms(trader);
   const clobProgram = programs.goldClobMarket;
   const marketState = new PublicKey(

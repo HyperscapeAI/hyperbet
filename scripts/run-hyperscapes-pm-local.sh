@@ -20,8 +20,10 @@ resolve_hyperscapes_root() {
   candidates+=(
     "$WORKSPACE_ROOT/.worktrees/hyperscapes-stream-bet-sync"
     "$WORKSPACE_ROOT/hyperscapes-stream-bet-sync"
+    "$WORKSPACE_ROOT/hyperscapes-mono"
     "$ROOT/../.worktrees/hyperscapes-stream-bet-sync"
     "$ROOT/../hyperscapes-stream-bet-sync"
+    "$ROOT/../hyperscapes-mono"
   )
 
   local candidate=""
@@ -142,6 +144,7 @@ if [[ -z "$NODE_BIN" ]]; then
   echo "[pm-local] node binary not found; set NODE_BIN or install node" >&2
   exit 1
 fi
+export PATH="$(dirname "$NODE_BIN"):$PATH"
 require_node_major "$NODE_BIN" "NODE_BIN" "22"
 DUEL_CLIENT_NODE_BIN="${DUEL_CLIENT_NODE_BIN:-$NODE_BIN}"
 if [[ -z "$DUEL_CLIENT_NODE_BIN" ]]; then
@@ -154,6 +157,47 @@ if [[ ! -d "$HYPERSCAPES_ROOT" ]]; then
   echo "[pm-local] hyperscapes repo not found; set HYPERSCAPES_ROOT to the local hyperscapes-stream-bet-sync checkout" >&2
   exit 1
 fi
+
+ensure_hyperscapes_physx_dist() {
+  local physx_pkg_dir="$HYPERSCAPES_ROOT/packages/physx-js-webidl"
+  local dist_dir="$physx_pkg_dir/dist"
+  local js_path="$dist_dir/physx-js-webidl.js"
+  local wasm_path="$dist_dir/physx-js-webidl.wasm"
+  local dts_path="$dist_dir/physx-js-webidl.d.ts"
+  local type_source="$physx_pkg_dir/types/physx-js-webidl.d.ts"
+  local source_dir=""
+  local candidate=""
+  local -a candidates=(
+    "$HYPERSCAPES_ROOT/packages/client/public/web"
+    "$HYPERSCAPES_ROOT/packages/server/public/web"
+    "$HYPERSCAPES_ROOT/packages/client/public"
+    "$HYPERSCAPES_ROOT/packages/server/public"
+  )
+
+  if [[ -f "$js_path" && -f "$wasm_path" ]]; then
+    return 0
+  fi
+
+  for candidate in "${candidates[@]}"; do
+    if [[ -f "$candidate/physx-js-webidl.js" && -f "$candidate/physx-js-webidl.wasm" ]]; then
+      source_dir="$candidate"
+      break
+    fi
+  done
+
+  if [[ -z "$source_dir" ]]; then
+    echo "[pm-local] unable to bootstrap PhysX dist; no checked-in PhysX assets found in $HYPERSCAPES_ROOT" >&2
+    return 1
+  fi
+
+  mkdir -p "$dist_dir"
+  cp "$source_dir/physx-js-webidl.js" "$js_path"
+  cp "$source_dir/physx-js-webidl.wasm" "$wasm_path"
+  if [[ -f "$type_source" ]]; then
+    cp "$type_source" "$dts_path"
+  fi
+  echo "[pm-local] bootstrapped Hyperscapes PhysX dist from $source_dir"
+}
 
 ENV_FILES=(
   "$ROOT/.env.stage-a.testnet.local"
@@ -211,7 +255,52 @@ GAME_PORT="${GAME_PORT:-5555}"
 GAME_CLIENT_PORT="${GAME_CLIENT_PORT:-3333}"
 KEEPER_PORT="${KEEPER_PORT:-8080}"
 APP_PORT="${APP_PORT:-4179}"
+
+resolve_hyperscapes_assets_root() {
+  local -a candidates=()
+  if [[ -n "${HYPERSCAPES_ASSETS_SOURCE_ROOT:-}" ]]; then
+    candidates+=("${HYPERSCAPES_ASSETS_SOURCE_ROOT}")
+  fi
+  candidates+=(
+    "$WORKSPACE_ROOT/hyperscapes-mono/packages/server/world/assets"
+    "$ROOT/../hyperscapes-mono/packages/server/world/assets"
+    "$WORKSPACE_ROOT/.worktrees/hyperscapes-stream-bet-sync/packages/server/world/assets"
+    "$ROOT/../.worktrees/hyperscapes-stream-bet-sync/packages/server/world/assets"
+  )
+
+  local candidate=""
+  for candidate in "${candidates[@]}"; do
+    if [[ -z "$candidate" || "$candidate" == "$HYPERSCAPES_ROOT/packages/server/world/assets" ]]; then
+      continue
+    fi
+    if [[ -f "$candidate/avatars/avatar-male-01.vrm" && -f "$candidate/manifests/npcs.json" ]]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+ensure_hyperscapes_local_assets() {
+  local source_root=""
+
+  if [[ -f "$HYPERSCAPES_ASSETS_ROOT/avatars/avatar-male-01.vrm" && -f "$HYPERSCAPES_ASSETS_ROOT/manifests/npcs.json" ]]; then
+    return 0
+  fi
+
+  source_root="$(resolve_hyperscapes_assets_root 2>/dev/null || true)"
+  if [[ -z "$source_root" ]]; then
+    return 0
+  fi
+
+  mkdir -p "$HYPERSCAPES_ASSETS_ROOT"
+  rsync -a --ignore-existing "$source_root/" "$HYPERSCAPES_ASSETS_ROOT/"
+  echo "[pm-local] seeded Hyperscapes local assets from $source_root"
+}
+
 HYPERSCAPES_ASSETS_ROOT="${HYPERSCAPES_ASSETS_ROOT:-$HYPERSCAPES_ROOT/packages/server/world/assets}"
+ensure_hyperscapes_local_assets
 DEFAULT_HYPERSCAPES_PUBLIC_CDN_URL="${GAME_HTTP_URL}/game-assets"
 if [[ ! -f "$HYPERSCAPES_ASSETS_ROOT/avatars/avatar-male-01.vrm" ]]; then
   DEFAULT_HYPERSCAPES_PUBLIC_CDN_URL="https://assets.hyperscape.club"
@@ -230,6 +319,11 @@ HYPERSCAPES_DUEL_NODE_ENV="${HYPERSCAPES_DUEL_NODE_ENV:-development}"
 HYPERSCAPES_USE_PRODUCTION_CLIENT="${HYPERSCAPES_USE_PRODUCTION_CLIENT:-true}"
 HYPERSCAPES_REUSE_EXISTING_CLIENT="${HYPERSCAPES_REUSE_EXISTING_CLIENT:-false}"
 HYPERSCAPES_DUEL_FRESH="${HYPERSCAPES_DUEL_FRESH:-false}"
+STREAMING_ANNOUNCEMENT_MS="${STREAMING_ANNOUNCEMENT_MS:-180000}"
+STREAMING_FIGHTING_MS="${STREAMING_FIGHTING_MS:-60000}"
+STREAMING_END_WARNING_MS="${STREAMING_END_WARNING_MS:-5000}"
+STREAMING_RESOLUTION_MS="${STREAMING_RESOLUTION_MS:-5000}"
+STREAMING_COUNTDOWN_TICKS="${STREAMING_COUNTDOWN_TICKS:-3}"
 DUEL_ALLOW_FRAME_EMBED="${DUEL_ALLOW_FRAME_EMBED:-true}"
 HYPERSCAPES_JWT_SECRET="${HYPERSCAPES_JWT_SECRET:-local-dev-secret}"
 HYPERSCAPES_LOCAL_POSTGRES_USER="${HYPERSCAPES_LOCAL_POSTGRES_USER:-${LOCAL_POSTGRES_USER:-${USER:-postgres}}}"
@@ -841,6 +935,33 @@ write_hyperscapes_client_runtime_env() {
   ' "$client_dist"
 }
 
+ensure_hyperscapes_client_build_deps() {
+  local impostor_build="$HYPERSCAPES_ROOT/packages/impostors/dist/index.js"
+  local decimation_build="$HYPERSCAPES_ROOT/packages/decimation/dist/index.js"
+  local procgen_build="$HYPERSCAPES_ROOT/packages/procgen/dist/index.js"
+  local shared_build_dir="$HYPERSCAPES_ROOT/packages/shared/build"
+  local shared_client_build="$shared_build_dir/framework.client.js"
+  local shared_full_build="$shared_build_dir/framework.js"
+
+  if [[ "$HYPERSCAPES_DUEL_FRESH" != "true" \
+    && -f "$impostor_build" \
+    && -f "$decimation_build" \
+    && -f "$procgen_build" \
+    && -f "$shared_client_build" \
+    && -f "$shared_full_build" ]]; then
+    return 0
+  fi
+
+  echo "[pm-local] building Hyperscapes client dependency artifacts"
+  (
+    cd "$HYPERSCAPES_ROOT"
+    "$BUN_BIN" run --cwd packages/impostors build
+    "$BUN_BIN" run --cwd packages/decimation build
+    "$BUN_BIN" run --cwd packages/procgen build
+    "$BUN_BIN" run --cwd packages/shared build
+  )
+}
+
 start_hyperscapes_client_preview() {
   local client_dir="$HYPERSCAPES_ROOT/packages/client"
   local client_dist="$client_dir/dist"
@@ -852,6 +973,7 @@ start_hyperscapes_client_preview() {
   fi
 
   if [[ ! -f "$client_dist/stream.html" || "$HYPERSCAPES_DUEL_FRESH" == "true" ]]; then
+    ensure_hyperscapes_client_build_deps
     echo "[pm-local] building Hyperscapes production client preview assets"
     (
       cd "$HYPERSCAPES_ROOT"
@@ -890,6 +1012,7 @@ if [[ "$HYPERSCAPES_USE_PRODUCTION_CLIENT" == "true" ]]; then
 elif [[ "$HYPERSCAPES_REUSE_EXISTING_CLIENT" == "true" ]]; then
   echo "[pm-local] reusing externally managed Hyperscapes client at $GAME_CLIENT_URL"
 fi
+ensure_hyperscapes_physx_dist
 (
   cd "$HYPERSCAPES_ROOT"
   duel_args=(
@@ -919,6 +1042,11 @@ fi
     DUEL_CLIENT_NODE_BIN="$DUEL_CLIENT_NODE_BIN" \
     JWT_SECRET="$HYPERSCAPES_JWT_SECRET" \
     PUBLIC_CDN_URL="$HYPERSCAPES_PUBLIC_CDN_URL" \
+    STREAMING_ANNOUNCEMENT_MS="$STREAMING_ANNOUNCEMENT_MS" \
+    STREAMING_FIGHTING_MS="$STREAMING_FIGHTING_MS" \
+    STREAMING_END_WARNING_MS="$STREAMING_END_WARNING_MS" \
+    STREAMING_RESOLUTION_MS="$STREAMING_RESOLUTION_MS" \
+    STREAMING_COUNTDOWN_TICKS="$STREAMING_COUNTDOWN_TICKS" \
     STREAMING_VIEWER_ACCESS_TOKEN="$STREAMING_VIEWER_ACCESS_TOKEN" \
     BETTING_FEED_ACCESS_TOKEN="$BETTING_FEED_ACCESS_TOKEN" \
     STREAM_CAPTURE_HEADLESS="$STREAM_CAPTURE_HEADLESS" \
@@ -1007,6 +1135,8 @@ close_existing_anvil_listeners "$APP_PORT"
 (
   cd "$ROOT"
   app_env=(
+    ACCEPTANCE_DUEL_SOURCE="real_hyperscapes"
+    E2E_DUEL_SOURCE="real_hyperscapes"
     VITE_GAME_API_URL="$KEEPER_URL"
     VITE_GAME_WS_URL="$GAME_WS_URL"
     VITE_WS_URL="$GAME_WS_URL"
@@ -1048,6 +1178,8 @@ if [[ "$PM_E2E_MONITOR" == "true" ]]; then
     cd "$ROOT"
       HYPERSCAPES_UI_URL="$HYPERSCAPES_UI_URL" \
       HYPERBET_UI_URL="$HYPERBET_UI_URL" \
+      ACCEPTANCE_DUEL_SOURCE="real_hyperscapes" \
+      E2E_DUEL_SOURCE="real_hyperscapes" \
       VITE_STREAM_URL="${VITE_STREAM_URL:-$HYPERSCAPES_UI_URL}" \
       SOURCE_STREAM_STATE_URL="${SOURCE_STREAM_STATE_URL:-${GAME_HTTP_URL}/api/streaming/state}" \
       SOURCE_BET_SYNC_STATE_URL="${SOURCE_BET_SYNC_STATE_URL:-${GAME_HTTP_URL}/api/internal/bet-sync/state}" \
@@ -1087,6 +1219,8 @@ if [[ "$PM_E2E_FULL_SOAK" == "true" ]]; then
     SOURCE_BET_SYNC_BEARER_TOKEN="${SOURCE_BET_SYNC_BEARER_TOKEN:-$BETTING_FEED_ACCESS_TOKEN}" \
     SYNC_STATUS_URL="${SYNC_STATUS_URL:-${KEEPER_URL}/api/sync/status}" \
     STREAM_STATE_URL="${STREAM_STATE_URL:-${KEEPER_URL}/api/streaming/state}" \
+    ACCEPTANCE_DUEL_SOURCE="real_hyperscapes" \
+    E2E_DUEL_SOURCE="real_hyperscapes" \
     "$BUN_BIN" run pm:soak:harness -- \
       --duration-min="$PM_E2E_HARNESS_DURATION_MIN" \
       --bsc-rpc="$PM_E2E_HARNESS_BSC_RPC_URL" \
@@ -1108,6 +1242,7 @@ cat <<EOF
   write-keys:  ${WRITER_KEYS_READY}
   evm-defer-finalize: ${EVM_KEEPER_DEFER_FINALIZE}
   evm-auto-reseed:    ${RESEED_LOCAL_EVM_ON_DUEL_CHANGE}
+  acceptance-duel-source: real_hyperscapes
 
 [pm-local] notes:
   - Hyperscapes remains the duel event source.

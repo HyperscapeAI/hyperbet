@@ -349,7 +349,7 @@ export type FightOracle = {
         },
         {
           "name": "program",
-          "address": "B5mRCRDJk9BrnH7regMWW5mpTQ8QG1CcCGSnDxMt8hmo"
+          "address": "GFdnu7kUnZGiXh4ejWiJSBCUxvq4UfdEeUv9jjFzr5EM"
         },
         {
           "name": "programData"

@@ -8,10 +8,15 @@ import {
   createAssociatedTokenAccountInstruction,
   getAssociatedTokenAddressSync,
 } from "@solana/spl-token";
-import { PublicKey, SystemProgram, Transaction } from "@solana/web3.js";
+import { type AccountMeta, PublicKey, SystemProgram, Transaction } from "@solana/web3.js";
+import {
+  firstNonEmptyValue,
+  resolveReachableSolanaAcceptanceRuntime,
+} from "../../../../scripts/testnet-acceptance-env";
 
 import {
   createPrograms,
+  DUEL_WINNER_MARKET_KIND,
   duelKeyHexToBytes,
   findAmmBetPda,
   findAmmConfigPda,
@@ -19,6 +24,7 @@ import {
   findAmmMintYesPda,
   findClobVaultPda,
   findDuelStatePda,
+  findMarketPda,
   findMarketConfigPda,
   findOrderPda,
   findOracleConfigPda,
@@ -29,29 +35,20 @@ import {
   findUserBalancePda,
   ORDER_BEHAVIOR_GTC,
   SIDE_ASK,
+  SIDE_BID,
   readKeypair,
   resolveFightOracleProgramId,
 } from "./common";
 
-type PredictionMarketsResponse = {
-  duel: {
-    duelKey: string | null;
-    duelId: string | null;
-  };
-  markets: Array<{
-    chainKey: string;
-    marketRef: string | null;
-    lifecycleStatus: string;
-  }>;
-};
-
 type SolanaPmCanaryResult = {
   marketRef: string;
   upsertTx: string;
-  placeOrderTx: string;
+  makerOrderTx: string;
+  takerOrderTx: string;
   cancelTx: string;
   syncTx: string;
-  claimTx: string;
+  makerClaimTx: string;
+  takerClaimTx: string;
 };
 
 type SolanaPerpsCanaryResult = {
@@ -84,6 +81,33 @@ type SolanaCanaryResult = {
   amm: SolanaAmmCanaryResult;
 };
 
+type MarketStateAccount = {
+  bestBid?: unknown;
+  bestAsk?: unknown;
+  nextOrderId?: unknown;
+};
+
+type PriceLevelAccount = {
+  totalOpen?: unknown;
+  headOrderId?: unknown;
+  tailOrderId?: unknown;
+};
+
+type OrderAccount = {
+  maker?: PublicKey;
+  amount?: unknown;
+  filled?: unknown;
+  nextOrderId?: unknown;
+  active?: boolean;
+};
+
+type InsuranceFundingSource = {
+  label: string;
+  keypair: ReturnType<typeof readKeypair>;
+  program: Awaited<ReturnType<typeof createPrograms>>["goldPerpsMarket"];
+  reserveLamports: bigint;
+};
+
 function requireEnv(name: string): string {
   const value = process.env[name]?.trim() ?? "";
   if (!value) {
@@ -97,6 +121,14 @@ function maybeEnv(name: string): string | null {
   return value || null;
 }
 
+function maybeAcceptanceEnv(suffix: string): string | null {
+  return firstNonEmptyValue(
+    process.env[`HYPERBET_SOLANA_TESTNET_${suffix}`],
+    process.env[`HYPERBET_SOLANA_STAGING_${suffix}`],
+    process.env[suffix],
+  );
+}
+
 function asBigInt(value: unknown): bigint {
   if (typeof value === "bigint") return value;
   if (typeof value === "number") return BigInt(Math.trunc(value));
@@ -105,6 +137,16 @@ function asBigInt(value: unknown): bigint {
     return BigInt(String(value));
   }
   throw new Error(`Cannot convert value to bigint: ${String(value)}`);
+}
+
+function lamportsToSolString(value: bigint): string {
+  const whole = value / 1_000_000_000n;
+  const fraction = value % 1_000_000_000n;
+  return `${whole}.${fraction.toString().padStart(9, "0")}`;
+}
+
+function maxBigInt(a: bigint, b: bigint): bigint {
+  return a > b ? a : b;
 }
 
 function derivePerpsMarketId(duelKeyHex: string): bigint {
@@ -122,112 +164,128 @@ function shaParticipant(label: string): number[] {
   return Array.from(createHash("sha256").update(label).digest());
 }
 
-function buildControlledCycle(
-  duelId: string,
-  duelKeyHex: string,
-): Record<string, unknown> {
-  const now = Date.now();
-  return {
-    cycle: {
-      cycleId: `staged-proof-solana-${duelId}`,
-      phase: "ANNOUNCEMENT",
-      duelId,
-      duelKeyHex,
-      cycleStartTime: now - 90_000,
-      phaseStartTime: now - 5_000,
-      phaseEndTime: now + 300_000,
-      betOpenTime: now - 15_000,
-      betCloseTime: now + 300_000,
-      fightStartTime: now + 60_000,
-      duelEndTime: null,
-      countdown: 300,
-      timeRemaining: 300_000,
-      winnerId: null,
-      winnerName: null,
-      winReason: null,
-      seed: null,
-      replayHash: null,
-      agent1: {
-        id: "staged-solana-agent-a",
-        name: "Stage Agent A",
-        provider: "Hyperscape",
-        model: "stage-alpha",
-        hp: 90,
-        maxHp: 100,
-        combatLevel: 90,
-        wins: 10,
-        losses: 2,
-        damageDealtThisFight: 12,
-        inventory: [],
-        monologues: [],
-      },
-      agent2: {
-        id: "staged-solana-agent-b",
-        name: "Stage Agent B",
-        provider: "OpenRouter",
-        model: "stage-beta",
-        hp: 88,
-        maxHp: 100,
-        combatLevel: 88,
-        wins: 8,
-        losses: 4,
-        damageDealtThisFight: 9,
-        inventory: [],
-        monologues: [],
-      },
-    },
-    leaderboard: [],
-    cameraTarget: null,
-  };
-}
+async function buildPlaceOrderRemainingAccounts(args: {
+  clobProgram: Awaited<ReturnType<typeof createPrograms>>["goldClobMarket"];
+  marketState: PublicKey;
+  side: number;
+  price: number;
+  amount: bigint;
+}): Promise<AccountMeta[]> {
+  const metas: AccountMeta[] = [];
+  const clobAccounts = args.clobProgram.account as Record<
+    string,
+    { fetch: (pubkey: PublicKey) => Promise<Record<string, unknown>>; fetchNullable: (pubkey: PublicKey) => Promise<Record<string, unknown> | null> }
+  >;
+  const marketAccount = (await clobAccounts.marketState.fetch(
+    args.marketState,
+  )) as MarketStateAccount;
+  const oppositeSide = args.side === SIDE_BID ? SIDE_ASK : SIDE_BID;
+  let remaining = args.amount;
+  let boundary =
+    args.side === SIDE_BID
+      ? Number(marketAccount.bestAsk ?? 1000)
+      : Number(marketAccount.bestBid ?? 0);
+  let matches = 0;
 
-async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(url, init);
-  const raw = await response.text();
-  if (!response.ok) {
-    throw new Error(`${response.status} ${response.statusText}: ${raw}`);
-  }
-  return JSON.parse(raw) as T;
-}
+  while (remaining > 0n && matches < 100) {
+    const crosses =
+      args.side === SIDE_BID
+        ? boundary <= args.price && boundary > 0 && boundary < 1000
+        : boundary >= args.price && boundary > 0 && boundary < 1000;
+    if (!crosses) break;
 
-async function waitFor<T>(
-  label: string,
-  fn: () => Promise<T>,
-  predicate: (value: T) => boolean,
-  timeoutMs = 120_000,
-): Promise<T> {
-  const deadline = Date.now() + timeoutMs;
-  let lastError = `${label} did not become ready`;
-  while (Date.now() < deadline) {
-    try {
-      const value = await fn();
-      if (predicate(value)) {
-        return value;
-      }
-      lastError = `${label} predicate not satisfied`;
-    } catch (error) {
-      lastError = error instanceof Error ? error.message : String(error);
+    const levelPda = findPriceLevelPda(
+      args.clobProgram.programId,
+      args.marketState,
+      oppositeSide,
+      boundary,
+    );
+    const level = (await clobAccounts.priceLevel.fetchNullable(
+      levelPda,
+    )) as PriceLevelAccount | null;
+    if (!level) break;
+
+    metas.push({
+      pubkey: levelPda,
+      isSigner: false,
+      isWritable: true,
+    });
+
+    let currentHead = asBigInt(level.headOrderId ?? 0);
+    let currentLevelOpen = asBigInt(level.totalOpen ?? 0);
+    if (currentHead === 0n || currentLevelOpen === 0n) {
+      boundary = args.side === SIDE_BID ? boundary + 1 : boundary - 1;
+      matches += 1;
+      continue;
     }
-    await new Promise((resolve) => setTimeout(resolve, 2_000));
+
+    while (remaining > 0n && currentHead > 0n && currentLevelOpen > 0n) {
+      const orderPda = findOrderPda(
+        args.clobProgram.programId,
+        args.marketState,
+        currentHead,
+      );
+      const order = (await clobAccounts.order.fetch(orderPda)) as OrderAccount;
+      const makerBalancePda = findUserBalancePda(
+        args.clobProgram.programId,
+        args.marketState,
+        order.maker as PublicKey,
+      );
+
+      metas.push(
+        { pubkey: orderPda, isSigner: false, isWritable: true },
+        { pubkey: makerBalancePda, isSigner: false, isWritable: true },
+      );
+
+      const orderRemaining = asBigInt(order.amount ?? 0) - asBigInt(order.filled ?? 0);
+      if (orderRemaining <= 0n || !order.active) {
+        break;
+      }
+
+      if (orderRemaining >= remaining) {
+        remaining = 0n;
+        break;
+      }
+
+      remaining -= orderRemaining;
+      currentLevelOpen -= orderRemaining;
+      currentHead = asBigInt(order.nextOrderId ?? 0);
+      matches += 1;
+      if (remaining > 0n && currentHead > 0n && currentLevelOpen > 0n) {
+        metas.push({
+          pubkey: levelPda,
+          isSigner: false,
+          isWritable: true,
+        });
+      }
+    }
+
+    boundary = args.side === SIDE_BID ? boundary + 1 : boundary - 1;
+    matches += 1;
   }
-  throw new Error(lastError);
-}
 
-function findCanonicalMarket(payload: PredictionMarketsResponse) {
-  return payload.markets.find((market) => market.chainKey === "solana") ?? null;
-}
+  const restingLevelPda = findPriceLevelPda(
+    args.clobProgram.programId,
+    args.marketState,
+    args.side,
+    args.price,
+  );
+  const restingLevel = (await clobAccounts.priceLevel.fetchNullable(
+    restingLevelPda,
+  )) as PriceLevelAccount | null;
+  if (restingLevel && asBigInt(restingLevel.tailOrderId ?? 0) > 0n) {
+    metas.push({
+      pubkey: findOrderPda(
+        args.clobProgram.programId,
+        args.marketState,
+        asBigInt(restingLevel.tailOrderId ?? 0),
+      ),
+      isSigner: false,
+      isWritable: true,
+    });
+  }
 
-async function publishControlledState(duelId: string, duelKeyHex: string): Promise<void> {
-  const keeperUrl = requireEnv("HYPERBET_SOLANA_KEEPER_STAGING_URL").replace(/\/$/, "");
-  const publishKey = requireEnv("HYPERBET_SOLANA_STAGING_STREAM_PUBLISH_KEY");
-  await requestJson(`${keeperUrl}/api/streaming/state/publish`, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      "x-arena-write-key": publishKey,
-    },
-    body: JSON.stringify(buildControlledCycle(duelId, duelKeyHex)),
-  });
+  return metas;
 }
 
 async function ensureAssociatedTokenAccounts(args: {
@@ -277,6 +335,94 @@ async function ensureAssociatedTokenAccounts(args: {
   return { destinationYes, destinationNo, ataSetupTx };
 }
 
+async function ensureRentExemptSystemAccount(args: {
+  connection: Awaited<ReturnType<typeof createPrograms>>["connection"];
+  payer: PublicKey;
+  signers: Parameters<Awaited<ReturnType<typeof createPrograms>>["provider"]["sendAndConfirm"]>[1];
+  provider: Awaited<ReturnType<typeof createPrograms>>["provider"];
+  target: PublicKey;
+}): Promise<void> {
+  const minimumBalance =
+    await args.connection.getMinimumBalanceForRentExemption(0);
+  const currentBalance = await args.connection.getBalance(args.target, "confirmed");
+  if (currentBalance >= minimumBalance) {
+    return;
+  }
+
+  const tx = new Transaction().add(
+    SystemProgram.transfer({
+      fromPubkey: args.payer,
+      toPubkey: args.target,
+      lamports: minimumBalance - currentBalance,
+    }),
+  );
+  await args.provider.sendAndConfirm(tx, args.signers);
+}
+
+async function topUpPerpsInsurance(args: {
+  marketIdBn: BN;
+  marketPda: PublicKey;
+  targetInsuranceLamports: bigint;
+  authorityProgram: Awaited<ReturnType<typeof createPrograms>>["goldPerpsMarket"];
+  fundingSources: InsuranceFundingSource[];
+}): Promise<string[]> {
+  const insuranceTxs: string[] = [];
+  const marketBefore = await args.authorityProgram.account.marketState.fetch(
+    args.marketPda,
+  );
+  let remaining =
+    args.targetInsuranceLamports - asBigInt(marketBefore.insuranceFund);
+  console.error(
+    `[solana-canary] perps insurance before=${lamportsToSolString(asBigInt(marketBefore.insuranceFund))} target=${lamportsToSolString(args.targetInsuranceLamports)} remaining=${lamportsToSolString(remaining > 0n ? remaining : 0n)}`,
+  );
+  if (remaining <= 0n) {
+    return insuranceTxs;
+  }
+
+  for (const source of args.fundingSources) {
+    if (remaining <= 0n) {
+      break;
+    }
+    const balance = BigInt(
+      await source.program.provider.connection.getBalance(
+        source.keypair.publicKey,
+        "confirmed",
+      ),
+    );
+    const available =
+      balance > source.reserveLamports ? balance - source.reserveLamports : 0n;
+    console.error(
+      `[solana-canary] insurance source=${source.label} balance=${lamportsToSolString(balance)} reserve=${lamportsToSolString(source.reserveLamports)} available=${lamportsToSolString(available)}`,
+    );
+    if (available <= 0n) {
+      continue;
+    }
+    const depositAmount = available >= remaining ? remaining : available;
+    const tx = await source.program.methods
+      .depositInsurance(args.marketIdBn, new BN(depositAmount.toString()))
+      .accountsPartial({
+        market: args.marketPda,
+        payer: source.keypair.publicKey,
+        systemProgram: SystemProgram.programId,
+      })
+      .signers([source.keypair])
+      .rpc();
+    insuranceTxs.push(tx);
+    console.error(
+      `[solana-canary] insurance deposit source=${source.label} amount=${lamportsToSolString(depositAmount)} tx=${tx}`,
+    );
+    remaining -= depositAmount;
+  }
+
+  if (remaining > 0n) {
+    throw new Error(
+      `solana perps insurance shortfall: need ${remaining.toString()} lamports (${lamportsToSolString(remaining)} SOL) more after local wallet aggregation`,
+    );
+  }
+
+  return insuranceTxs;
+}
+
 async function main(): Promise<void> {
   const previousEnv = {
     SOLANA_RPC_URL: process.env.SOLANA_RPC_URL,
@@ -287,24 +433,13 @@ async function main(): Promise<void> {
     GOLD_PERPS_MARKET_PROGRAM_ID: process.env.GOLD_PERPS_MARKET_PROGRAM_ID,
   };
 
-  process.env.SOLANA_RPC_URL = requireEnv("HYPERBET_SOLANA_STAGING_RPC_URL");
-  process.env.SOLANA_CLUSTER =
-    maybeEnv("HYPERBET_SOLANA_STAGING_CLUSTER") ?? "devnet";
-  const stagedFightOracleProgramId = maybeEnv(
-    "HYPERBET_SOLANA_STAGING_FIGHT_ORACLE_PROGRAM_ID",
-  );
-  if (stagedFightOracleProgramId) {
-    process.env.FIGHT_ORACLE_PROGRAM_ID = stagedFightOracleProgramId;
-  }
-  process.env.GOLD_CLOB_MARKET_PROGRAM_ID = requireEnv(
-    "HYPERBET_SOLANA_STAGING_GOLD_CLOB_PROGRAM_ID",
-  );
-  process.env.GOLD_AMM_MARKET_PROGRAM_ID = requireEnv(
-    "HYPERBET_SOLANA_STAGING_GOLD_AMM_PROGRAM_ID",
-  );
-  process.env.GOLD_PERPS_MARKET_PROGRAM_ID = requireEnv(
-    "HYPERBET_SOLANA_STAGING_GOLD_PERPS_PROGRAM_ID",
-  );
+  const runtime = await resolveReachableSolanaAcceptanceRuntime(process.env);
+  process.env.SOLANA_RPC_URL = runtime.rpcUrl;
+  process.env.SOLANA_CLUSTER = runtime.cluster;
+  process.env.FIGHT_ORACLE_PROGRAM_ID = runtime.fightOracleProgramId;
+  process.env.GOLD_CLOB_MARKET_PROGRAM_ID = runtime.goldClobProgramId;
+  process.env.GOLD_AMM_MARKET_PROGRAM_ID = runtime.goldAmmProgramId;
+  process.env.GOLD_PERPS_MARKET_PROGRAM_ID = runtime.goldPerpsProgramId;
 
   try {
     const duelId = requireEnv("HYPERBET_STAGED_PROOF_DUEL_ID");
@@ -312,14 +447,25 @@ async function main(): Promise<void> {
       .replace(/^0x/i, "")
       .toLowerCase();
     const duelKey = duelKeyHexToBytes(duelKeyHex);
-    const authority = readKeypair(
-      requireEnv("HYPERBET_SOLANA_STAGING_ORACLE_AUTHORITY_KEYPAIR"),
-    );
-    const trader = readKeypair(requireEnv("HYPERBET_SOLANA_STAGING_CANARY_KEYPAIR"));
-    const keeperUrl = requireEnv("HYPERBET_SOLANA_KEEPER_STAGING_URL").replace(/\/$/, "");
+    const authorityKeypairPath = runtime.anchorWallet ?? runtime.oracleAuthorityKeypair;
+    if (!authorityKeypairPath || !runtime.canaryKeypair || !runtime.marketMakerKeypair) {
+      throw new Error("Solana acceptance wallet env is incomplete");
+    }
+    const authority = readKeypair(authorityKeypairPath);
+    const trader = readKeypair(runtime.canaryKeypair);
+    const matcher = readKeypair(runtime.marketMakerKeypair);
 
     const authorityPrograms = createPrograms(authority);
     const traderPrograms = createPrograms(trader);
+    const matcherPrograms = createPrograms(matcher);
+    const oracleFundingKeypair =
+      runtime.oracleAuthorityKeypair &&
+      runtime.oracleAuthorityKeypair !== authorityKeypairPath
+        ? readKeypair(runtime.oracleAuthorityKeypair)
+        : null;
+    const oracleFundingPrograms = oracleFundingKeypair
+      ? createPrograms(oracleFundingKeypair)
+      : null;
     const fightOracleProgramId = resolveFightOracleProgramId();
     const fightOracle = authorityPrograms.fightOracle;
     const clobProgram = traderPrograms.goldClobMarket;
@@ -356,64 +502,120 @@ async function main(): Promise<void> {
       .signers([authority])
       .rpc();
 
-    await publishControlledState(duelId, duelKeyHex);
-
-    const lifecycle = await waitFor(
-      "solana lifecycle open",
-      async () =>
-        requestJson<PredictionMarketsResponse>(
-          `${keeperUrl}/api/arena/prediction-markets/active`,
-        ),
-      (payload) => {
-        const market = findCanonicalMarket(payload);
-        return (
-          payload.duel.duelKey === duelKeyHex &&
-          market?.marketRef != null &&
-          market.lifecycleStatus === "OPEN"
-        );
-      },
-    );
-
-    const market = findCanonicalMarket(lifecycle);
-    if (!market?.marketRef) {
-      throw new Error("solana marketRef missing after lifecycle open");
-    }
-
-    const marketState = new PublicKey(market.marketRef);
-    const marketAccount = await clobProgram.account.marketState.fetch(marketState);
+    const marketState = findMarketPda(clobProgram.programId, duelState);
     const configPda = findMarketConfigPda(clobProgram.programId);
+    const vaultPda = findClobVaultPda(clobProgram.programId, marketState);
+    const existingMarket =
+      await authorityPrograms.goldClobMarket.account.marketState.fetchNullable(marketState);
+    if (!existingMarket) {
+      await authorityPrograms.goldClobMarket.methods
+        .initializeMarket(Array.from(duelKey), DUEL_WINNER_MARKET_KIND)
+        .accountsPartial({
+          operator: authority.publicKey,
+          config: configPda,
+          duelState,
+          marketState,
+          vault: vaultPda,
+          systemProgram: SystemProgram.programId,
+        })
+        .signers([authority])
+        .rpc();
+    }
+    await ensureRentExemptSystemAccount({
+      connection: authorityPrograms.connection,
+      payer: authority.publicKey,
+      signers: [authority],
+      provider: authorityPrograms.provider,
+      target: vaultPda,
+    });
+
+    const marketAccount = await clobProgram.account.marketState.fetch(marketState);
     const config = await clobProgram.account.marketConfig.fetch(configPda);
-    const userBalance = findUserBalancePda(
+    const takerUserBalance = findUserBalancePda(
       clobProgram.programId,
       marketState,
       trader.publicKey,
     );
-    const nextOrderId = BigInt(marketAccount.nextOrderId.toString());
-    const placeOrderTx = await clobProgram.methods
+    const makerUserBalance = findUserBalancePda(
+      matcherPrograms.goldClobMarket.programId,
+      marketState,
+      matcher.publicKey,
+    );
+    const makerAmount = BigInt(
+      (
+        maybeAcceptanceEnv("CANARY_ORDER_LAMPORTS") ??
+        "1000000"
+      ).trim(),
+    );
+    const makerOrderId = BigInt(marketAccount.nextOrderId.toString());
+    const makerOrderTx = await matcherPrograms.goldClobMarket.methods
       .placeOrder(
-        new BN(nextOrderId.toString()),
+        new BN(makerOrderId.toString()),
         SIDE_ASK,
-        999,
-        new BN(
-          (process.env.HYPERBET_SOLANA_STAGING_CANARY_ORDER_LAMPORTS ?? "1000000").trim(),
-        ),
+        600,
+        new BN(makerAmount.toString()),
         ORDER_BEHAVIOR_GTC,
       )
       .accountsPartial({
         marketState,
         duelState,
-        userBalance,
-        newOrder: findOrderPda(clobProgram.programId, marketState, nextOrderId),
-        restingLevel: findPriceLevelPda(clobProgram.programId, marketState, SIDE_ASK, 999),
+        userBalance: makerUserBalance,
+        newOrder: findOrderPda(clobProgram.programId, marketState, makerOrderId),
+        restingLevel: findPriceLevelPda(clobProgram.programId, marketState, SIDE_ASK, 600),
         config: configPda,
         treasury: config.treasury,
         marketMaker: config.marketMaker,
-        vault: findClobVaultPda(clobProgram.programId, marketState),
+        vault: vaultPda,
+        user: matcher.publicKey,
+        systemProgram: SystemProgram.programId,
+      })
+      .signers([matcher])
+      .rpc();
+
+    const refreshedMarket = await clobProgram.account.marketState.fetch(marketState);
+    const takerOrderId = BigInt(refreshedMarket.nextOrderId.toString());
+    const remainingAccounts = await buildPlaceOrderRemainingAccounts({
+      clobProgram,
+      marketState,
+      side: SIDE_BID,
+      price: 600,
+      amount: makerAmount,
+    });
+    const takerOrderTx = await clobProgram.methods
+      .placeOrder(
+        new BN(takerOrderId.toString()),
+        SIDE_BID,
+        600,
+        new BN(makerAmount.toString()),
+        ORDER_BEHAVIOR_GTC,
+      )
+      .accountsPartial({
+        marketState,
+        duelState,
+        userBalance: takerUserBalance,
+        newOrder: findOrderPda(clobProgram.programId, marketState, takerOrderId),
+        restingLevel: findPriceLevelPda(clobProgram.programId, marketState, SIDE_BID, 600),
+        config: configPda,
+        treasury: config.treasury,
+        marketMaker: config.marketMaker,
+        vault: vaultPda,
         user: trader.publicKey,
         systemProgram: SystemProgram.programId,
       })
+      .remainingAccounts(remainingAccounts)
       .signers([trader])
       .rpc();
+
+    const makerBalanceAfterMatch =
+      await matcherPrograms.goldClobMarket.account.userBalance.fetchNullable(makerUserBalance);
+    const takerBalanceAfterMatch =
+      await traderPrograms.goldClobMarket.account.userBalance.fetchNullable(takerUserBalance);
+    if (
+      asBigInt(makerBalanceAfterMatch?.bShares ?? 0) <= 0n ||
+      asBigInt(takerBalanceAfterMatch?.aShares ?? 0) <= 0n
+    ) {
+      throw new Error("solana PM matched trade did not create expected maker/taker exposure");
+    }
 
     const cancelTx = await fightOracle.methods
       .cancelDuel(Array.from(duelKey), "staged-live-proof-cancelled")
@@ -433,39 +635,65 @@ async function main(): Promise<void> {
       })
       .rpc();
 
-    await waitFor(
-      "solana lifecycle cancelled",
-      async () =>
-        requestJson<PredictionMarketsResponse>(
-          `${keeperUrl}/api/arena/prediction-markets/active`,
-        ),
-      (payload) => findCanonicalMarket(payload)?.lifecycleStatus === "CANCELLED",
-    );
+    const cancelledMarket = await clobProgram.account.marketState.fetch(marketState);
+    if (!("cancelled" in (cancelledMarket.status as Record<string, unknown>))) {
+      throw new Error("solana PM market did not enter cancelled status");
+    }
 
-    const claimTx = await traderPrograms.goldClobMarket.methods
+    const makerClaimTx = await matcherPrograms.goldClobMarket.methods
       .claim()
       .accountsPartial({
         marketState,
         duelState,
-        userBalance,
+        userBalance: makerUserBalance,
         config: configPda,
         marketMaker: config.marketMaker,
-        vault: findClobVaultPda(clobProgram.programId, marketState),
+        vault: vaultPda,
+        user: matcher.publicKey,
+        systemProgram: SystemProgram.programId,
+      })
+      .signers([matcher])
+      .rpc();
+
+    const takerClaimTx = await traderPrograms.goldClobMarket.methods
+      .claim()
+      .accountsPartial({
+        marketState,
+        duelState,
+        userBalance: takerUserBalance,
+        config: configPda,
+        marketMaker: config.marketMaker,
+        vault: vaultPda,
         user: trader.publicKey,
         systemProgram: SystemProgram.programId,
       })
       .signers([trader])
       .rpc();
 
-    const balanceAfter =
-      await traderPrograms.goldClobMarket.account.userBalance.fetchNullable(userBalance);
-    const aShares = BigInt(balanceAfter?.aShares?.toString?.() ?? "0");
-    const bShares = BigInt(balanceAfter?.bShares?.toString?.() ?? "0");
-    if (aShares !== 0n || bShares !== 0n) {
-      throw new Error(`solana claim cleanup incomplete: ${aShares}:${bShares}`);
+    const makerBalanceAfterClaim =
+      await matcherPrograms.goldClobMarket.account.userBalance.fetchNullable(makerUserBalance);
+    const takerBalanceAfterClaim =
+      await traderPrograms.goldClobMarket.account.userBalance.fetchNullable(takerUserBalance);
+    const makerAShares = asBigInt(makerBalanceAfterClaim?.aShares ?? 0);
+    const makerBShares = asBigInt(makerBalanceAfterClaim?.bShares ?? 0);
+    const takerAShares = asBigInt(takerBalanceAfterClaim?.aShares ?? 0);
+    const takerBShares = asBigInt(takerBalanceAfterClaim?.bShares ?? 0);
+    if (
+      makerAShares !== 0n ||
+      makerBShares !== 0n ||
+      takerAShares !== 0n ||
+      takerBShares !== 0n
+    ) {
+      throw new Error(
+        `solana claim cleanup incomplete: maker=${makerAShares}:${makerBShares} taker=${takerAShares}:${takerBShares}`,
+      );
     }
 
-    const perpsMarketId = derivePerpsMarketId(duelKeyHex);
+    const configuredPerpsMarketId = maybeAcceptanceEnv("CANARY_PERPS_MARKET_ID");
+    const perpsMarketId =
+      configuredPerpsMarketId !== null
+        ? BigInt(configuredPerpsMarketId.trim())
+        : derivePerpsMarketId(duelKeyHex);
     const perpsMarketIdBn = new BN(perpsMarketId.toString());
     const perpsConfigPda = findPerpsConfigPda(perpsAuthorityProgram.programId);
     const perpsMarketPda = findPerpsMarketPda(
@@ -482,18 +710,70 @@ async function main(): Promise<void> {
     if (!perpsConfig) {
       throw new Error("solana perps config missing for staged proof");
     }
+    const configuredSpotIndex = maybeAcceptanceEnv("CANARY_PERPS_SPOT_INDEX");
+    const defaultSpotIndex =
+      (asBigInt(perpsConfig.minOracleSpotIndex) +
+        asBigInt(perpsConfig.maxOracleSpotIndex)) / 2n;
 
-    const updateOracleTx = await perpsAuthorityProgram.methods
+    const buildUpdateOracleInstruction = () =>
+      perpsAuthorityProgram.methods
+        .updateMarketOracle(
+          perpsMarketIdBn,
+          new BN(
+            (configuredSpotIndex ?? defaultSpotIndex.toString()).trim(),
+          ),
+          new BN(
+            (maybeAcceptanceEnv("CANARY_PERPS_MU") ?? "1000000000").trim(),
+          ),
+          new BN(
+            (maybeAcceptanceEnv("CANARY_PERPS_SIGMA") ?? "100000000").trim(),
+          ),
+        )
+        .accountsPartial({
+          config: perpsConfigPda,
+          market: perpsMarketPda,
+          authority: authority.publicKey,
+          systemProgram: SystemProgram.programId,
+        })
+        .instruction();
+
+    const sendPerpsTx = async (args: {
+      marginDelta: bigint;
+      sizeDelta: bigint;
+    }): Promise<string> => {
+      const tx = new Transaction().add(
+        await buildUpdateOracleInstruction(),
+        await perpsTraderProgram.methods
+          .modifyPosition(
+            perpsMarketIdBn,
+            new BN(args.marginDelta.toString()),
+            new BN(args.sizeDelta.toString()),
+            new BN(0),
+          )
+          .accountsPartial({
+            config: perpsConfigPda,
+            market: perpsMarketPda,
+            position: perpsPositionPda,
+            trader: trader.publicKey,
+            systemProgram: SystemProgram.programId,
+          })
+          .instruction(),
+      );
+      tx.feePayer = authority.publicKey;
+      return authorityPrograms.provider.sendAndConfirm(tx, [authority, trader]);
+    };
+
+    let updateOracleTx = await perpsAuthorityProgram.methods
       .updateMarketOracle(
         perpsMarketIdBn,
         new BN(
-          (process.env.HYPERBET_SOLANA_STAGING_CANARY_PERPS_SPOT_INDEX ?? "1000000000").trim(),
+          (configuredSpotIndex ?? defaultSpotIndex.toString()).trim(),
         ),
         new BN(
-          (process.env.HYPERBET_SOLANA_STAGING_CANARY_PERPS_MU ?? "1000000000").trim(),
+          (maybeAcceptanceEnv("CANARY_PERPS_MU") ?? "1000000000").trim(),
         ),
         new BN(
-          (process.env.HYPERBET_SOLANA_STAGING_CANARY_PERPS_SIGMA ?? "100000000").trim(),
+          (maybeAcceptanceEnv("CANARY_PERPS_SIGMA") ?? "100000000").trim(),
         ),
       )
       .accountsPartial({
@@ -507,78 +787,80 @@ async function main(): Promise<void> {
 
     const perpsMinInsuranceLamports = BigInt(
       (
-        process.env.HYPERBET_SOLANA_STAGING_CANARY_PERPS_MIN_INSURANCE_LAMPORTS ??
-        "12000000000"
+        maybeAcceptanceEnv("CANARY_PERPS_MIN_INSURANCE_LAMPORTS") ?? "12000000000"
       ).trim(),
     );
-    const perpsMarketBefore = await perpsAuthorityProgram.account.marketState.fetch(
-      perpsMarketPda,
-    );
-    let depositInsuranceTx: string | null = null;
-    const currentInsurance = asBigInt(perpsMarketBefore.insuranceFund);
-    if (currentInsurance < perpsMinInsuranceLamports) {
-      const depositAmount = perpsMinInsuranceLamports - currentInsurance;
-      depositInsuranceTx = await perpsAuthorityProgram.methods
-        .depositInsurance(perpsMarketIdBn, new BN(depositAmount.toString()))
-        .accountsPartial({
-          market: perpsMarketPda,
-          payer: authority.publicKey,
-          systemProgram: SystemProgram.programId,
-        })
-        .signers([authority])
-        .rpc();
+    const insuranceFundingSources: InsuranceFundingSource[] = [
+      {
+        label: "authority",
+        keypair: authority,
+        program: perpsAuthorityProgram,
+        reserveLamports: 1_200_000_000n,
+      },
+      {
+        label: "canary",
+        keypair: trader,
+        program: perpsTraderProgram,
+        reserveLamports: 100_000_000n,
+      },
+      {
+        label: "market-maker",
+        keypair: matcher,
+        program: matcherPrograms.goldPerpsMarket,
+        reserveLamports: 50_000_000n,
+      },
+    ];
+    if (oracleFundingPrograms) {
+      insuranceFundingSources.push({
+        label: "oracle-authority",
+        keypair: oracleFundingKeypair!,
+        program: oracleFundingPrograms.goldPerpsMarket,
+        reserveLamports: 10_000_000n,
+      });
     }
+    const depositInsuranceTxs = await topUpPerpsInsurance({
+      marketIdBn: perpsMarketIdBn,
+      marketPda: perpsMarketPda,
+      targetInsuranceLamports: perpsMinInsuranceLamports,
+      authorityProgram: perpsAuthorityProgram,
+      fundingSources: insuranceFundingSources,
+    });
+    const depositInsuranceTx =
+      depositInsuranceTxs.length > 0 ? depositInsuranceTxs.at(-1) ?? null : null;
 
     const existingPosition =
       await perpsTraderProgram.account.positionState.fetchNullable(perpsPositionPda);
     const existingSize = asBigInt(existingPosition?.size ?? 0);
     if (existingSize !== 0n) {
-      await perpsTraderProgram.methods
-        .modifyPosition(
-          perpsMarketIdBn,
-          new BN(0),
-          new BN((-existingSize).toString()),
-          new BN(0),
-        )
-        .accountsPartial({
-          config: perpsConfigPda,
-          market: perpsMarketPda,
-          position: perpsPositionPda,
-          trader: trader.publicKey,
-          systemProgram: SystemProgram.programId,
-        })
-        .signers([trader])
-        .rpc();
+      await sendPerpsTx({
+        marginDelta: 0n,
+        sizeDelta: -existingSize,
+      });
     }
 
-    const perpsMarginDelta = BigInt(
-      (
-        process.env.HYPERBET_SOLANA_STAGING_CANARY_PERPS_MARGIN_LAMPORTS ??
-        "250000000"
-      ).trim(),
-    );
     const perpsSizeDelta = BigInt(
       (
-        process.env.HYPERBET_SOLANA_STAGING_CANARY_PERPS_SIZE_LAMPORTS ??
-        "500000000"
+        maybeAcceptanceEnv("CANARY_PERPS_SIZE_LAMPORTS") ?? "500000000"
       ).trim(),
     );
-    const openPositionTx = await perpsTraderProgram.methods
-      .modifyPosition(
-        perpsMarketIdBn,
-        new BN(perpsMarginDelta.toString()),
-        new BN(perpsSizeDelta.toString()),
-        new BN(0),
-      )
-      .accountsPartial({
-        config: perpsConfigPda,
-        market: perpsMarketPda,
-        position: perpsPositionPda,
-        trader: trader.publicKey,
-        systemProgram: SystemProgram.programId,
-      })
-      .signers([trader])
-      .rpc();
+    const configuredPerpsMarginDelta = BigInt(
+      (
+        maybeAcceptanceEnv("CANARY_PERPS_MARGIN_LAMPORTS") ?? "0"
+      ).trim(),
+    );
+    const tradeFeeBps =
+      asBigInt(perpsConfig.tradeTreasuryFeeBps) +
+      asBigInt(perpsConfig.tradeMarketMakerFeeBps);
+    const minOpenMargin =
+      ((perpsSizeDelta < 0n ? -perpsSizeDelta : perpsSizeDelta) * tradeFeeBps) /
+        10_000n +
+      asBigInt(perpsConfig.minMarginLamports) +
+      1_000_000n;
+    const perpsMarginDelta = maxBigInt(configuredPerpsMarginDelta, minOpenMargin);
+    const openPositionTx = await sendPerpsTx({
+      marginDelta: perpsMarginDelta,
+      sizeDelta: perpsSizeDelta,
+    });
 
     const openedPosition = await perpsTraderProgram.account.positionState.fetch(
       perpsPositionPda,
@@ -587,22 +869,10 @@ async function main(): Promise<void> {
       throw new Error("solana perps canary failed to open expected position size");
     }
 
-    const closePositionTx = await perpsTraderProgram.methods
-      .modifyPosition(
-        perpsMarketIdBn,
-        new BN(0),
-        new BN((-perpsSizeDelta).toString()),
-        new BN(0),
-      )
-      .accountsPartial({
-        config: perpsConfigPda,
-        market: perpsMarketPda,
-        position: perpsPositionPda,
-        trader: trader.publicKey,
-        systemProgram: SystemProgram.programId,
-      })
-      .signers([trader])
-      .rpc();
+    const closePositionTx = await sendPerpsTx({
+      marginDelta: 0n,
+      sizeDelta: -perpsSizeDelta,
+    });
 
     const closedPosition =
       await perpsTraderProgram.account.positionState.fetchNullable(perpsPositionPda);
@@ -648,8 +918,7 @@ async function main(): Promise<void> {
     if (!existingBet) {
       const initialLiquidity = BigInt(
         (
-          process.env.HYPERBET_SOLANA_STAGING_CANARY_AMM_INITIAL_LIQUIDITY ??
-          "1000000000"
+          maybeAcceptanceEnv("CANARY_AMM_INITIAL_LIQUIDITY") ?? "10000000"
         ).trim(),
       );
       const expirationAt = now + 900;
@@ -705,7 +974,7 @@ async function main(): Promise<void> {
     const reserveYesBefore = asBigInt(betBefore.reserves[0]);
     const reserveNoBefore = asBigInt(betBefore.reserves[1]);
     const ammTradeAmount = BigInt(
-      (process.env.HYPERBET_SOLANA_STAGING_CANARY_AMM_BUY_LAMPORTS ?? "1000000").trim(),
+      (maybeAcceptanceEnv("CANARY_AMM_BUY_LAMPORTS") ?? "1000000").trim(),
     );
     const buyTx = await ammTraderProgram.methods
       .buy(betIdBn, 0, new BN(ammTradeAmount.toString()))
@@ -744,12 +1013,14 @@ async function main(): Promise<void> {
       duelId,
       duelKeyHex,
       pm: {
-        marketRef: market.marketRef,
+        marketRef: marketState.toBase58(),
         upsertTx,
-        placeOrderTx,
+        makerOrderTx,
+        takerOrderTx,
         cancelTx,
         syncTx,
-        claimTx,
+        makerClaimTx,
+        takerClaimTx,
       },
       perps: {
         marketId: perpsMarketId.toString(),
@@ -787,5 +1058,10 @@ async function main(): Promise<void> {
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  await main();
+  void main()
+    .then(() => process.exit(0))
+    .catch((error) => {
+      console.error(error);
+      process.exit(1);
+    });
 }

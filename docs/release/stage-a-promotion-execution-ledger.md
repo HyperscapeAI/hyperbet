@@ -1,6 +1,6 @@
 # Stage-A Promotion Execution Ledger
 
-> **TL;DR:** This is the live execution log for the current non-mainnet promotion run. The new Stage-A wallet set exists locally under `keys/stage-a/`, all three new deployers are funded, and fresh non-mainnet ERC20 collateral tokens now exist on both `BSC testnet` and `AVAX Fuji`. BSC and AVAX PM-core plus perps are now deployed from the new Stage-A wallet set. The current hard blocker is the EVM AMM `Router`, which exceeds the EVM max code-size limit as compiled.
+> **TL;DR:** This is the live execution log for the current non-mainnet promotion run. The new Stage-A wallet set exists locally under `keys/stage-a/`, all three new deployers are funded, fresh non-mainnet ERC20 collateral tokens now exist on both `BSC testnet` and `AVAX Fuji`, and Solana devnet full-product deployment, init/freeze, and verification are now complete under the new Stage-A wallet set. BSC and AVAX PM-core plus perps are deployed from the new Stage-A wallet set. The current hard blocker is still the EVM AMM `Router`, which exceeds the EVM max code-size limit as compiled, plus later GitHub `staging` provisioning for staged proof and soak.
 
 This document records the exact commands, balances, transaction hashes, and blockers for the current Stage-A promotion run. It is intentionally operational and append-only for this execution cycle.
 
@@ -46,8 +46,8 @@ Local shell export helpers exist at:
 | Deploy BSC PM + AMM + perps | In progress | PM-core and perps are deployed; AMM is blocked by EVM max code size |
 | Deploy AVAX PM + AMM + perps | In progress | PM-core and perps are deployed; AMM is blocked by the same EVM code-size issue |
 | Verify BSC and AVAX deployment receipts | Blocked | Verification confirms AMM receipt fields are still missing |
-| Resolve Solana devnet keypair/program-id alignment | Blocked | Devnet preflight fails on all four program keypair/pubkey checks |
-| Run staged proof and staged soak | Pending | Blocked on missing EVM AMM and Solana devnet deployment |
+| Resolve Solana devnet keypair/program-id alignment | Complete | Strict new-wallet-only Solana Stage-A IDs are live on devnet and verified |
+| Run staged proof and staged soak | Pending | Blocked on missing EVM AMM and missing GitHub `staging` provisioning |
 
 ## Execution Log
 
@@ -998,15 +998,405 @@ Conclusion:
   - the actual local keypair for `4zVqVfrY5AjqKytAEBEo3MHk2PQBj6u7bTvUcWAu9Sya` is not present on this machine.
 - Without that key, PM upgrades cannot proceed, and therefore the full Solana devnet promotion cannot complete.
 
+### Step 15. Switch Solana Stage-A to strict new-wallet-only funding
+
+Status:
+- Complete
+
+Decision:
+- Abandoned the mixed old-authority Solana model for Stage-A.
+- Standardized on the new Stage-A Solana deployer only:
+  - `B6rVRCTCUxWQ5fmT1fboPsnbuMuwoKpWSCBK3NHbs83w`
+
+Bootstrap funding actions:
+- The CI-held legacy Solana deployer was used only as a funding source, not as the Stage-A authority.
+- Updated [fund-stage-a-wallets.yml](/Volumes/OWC%20Envoy%20Pro%20FX/Work/hyperbet/.github/workflows/fund-stage-a-wallets.yml) to:
+  - install Solana CLI on the runner
+  - support `chain=solana`
+  - support `recipient=ALL` for full-balance sweep
+
+GitHub Actions run:
+- `23597777780`
+
+Funding transfer:
+- from legacy CI-held Solana deployer:
+  - `4zVqVfrY5AjqKytAEBEo3MHk2PQBj6u7bTvUcWAu9Sya`
+- to new Stage-A Solana deployer:
+  - `B6rVRCTCUxWQ5fmT1fboPsnbuMuwoKpWSCBK3NHbs83w`
+- signature:
+  - `4Cc3K1hxGA6d8BkhoTgfsqxzRHfUWnC1j7N34zTLRt3YFZzcYHosz75WbpXBwNSGGiHJMaHPjaed82pn43XXmQnL`
+
+Confirmed balances after sweep:
+- old legacy deployer:
+  - `0 SOL`
+- new Stage-A deployer:
+  - `9.799917 SOL`
+
+Additional funding state before final deploy:
+- Observed Stage-A deployer balance:
+  - `14.798917 SOL`
+- This was sufficient for the remaining three Solana program deploys plus init/freeze.
+
+### Step 16. Deploy all four Solana Stage-A programs under the new wallet
+
+Status:
+- Complete
+
+Build note:
+- After the machine reboot, `anchor build` completed successfully again.
+- The subsequent deploy used `SKIP_BUILD=1` because the SBF binaries and generated artifacts were already up to date.
+
+Primary deploy command:
+
+```bash
+export PATH="/opt/homebrew/bin:/usr/local/bin:/Users/mac/.bun/bin:/Users/mac/.local/share/solana/install/active_release/bin:$PATH"
+source /Volumes/OWC\ Envoy\ Pro\ FX/Work/hyperbet/keys/stage-a/export-stage-a.sh
+export SOLANA_RPC_URL="https://solana-devnet.g.alchemy.com/v2/h85R-i8JMJTM3RRVgxLza"
+export SKIP_BUILD=1
+cd /Volumes/OWC\ Envoy\ Pro\ FX/Work/hyperbet/packages/hyperbet-solana/anchor
+bash scripts/deploy-programs.sh devnet
+```
+
+Deploy transport notes:
+- Alchemy devnet RPC worked reliably for program deployment after public devnet returned repeated `AlreadyProcessed` write failures.
+- `fight_oracle` already matched the current binary and was skipped.
+- No stale Stage-A buffers remained after cleanup.
+
+Final deployed / confirmed Stage-A Solana program IDs:
+- `fight_oracle`
+  - `GFdnu7kUnZGiXh4ejWiJSBCUxvq4UfdEeUv9jjFzr5EM`
+  - already matched current binary
+- `gold_clob_market`
+  - `3QUVoaKJqo1rg9eXe7vyFewJrY75NWdtH8JZfvTb79Uy`
+  - deploy signature:
+    - `4jQHApQGyUSAeHRyBBkcTdBK253TmsjLVJW8YjysztndhR5U9jSb51FJWW5P6XjjbYFPv7zB144JciTE64x9mSa9`
+- `lvr_amm`
+  - `12E8Lz5w8Qxyj8Fh6LgsCgPDQNJMCLMV1y43LhPrH66w`
+  - deploy signature:
+    - `jUgwWfhNmP21eY5onNBAQ6ZdjRRVL6D7ppqQXrd65ajPMRTCK5KmvzRt9riJgkLb2k4tPnwa5yfPyeoVw65CbWK`
+- `gold_perps_market`
+  - `BFbmQbSbf3R6fMDdXKMKQZCTyMhMs9MCcjAhGDBLETXS`
+  - deploy signature:
+    - `3AxDvrrRa6zkiRAYPFsATMNkq2kMRF7W2AxuSTVLuXReCi1rzsFBhCUJLnGv1X9wNpbU1LYMm1LYVpFokbgmvCzj`
+
+Verified upgrade authority after deploy:
+- all four programs:
+  - `B6rVRCTCUxWQ5fmT1fboPsnbuMuwoKpWSCBK3NHbs83w`
+
+### Step 17. Initialize, freeze, and verify the Solana full-product deployment
+
+Status:
+- Complete
+
+First init/freeze attempt:
+- Used Alchemy devnet RPC.
+- On-chain transaction landed, but local confirmation timed out because the endpoint did not support `signatureSubscribe` over the derived websocket path.
+- Timed-out signature:
+  - `4jTRujwDdHzg8dqZUoLg6QrSD3U3SzK3JuVFLvV48QrdjdV2GUvVGHXYJJ2Xgmrm3PJHLB8StWsFRtRQaV9dZAXw`
+- Transaction status was later confirmed finalized on-chain.
+
+Successful init/freeze command:
+
+```bash
+export PATH="/opt/homebrew/bin:/usr/local/bin:/Users/mac/.bun/bin:/Users/mac/.local/share/solana/install/active_release/bin:$PATH"
+source /Volumes/OWC\ Envoy\ Pro\ FX/Work/hyperbet/keys/stage-a/export-stage-a.sh
+unset SOLANA_RPC_URL
+cd /Volumes/OWC\ Envoy\ Pro\ FX/Work/hyperbet
+node --import tsx packages/hyperbet-solana/scripts/init-pm-config.ts --cluster devnet --freeze --out .ci-artifacts/stage-a/solana-init-devnet.json
+```
+
+Init/freeze artifact:
+- [.ci-artifacts/stage-a/solana-init-devnet.json](/Volumes/OWC%20Envoy%20Pro%20FX/Work/hyperbet/.ci-artifacts/stage-a/solana-init-devnet.json)
+
+Key PDAs and receipts:
+- oracle config:
+  - `5basW2tPtGYVQLFd4rHNyN4rHrLqbRi5BGBeB8R5MBg2`
+- market config:
+  - `G6SEueAJsTxSbwCSEdYFAbhAXJkdypQ1ZLZFEa2ZAaFM`
+- AMM admin state:
+  - `3AnE6vCHYw3wo7KDanjy7tm51aPNsMSuZpBxWz14HSPS`
+- AMM config:
+  - `3eFbaqGdgsacaqwjTABzC6YJgDkgDNEbDCJDx7xXWBBR`
+- perps config:
+  - `2GKDScykvs22Uie6zC4iKnM5jZyAy1m7mPqKahvpaQEU`
+- freeze oracle tx:
+  - `4y7z65ARWA1hi9qomFpGvsQTX7kMVEu7eBWz9Q1gozd8XNuhwJGkGC7kTphEvgU6USjKQYBof1GobrX592aTsZPx`
+- freeze market tx:
+  - `28osBuQUnW57qLNtqLdFwzzBG6LAwddMUSjavRJHfmhJvsz2UEnihMDhm7jKkms15B4NNzfhdsjUCNumUDgfa69Y`
+- freeze AMM tx:
+  - `3wrADkbgimSnzX5Pj3bzgZSvuNRWvARS72u23jCbzifKuDgs9hWbxHdNV6KJLz2BpFPzMyM2mMzdyEAShZJLZHzH`
+- freeze perps tx:
+  - `2bakr3e2jpHiuqEDSYGEr98PUnEphELubiKHh23KZbssQEq6jKTZSSNoicYhRan4nDGYJKpeZYtu7eouXndfQ3mM`
+
+Successful verify command:
+
+```bash
+export PATH="/opt/homebrew/bin:/usr/local/bin:/Users/mac/.bun/bin:/Users/mac/.local/share/solana/install/active_release/bin:$PATH"
+source /Volumes/OWC\ Envoy\ Pro\ FX/Work/hyperbet/keys/stage-a/export-stage-a.sh
+unset SOLANA_RPC_URL
+cd /Volumes/OWC\ Envoy\ Pro\ FX/Work/hyperbet
+node --import tsx packages/hyperbet-solana/scripts/verify-deployment.ts --cluster devnet --out .ci-artifacts/stage-a/solana-devnet.json
+```
+
+Verifier fix required:
+- [verify-deployment.ts](/Volumes/OWC%20Envoy%20Pro%20FX/Work/hyperbet/packages/hyperbet-solana/scripts/verify-deployment.ts) initially false-failed all upgrade-authority checks because it invoked `solana program show` with the original Stage-A wallet path containing spaces.
+- Patched the verifier to stage the signer into a temp no-space path before shelling out to Solana CLI.
+
+Final verify artifact:
+- [.ci-artifacts/stage-a/solana-devnet.json](/Volumes/OWC%20Envoy%20Pro%20FX/Work/hyperbet/.ci-artifacts/stage-a/solana-devnet.json)
+
+Final verify result:
+- `failures: []`
+- `warnings: []`
+- all four program upgrade authorities matched:
+  - `B6rVRCTCUxWQ5fmT1fboPsnbuMuwoKpWSCBK3NHbs83w`
+
 ## Current Blockers (Updated Again)
 
 Known remaining blockers before full non-mainnet signoff:
 
-1. Recover or provide the local Solana keypair for upgrade authority `4zVqVfrY5AjqKytAEBEo3MHk2PQBj6u7bTvUcWAu9Sya`.
-2. Re-run Solana devnet deploy with that authority wallet:
-   - PM upgrade for `fight_oracle`
-   - PM upgrade for `gold_clob_market`
-   - fresh deploy for rotated `lvr_amm`
-   - fresh deploy for rotated `gold_perps_market`
-3. Run Solana init/freeze and Solana full-product verify after the deploy succeeds.
-4. Provision GitHub `staging` and run staged proof / staged soak after Solana is green.
+1. Shrink or refactor the EVM AMM `Router` so BSC and AVAX AMM can deploy under the EVM max code-size limit.
+2. Re-run BSC and AVAX AMM deploys and then re-run full EVM verification so the canonical receipts include AMM addresses.
+3. Provision GitHub `staging` with the required `HYPERBET_*_STAGING_*` vars and secrets.
+4. Run staged proof and staged soak after the EVM AMM lane and GitHub `staging` provisioning are complete.
+
+## Step 18. Direct Testnet Acceptance Harness
+
+Status:
+- In progress
+
+What changed:
+- Added local testnet/devnet acceptance env resolution in [testnet-acceptance-env.ts](/Volumes/OWC%20Envoy%20Pro%20FX/Work/hyperbet/scripts/testnet-acceptance-env.ts).
+- Added direct non-mainnet canary wrapper in [run-stage-a-direct-canaries.sh](/Volumes/OWC%20Envoy%20Pro%20FX/Work/hyperbet/scripts/run-stage-a-direct-canaries.sh).
+- Added local acceptance keeper manager in [manage-stage-a-acceptance-services.sh](/Volumes/OWC%20Envoy%20Pro%20FX/Work/hyperbet/scripts/manage-stage-a-acceptance-services.sh).
+- Patched the EVM direct canary in [staged-proof-evm-common.ts](/Volumes/OWC%20Envoy%20Pro%20FX/Work/hyperbet/scripts/staged-proof-evm-common.ts) to:
+  - use matched PM trades instead of one-sided order placement
+  - use chain-only PM lifecycle checks rather than keeper lifecycle polling
+  - fail hard on reverted EVM receipts instead of assuming a mined hash means success
+- Patched the Solana direct canary in [staged-proof-solana.ts](/Volumes/OWC%20Envoy%20Pro%20FX/Work/hyperbet/packages/hyperbet-solana/keeper/src/staged-proof-solana.ts) to:
+  - use the Stage-A `ANCHOR_WALLET` authority for privileged PM/perps/AMM calls
+  - derive and initialize the CLOB market PDA directly instead of relying on keeper-discovered lifecycle state
+  - prefund the CLOB vault PDA to rent-exempt before placing PM orders
+  - derive the perps oracle spot index from the live frozen config range instead of a stale hardcoded default
+
+Current direct-canary results:
+- BSC:
+  - green
+  - artifact: [.ci-artifacts/stage-a/direct-canaries/bsc.json](/Volumes/OWC%20Envoy%20Pro%20FX/Work/hyperbet/.ci-artifacts/stage-a/direct-canaries/bsc.json)
+- AVAX:
+  - green in isolated acceptance runs after fixing the AVAX RPC typo and hardening EVM receipt handling
+  - latest successful isolated run exercised PM matched trade, perps open/close, and AMM create/buy on AVAX Fuji
+- Solana:
+  - PM lane advanced from authority failure to full direct chain-owned market creation
+  - PM order placement and claim path no longer depend on keeper lifecycle discovery
+  - current blocker moved to perps funding, not PM wiring
+
+Latest Solana blocker:
+- The frozen deployed perps config requires:
+  - `minMarketInsuranceLamports = 12000000000`
+  - equivalent to `12 SOL`
+- The direct canary now reaches `depositInsurance`, but local balances are insufficient to satisfy the on-chain minimum.
+
+Confirmed local devnet balances:
+- Stage-A deployer `B6rVRCTCUxWQ5fmT1fboPsnbuMuwoKpWSCBK3NHbs83w`: `0.97181108 SOL`
+- Stage-A canary `49TkQJPeK8wgCfK86imb91B7C5Jjp6QCc4gWD1ELjWwP`: `1.999946 SOL`
+- Stage-A market maker `6kVjz7xYE4UbmtsAsPLX9SbU8GR66ExkJoAex8bfJf2Q`: `0.99381344 SOL`
+- Stage-A oracle authority `6LBgqsGHCqSyQVwCPEtxTxRwhAvwMAJ5PYhWjQo3xdn4`: `0.25 SOL`
+- Additional local wallet `RFXuMwGJ4Rm9mYcYLstWX8ANnZxV25eyfd4ZdMeBY1u`: `5 SOL`
+
+Aggregate funding reality:
+- new-wallet-only total available for Solana acceptance:
+  - `4.21557052 SOL`
+- including the extra local `RFX...` wallet:
+  - `9.21557052 SOL`
+- shortfall versus the frozen perps insurance minimum:
+  - `2.78442948 SOL`
+- practical remaining requirement:
+  - at least `2.8 SOL` more before Solana perps can be exercised end-to-end
+
+Updated blockers:
+1. Acquire at least `2.8 SOL` more on devnet for local Solana acceptance funding.
+2. Re-run the Solana direct canary once the perps insurance minimum can be satisfied.
+3. After direct canaries are green on all three chains, move to browser-driven local user testing on top of the deployed Stage-A chains.
+
+### Step 18a. Additional local Solana funding from RFX
+
+Status:
+- Complete
+
+Action:
+- Swept the remaining local devnet SOL from:
+  - `RFXuMwGJ4Rm9mYcYLstWX8ANnZxV25eyfd4ZdMeBY1u`
+- into the Stage-A Solana deployer:
+  - `B6rVRCTCUxWQ5fmT1fboPsnbuMuwoKpWSCBK3NHbs83w`
+
+Transfer receipt:
+- signature:
+  - `5ya16DSpBJfBtRua8MBWna1PLArvEhBxacw7K9XmJLPtcicEQrFoVxixPWSPwXyrGsRwQmg6b7cUbQkx69yeMRtg`
+
+Post-transfer balances:
+- `B6rVRCTCUxWQ5fmT1fboPsnbuMuwoKpWSCBK3NHbs83w`:
+  - `5.97180608 SOL`
+- `RFXuMwGJ4Rm9mYcYLstWX8ANnZxV25eyfd4ZdMeBY1u`:
+  - `0 SOL`
+
+Recomputed funding reality after the sweep:
+- Stage-A deployer:
+  - `5.97180608 SOL`
+- Stage-A canary:
+  - `1.999946 SOL`
+- Stage-A market maker:
+  - `0.99381344 SOL`
+- Stage-A oracle authority:
+  - `0.25 SOL`
+- aggregate local devnet SOL still available:
+  - `9.21556552 SOL`
+- remaining shortfall versus the frozen perps insurance minimum:
+  - `2.78443448 SOL`
+
+### Step 18b. Solana perps insurance rerun after failed user top-up
+
+Status:
+- Blocked
+
+Action:
+- Rechecked the Stage-A Solana actor balances after the attempted extra user top-up.
+- Queried recent signatures for the Stage-A deployer on both Helius and public devnet RPC.
+- Re-ran the direct Solana canary with fresh duel inputs against:
+  - `https://devnet.helius-rpc.com/?api-key=dd4ea427-6b5e-4c12-b8f9-e157dfda064a`
+
+Observed balances before the clean rerun:
+- Stage-A deployer `B6rVRCTCUxWQ5fmT1fboPsnbuMuwoKpWSCBK3NHbs83w`:
+  - `1.199995 SOL`
+- Stage-A canary `49TkQJPeK8wgCfK86imb91B7C5Jjp6QCc4gWD1ELjWwP`:
+  - `0.099995 SOL`
+- Stage-A market maker `6kVjz7xYE4UbmtsAsPLX9SbU8GR66ExkJoAex8bfJf2Q`:
+  - `0.55124948 SOL`
+- Stage-A oracle authority `6LBgqsGHCqSyQVwCPEtxTxRwhAvwMAJ5PYhWjQo3xdn4`:
+  - `0.25 SOL`
+
+Observed balances after the insurance rerun drained the remaining usable local reserves:
+- Stage-A deployer `B6rVRCTCUxWQ5fmT1fboPsnbuMuwoKpWSCBK3NHbs83w`:
+  - `1.17761348 SOL`
+- Stage-A canary `49TkQJPeK8wgCfK86imb91B7C5Jjp6QCc4gWD1ELjWwP`:
+  - `0.099941 SOL`
+- Stage-A market maker `6kVjz7xYE4UbmtsAsPLX9SbU8GR66ExkJoAex8bfJf2Q`:
+  - `0.04690172 SOL`
+- Stage-A oracle authority `6LBgqsGHCqSyQVwCPEtxTxRwhAvwMAJ5PYhWjQo3xdn4`:
+  - `0.009995 SOL`
+
+Exact current blocker:
+- The clean rerun now fails with the explicit error:
+  - `solana perps insurance shortfall: need 11261843800 lamports (11.261843800 SOL) more after local wallet aggregation`
+- This confirms the extra attempted user top-up did not arrive as usable balance on the Stage-A funding pool, and the remaining local wallets have now been drained down to their configured acceptance reserves.
+
+Instrumentation added:
+- Patched [staged-proof-solana.ts](/Volumes/OWC%20Envoy%20Pro%20FX/Work/hyperbet/packages/hyperbet-solana/keeper/src/staged-proof-solana.ts) to log:
+  - current perps insurance before funding
+  - target insurance
+  - remaining insurance gap
+  - per-source balance, reserve, and available funding
+  - per-source `depositInsurance` transaction signatures
+
+Updated acceptance reality:
+1. BSC direct canary remains green.
+2. AVAX direct canary remains green.
+3. Solana PM lane remains wired and usable.
+4. Solana perps still cannot complete without another `11.261843800 SOL` of usable devnet funding.
+
+### Step 18c. Solana direct canary root-cause fixes and green run
+
+Status:
+- Complete
+
+Root causes identified:
+1. The acceptance harness was rotating duel keys on every rerun, which created fresh isolated Solana perps market IDs and made earlier insurance deposits appear to be lost.
+2. The Solana canary did not honor plain local `CANARY_*` override env names, so manual reruns were silently ignoring the intended perps market override.
+3. The perps open/close flow was racing the frozen `maxOracleStalenessSeconds = 5` requirement by sending `updateMarketOracle` and `modifyPosition` as separate transactions.
+4. The perps margin default was too brittle because it did not account for trade fees, so a nominal min-margin trade could still fail `InvalidMargin`.
+5. The AMM acceptance default was too heavy for the remaining local authority balance because `init_bet_account` transfers the full initial bet reserve from the authority.
+6. The Solana canary result JSON still referenced a removed `market` variable after the flow changes.
+
+Fixes applied:
+- Patched [run-stage-a-direct-canaries.sh](/Volumes/OWC%20Envoy%20Pro%20FX/Work/hyperbet/scripts/run-stage-a-direct-canaries.sh) to persist a sticky acceptance duel under:
+  - `keys/stage-a/acceptance/duel.env`
+- Patched [staged-proof-solana.ts](/Volumes/OWC%20Envoy%20Pro%20FX/Work/hyperbet/packages/hyperbet-solana/keeper/src/staged-proof-solana.ts) to:
+  - honor bare `CANARY_*` env overrides in addition to legacy names
+  - accept a fixed `CANARY_PERPS_MARKET_ID`
+  - log live perps insurance state/source funding when diagnosing failures
+  - reuse the already-funded perps market instead of minting fresh isolated insurance requirements
+  - bundle `updateMarketOracle` and `modifyPosition` into the same transaction for perps open/close
+  - auto-pad perps margin above `min_margin_lamports + fees`
+  - lower the default AMM initial liquidity for acceptance from `1 SOL` to `0.01 SOL`
+  - fix the final Solana result assembly to reference the actual PM market PDA
+
+Confirmed funded perps market reused:
+- market account:
+  - `9SaxjYKYLTCHnWAW6J27bG4VWCiaoTW4cwJ612P4fyfa`
+- market id:
+  - `4893965445`
+- on-chain `insurance_fund`:
+  - `12 SOL`
+
+Successful direct Solana canary artifact:
+- [.ci-artifacts/stage-a/direct-canaries/solana.json](/Volumes/OWC%20Envoy%20Pro%20FX/Work/hyperbet/.ci-artifacts/stage-a/direct-canaries/solana.json)
+
+Result:
+1. BSC direct canary: green.
+2. AVAX direct canary: green.
+3. Solana direct canary: green.
+4. The protocol-level precondition for browser-driven testnet acceptance is now satisfied on all deployed Stage-A chains.
+
+### Step 18d. Synthetic browser-to-chain acceptance completed on BSC
+
+Status:
+- Complete
+
+What changed:
+1. Patched [market-flows.e2e.ts](/Volumes/OWC%20Envoy%20Pro%20FX/Work/hyperbet/packages/hyperbet-bsc/app/tests/e2e/market-flows.e2e.ts) so:
+   - the matched YES/NO PM flow still uses the stronger `0.001` setup that proves two-sided browser trading
+   - recovery uses the lighter `0.0005` sell seed to avoid burning matcher gas on a non-matching setup leg
+   - cancel/refund uses an isolated `E2E_CANCEL_PREDICTION_AMOUNT = 0.00025` because the acceptance bar there is refund semantics, not order size
+2. Rebalanced remaining BSC gas locally across Stage-A wallets instead of blocking on another faucet/CI funding cycle.
+3. Completed the remaining targeted browser reruns on the deployed BSC testnet chain.
+
+Confirmed browser tx evidence:
+- recovery YES:
+  - `0x79c6a2a7840ad0736b6d85b45fab05296735d67d7655e6ed9b081c040beb35bd`
+- cancel YES:
+  - `0xc0163a00de2f03133ed1f7b8f58bf5d6611963336bfda418a1d4d95bc390b670`
+- cancel refund claim:
+  - `0x73277718f9c347752176315d122544007975fbfae0ab64271582383be617bdb6`
+
+Local-only BSC gas rebalances used to finish the lane:
+- admin -> matcher:
+  - `0xd62d595c390f6dd2c1765d94d2f75407754294f5681e0c66fd731969014918fe`
+- market operator -> canary:
+  - `0xea63e4529b47449944f77a7459bca4009be31c4645dd90503c3a5fcc967a8ff8`
+- deployer -> market operator:
+  - `0x6067869ed15ead376db9c90de5939861274492c49261d62f5febdb0f244da00e`
+- admin -> reporter:
+  - `0x00a11977713338a599502b2c195a5901e98a1a347571981fd31d26535e23be68`
+  - `0xbf5676474f8bf88a863f2365ac079e77a4412faeec5007a87518c438ac9fc004`
+  - `0xc2d46a7910f761537f41d5db75cc0bb7fc9aed0c0baaee5454b04654dd1ab869`
+- admin -> finalizer:
+  - `0x5994c081c6e26689ca8263dbe9a4b0231579543b694ed55c3431e3e3cdd2502b`
+- finalizer -> canary:
+  - `0xc52f6656b6d174bcd06c5edf714e43586ddb1d987de13f546b452eeb73697fff`
+- finalizer -> matcher:
+  - `0x329ba75b6ab59a6d9a8885f6517fe6f0b246d36a82c5bc308f71c255e7e94e3c`
+- treasury -> canary:
+  - `0x41bc3035385d097c6c1a1daa2b0dc1b79bc4d21aabc0ace43c4f194d803360d6`
+  - `0x8dd47911afb4d384043d9eec48caf8df79bd63542032ea706aefbf8ba07eeed9`
+- market maker -> reporter:
+  - `0xc0f1e68ca5cf2ed891edb60b860173c278c3e34d4c3b64f743d0c0b47d9f7f36`
+  - `0xfe0af50a8a54d9c9647f35e8a2597ef1c7f44d3281d2a174b529f8f204fc4dcd`
+- market maker -> matcher:
+  - `0xc1e9085f3666d7127259c80a24e2acfe675096cffabead799ee50abb037f5afa`
+  - `0x39615ef74c5aa234a4dbb2a85e5dca8195c1b0de18131d1f12fb24e8f88ce24c`
+
+Result:
+1. BSC synthetic browser PM lane is green on the deployed Stage-A contracts.
+2. AVAX synthetic browser PM lane was already green.
+3. Solana synthetic browser lane remains green except for the explicitly time-gated matured-claim variant.
+4. The next phase is swapping the duel source from `synthetic_publish` to `real_hyperscapes`.

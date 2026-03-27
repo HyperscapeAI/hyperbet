@@ -9,6 +9,10 @@ import { Connection, PublicKey } from "@solana/web3.js";
 import dotenv from "dotenv";
 import { ethers } from "ethers";
 
+import {
+  resolveEvmAcceptanceRuntime,
+  resolveSolanaAcceptanceRuntime,
+} from "../../../scripts/testnet-acceptance-env.ts";
 import { normalizeAddress } from "./index.ts";
 
 dotenv.config();
@@ -39,7 +43,7 @@ export type CheckResult = {
   details: string;
 };
 
-type DeploymentMode = "production" | "staging";
+type DeploymentMode = "production" | "staging" | "testnet";
 
 type EvmSurfaceCheck = {
   chain: BettingEvmChain;
@@ -297,7 +301,7 @@ function parseDeployment(args: Array<string>): DeploymentMode {
     ?.slice("--deployment=".length);
   const envValue = process.env.HYPERBET_VERIFY_DEPLOYMENT?.trim();
   const value = argValue || envValue || "production";
-  if (value !== "production" && value !== "staging") {
+  if (value !== "production" && value !== "staging" && value !== "testnet") {
     throw new Error(`unsupported deployment mode: ${value}`);
   }
   return value;
@@ -313,58 +317,29 @@ function firstNonEmptyValue(...values: Array<string | undefined>): string | null
   return null;
 }
 
-function resolveStagingEvmCheck(
+function resolveNonMainnetEvmCheck(
   chain: BettingEvmChain,
 ): EvmSurfaceCheck | CheckResult {
-  const chainUpper = chain.toUpperCase();
-  const deployment = resolveBettingEvmDeploymentForChain(chain, "mainnet-beta");
-  const rpcUrl = firstNonEmptyValue(
-    process.env[`${chainUpper}_STAGING_RPC_URL`],
-    process.env[`EVM_${chainUpper}_STAGING_RPC_URL`],
-  );
+  const runtime = resolveEvmAcceptanceRuntime(chain as "bsc" | "avax", process.env);
+  const deployment = resolveBettingEvmDeploymentForChain(chain, "testnet");
+  const rpcUrl = runtime.rpcUrl;
   if (!rpcUrl) {
     return {
       chain,
       ok: false,
-      details: `${chainUpper}_STAGING_RPC_URL not configured`,
+      details: `${chain.toUpperCase()} testnet RPC URL not configured`,
     };
   }
 
   const addressFields = {
-    duelOracleAddress: firstNonEmptyValue(
-      process.env[`ORACLE_CONTRACT_ADDRESS_${chainUpper}_STAGING`],
-      process.env[`${chainUpper}_STAGING_DUEL_ORACLE_ADDRESS`],
-    ),
-    goldClobAddress: firstNonEmptyValue(
-      process.env[`CLOB_CONTRACT_ADDRESS_${chainUpper}_STAGING`],
-      process.env[`${chainUpper}_STAGING_GOLD_CLOB_ADDRESS`],
-    ),
-    goldAmmRouterAddress: firstNonEmptyValue(
-      process.env[`AMM_ROUTER_ADDRESS_${chainUpper}_STAGING`],
-      process.env[`${chainUpper}_STAGING_GOLD_AMM_ROUTER_ADDRESS`],
-    ),
-    mUsdTokenAddress: firstNonEmptyValue(
-      process.env[`MUSD_TOKEN_ADDRESS_${chainUpper}_STAGING`],
-      process.env[`${chainUpper}_STAGING_MUSD_TOKEN_ADDRESS`],
-    ),
-    goldTokenAddress: firstNonEmptyValue(
-      process.env[`GOLD_TOKEN_ADDRESS_${chainUpper}_STAGING`],
-      process.env[`${chainUpper}_STAGING_GOLD_TOKEN_ADDRESS`],
-    ),
-    skillOracleAddress: firstNonEmptyValue(
-      process.env[`SKILL_ORACLE_ADDRESS_${chainUpper}_STAGING`],
-      process.env[`${chainUpper}_STAGING_SKILL_ORACLE_ADDRESS`],
-    ),
-    perpEngineAddress: firstNonEmptyValue(
-      process.env[`PERP_ENGINE_ADDRESS_${chainUpper}_STAGING`],
-      process.env[`${chainUpper}_STAGING_PERP_ENGINE_ADDRESS`],
-    ),
-    perpMarginTokenAddress: firstNonEmptyValue(
-      process.env[`PERP_MARGIN_TOKEN_ADDRESS_${chainUpper}_STAGING`],
-      process.env[`${chainUpper}_STAGING_PERP_MARGIN_TOKEN_ADDRESS`],
-      process.env[`GOLD_TOKEN_ADDRESS_${chainUpper}_STAGING`],
-      process.env[`${chainUpper}_STAGING_GOLD_TOKEN_ADDRESS`],
-    ),
+    duelOracleAddress: runtime.duelOracleAddress,
+    goldClobAddress: runtime.goldClobAddress,
+    goldAmmRouterAddress: runtime.goldAmmRouterAddress,
+    mUsdTokenAddress: runtime.mUsdTokenAddress,
+    goldTokenAddress: runtime.goldTokenAddress,
+    skillOracleAddress: runtime.skillOracleAddress,
+    perpEngineAddress: runtime.perpEngineAddress,
+    perpMarginTokenAddress: runtime.perpMarginTokenAddress,
   };
 
   for (const [fieldName, rawAddress] of Object.entries(addressFields)) {
@@ -378,16 +353,17 @@ function resolveStagingEvmCheck(
     }
   }
 
-  return {
-    chain,
-    rpcUrl,
-    expectedChainId: BigInt(
-      firstNonEmptyValue(
-        process.env[expectedChainIdEnvVar(chain)],
-        process.env[`${chainUpper}_STAGING_CHAIN_ID`],
-        `${deployment.chainId}`,
-      )!,
-    ),
+    return {
+      chain,
+      rpcUrl,
+      expectedChainId: BigInt(
+        firstNonEmptyValue(
+          process.env[expectedChainIdEnvVar(chain)],
+          process.env[`${chain.toUpperCase()}_TESTNET_CHAIN_ID`],
+          process.env[`${chain.toUpperCase()}_STAGING_CHAIN_ID`],
+          `${deployment.chainId}`,
+        )!,
+      ),
     duelOracleAddress: normalizeAddress(addressFields.duelOracleAddress!),
     goldClobAddress: normalizeAddress(addressFields.goldClobAddress!),
     goldAmmRouterAddress: normalizeAddress(addressFields.goldAmmRouterAddress!),
@@ -451,12 +427,12 @@ function resolveProductionEvmCheck(
   }
 }
 
-function resolveStagingSolanaCheck(): SolanaSurfaceCheck | CheckResult {
+function resolveNonMainnetSolanaCheck(): SolanaSurfaceCheck | CheckResult {
+  const runtime = resolveSolanaAcceptanceRuntime(process.env);
   const rpcUrl =
     process.env.SOLANA_VERIFY_RPC_URL?.trim() ||
     process.env.SOLANA_RPC_URL?.trim() ||
-    process.env.HYPERBET_SOLANA_STAGING_RPC_URL?.trim() ||
-    "";
+    runtime.rpcUrl;
   if (!rpcUrl) {
     return {
       chain: "solana",
@@ -468,16 +444,13 @@ function resolveStagingSolanaCheck(): SolanaSurfaceCheck | CheckResult {
   const goldClobProgramId =
     process.env.SOLANA_VERIFY_GOLD_CLOB_PROGRAM_ID?.trim() ||
     process.env.SOLANA_VERIFY_PROGRAM_ID?.trim() ||
-    process.env.HYPERBET_SOLANA_STAGING_GOLD_CLOB_PROGRAM_ID?.trim() ||
-    "";
+    runtime.goldClobProgramId;
   const goldAmmProgramId =
     process.env.SOLANA_VERIFY_GOLD_AMM_PROGRAM_ID?.trim() ||
-    process.env.HYPERBET_SOLANA_STAGING_GOLD_AMM_PROGRAM_ID?.trim() ||
-    "";
+    runtime.goldAmmProgramId;
   const goldPerpsProgramId =
     process.env.SOLANA_VERIFY_GOLD_PERPS_PROGRAM_ID?.trim() ||
-    process.env.HYPERBET_SOLANA_STAGING_GOLD_PERPS_PROGRAM_ID?.trim() ||
-    "";
+    runtime.goldPerpsProgramId;
 
   for (const [fieldName, rawAddress] of Object.entries({
     goldClobProgramId,
@@ -532,9 +505,9 @@ async function run() {
 
   const evmChecks = evmChains.map((chain) => {
     const resolved =
-      deployment === "staging"
-        ? resolveStagingEvmCheck(chain)
-        : resolveProductionEvmCheck(chain);
+      deployment === "production"
+        ? resolveProductionEvmCheck(chain)
+        : resolveNonMainnetEvmCheck(chain);
     if ("ok" in resolved) {
       return Promise.resolve(resolved);
     }
@@ -544,9 +517,9 @@ async function run() {
   const solanaCheck = includeSolana
     ? (() => {
         const resolved =
-          deployment === "staging"
-            ? resolveStagingSolanaCheck()
-            : resolveProductionSolanaCheck();
+          deployment === "production"
+            ? resolveProductionSolanaCheck()
+            : resolveNonMainnetSolanaCheck();
         if ("ok" in resolved) {
           return Promise.resolve(resolved);
         }
