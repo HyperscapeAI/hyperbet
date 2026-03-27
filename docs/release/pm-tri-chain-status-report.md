@@ -4,175 +4,186 @@
 
 - Base branch: `audit/develop-pm-hardening`
 - Report branch: `enoomian/pm-trichain-report`
-- Date: 2026-03-27
-- Scope: summarize the current prediction-market rollout posture across `Solana devnet`, `BSC testnet`, and `AVAX Fuji`, then explain the approach and current status for `PM + perps + internal AMM`.
+- Scope: `PM/CLOB duels + perps/models + internal AMM` across `Solana devnet`, `BSC testnet`, and `AVAX Fuji`
+
+This branch is a docs-only handoff branch. It contains committed documentation and evidence references, but it does not contain the full raw artifact bundle. The branch-level source of truth for what is committed, what exists only locally, and what is still missing is:
+
+- [pm-tri-chain-evidence-tracker.md](pm-tri-chain-evidence-tracker.md)
 
 ## Executive Summary
 
-Prediction-market work is no longer in a single-chain or PM-only posture.
-On this branch, the system is being treated as a tri-chain phase-1 product:
+The expert reading of `audit/develop-pm-hardening` is that prediction-market work is already in a real tri-chain non-mainnet proving posture. PM is the most mature surface. Perps is already integrated into the phase-1 launch shape and partially proven on live non-mainnet lanes. AMM is designed into the same launch shape and proof model, but it is not closeout-complete.
 
-- `PM/CLOB duels` as the primary user-facing launch surface
-- `perps/models` as the second user-facing launch surface
-- `AMM` as an internal launch-critical liquidity surface
+The important distinction for this report branch is between:
 
-The PM side is materially advanced on all three non-mainnet chains and already has supporting deployment, verification, and browser acceptance evidence. The remaining work on this branch is no longer basic PM-core development. It is the integration and closeout work around AMM, perps, staged proof, staged soak, and final governance/evidence completion.
+- committed evidence that is already in git
+- local-only artifacts and receipts that are referenced in docs but ignored by repo policy
+- closeout items that are still genuinely missing
 
-## What We Have Done For PM
+That distinction is what keeps this branch honest.
 
-### 1. PM-core hardening landed on the active implementation branch
+## PM Accomplishments
 
-Per the release tracker, the repo-side work already merged on `audit/develop-pm-hardening` includes:
+### PM-core hardening is already merged into the active implementation train
 
-- PM-core hardening for oracle finality
+The committed release tracker records:
+
+- oracle finality hardening
 - order semantics hardening
 - governance freeze and protocol guardrails
 - launch-scope registry gating for the real launch chains
 
 Primary source:
 
-- [prediction-market-launch-freeze-tracker.md](/Volumes/OWC%20Envoy%20Pro%20FX/Work/hyperbet/docs/release/prediction-market-launch-freeze-tracker.md)
+- [prediction-market-launch-freeze-tracker.md](prediction-market-launch-freeze-tracker.md)
 
-### 2. Tri-chain non-mainnet PM rehearsal is defined and wired
+### PM is already scoped as a tri-chain non-mainnet launch rehearsal
 
-The off-mainnet rehearsal scope is explicitly:
+The committed release docs explicitly treat these as the launch-blocking rehearsal lanes:
 
 - `Solana devnet`
 - `BSC testnet`
 - `AVAX Fuji`
 
-The release and ops docs treat these three lanes as the launch-blocking rehearsal surface, with `Base` removed from phase-1 blocking scope.
+Primary sources:
+
+- [prediction-market-launch-freeze-tracker.md](prediction-market-launch-freeze-tracker.md)
+- [testnet-operations-ledger.md](testnet-operations-ledger.md)
+
+### PM already has committed operational and browser evidence
+
+Committed docs already record:
+
+- Stage-A wallet creation and funding
+- non-mainnet deployment actions
+- PM-specific tx hashes and signatures
+- browser acceptance evidence for live PM flows on deployed non-mainnet chains
 
 Primary sources:
 
-- [prediction-market-launch-freeze-tracker.md](/Volumes/OWC%20Envoy%20Pro%20FX/Work/hyperbet/docs/release/prediction-market-launch-freeze-tracker.md)
-- [testnet-operations-ledger.md](/Volumes/OWC%20Envoy%20Pro%20FX/Work/hyperbet/docs/release/testnet-operations-ledger.md)
+- [stage-a-promotion-execution-ledger.md](stage-a-promotion-execution-ledger.md)
+- [stage-a-browser-acceptance-matrix.md](stage-a-browser-acceptance-matrix.md)
 
-### 3. Testnet/devnet evidence already exists for PM bring-up
-
-The Stage-A execution ledger records the concrete non-mainnet operational bring-up:
-
-- new Stage-A wallet set created locally under `keys/stage-a/`
-- new deployers funded for Solana, BSC, and AVAX
-- fresh non-mainnet collateral tokens created on BSC and AVAX where needed for broader rehearsal
-- Solana devnet full-product deployment/init/freeze/verification recorded as complete under the Stage-A wallet set
-- BSC and AVAX PM-core plus perps deployment recorded under the new Stage-A wallet set
-
-Primary source:
-
-- [stage-a-promotion-execution-ledger.md](/Volumes/OWC%20Envoy%20Pro%20FX/Work/hyperbet/docs/release/stage-a-promotion-execution-ledger.md)
-
-### 4. PM browser acceptance evidence exists across all three chains
-
-The Stage-A browser acceptance matrix shows the synthetic non-mainnet browser lane is already live against deployed Stage-A chains:
-
-- BSC: live PM flows passing
-- AVAX: live PM flows passing
-- Solana: live PM flows passing, with the matured winner-claim lane explicitly separated because it is time-gated by protocol timing
-
-Covered PM behaviors include:
-
-- fresh/open market interaction
-- YES and NO order placement
-- keeper recovery
-- cancel and refund
-- Solana lifecycle shell and cancellation/refund flows
-
-Primary source:
-
-- [stage-a-browser-acceptance-matrix.md](/Volumes/OWC%20Envoy%20Pro%20FX/Work/hyperbet/docs/release/stage-a-browser-acceptance-matrix.md)
-
-## Tri-Chain Evidence Snapshot
+## Tri-Chain Evidence By Chain
 
 ### Solana devnet
 
-- PM is part of a deployed and verified Stage-A path on devnet.
-- Browser acceptance covers PM lifecycle shell, order placement, restart recovery, and cancelled-duel refund.
-- The remaining PM-adjacent browser gap is the intentionally time-gated matured winner-claim lane.
+- Committed doc evidence:
+  - the Stage-A ledger records full-product Stage-A deploy, init, freeze, and verification activity under the Stage-A wallet model
+  - the browser matrix records PM lifecycle shell, YES/NO order placement, restart recovery, and cancelled-duel refund
+  - concrete Solana signatures are already committed in the ledger, including:
+    - funding transfer: `4Cc3K1hxGA6d8BkhoTgfsqxzRHfUWnC1j7N34zTLRt3YFZzcYHosz75WbpXBwNSGGiHJMaHPjaed82pn43XXmQnL`
+    - `gold_clob_market` deploy: `4jQHApQGyUSAeHRyBBkcTdBK253TmsjLVJW8YjysztndhR5U9jSb51FJWW5P6XjjbYFPv7zB144JciTE64x9mSa9`
+    - `lvr_amm` deploy: `jUgwWfhNmP21eY5onNBAQ6ZdjRRVL6D7ppqQXrd65ajPMRTCK5KmvzRt9riJgkLb2k4tPnwa5yfPyeoVw65CbWK`
+    - `gold_perps_market` deploy: `3AxDvrrRa6zkiRAYPFsATMNkq2kMRF7W2AxuSTVLuXReCi1rzsFBhCUJLnGv1X9wNpbU1LYMm1LYVpFokbgmvCzj`
+    - freeze oracle: `4y7z65ARWA1hi9qomFpGvsQTX7kMVEu7eBWz9Q1gozd8XNuhwJGkGC7kTphEvgU6USjKQYBof1GobrX592aTsZPx`
+    - freeze market: `28osBuQUnW57qLNtqLdFwzzBG6LAwddMUSjavRJHfmhJvsz2UEnihMDhm7jKkms15B4NNzfhdsjUCNumUDgfa69Y`
+    - freeze AMM: `3wrADkbgimSnzX5Pj3bzgZSvuNRWvARS72u23jCbzifKuDgs9hWbxHdNV6KJLz2BpFPzMyM2mMzdyEAShZJLZHzH`
+    - freeze perps: `2bakr3e2jpHiuqEDSYGEr98PUnEphELubiKHh23KZbssQEq6jKTZSSNoicYhRan4nDGYJKpeZYtu7eouXndfQ3mM`
+- Local artifact referenced:
+  - `.ci-artifacts/stage-a/solana-devnet.json`
+  - `.ci-artifacts/stage-a/solana-init-devnet.json`
+  - `.ci-artifacts/stage-a/direct-canaries/solana.json`
+- Remaining gap:
+  - the committed browser acceptance docs still call out the matured winner-claim lane as intentionally time-gated
+  - staged proof, staged soak, and canonical mainnet truth are still not captured as committed closeout evidence
 
 ### BSC testnet
 
-- PM is deployed on the Stage-A chain with live market-flow/browser evidence.
-- Browser evidence proves live PM creation, order placement, recovery, cancellation, and refund behavior.
-- The PM lane is real-chain backed, not mocked.
+- Committed doc evidence:
+  - PM-core deployment txs are recorded in the Stage-A ledger:
+    - oracle: `0xb93a97b918c2a7764f1d6c406849e3b8dddee223d82be1f22d476cb8acda53a4`
+    - clob: `0x23096538668f896d7111509b0790c849399c0a7a3a5d37f15c6cace3e9fb2e11`
+  - perps deployment txs are also recorded:
+    - `SkillOracle`: `0x36f78eeeb87013affda44fa1a3c3dc89c977a3acc003ed98a791ac7c9ff34d36`
+    - `AgentPerpEngine`: `0xcef23a7bf0de93c7217bb12b9ba12f6b9ca5920b67503e0f36bc4c27327a270a`
+  - browser PM evidence is committed:
+    - recovery YES: `0x79c6a2a7840ad0736b6d85b45fab05296735d67d7655e6ed9b081c040beb35bd`
+    - cancel YES: `0xc0163a00de2f03133ed1f7b8f58bf5d6611963336bfda418a1d4d95bc390b670`
+    - cancel refund claim: `0x73277718f9c347752176315d122544007975fbfae0ab64271582383be617bdb6`
+- Local artifact referenced:
+  - `.ci-artifacts/stage-a/bscTestnet.json`
+  - `.ci-artifacts/stage-a/direct-canaries/bsc.json`
+  - `keys/stage-a/token-addresses.bscTestnet.json`
+- Remaining gap:
+  - closeout docs still do not treat the BSC lane as fully closed for staged proof, staged soak, canonical mainnet truth, and governance evidence
+  - local Stage-A evidence exists, but it is not embedded in git
 
 ### AVAX Fuji
 
-- PM is deployed on the Stage-A chain with the same live PM flow coverage shape as BSC.
-- Browser evidence covers live market creation, order placement, recovery, cancellation, and refund.
+- Committed doc evidence:
+  - PM-core deployment txs are recorded in the Stage-A ledger:
+    - oracle: `0x9ddab4aca88ff472c5b654742447a3816b294efc30a0536375d0d4f4e258c801`
+    - clob: `0x2f967a345d20702681a1edf6ac233712448883be5ac407a38c48551aa9be8de4`
+  - perps deployment txs are also recorded:
+    - `SkillOracle`: `0x093bf63a7f75d9aaad3d293991a85b2e951c333aa1f6feebe823f4b49dc82246`
+    - `AgentPerpEngine`: `0xa7abd767a84698b8c258bc1225b11cf4d94e6aae08b2e73eaca2bbfc13103553`
+  - the browser acceptance matrix records AVAX live PM/browser flow coverage
+- Local artifact referenced:
+  - `.ci-artifacts/stage-a/avaxFuji.json`
+  - `.ci-artifacts/stage-a/direct-canaries/avax.json`
+  - `keys/stage-a/token-addresses.avaxFuji.json`
+- Remaining gap:
+  - as with BSC, local Stage-A proof is not the same as committed closeout evidence
+  - staged proof, staged soak, canonical mainnet truth, and governance evidence remain open
 
-## Approach We Took For PM + AMM + Perps
+## PM-AMM-Perps Approach
 
-This branch does not treat AMM and perps as side experiments outside PM. The approach is to prove the full phase-1 product together:
+This branch does not treat AMM and perps as separate side efforts outside PM. The committed repo posture is to prove the full phase-1 product together:
 
-1. Keep proof scope coupled across `pm`, `perps`, and `amm`
-2. Reuse shared deployment truth and registry-shaped receipts
-3. Keep Solana and EVM verification rails aligned to full-product scope
-4. Use local-first bring-up, then staged proof, then soak for closeout
+1. keep proof scope coupled across `pm`, `perps`, and `amm`
+2. reuse shared deployment truth and registry-shaped receipts
+3. keep Solana and EVM verification rails aligned to full-product scope
+4. use local-first bring-up, then staged proof, then soak for closeout
 
-The supporting repo work already landed for that approach includes:
+Committed sources already show:
 
 - oracle-only AMM settlement on EVM and Solana
 - Solana perps pause preserved after freeze
 - Solana full-product deploy/init/freeze/verify rails extended to include AMM
 - canonical EVM receipt writing for PM, AMM, and perps
-- staged proof canary wiring for `pm`, `perps`, and `amm`
-- soak workflow wiring for the same launch-scope surfaces
+- staged proof and soak wiring aimed at `pm`, `perps`, and `amm`
 
 Primary sources:
 
-- [prediction-market-launch-freeze-tracker.md](/Volumes/OWC%20Envoy%20Pro%20FX/Work/hyperbet/docs/release/prediction-market-launch-freeze-tracker.md)
-- [launch-ops-evidence-index.md](/Volumes/OWC%20Envoy%20Pro%20FX/Work/hyperbet/docs/release/launch-ops-evidence-index.md)
+- [prediction-market-launch-freeze-tracker.md](prediction-market-launch-freeze-tracker.md)
+- [launch-ops-evidence-index.md](launch-ops-evidence-index.md)
 
-## Where PM-AMM And Perps Stand On This Branch
+## Current State And Blockers
 
-### PM
+For release-closeout truth on this branch, the branch narrative follows:
 
-- PM-core is the most mature part of the launch scope.
-- The tri-chain non-mainnet lanes, ops docs, and browser evidence are already centered around PM as a real deployed surface.
-- The remaining PM work is mostly acceptance and launch-closeout work, not core protocol construction.
+1. [prediction-market-launch-freeze-tracker.md](prediction-market-launch-freeze-tracker.md)
+2. [testnet-operations-ledger.md](testnet-operations-ledger.md)
+3. [launch-ops-evidence-index.md](launch-ops-evidence-index.md)
 
-### Perps
+[stage-a-promotion-execution-ledger.md](stage-a-promotion-execution-ledger.md) is still important, but it is treated as append-only operational evidence. It contains later local progress and local artifact references that are stronger than what the closeout trackers currently assert. Until those closeout docs are reconciled, those items should be read as local-only or partial evidence, not final closeout.
 
-- Perps are already treated as launch-scope, user-facing functionality under the `models` / `agents` surface.
-- BSC and AVAX Stage-A deployment status includes perps on-chain bring-up.
-- Solana browser coverage already includes perps open/close flows.
-- The remaining work is not “whether perps exists”; it is raising non-mainnet proof depth and finishing staged proof/soak plus live-duel acceptance.
+On that basis, the honest current blockers are:
 
-### AMM
+- launch-chain canonical mainnet registry truth is still incomplete
+- GitHub `staging` environment and `HYPERBET_*_STAGING_*` vars and secrets are not provisioned
+- no committed staged proof artifact bundle exists
+- no committed staged soak artifact bundle exists
+- governance transfer, freeze receipts, signer closeout, and final audit package items remain open
+- BSC and AVAX AMM/perps supporting token/address inputs are not yet reconciled across the authoritative closeout docs
+- the Stage-A execution ledger still records unresolved AMM execution history that should be treated as non-final until the closeout docs are aligned
 
-- AMM is intentionally treated as internal launch-critical infrastructure, not as a browser acceptance surface.
-- The repo-side wiring for AMM is already part of full-product deployment, verification, registry, and staged-proof design.
-- On this branch, the main honest blocker is still the EVM AMM `Router` size issue called out in the Stage-A promotion ledger.
+## Key References
 
-## Honest Current Blockers
-
-From the release tracker, testnet ledger, launch evidence index, and Stage-A execution ledger, the current blockers on this branch are:
-
-- truthful launch-chain canonical registry population is still incomplete
-- GitHub `staging` environment and `HYPERBET_*_STAGING_*` vars/secrets are not yet provisioned
-- local BSC/AVAX AMM and perps rehearsal still depends on shared token/address inputs being fully provisioned in the expected paths
-- staged proof artifact bundle does not exist yet
-- staged soak artifact bundle does not exist yet
-- governance transfer, freeze receipts, signer closeout, and final audit packet are still open
-- EVM AMM deployment remains blocked on `Router` size as compiled in the current Stage-A ledger state
-
-## Recommended Reading Order
-
-For reviewers who want the shortest path through the evidence:
-
-1. [prediction-market-launch-freeze-tracker.md](/Volumes/OWC%20Envoy%20Pro%20FX/Work/hyperbet/docs/release/prediction-market-launch-freeze-tracker.md)
-2. [testnet-operations-ledger.md](/Volumes/OWC%20Envoy%20Pro%20FX/Work/hyperbet/docs/release/testnet-operations-ledger.md)
-3. [stage-a-promotion-execution-ledger.md](/Volumes/OWC%20Envoy%20Pro%20FX/Work/hyperbet/docs/release/stage-a-promotion-execution-ledger.md)
-4. [stage-a-browser-acceptance-matrix.md](/Volumes/OWC%20Envoy%20Pro%20FX/Work/hyperbet/docs/release/stage-a-browser-acceptance-matrix.md)
-5. [launch-ops-evidence-index.md](/Volumes/OWC%20Envoy%20Pro%20FX/Work/hyperbet/docs/release/launch-ops-evidence-index.md)
+1. [pm-tri-chain-evidence-tracker.md](pm-tri-chain-evidence-tracker.md)
+2. [prediction-market-launch-freeze-tracker.md](prediction-market-launch-freeze-tracker.md)
+3. [testnet-operations-ledger.md](testnet-operations-ledger.md)
+4. [stage-a-promotion-execution-ledger.md](stage-a-promotion-execution-ledger.md)
+5. [stage-a-browser-acceptance-matrix.md](stage-a-browser-acceptance-matrix.md)
+6. [launch-ops-evidence-index.md](launch-ops-evidence-index.md)
 
 ## Bottom Line
 
-The right expert reading of `audit/develop-pm-hardening` is:
+PM is the most mature and best-evidenced surface in the phase-1 launch stack. Perps is already inside the launch shape and partially proven on real non-mainnet lanes. AMM is part of the same launch architecture and evidence model, but this report branch does not overstate its closeout status.
 
-- prediction-market work is already in a tri-chain non-mainnet proving posture
-- PM is the most mature and best-evidenced surface
-- perps are integrated into the launch shape and already partially proven on live non-mainnet lanes
-- AMM is designed into the same launch shape, but still carries an honest EVM deployment blocker plus staged-proof closeout work
-- the remaining work is launch-integration and evidence closeout, not a return to PM-core design
+The purpose of `enoomian/pm-trichain-report` is therefore not to pretend the whole package is done. It is to give reviewers an honest, branch-accurate view of:
+
+- what is already proven in committed docs
+- what exists only as local artifact evidence
+- what still has to be captured before closeout
