@@ -161,7 +161,7 @@ export type GoldPerpsMarket = {
         },
         {
           "name": "program",
-          "address": "6YjWiway8kaSjwtAinJxqWPvV3DqBVapDWAsSEZjjmbP"
+          "address": "BFbmQbSbf3R6fMDdXKMKQZCTyMhMs9MCcjAhGDBLETXS"
         },
         {
           "name": "programData"

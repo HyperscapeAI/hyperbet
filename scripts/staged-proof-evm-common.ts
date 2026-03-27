@@ -14,6 +14,10 @@ import {
 import { privateKeyToAccount } from "viem/accounts";
 
 import { GOLD_CLOB_ABI } from "../packages/hyperbet-ui/src/lib/goldClobAbi";
+import {
+  firstNonEmptyValue,
+  resolveEvmAcceptanceRuntime,
+} from "./testnet-acceptance-env";
 
 export type EvmChain = "bsc" | "avax";
 
@@ -34,10 +38,12 @@ export type EvmPmCanaryResult = {
   marketRef: string;
   openTx: string;
   createMarketTx: string;
-  placeOrderTx: string;
+  makerOrderTx: string;
+  takerOrderTx: string;
   cancelTx: string;
   syncTx: string;
-  claimTx: string;
+  makerClaimTx: string;
+  takerClaimTx: string;
 };
 
 export type EvmPerpsCanaryResult = {
@@ -70,6 +76,9 @@ export type EvmCanaryResult = {
   perps: EvmPerpsCanaryResult;
   amm: EvmAmmCanaryResult;
 };
+
+type ScriptPublicClient = ReturnType<typeof createPublicClient>;
+type ScriptWalletClient = ReturnType<typeof createWalletClient>;
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const duelOracleArtifactPath = path.resolve(
@@ -151,6 +160,10 @@ const EVM_STATUS_BETTING_OPEN = 2;
 const ORDER_FLAG_GTC = 0x01;
 const EVM_PERPS_ACTIVE_STATUS = 1n;
 
+function logCanaryStep(chain: EvmChain, step: string): void {
+  console.error(`[acceptance:${chain}] ${step}`);
+}
+
 function requireEnv(name: string): string {
   const value = process.env[name]?.trim() ?? "";
   if (!value) {
@@ -174,6 +187,19 @@ function requireChainEnv(chain: EvmChain, suffix: string): string {
 
 function maybeChainEnv(chain: EvmChain, suffix: string): string | null {
   return maybeEnv(envKey(chain, suffix));
+}
+
+function maybeAcceptanceChainSetting(
+  chain: EvmChain,
+  suffix: string,
+): string | null {
+  const upper = chain.toUpperCase();
+  return firstNonEmptyValue(
+    process.env[`HYPERBET_${upper}_TESTNET_${suffix}`],
+    process.env[`HYPERBET_${upper}_STAGING_${suffix}`],
+    maybeChainEnv(chain, `TESTNET_${suffix}`),
+    maybeChainEnv(chain, `STAGING_${suffix}`),
+  );
 }
 
 function normalizeHex32(value: string): string {
@@ -324,8 +350,12 @@ async function publishControlledState(
   duelId: string,
   duelKeyHex: string,
 ): Promise<void> {
-  const keeperUrl = requireChainEnv(chain, "KEEPER_STAGING_URL").replace(/\/$/, "");
-  const publishKey = requireChainEnv(chain, "STAGING_STREAM_PUBLISH_KEY");
+  const runtime = resolveEvmAcceptanceRuntime(chain, process.env);
+  const keeperUrl = runtime.keeperUrl?.replace(/\/$/, "");
+  const publishKey = maybeAcceptanceChainSetting(chain, "STREAM_PUBLISH_KEY");
+  if (!keeperUrl || !publishKey) {
+    throw new Error(`${chain} acceptance keeper URL or publish key is missing`);
+  }
   await requestJson(`${keeperUrl}/api/streaming/state/publish`, {
     method: "POST",
     headers: {
@@ -336,18 +366,39 @@ async function publishControlledState(
   });
 }
 
-async function waitForReceipt(
-  client: ReturnType<typeof createPublicClient>,
-  hash: Hash,
-) {
-  return client.waitForTransactionReceipt({ hash });
+async function waitForReceipt(client: ScriptPublicClient, hash: Hash) {
+  const receipt = await client.waitForTransactionReceipt({ hash });
+  if (receipt.status !== "success") {
+    throw new Error(`EVM transaction reverted: ${hash}`);
+  }
+  return receipt;
+}
+
+async function readContractLoose<T>(
+  client: ScriptPublicClient,
+  parameters: Record<string, unknown>,
+): Promise<T> {
+  return client.readContract(parameters as never) as Promise<T>;
+}
+
+async function writeContractLoose(
+  client: ScriptWalletClient,
+  parameters: Record<string, unknown>,
+): Promise<Hash> {
+  if (!client.account) {
+    throw new Error("Wallet client account is required for acceptance canaries");
+  }
+  return client.writeContract({
+    ...(parameters as Record<string, unknown>),
+    account: client.account,
+  } as never) as Promise<Hash>;
 }
 
 async function readTokenDecimals(
-  client: ReturnType<typeof createPublicClient>,
+  client: ScriptPublicClient,
   tokenAddress: Address,
 ): Promise<number> {
-  const decimals = (await client.readContract({
+  const decimals = (await readContractLoose<number>(client, {
     address: tokenAddress,
     abi: erc20Abi,
     functionName: "decimals",
@@ -360,18 +411,20 @@ async function runPmCanary(args: {
   duelId: string;
   duelKeyHex: string;
   duelKey: Hash;
-  publicClient: ReturnType<typeof createPublicClient>;
-  reporterClient: ReturnType<typeof createWalletClient>;
-  canaryClient: ReturnType<typeof createWalletClient>;
+  publicClient: ScriptPublicClient;
+  reporterClient: ScriptWalletClient;
+  marketOperatorClient: ScriptWalletClient;
+  pauserClient: ScriptWalletClient;
+  canaryClient: ScriptWalletClient;
+  matcherClient: ScriptWalletClient;
   oracleAddress: Address;
   clobAddress: Address;
-  keeperUrl: string;
 }): Promise<EvmPmCanaryResult> {
   const latestBlock = await args.publicClient.getBlock({ blockTag: "latest" });
   const now = Number(latestBlock.timestamp);
   const tag = chainAgentTag(args.chain);
 
-  const openTx = await args.reporterClient.writeContract({
+  const openTx = await writeContractLoose(args.reporterClient, {
     chain: undefined,
     address: args.oracleAddress,
     abi: duelOracleAbi,
@@ -388,8 +441,9 @@ async function runPmCanary(args: {
     ],
   });
   await waitForReceipt(args.publicClient, openTx);
+  logCanaryStep(args.chain, `pm open duel tx=${openTx}`);
 
-  const createMarketTx = await args.reporterClient.writeContract({
+  const createMarketTx = await writeContractLoose(args.marketOperatorClient, {
     chain: undefined,
     address: args.clobAddress,
     abi: goldClobAdminAbi,
@@ -397,50 +451,49 @@ async function runPmCanary(args: {
     args: [args.duelKey, MARKET_KIND_DUEL_WINNER],
   });
   await waitForReceipt(args.publicClient, createMarketTx);
-
-  await publishControlledState(args.chain, args.duelId, args.duelKeyHex);
-
-  const openLifecycle = await waitFor(
-    `${args.chain} lifecycle market open`,
-    async () =>
-      requestJson<PredictionMarketsResponse>(
-        `${args.keeperUrl}/api/arena/prediction-markets/active`,
-      ),
-    (payload) => {
-      const nextMarket = findCanonicalMarket(args.chain, payload);
-      return (
-        payload.duel.duelKey === args.duelKeyHex &&
-        nextMarket?.marketRef != null &&
-        nextMarket.lifecycleStatus === "OPEN"
-      );
-    },
-  );
-
-  const runtimeMarket = findCanonicalMarket(args.chain, openLifecycle);
-  if (!runtimeMarket?.marketRef) {
-    throw new Error(`${args.chain} marketRef missing after lifecycle open`);
+  logCanaryStep(args.chain, `pm create market tx=${createMarketTx}`);
+  const marketRef = (await readContractLoose<Hash>(args.publicClient, {
+    address: args.clobAddress,
+    abi: GOLD_CLOB_ABI,
+    functionName: "marketKey",
+    args: [args.duelKey, MARKET_KIND_DUEL_WINNER],
+  })) as Hash;
+  const marketStateAfterCreate = await readContractLoose(args.publicClient, {
+    address: args.clobAddress,
+    abi: GOLD_CLOB_ABI,
+    functionName: "getMarket",
+    args: [args.duelKey, MARKET_KIND_DUEL_WINNER],
+  });
+  if (
+    !asBoolean(marketStateAfterCreate, "exists") ||
+    asBigInt(marketStateAfterCreate, 2, "status") !== 1n
+  ) {
+    throw new Error(`${args.chain} PM market did not enter OPEN after creation`);
   }
 
-  const treasuryFeeBps = (await args.publicClient.readContract({
+  const treasuryFeeBps = (await readContractLoose<bigint>(args.publicClient, {
     address: args.clobAddress,
     abi: GOLD_CLOB_ABI,
     functionName: "tradeTreasuryFeeBps",
   })) as bigint;
-  const marketMakerFeeBps = (await args.publicClient.readContract({
+  const marketMakerFeeBps = (await readContractLoose<bigint>(args.publicClient, {
     address: args.clobAddress,
     abi: GOLD_CLOB_ABI,
     functionName: "tradeMarketMakerFeeBps",
   })) as bigint;
   const amount = parseUnits(
-    (
-      maybeChainEnv(args.chain, "STAGING_CANARY_ORDER_AMOUNT") ?? "0.001"
-    ).trim(),
+    (maybeAcceptanceChainSetting(args.chain, "CANARY_ORDER_AMOUNT") ?? "0.001").trim(),
     18,
   );
-  const cost = quoteCost(EVM_SELL_SIDE, 999, amount);
-  const fees = (cost * (treasuryFeeBps + marketMakerFeeBps)) / 10_000n;
+  const makerSide = EVM_SELL_SIDE;
+  const takerSide = 1;
+  const tradePrice = 600;
+  const makerCost = quoteCost(makerSide, tradePrice, amount);
+  const takerCost = quoteCost(takerSide, tradePrice, amount);
+  const makerFees = (makerCost * (treasuryFeeBps + marketMakerFeeBps)) / 10_000n;
+  const takerFees = (takerCost * (treasuryFeeBps + marketMakerFeeBps)) / 10_000n;
 
-  const placeOrderTx = await args.canaryClient.writeContract({
+  const makerOrderTx = await writeContractLoose(args.matcherClient, {
     chain: undefined,
     address: args.clobAddress,
     abi: GOLD_CLOB_ABI,
@@ -448,16 +501,56 @@ async function runPmCanary(args: {
     args: [
       args.duelKey,
       MARKET_KIND_DUEL_WINNER,
-      EVM_SELL_SIDE,
-      999,
+      makerSide,
+      tradePrice,
       amount,
       ORDER_FLAG_GTC,
     ],
-    value: cost + fees,
+    value: makerCost + makerFees,
   });
-  await waitForReceipt(args.publicClient, placeOrderTx);
+  await waitForReceipt(args.publicClient, makerOrderTx);
 
-  const cancelTx = await args.reporterClient.writeContract({
+  const takerOrderTx = await writeContractLoose(args.canaryClient, {
+    chain: undefined,
+    address: args.clobAddress,
+    abi: GOLD_CLOB_ABI,
+    functionName: "placeOrder",
+    args: [
+      args.duelKey,
+      MARKET_KIND_DUEL_WINNER,
+      takerSide,
+      tradePrice,
+      amount,
+      ORDER_FLAG_GTC,
+    ],
+    value: takerCost + takerFees,
+  });
+  await waitForReceipt(args.publicClient, takerOrderTx);
+  logCanaryStep(args.chain, `pm matched trade makerTx=${makerOrderTx} takerTx=${takerOrderTx}`);
+
+  const makerPositionAfterMatch = (await readContractLoose<
+    readonly [bigint, bigint, bigint, bigint]
+  >(args.publicClient, {
+    address: args.clobAddress,
+    abi: GOLD_CLOB_ABI,
+    functionName: "positions",
+    args: [marketRef, args.matcherClient.account!.address],
+  })) as readonly [bigint, bigint, bigint, bigint];
+  const takerPositionAfterMatch = (await readContractLoose<
+    readonly [bigint, bigint, bigint, bigint]
+  >(args.publicClient, {
+    address: args.clobAddress,
+    abi: GOLD_CLOB_ABI,
+    functionName: "positions",
+    args: [marketRef, args.canaryClient.account!.address],
+  })) as readonly [bigint, bigint, bigint, bigint];
+  if (makerPositionAfterMatch[1] <= 0n || takerPositionAfterMatch[0] <= 0n) {
+    throw new Error(
+      `${args.chain} PM matched trade did not create expected maker/taker exposure`,
+    );
+  }
+
+  const cancelTx = await writeContractLoose(args.pauserClient, {
     chain: undefined,
     address: args.oracleAddress,
     abi: duelOracleAbi,
@@ -466,7 +559,7 @@ async function runPmCanary(args: {
   });
   await waitForReceipt(args.publicClient, cancelTx);
 
-  const syncTx = await args.reporterClient.writeContract({
+  const syncTx = await writeContractLoose(args.reporterClient, {
     chain: undefined,
     address: args.clobAddress,
     abi: GOLD_CLOB_ABI,
@@ -474,45 +567,68 @@ async function runPmCanary(args: {
     args: [args.duelKey, MARKET_KIND_DUEL_WINNER],
   });
   await waitForReceipt(args.publicClient, syncTx);
+  logCanaryStep(args.chain, `pm cancel+sync txs=${cancelTx},${syncTx}`);
+  const marketStateAfterSync = await readContractLoose(args.publicClient, {
+    address: args.clobAddress,
+    abi: GOLD_CLOB_ABI,
+    functionName: "getMarket",
+    args: [args.duelKey, MARKET_KIND_DUEL_WINNER],
+  });
+  if (asBigInt(marketStateAfterSync, 2, "status") !== 4n) {
+    throw new Error(`${args.chain} PM market did not enter CANCELLED after sync`);
+  }
 
-  await waitFor(
-    `${args.chain} lifecycle cancelled`,
-    async () =>
-      requestJson<PredictionMarketsResponse>(
-        `${args.keeperUrl}/api/arena/prediction-markets/active`,
-      ),
-    (payload) => findCanonicalMarket(args.chain, payload)?.lifecycleStatus === "CANCELLED",
-  );
-
-  const claimTx = await args.canaryClient.writeContract({
+  const makerClaimTx = await writeContractLoose(args.matcherClient, {
     chain: undefined,
     address: args.clobAddress,
     abi: GOLD_CLOB_ABI,
     functionName: "claim",
     args: [args.duelKey, MARKET_KIND_DUEL_WINNER],
   });
-  await waitForReceipt(args.publicClient, claimTx);
+  await waitForReceipt(args.publicClient, makerClaimTx);
 
-  const position = (await args.publicClient.readContract({
+  const takerClaimTx = await writeContractLoose(args.canaryClient, {
+    chain: undefined,
+    address: args.clobAddress,
+    abi: GOLD_CLOB_ABI,
+    functionName: "claim",
+    args: [args.duelKey, MARKET_KIND_DUEL_WINNER],
+  });
+  await waitForReceipt(args.publicClient, takerClaimTx);
+  logCanaryStep(args.chain, `pm claims makerTx=${makerClaimTx} takerTx=${takerClaimTx}`);
+
+  const makerPosition = (await readContractLoose<
+    readonly [bigint, bigint, bigint, bigint]
+  >(args.publicClient, {
     address: args.clobAddress,
     abi: GOLD_CLOB_ABI,
     functionName: "positions",
-    args: [runtimeMarket.marketRef as Hash, args.canaryClient.account!.address],
+    args: [marketRef, args.matcherClient.account!.address],
   })) as readonly [bigint, bigint, bigint, bigint];
-  if (position.some((value) => value !== 0n)) {
+  const takerPosition = (await readContractLoose<
+    readonly [bigint, bigint, bigint, bigint]
+  >(args.publicClient, {
+    address: args.clobAddress,
+    abi: GOLD_CLOB_ABI,
+    functionName: "positions",
+    args: [marketRef, args.canaryClient.account!.address],
+  })) as readonly [bigint, bigint, bigint, bigint];
+  if (makerPosition.some((value) => value !== 0n) || takerPosition.some((value) => value !== 0n)) {
     throw new Error(
-      `${args.chain} claim cleanup incomplete: ${position.map((value) => value.toString()).join(":")}`,
+      `${args.chain} claim cleanup incomplete: maker=${makerPosition.map((value) => value.toString()).join(":")} taker=${takerPosition.map((value) => value.toString()).join(":")}`,
     );
   }
 
   return {
-    marketRef: runtimeMarket.marketRef,
+    marketRef,
     openTx,
     createMarketTx,
-    placeOrderTx,
+    makerOrderTx,
+    takerOrderTx,
     cancelTx,
     syncTx,
-    claimTx,
+    makerClaimTx,
+    takerClaimTx,
   };
 }
 
@@ -520,18 +636,18 @@ async function runAmmCanary(args: {
   chain: EvmChain;
   duelId: string;
   duelKey: Hash;
-  publicClient: ReturnType<typeof createPublicClient>;
-  adminClient: ReturnType<typeof createWalletClient>;
-  canaryClient: ReturnType<typeof createWalletClient>;
+  publicClient: ScriptPublicClient;
+  adminClient: ScriptWalletClient;
+  canaryClient: ScriptWalletClient;
   routerAddress: Address;
   mUsdTokenAddress: Address;
 }): Promise<EvmAmmCanaryResult> {
-  const beforeMarkets = (await args.publicClient.readContract({
+  const beforeMarkets = (await readContractLoose<Address[]>(args.publicClient, {
     address: args.routerAddress,
     abi: routerAbi,
     functionName: "getAllMarkets",
   })) as Address[];
-  const frozen = (await args.publicClient.readContract({
+  const frozen = (await readContractLoose<boolean>(args.publicClient, {
     address: args.routerAddress,
     abi: routerAbi,
     functionName: "configFrozen",
@@ -542,15 +658,15 @@ async function runAmmCanary(args: {
 
   const mUsdDecimals = await readTokenDecimals(args.publicClient, args.mUsdTokenAddress);
   const initialLiquidity = parseUnits(
-    maybeChainEnv(args.chain, "STAGING_CANARY_AMM_INITIAL_LIQUIDITY") ?? "10",
+    maybeAcceptanceChainSetting(args.chain, "CANARY_AMM_INITIAL_LIQUIDITY") ?? "10",
     mUsdDecimals,
   );
   const tradeAmount = parseUnits(
-    maybeChainEnv(args.chain, "STAGING_CANARY_AMM_BUY_AMOUNT") ?? "1",
+    maybeAcceptanceChainSetting(args.chain, "CANARY_AMM_BUY_AMOUNT") ?? "1",
     mUsdDecimals,
   );
 
-  const approveCreateTx = await args.adminClient.writeContract({
+  const approveCreateTx = await writeContractLoose(args.adminClient, {
     chain: undefined,
     address: args.mUsdTokenAddress,
     abi: erc20Abi,
@@ -558,8 +674,9 @@ async function runAmmCanary(args: {
     args: [args.routerAddress, initialLiquidity],
   });
   await waitForReceipt(args.publicClient, approveCreateTx);
+  logCanaryStep(args.chain, `amm approve create tx=${approveCreateTx}`);
 
-  const createMarketTx = await args.adminClient.writeContract({
+  const createMarketTx = await writeContractLoose(args.adminClient, {
     chain: undefined,
     address: args.routerAddress,
     abi: routerAbi,
@@ -575,8 +692,9 @@ async function runAmmCanary(args: {
     ],
   });
   await waitForReceipt(args.publicClient, createMarketTx);
+  logCanaryStep(args.chain, `amm create market tx=${createMarketTx}`);
 
-  const afterMarkets = (await args.publicClient.readContract({
+  const afterMarkets = (await readContractLoose<Address[]>(args.publicClient, {
     address: args.routerAddress,
     abi: routerAbi,
     functionName: "getAllMarkets",
@@ -590,7 +708,7 @@ async function runAmmCanary(args: {
     throw new Error(`${args.chain} AMM market address missing after create`);
   }
 
-  const marketBefore = await args.publicClient.readContract({
+  const marketBefore = await readContractLoose(args.publicClient, {
     address: marketAddress,
     abi: lvrMarketAbi,
     functionName: "getMarketDetails",
@@ -598,16 +716,17 @@ async function runAmmCanary(args: {
   const reserveYesBefore = asBigInt(marketBefore, 4, "reserveYes");
   const reserveNoBefore = asBigInt(marketBefore, 5, "reserveNo");
 
-  const approveBuyTx = await args.canaryClient.writeContract({
+  const approveBuyTx = await writeContractLoose(args.canaryClient, {
     chain: undefined,
     address: args.mUsdTokenAddress,
     abi: erc20Abi,
     functionName: "approve",
-    args: [marketAddress, tradeAmount],
+    args: [args.routerAddress, tradeAmount],
   });
   await waitForReceipt(args.publicClient, approveBuyTx);
+  logCanaryStep(args.chain, `amm approve buy tx=${approveBuyTx}`);
 
-  const buyTx = await args.canaryClient.writeContract({
+  const buyTx = await writeContractLoose(args.canaryClient, {
     chain: undefined,
     address: args.routerAddress,
     abi: routerAbi,
@@ -615,8 +734,9 @@ async function runAmmCanary(args: {
     args: [marketAddress, tradeAmount, 0n],
   });
   await waitForReceipt(args.publicClient, buyTx);
+  logCanaryStep(args.chain, `amm buy yes tx=${buyTx}`);
 
-  const marketAfter = await args.publicClient.readContract({
+  const marketAfter = await readContractLoose(args.publicClient, {
     address: marketAddress,
     abi: lvrMarketAbi,
     functionName: "getMarketDetails",
@@ -627,12 +747,12 @@ async function runAmmCanary(args: {
     throw new Error(`${args.chain} AMM trade did not move reserves`);
   }
 
-  const yesTokenAddress = (await args.publicClient.readContract({
+  const yesTokenAddress = (await readContractLoose<Address>(args.publicClient, {
     address: marketAddress,
     abi: lvrMarketAbi,
     functionName: "yesToken",
   })) as Address;
-  const yesBalance = (await args.publicClient.readContract({
+  const yesBalance = (await readContractLoose<bigint>(args.publicClient, {
     address: yesTokenAddress,
     abi: erc20Abi,
     functionName: "balanceOf",
@@ -658,16 +778,16 @@ async function runAmmCanary(args: {
 async function runPerpsCanary(args: {
   chain: EvmChain;
   duelKey: Hash;
-  publicClient: ReturnType<typeof createPublicClient>;
-  reporterClient: ReturnType<typeof createWalletClient>;
-  adminClient: ReturnType<typeof createWalletClient>;
-  marketOperatorClient: ReturnType<typeof createWalletClient>;
-  canaryClient: ReturnType<typeof createWalletClient>;
+  publicClient: ScriptPublicClient;
+  reporterClient: ScriptWalletClient;
+  adminClient: ScriptWalletClient;
+  marketOperatorClient: ScriptWalletClient;
+  canaryClient: ScriptWalletClient;
   skillOracleAddress: Address;
   perpEngineAddress: Address;
 }): Promise<EvmPerpsCanaryResult> {
   const agentId = args.duelKey;
-  const updateSkillTx = await args.reporterClient.writeContract({
+  const updateSkillTx = await writeContractLoose(args.reporterClient, {
     chain: undefined,
     address: args.skillOracleAddress,
     abi: skillOracleAbi,
@@ -675,16 +795,17 @@ async function runPerpsCanary(args: {
     args: [agentId, 1500n, 0n],
   });
   await waitForReceipt(args.publicClient, updateSkillTx);
+  logCanaryStep(args.chain, `perps update skill tx=${updateSkillTx}`);
 
-  const marketConfig = await args.publicClient.readContract({
+  const marketConfig = await readContractLoose(args.publicClient, {
     address: args.perpEngineAddress,
     abi: perpEngineAbi,
     functionName: "marketConfigs",
     args: [agentId],
   });
-  let createMarketTx: string | null = null;
+  let createMarketTx: Hash | null = null;
   if (!asBoolean(marketConfig, "exists", 12)) {
-    createMarketTx = await args.marketOperatorClient.writeContract({
+    createMarketTx = await writeContractLoose(args.marketOperatorClient, {
       chain: undefined,
       address: args.perpEngineAddress,
       abi: perpEngineAbi,
@@ -692,30 +813,31 @@ async function runPerpsCanary(args: {
       args: [agentId],
     });
     await waitForReceipt(args.publicClient, createMarketTx);
+    logCanaryStep(args.chain, `perps create market tx=${createMarketTx}`);
   }
 
-  const marginTokenAddress = (await args.publicClient.readContract({
+  const marginTokenAddress = (await readContractLoose<Address>(args.publicClient, {
     address: args.perpEngineAddress,
     abi: perpEngineAbi,
     functionName: "marginToken",
   })) as Address;
   const marginDecimals = await readTokenDecimals(args.publicClient, marginTokenAddress);
-  const marketStateBefore = await args.publicClient.readContract({
+  const marketStateBefore = await readContractLoose(args.publicClient, {
     address: args.perpEngineAddress,
     abi: perpEngineAbi,
     functionName: "markets",
     args: [agentId],
   });
   const insuranceTarget = parseUnits(
-    maybeChainEnv(args.chain, "STAGING_CANARY_PERPS_MIN_INSURANCE") ?? "25",
+    maybeAcceptanceChainSetting(args.chain, "CANARY_PERPS_MIN_INSURANCE") ?? "25",
     marginDecimals,
   );
-  let approveInsuranceTx: string | null = null;
-  let depositInsuranceTx: string | null = null;
+  let approveInsuranceTx: Hash | null = null;
+  let depositInsuranceTx: Hash | null = null;
   const insuranceFund = asBigInt(marketStateBefore, 9, "insuranceFund");
   if (insuranceFund < insuranceTarget) {
     const depositAmount = insuranceTarget - insuranceFund;
-    approveInsuranceTx = await args.adminClient.writeContract({
+    approveInsuranceTx = await writeContractLoose(args.adminClient, {
       chain: undefined,
       address: marginTokenAddress,
       abi: erc20Abi,
@@ -724,7 +846,7 @@ async function runPerpsCanary(args: {
     });
     await waitForReceipt(args.publicClient, approveInsuranceTx);
 
-    depositInsuranceTx = await args.adminClient.writeContract({
+    depositInsuranceTx = await writeContractLoose(args.adminClient, {
       chain: undefined,
       address: args.perpEngineAddress,
       abi: perpEngineAbi,
@@ -732,9 +854,13 @@ async function runPerpsCanary(args: {
       args: [agentId, depositAmount],
     });
     await waitForReceipt(args.publicClient, depositInsuranceTx);
+    logCanaryStep(
+      args.chain,
+      `perps insurance txs=${approveInsuranceTx},${depositInsuranceTx}`,
+    );
   }
 
-  const existingPosition = await args.publicClient.readContract({
+  const existingPosition = await readContractLoose(args.publicClient, {
     address: args.perpEngineAddress,
     abi: perpEngineAbi,
     functionName: "positions",
@@ -742,7 +868,7 @@ async function runPerpsCanary(args: {
   });
   const existingSize = asBigInt(existingPosition, 0, "size");
   if (existingSize !== 0n) {
-    const flattenTx = await args.canaryClient.writeContract({
+    const flattenTx = await writeContractLoose(args.canaryClient, {
       chain: undefined,
       address: args.perpEngineAddress,
       abi: perpEngineAbi,
@@ -753,15 +879,15 @@ async function runPerpsCanary(args: {
   }
 
   const marginDelta = parseUnits(
-    maybeChainEnv(args.chain, "STAGING_CANARY_PERPS_MARGIN") ?? "30",
+    maybeAcceptanceChainSetting(args.chain, "CANARY_PERPS_MARGIN") ?? "30",
     marginDecimals,
   );
   const sizeDelta = parseUnits(
-    maybeChainEnv(args.chain, "STAGING_CANARY_PERPS_SIZE") ?? "1",
+    maybeAcceptanceChainSetting(args.chain, "CANARY_PERPS_SIZE") ?? "1",
     18,
   );
 
-  const approveMarginTx = await args.canaryClient.writeContract({
+  const approveMarginTx = await writeContractLoose(args.canaryClient, {
     chain: undefined,
     address: marginTokenAddress,
     abi: erc20Abi,
@@ -769,8 +895,9 @@ async function runPerpsCanary(args: {
     args: [args.perpEngineAddress, marginDelta],
   });
   await waitForReceipt(args.publicClient, approveMarginTx);
+  logCanaryStep(args.chain, `perps approve margin tx=${approveMarginTx}`);
 
-  const openPositionTx = await args.canaryClient.writeContract({
+  const openPositionTx = await writeContractLoose(args.canaryClient, {
     chain: undefined,
     address: args.perpEngineAddress,
     abi: perpEngineAbi,
@@ -778,8 +905,9 @@ async function runPerpsCanary(args: {
     args: [agentId, marginDelta, sizeDelta],
   });
   await waitForReceipt(args.publicClient, openPositionTx);
+  logCanaryStep(args.chain, `perps open position tx=${openPositionTx}`);
 
-  const openedPosition = await args.publicClient.readContract({
+  const openedPosition = await readContractLoose(args.publicClient, {
     address: args.perpEngineAddress,
     abi: perpEngineAbi,
     functionName: "positions",
@@ -789,7 +917,7 @@ async function runPerpsCanary(args: {
     throw new Error(`${args.chain} perps canary failed to open expected position`);
   }
 
-  const closePositionTx = await args.canaryClient.writeContract({
+  const closePositionTx = await writeContractLoose(args.canaryClient, {
     chain: undefined,
     address: args.perpEngineAddress,
     abi: perpEngineAbi,
@@ -797,8 +925,9 @@ async function runPerpsCanary(args: {
     args: [agentId, 0n, -sizeDelta],
   });
   await waitForReceipt(args.publicClient, closePositionTx);
+  logCanaryStep(args.chain, `perps close position tx=${closePositionTx}`);
 
-  const closedPosition = await args.publicClient.readContract({
+  const closedPosition = await readContractLoose(args.publicClient, {
     address: args.perpEngineAddress,
     abi: perpEngineAbi,
     functionName: "positions",
@@ -811,7 +940,7 @@ async function runPerpsCanary(args: {
     throw new Error(`${args.chain} perps canary position did not close cleanly`);
   }
 
-  const marketStateAfter = await args.publicClient.readContract({
+  const marketStateAfter = await readContractLoose(args.publicClient, {
     address: args.perpEngineAddress,
     abi: perpEngineAbi,
     functionName: "markets",
@@ -840,48 +969,61 @@ export async function runEvmCanary(chain: EvmChain): Promise<EvmCanaryResult> {
   const duelId = requireEnv("HYPERBET_STAGED_PROOF_DUEL_ID");
   const duelKeyHex = normalizeHex32(requireEnv("HYPERBET_STAGED_PROOF_DUEL_KEY"));
   const duelKey = `0x${duelKeyHex}` as Hash;
-  const rpcUrl = requireChainEnv(chain, "STAGING_RPC_URL");
-  const keeperUrl = requireChainEnv(chain, "KEEPER_STAGING_URL").replace(/\/$/, "");
+  const runtime = resolveEvmAcceptanceRuntime(chain, process.env);
+  if (
+    !runtime.canaryPrivateKey ||
+    !runtime.matcherPrivateKey ||
+    !runtime.reporterPrivateKey ||
+    !runtime.adminPrivateKey ||
+    !runtime.marketOperatorPrivateKey ||
+    !runtime.pauserPrivateKey
+  ) {
+    throw new Error(`${chain} acceptance wallet env is incomplete`);
+  }
+  const rpcUrl = runtime.rpcUrl;
 
-  const canary = privateKeyToAccount(
-    requireChainEnv(chain, "STAGING_CANARY_PRIVATE_KEY") as `0x${string}`,
-  );
-  const reporter = privateKeyToAccount(
-    requireChainEnv(chain, "STAGING_REPORTER_PRIVATE_KEY") as `0x${string}`,
-  );
-  const admin = privateKeyToAccount(
-    requireChainEnv(chain, "STAGING_ADMIN_PRIVATE_KEY") as `0x${string}`,
-  );
+  const canary = privateKeyToAccount(runtime.canaryPrivateKey as `0x${string}`);
+  const matcher = privateKeyToAccount(runtime.matcherPrivateKey as `0x${string}`);
+  const reporter = privateKeyToAccount(runtime.reporterPrivateKey as `0x${string}`);
+  const admin = privateKeyToAccount(runtime.adminPrivateKey as `0x${string}`);
   const marketOperator = privateKeyToAccount(
-    (
-      maybeChainEnv(chain, "STAGING_MARKET_OPERATOR_PRIVATE_KEY") ??
-      requireChainEnv(chain, "STAGING_ADMIN_PRIVATE_KEY")
-    ) as `0x${string}`,
+    runtime.marketOperatorPrivateKey as `0x${string}`,
   );
-  const oracleAddress = requireChainEnv(chain, "STAGING_DUEL_ORACLE_ADDRESS") as Address;
-  const clobAddress = requireChainEnv(chain, "STAGING_GOLD_CLOB_ADDRESS") as Address;
-  const routerAddress = requireChainEnv(chain, "STAGING_GOLD_AMM_ROUTER_ADDRESS") as Address;
-  const mUsdTokenAddress = requireChainEnv(chain, "STAGING_MUSD_TOKEN_ADDRESS") as Address;
-  const skillOracleAddress = requireChainEnv(chain, "STAGING_SKILL_ORACLE_ADDRESS") as Address;
-  const perpEngineAddress = requireChainEnv(chain, "STAGING_PERP_ENGINE_ADDRESS") as Address;
+  const pauser = privateKeyToAccount(runtime.pauserPrivateKey as `0x${string}`);
+  const oracleAddress = runtime.duelOracleAddress as Address;
+  const clobAddress = runtime.goldClobAddress as Address;
+  const routerAddress = runtime.goldAmmRouterAddress as Address;
+  const mUsdTokenAddress = runtime.mUsdTokenAddress as Address;
+  const skillOracleAddress = runtime.skillOracleAddress as Address;
+  const perpEngineAddress = runtime.perpEngineAddress as Address;
 
-  const publicClient = createPublicClient({ transport: http(rpcUrl) });
+  const publicClient = createPublicClient({
+    transport: http(rpcUrl),
+  }) as ScriptPublicClient;
   const reporterClient = createWalletClient({
     account: reporter,
     transport: http(rpcUrl),
-  });
+  }) as ScriptWalletClient;
   const adminClient = createWalletClient({
     account: admin,
     transport: http(rpcUrl),
-  });
+  }) as ScriptWalletClient;
   const marketOperatorClient = createWalletClient({
     account: marketOperator,
     transport: http(rpcUrl),
-  });
+  }) as ScriptWalletClient;
+  const pauserClient = createWalletClient({
+    account: pauser,
+    transport: http(rpcUrl),
+  }) as ScriptWalletClient;
   const canaryClient = createWalletClient({
     account: canary,
     transport: http(rpcUrl),
-  });
+  }) as ScriptWalletClient;
+  const matcherClient = createWalletClient({
+    account: matcher,
+    transport: http(rpcUrl),
+  }) as ScriptWalletClient;
 
   const pm = await runPmCanary({
     chain,
@@ -890,11 +1032,14 @@ export async function runEvmCanary(chain: EvmChain): Promise<EvmCanaryResult> {
     duelKey,
     publicClient,
     reporterClient,
+    marketOperatorClient,
+    pauserClient,
     canaryClient,
+    matcherClient,
     oracleAddress,
     clobAddress,
-    keeperUrl,
   });
+  logCanaryStep(chain, "pm complete");
   const perps = await runPerpsCanary({
     chain,
     duelKey,
@@ -906,6 +1051,7 @@ export async function runEvmCanary(chain: EvmChain): Promise<EvmCanaryResult> {
     skillOracleAddress,
     perpEngineAddress,
   });
+  logCanaryStep(chain, "perps complete");
   const amm = await runAmmCanary({
     chain,
     duelId,
@@ -916,6 +1062,7 @@ export async function runEvmCanary(chain: EvmChain): Promise<EvmCanaryResult> {
     routerAddress,
     mUsdTokenAddress,
   });
+  logCanaryStep(chain, "amm complete");
 
   return {
     duelId,

@@ -59,11 +59,11 @@ const buildLogPath = path.join("/tmp", `hyperbet-${chain}-e2e-build.log`);
 const evmBuildLogPath = path.join("/tmp", `hyperbet-${chain}-e2e-evm-build.log`);
 const marketFlowGrepByChain: Record<ChainKey, string> = {
   solana:
-    "solana predictions place YES and NO orders, resolve, and claim|solana prediction markets recover after keeper and proxy restarts|solana cancelled duel refunds and clears claim state",
+    "solana predictions place YES and NO orders and stage a proposed winner claim|solana open prediction markets recover after keeper and proxy restarts|solana cancelled duel refunds and clears claim state",
   bsc:
-    "evm predictions place YES and NO orders, resolve, and claim|bsc prediction markets recover after keeper and anvil restarts|bsc cancelled prediction markets refund and clear positions",
+    "evm predictions place YES and NO orders on a fresh live market|bsc prediction markets recover after keeper restarts|bsc cancelled prediction markets refund and clear positions",
   avax:
-    "evm predictions place YES and NO orders, resolve, and claim|avax prediction markets recover after keeper and anvil restarts|avax cancelled prediction markets refund and clear positions",
+    "evm predictions place YES and NO orders on a fresh live market|avax prediction markets recover after keeper restarts|avax cancelled prediction markets refund and clear positions",
 };
 
 const localPortConfigByChain: Record<ChainKey, LocalPortConfig> = {

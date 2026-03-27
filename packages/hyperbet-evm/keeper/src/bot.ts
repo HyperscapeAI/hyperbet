@@ -1523,6 +1523,12 @@ type EvmKeeperRuntime = {
   duelOracleAddress: Address;
   goldClobAddress: Address;
   publicClient: ReturnType<typeof createPublicClient>;
+  reporter: EvmRoleSigner;
+  operator: EvmRoleSigner;
+  finalizer: EvmRoleSigner | null;
+};
+
+type EvmRoleSigner = {
   walletClient: ReturnType<typeof createWalletClient>;
   account: ReturnType<typeof privateKeyToAccount>;
 };
@@ -1560,6 +1566,18 @@ function parsePrivateKey(value: string | undefined): `0x${string}` | null {
     return null;
   }
   return withPrefix as `0x${string}`;
+}
+
+function firstDefinedPrivateKey(
+  names: readonly string[],
+): `0x${string}` | null {
+  for (const name of names) {
+    const parsed = parsePrivateKey(process.env[name]);
+    if (parsed) {
+      return parsed;
+    }
+  }
+  return null;
 }
 
 function isLocalRpcUrl(value: string): boolean {
@@ -1646,7 +1664,6 @@ async function alignLocalChainTime(
 
 function buildEvmRuntime(
   chainKey: BettingEvmChain,
-  privateKey: `0x${string}` | null,
 ): EvmKeeperRuntime | null {
   const runtimeEnv = resolveBettingEvmRuntimeEnv(
     chainKey,
@@ -1655,13 +1672,47 @@ function buildEvmRuntime(
   );
   const oracle = parseAddressEnv(runtimeEnv.duelOracleAddress);
   const clob = parseAddressEnv(runtimeEnv.goldClobAddress);
-  if (!oracle || !clob || !privateKey) {
+  if (!oracle || !clob) {
     return null;
   }
 
-  const account = privateKeyToAccount(privateKey);
+  const upper = chainKey.toUpperCase();
+  const reporterPrivateKey = firstDefinedPrivateKey([
+    `HYPERBET_${upper}_TESTNET_REPORTER_PRIVATE_KEY`,
+    `HYPERBET_${upper}_STAGING_REPORTER_PRIVATE_KEY`,
+    "EVM_REPORTER_PRIVATE_KEY",
+    "TESTNET_REPORTER_PRIVATE_KEY",
+    "EVM_KEEPER_PRIVATE_KEY",
+    "PRIVATE_KEY",
+  ]);
+  const operatorPrivateKey = firstDefinedPrivateKey([
+    `HYPERBET_${upper}_TESTNET_MARKET_OPERATOR_PRIVATE_KEY`,
+    `HYPERBET_${upper}_STAGING_MARKET_OPERATOR_PRIVATE_KEY`,
+    "EVM_MARKET_OPERATOR_PRIVATE_KEY",
+    "TESTNET_MARKET_OPERATOR_PRIVATE_KEY",
+    "TESTNET_ADMIN_PRIVATE_KEY",
+    "EVM_KEEPER_PRIVATE_KEY",
+    "PRIVATE_KEY",
+  ]);
+  const finalizerPrivateKey = firstDefinedPrivateKey([
+    `HYPERBET_${upper}_TESTNET_FINALIZER_PRIVATE_KEY`,
+    `HYPERBET_${upper}_STAGING_FINALIZER_PRIVATE_KEY`,
+    "EVM_FINALIZER_PRIVATE_KEY",
+    "TESTNET_FINALIZER_PRIVATE_KEY",
+    "EVM_KEEPER_PRIVATE_KEY",
+    "PRIVATE_KEY",
+  ]);
+  if (!reporterPrivateKey || !operatorPrivateKey) {
+    return null;
+  }
+
   const rpcUrl = runtimeEnv.rpcUrl.trim();
   const transport = http(rpcUrl);
+  const reporterAccount = privateKeyToAccount(reporterPrivateKey);
+  const operatorAccount = privateKeyToAccount(operatorPrivateKey);
+  const finalizerAccount = finalizerPrivateKey
+    ? privateKeyToAccount(finalizerPrivateKey)
+    : null;
   return {
     chainKey,
     rpcUrl,
@@ -1669,20 +1720,32 @@ function buildEvmRuntime(
     duelOracleAddress: oracle,
     goldClobAddress: clob,
     publicClient: createPublicClient({ transport }),
-    walletClient: createWalletClient({ account, transport }),
-    account,
+    reporter: {
+      account: reporterAccount,
+      walletClient: createWalletClient({ account: reporterAccount, transport }),
+    },
+    operator: {
+      account: operatorAccount,
+      walletClient: createWalletClient({ account: operatorAccount, transport }),
+    },
+    finalizer: finalizerAccount
+      ? {
+          account: finalizerAccount,
+          walletClient: createWalletClient({
+            account: finalizerAccount,
+            transport,
+          }),
+        }
+      : null,
   };
 }
 
-const evmKeeperPrivateKey = parsePrivateKey(
-  process.env.EVM_KEEPER_PRIVATE_KEY ?? process.env.PRIVATE_KEY,
-);
 const configuredEvmKeeperChains = parseBettingEvmChainList(
   process.env.EVM_KEEPER_CHAINS,
   BETTING_EVM_CHAIN_ORDER,
 );
 const evmKeeperChains = configuredEvmKeeperChains
-  .map((chainKey) => buildEvmRuntime(chainKey, evmKeeperPrivateKey))
+  .map((chainKey) => buildEvmRuntime(chainKey))
   .filter((chain): chain is EvmKeeperRuntime => chain !== null);
 
 const requiredPrograms = [
@@ -2962,7 +3025,7 @@ async function upsertEvmDuelLifecycle(
           `lock:${data.duelId}`,
         );
       }
-      const upsertHash = await chain.walletClient.writeContract({
+      const upsertHash = await chain.reporter.walletClient.writeContract({
         chain: undefined,
         address: chain.duelOracleAddress,
         abi: DUEL_OUTCOME_ORACLE_ABI,
@@ -2977,7 +3040,7 @@ async function upsertEvmDuelLifecycle(
           metadata,
           status,
         ],
-        account: chain.account,
+        account: chain.reporter.account,
       });
       await chain.publicClient.waitForTransactionReceipt({
         hash: upsertHash,
@@ -2992,13 +3055,13 @@ async function upsertEvmDuelLifecycle(
       })) as { exists: boolean };
 
       if (!market.exists) {
-        const createHash = await chain.walletClient.writeContract({
+        const createHash = await chain.operator.walletClient.writeContract({
           chain: undefined,
           address: chain.goldClobAddress,
           abi: EVM_GOLD_CLOB_ADMIN_ABI,
           functionName: "createMarketForDuel",
           args: [duelKey, EVM_DUEL_WINNER_MARKET_KIND],
-          account: chain.account,
+          account: chain.operator.account,
         });
         await chain.publicClient.waitForTransactionReceipt({
           hash: createHash,
@@ -3006,13 +3069,13 @@ async function upsertEvmDuelLifecycle(
         });
       }
 
-      const syncHash = await chain.walletClient.writeContract({
+      const syncHash = await chain.operator.walletClient.writeContract({
         chain: undefined,
         address: chain.goldClobAddress,
         abi: EVM_GOLD_CLOB_ADMIN_ABI,
         functionName: "syncMarketFromOracle",
         args: [duelKey, EVM_DUEL_WINNER_MARKET_KIND],
-        account: chain.account,
+        account: chain.operator.account,
       });
       await chain.publicClient.waitForTransactionReceipt({
         hash: syncHash,
@@ -3121,7 +3184,7 @@ async function reportEvmResult(data: DuelLifecycleEvent): Promise<void> {
       );
 
       if (existingStatus < EVM_DUEL_STATUS_LOCKED) {
-        const lockHash = await chain.walletClient.writeContract({
+        const lockHash = await chain.reporter.walletClient.writeContract({
           chain: undefined,
           address: chain.duelOracleAddress,
           abi: DUEL_OUTCOME_ORACLE_ABI,
@@ -3136,20 +3199,20 @@ async function reportEvmResult(data: DuelLifecycleEvent): Promise<void> {
             metadata,
             EVM_DUEL_STATUS_LOCKED,
           ],
-          account: chain.account,
+          account: chain.reporter.account,
         });
         await chain.publicClient.waitForTransactionReceipt({
           hash: lockHash,
           confirmations: 1,
         });
 
-        const lockSyncHash = await chain.walletClient.writeContract({
+        const lockSyncHash = await chain.operator.walletClient.writeContract({
           chain: undefined,
           address: chain.goldClobAddress,
           abi: EVM_GOLD_CLOB_ADMIN_ABI,
           functionName: "syncMarketFromOracle",
           args: [duelKey, EVM_DUEL_WINNER_MARKET_KIND],
-          account: chain.account,
+          account: chain.operator.account,
         });
         await chain.publicClient.waitForTransactionReceipt({
           hash: lockSyncHash,
@@ -3164,13 +3227,18 @@ async function reportEvmResult(data: DuelLifecycleEvent): Promise<void> {
           );
           return;
         }
-        const finalizeHash = await chain.walletClient.writeContract({
+        if (!chain.finalizer) {
+          throw new Error(
+            `missing finalizer signer for ${chain.chainKey}; set TESTNET_FINALIZER_PRIVATE_KEY or EVM_FINALIZER_PRIVATE_KEY`,
+          );
+        }
+        const finalizeHash = await chain.finalizer.walletClient.writeContract({
           chain: undefined,
           address: chain.duelOracleAddress,
           abi: DUEL_OUTCOME_ORACLE_ABI,
           functionName: "finalizeResult",
           args: [duelKey, metadata],
-          account: chain.account,
+          account: chain.finalizer.account,
         });
         await chain.publicClient.waitForTransactionReceipt({
           hash: finalizeHash,
@@ -3179,7 +3247,7 @@ async function reportEvmResult(data: DuelLifecycleEvent): Promise<void> {
         return;
       }
 
-      const proposeHash = await chain.walletClient.writeContract({
+      const proposeHash = await chain.reporter.walletClient.writeContract({
         chain: undefined,
         address: chain.duelOracleAddress,
         abi: DUEL_OUTCOME_ORACLE_ABI,
@@ -3198,20 +3266,20 @@ async function reportEvmResult(data: DuelLifecycleEvent): Promise<void> {
           duelEndTs,
           metadata,
         ],
-        account: chain.account,
+        account: chain.reporter.account,
       });
       await chain.publicClient.waitForTransactionReceipt({
         hash: proposeHash,
         confirmations: 1,
       });
 
-      const syncHash = await chain.walletClient.writeContract({
+      const syncHash = await chain.operator.walletClient.writeContract({
         chain: undefined,
         address: chain.goldClobAddress,
         abi: EVM_GOLD_CLOB_ADMIN_ABI,
         functionName: "syncMarketFromOracle",
         args: [duelKey, EVM_DUEL_WINNER_MARKET_KIND],
-        account: chain.account,
+        account: chain.operator.account,
       });
       await chain.publicClient.waitForTransactionReceipt({
         hash: syncHash,
@@ -3226,13 +3294,18 @@ async function reportEvmResult(data: DuelLifecycleEvent): Promise<void> {
         return;
       }
 
-      const finalizeHash = await chain.walletClient.writeContract({
+      if (!chain.finalizer) {
+        throw new Error(
+          `missing finalizer signer for ${chain.chainKey}; set TESTNET_FINALIZER_PRIVATE_KEY or EVM_FINALIZER_PRIVATE_KEY`,
+        );
+      }
+      const finalizeHash = await chain.finalizer.walletClient.writeContract({
         chain: undefined,
         address: chain.duelOracleAddress,
         abi: DUEL_OUTCOME_ORACLE_ABI,
         functionName: "finalizeResult",
         args: [duelKey, metadata],
-        account: chain.account,
+        account: chain.finalizer.account,
       });
       await chain.publicClient.waitForTransactionReceipt({
         hash: finalizeHash,

@@ -85,6 +85,14 @@ const E2E_ARENA_WRITE_KEY =
   process.env.ARENA_EXTERNAL_BET_WRITE_KEY?.trim() ||
   process.env.VITE_ARENA_WRITE_KEY?.trim() ||
   "";
+const E2E_DUEL_SOURCE =
+  process.env.E2E_DUEL_SOURCE?.trim().toLowerCase() || "synthetic_publish";
+const SEEDED_ASK_LIQUIDITY_LAMPORTS = "100000000";
+const MIN_BOOTSTRAP_AUTHORITY_LAMPORTS = 50_000_000n;
+const ASK_LIQUIDITY_MAKER_SEED = Uint8Array.from([
+  14, 22, 189, 71, 203, 44, 97, 156, 18, 240, 85, 132, 53, 199, 4, 220, 91,
+  11, 144, 201, 32, 77, 165, 118, 246, 17, 63, 154, 208, 39, 121, 6,
+]);
 
 async function loadState(): Promise<E2eState> {
   const statePath = path.resolve(__dirname, "./state.json");
@@ -130,11 +138,97 @@ async function readText(page: Page, testId: string): Promise<string> {
   return ((await locator.textContent().catch(() => "")) || "").trim();
 }
 
+function loadKeypairFromPath(filepath: string): Keypair {
+  const secret = JSON.parse(fs.readFileSync(filepath, "utf8")) as number[];
+  return Keypair.fromSecretKey(Uint8Array.from(secret));
+}
+
 function loadBootstrapAuthority(state: E2eState): Keypair {
   const walletPath = state.bootstrapWalletPath?.trim() || "";
   if (!walletPath) throw new Error("Missing bootstrapWalletPath in e2e state");
-  const secret = JSON.parse(fs.readFileSync(walletPath, "utf8")) as number[];
-  return Keypair.fromSecretKey(Uint8Array.from(secret));
+  return loadKeypairFromPath(walletPath);
+}
+
+function seededAskLiquidityMaker(): Keypair {
+  return Keypair.fromSeed(ASK_LIQUIDITY_MAKER_SEED);
+}
+
+async function ensureBootstrapAuthorityLamportBuffer(
+  connection: Connection,
+  state: E2eState,
+  minimumLamports = MIN_BOOTSTRAP_AUTHORITY_LAMPORTS,
+): Promise<void> {
+  const authority = loadBootstrapAuthority(state);
+  const authorityBalance = BigInt(
+    await connection.getBalance(authority.publicKey, "confirmed"),
+  );
+  if (authorityBalance >= minimumLamports) {
+    return;
+  }
+
+  const candidateEntries: Array<{
+    signer: Keypair;
+    reserveLamports: bigint;
+  }> = [];
+  const canaryPath = process.env.SOLANA_CANARY_KEYPAIR?.trim() || "";
+  if (canaryPath && canaryPath !== state.bootstrapWalletPath?.trim()) {
+    candidateEntries.push({
+      signer: loadKeypairFromPath(canaryPath),
+      reserveLamports: 250_000_000n,
+    });
+  }
+  candidateEntries.push({
+    signer: seededAskLiquidityMaker(),
+    reserveLamports: 100_000_000n,
+  });
+
+  let currentBalance = authorityBalance;
+  for (const candidate of candidateEntries) {
+    if (currentBalance >= minimumLamports) {
+      break;
+    }
+    if (candidate.signer.publicKey.equals(authority.publicKey)) {
+      continue;
+    }
+    const candidateBalance = BigInt(
+      await connection.getBalance(candidate.signer.publicKey, "confirmed"),
+    );
+    const transferableLamports =
+      candidateBalance > candidate.reserveLamports
+        ? candidateBalance - candidate.reserveLamports
+        : 0n;
+    if (transferableLamports <= 0n) {
+      continue;
+    }
+    const requiredLamports = minimumLamports - currentBalance;
+    const transferLamports =
+      transferableLamports < requiredLamports
+        ? transferableLamports
+        : requiredLamports;
+    const provider = new AnchorProvider(connection, toWallet(candidate.signer), {
+      commitment: "confirmed",
+      preflightCommitment: "confirmed",
+    });
+    await provider.sendAndConfirm(
+      new Transaction().add(
+        SystemProgram.transfer({
+          fromPubkey: candidate.signer.publicKey,
+          toPubkey: authority.publicKey,
+          lamports: Number(transferLamports),
+        }),
+      ),
+      [],
+    );
+    currentBalance = BigInt(
+      await connection.getBalance(authority.publicKey, "confirmed"),
+    );
+  }
+
+  if (currentBalance < minimumLamports) {
+    throw new Error(
+      `Bootstrap authority underfunded: authority=${authority.publicKey.toBase58()} balance=${currentBalance.toString()} minimum=${minimumLamports.toString()}`,
+    );
+  }
 }
 
 async function seedAskLiquidity(
@@ -146,8 +240,8 @@ async function seedAskLiquidity(
     vault: PublicKey;
   },
 ): Promise<void> {
-  const authority = loadBootstrapAuthority(state);
-  const provider = new AnchorProvider(connection, toWallet(authority), {
+  const maker = seededAskLiquidityMaker();
+  const provider = new AnchorProvider(connection, toWallet(maker), {
     commitment: "confirmed",
     preflightCommitment: "confirmed",
   });
@@ -187,7 +281,7 @@ async function seedAskLiquidity(
       new BN(nextOrderId.toString()),
       SIDE_ASK,
       500,
-      new BN("1000000000"),
+      new BN(SEEDED_ASK_LIQUIDITY_LAMPORTS),
       ORDER_BEHAVIOR_GTC,
     )
     .accountsPartial({
@@ -196,7 +290,7 @@ async function seedAskLiquidity(
       userBalance: deriveUserBalancePda(
         clobProgram.programId,
         marketState,
-        authority.publicKey,
+        maker.publicKey,
       ),
       newOrder: deriveOrderPda(clobProgram.programId, marketState, nextOrderId),
       restingLevel: derivePriceLevelPda(
@@ -209,10 +303,10 @@ async function seedAskLiquidity(
       treasury: new PublicKey(state.clobTreasury || ""),
       marketMaker: new PublicKey(state.clobMarketMaker || ""),
       vault,
-      user: authority.publicKey,
+      user: maker.publicKey,
       systemProgram: SystemProgram.programId,
     })
-    .signers([authority])
+    .signers([maker])
     .rpc();
 }
 
@@ -287,6 +381,7 @@ async function createFreshSolanaOpenMarket(
   marketState: PublicKey;
   vault: PublicKey;
 }> {
+  await ensureBootstrapAuthorityLamportBuffer(connection, state);
   const authority = loadBootstrapAuthority(state);
   const provider = new AnchorProvider(connection, toWallet(authority), {
     commitment: "confirmed",
@@ -343,6 +438,11 @@ async function createFreshSolanaOpenMarket(
 
   await syncMarketFromDuel(clobProgram as never, marketState, duelState);
 
+  if (E2E_DUEL_SOURCE !== "synthetic_publish") {
+    throw new Error(
+      `solana-clob-ui synthetic publish requires synthetic_publish duel source, got ${E2E_DUEL_SOURCE}`,
+    );
+  }
   await postJson<{ ok: boolean; seq: number }>(
     request,
     "/api/streaming/state/publish",

@@ -4,6 +4,9 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TARGET_CLUSTER="${1:-${SOLANA_DEPLOY_CLUSTER:-}}"
 PROGRAM_SCOPE="${HYPERBET_SOLANA_PROGRAM_SCOPE:-all}"
+SOLANA_CLUSTER_URL="${SOLANA_RPC_URL:-}"
+DEPLOY_TRANSPORT="${SOLANA_DEPLOY_TRANSPORT:-}"
+DEPLOY_TRANSPORT_ARGS=()
 
 if [[ "${2:-}" == "--pm-only" ]]; then
   PROGRAM_SCOPE="pm"
@@ -62,7 +65,7 @@ cleanup_stale_buffers() {
   output="$(
     solana program close \
       --buffers \
-      --url "$TARGET_CLUSTER" \
+      --url "$SOLANA_CLUSTER_URL" \
       --keypair "$WALLET_PATH" \
       --authority "$WALLET_PATH" \
       --recipient "$WALLET_ADDRESS" 2>&1
@@ -114,7 +117,7 @@ prepare_cli_signer() {
 program_exists() {
   local program_id="$1"
   solana program show \
-    --url "$TARGET_CLUSTER" \
+    --url "$SOLANA_CLUSTER_URL" \
     --keypair "$WALLET_PATH" \
     "$program_id" >/dev/null 2>&1
 }
@@ -127,7 +130,7 @@ program_matches_binary() {
   local deployed_hash
 
   if ! solana program show \
-    --url "$TARGET_CLUSTER" \
+    --url "$SOLANA_CLUSTER_URL" \
     --keypair "$WALLET_PATH" \
     "$program_id" >/dev/null 2>&1; then
     return 1
@@ -135,7 +138,7 @@ program_matches_binary() {
 
   dumped_binary="$(mktemp "${TMPDIR:-/tmp}/hyperbet-program-dump.XXXXXX.so")"
   if ! solana program dump \
-    --url "$TARGET_CLUSTER" \
+    --url "$SOLANA_CLUSTER_URL" \
     --keypair "$WALLET_PATH" \
     "$program_id" \
     "$dumped_binary" >/dev/null 2>&1; then
@@ -160,10 +163,11 @@ deploy_program() {
   set +e
   output="$(
     solana program deploy \
-      --url "$TARGET_CLUSTER" \
+      --url "$SOLANA_CLUSTER_URL" \
       --keypair "$WALLET_PATH" \
       --fee-payer "$WALLET_PATH" \
       --upgrade-authority "$WALLET_PATH" \
+      "${DEPLOY_TRANSPORT_ARGS[@]}" \
       --program-id "$keypair_path" \
       "$binary_path" 2>&1
   )"
@@ -177,7 +181,7 @@ deploy_program() {
 
   echo "[deploy] deployment failed for $program; reclaiming any staged buffers"
   cleanup_stale_buffers "after failed $program deploy"
-  echo "[deploy] balance after failed $program deploy: $(solana balance --url "$TARGET_CLUSTER" --keypair "$WALLET_PATH")"
+  echo "[deploy] balance after failed $program deploy: $(solana balance --url "$SOLANA_CLUSTER_URL" --keypair "$WALLET_PATH")"
   return $status
 }
 
@@ -192,7 +196,7 @@ upgrade_program() {
   output="$(
     anchor upgrade "$binary_path" \
       --program-id "$program_id" \
-      --provider.cluster "$TARGET_CLUSTER" \
+      --provider.cluster "$SOLANA_CLUSTER_URL" \
       --provider.wallet "$WALLET_PATH" 2>&1
   )"
   status=$?
@@ -205,7 +209,7 @@ upgrade_program() {
 
   echo "[deploy] upgrade failed for $program ($program_id); reclaiming any staged buffers"
   cleanup_stale_buffers "after failed $program upgrade"
-  echo "[deploy] balance after failed $program upgrade: $(solana balance --url "$TARGET_CLUSTER" --keypair "$WALLET_PATH")"
+  echo "[deploy] balance after failed $program upgrade: $(solana balance --url "$SOLANA_CLUSTER_URL" --keypair "$WALLET_PATH")"
   return $status
 }
 
@@ -225,7 +229,27 @@ case "$TARGET_CLUSTER" in
     ;;
 esac
 
-for required in anchor bun solana solana-keygen; do
+if [[ -z "$SOLANA_CLUSTER_URL" ]]; then
+  SOLANA_CLUSTER_URL="$TARGET_CLUSTER"
+fi
+
+if [[ -z "$DEPLOY_TRANSPORT" && "$TARGET_CLUSTER" != "mainnet-beta" ]]; then
+  DEPLOY_TRANSPORT="rpc"
+fi
+
+case "$DEPLOY_TRANSPORT" in
+  "") ;;
+  rpc) DEPLOY_TRANSPORT_ARGS+=(--use-rpc) ;;
+  quic) DEPLOY_TRANSPORT_ARGS+=(--use-quic) ;;
+  udp) DEPLOY_TRANSPORT_ARGS+=(--use-udp) ;;
+  tpu) DEPLOY_TRANSPORT_ARGS+=(--use-tpu-client) ;;
+  *)
+    echo "unsupported SOLANA_DEPLOY_TRANSPORT: $DEPLOY_TRANSPORT" >&2
+    exit 1
+    ;;
+esac
+
+for required in anchor bun node solana solana-keygen; do
   if ! command -v "$required" >/dev/null 2>&1; then
     echo "missing required command: $required" >&2
     exit 1
@@ -241,12 +265,13 @@ if [[ -n "${SOLANA_EXPECTED_AUTHORITY:-}" && "$WALLET_ADDRESS" != "${SOLANA_EXPE
   exit 1
 fi
 echo "[deploy] cluster: $TARGET_CLUSTER"
+echo "[deploy] rpc url:  $SOLANA_CLUSTER_URL"
 echo "[deploy] scope:   $PROGRAM_SCOPE"
 echo "[deploy] wallet:  $WALLET_PATH"
 echo "[deploy] address: $WALLET_ADDRESS"
-echo "[deploy] balance: $(solana balance --url "$TARGET_CLUSTER" --keypair "$WALLET_PATH")"
+echo "[deploy] balance: $(solana balance --url "$SOLANA_CLUSTER_URL" --keypair "$WALLET_PATH")"
 cleanup_stale_buffers "before deployment"
-echo "[deploy] balance after cleanup: $(solana balance --url "$TARGET_CLUSTER" --keypair "$WALLET_PATH")"
+echo "[deploy] balance after cleanup: $(solana balance --url "$SOLANA_CLUSTER_URL" --keypair "$WALLET_PATH")"
 
 if [[ "$TARGET_CLUSTER" != "mainnet-beta" ]]; then
   echo "[deploy] syncing durable Stage-A program keypairs into anchor/target/deploy"
@@ -296,7 +321,7 @@ for program in "${PROGRAMS[@]}"; do
   fi
 
   echo "[deploy] verifying $program ($program_id)"
-  solana program show --url "$TARGET_CLUSTER" --keypair "$WALLET_PATH" "$program_id"
+  solana program show --url "$SOLANA_CLUSTER_URL" --keypair "$WALLET_PATH" "$program_id"
 done
 
 echo "[deploy] complete"

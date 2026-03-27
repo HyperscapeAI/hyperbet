@@ -28,7 +28,10 @@ import {
   captureInviteCodeFromLocation,
   getStoredInviteCode,
 } from "@hyperbet/ui/lib/invite";
-import { usePredictionMarketLifecycle } from "@hyperbet/ui/lib/predictionMarkets";
+import {
+  normalizePredictionMarketDuelKeyHex,
+  usePredictionMarketLifecycle,
+} from "@hyperbet/ui/lib/predictionMarkets";
 import { useAppConnection, useAppWallet, useAppWalletModal } from "./lib/appWallet";
 import { StreamPlayer } from "@hyperbet/ui/components/StreamPlayer";
 import { PointsDisplay } from "@hyperbet/ui/components/PointsDisplay";
@@ -71,6 +74,44 @@ function formatGold(v: number, locale: UiLocale = "en"): string {
     if (v >= 1_000) return `${(v / 1_000).toFixed(1)}K`;
   }
   return String(v);
+}
+
+function readSolanaE2eRuntimeOverride(): {
+  duelKey: string | null;
+  duelId: string | null;
+  marketRef: string | null;
+} {
+  if (typeof window === "undefined") {
+    return {
+      duelKey: null,
+      duelId: null,
+      marketRef: null,
+    };
+  }
+
+  const searchParams = new URLSearchParams(window.location.search);
+  const duelKey = normalizePredictionMarketDuelKeyHex(
+    searchParams.get("e2eSolanaDuelKey") ??
+      searchParams.get("e2eDuelKey") ??
+      window.localStorage.getItem("hyperbet.e2e.solanaDuelKey") ??
+      "",
+  );
+  const duelId =
+    searchParams.get("e2eSolanaDuelId") ??
+    searchParams.get("e2eDuelId") ??
+    window.localStorage.getItem("hyperbet.e2e.solanaDuelId") ??
+    null;
+  const marketRef =
+    searchParams.get("e2eSolanaMarketRef") ??
+    searchParams.get("e2eMarketRef") ??
+    window.localStorage.getItem("hyperbet.e2e.solanaMarketRef") ??
+    null;
+
+  return {
+    duelKey,
+    duelId: duelId?.trim() || null,
+    marketRef: marketRef?.trim() || null,
+  };
 }
 
 function formatTimeAgo(ts: number, locale: UiLocale = "en"): string {
@@ -709,6 +750,17 @@ export function App() {
   const { context: duelContext } = useDuelContext();
   const liveCycle = streamingState?.cycle ?? null;
   const { market: lifecycleMarket } = usePredictionMarketLifecycle("solana");
+  const runtimeE2eOverride = useMemo(
+    () =>
+      isE2eMode
+        ? readSolanaE2eRuntimeOverride()
+        : {
+            duelKey: null,
+            duelId: null,
+            marketRef: null,
+          },
+    [isE2eMode],
+  );
   const streamSources = STREAM_URLS;
   const activeStreamUrl = streamSources[streamSourceIndex] ?? "";
 
@@ -1128,8 +1180,14 @@ export function App() {
     return "IDLE";
   })();
 
+  const activeLifecycleMarket =
+    runtimeE2eOverride.duelKey &&
+    normalizePredictionMarketDuelKeyHex(lifecycleMarket?.duelKey ?? null) !==
+      runtimeE2eOverride.duelKey
+      ? null
+      : lifecycleMarket;
   const marketStatusText = _getMarketStatusLabel(
-    lifecycleMarket?.lifecycleStatus ?? solanaClobSnapshot.marketStatus,
+    activeLifecycleMarket?.lifecycleStatus ?? solanaClobSnapshot.marketStatus,
     copy,
   );
   const countdownText = formatCountdown(

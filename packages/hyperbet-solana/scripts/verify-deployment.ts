@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { execFile as execFileCb } from "node:child_process";
 import { promisify } from "node:util";
@@ -361,10 +362,21 @@ async function readUpgradeAuthority(
   cluster: BettingSolanaCluster,
   walletPath: string | null,
 ): Promise<string | null> {
+  let preparedWalletDir: string | null = null;
+  let preparedWalletPath: string | null = null;
   try {
     const args = ["program", "show", "--url", cluster];
     if (walletPath) {
-      args.push("--keypair", walletPath);
+      preparedWalletDir = fs.mkdtempSync(
+        path.join(os.tmpdir(), "hyperbet-stage-a-verify-"),
+      );
+      preparedWalletPath = path.join(
+        preparedWalletDir,
+        path.basename(walletPath),
+      );
+      fs.copyFileSync(walletPath, preparedWalletPath);
+      fs.chmodSync(preparedWalletPath, 0o600);
+      args.push("--keypair", preparedWalletPath);
     }
     args.push(programId);
     const { stdout } = await execFile("solana", args, { env: process.env });
@@ -372,6 +384,10 @@ async function readUpgradeAuthority(
     return match ? match[1] : null;
   } catch {
     return null;
+  } finally {
+    if (preparedWalletDir) {
+      fs.rmSync(preparedWalletDir, { recursive: true, force: true });
+    }
   }
 }
 

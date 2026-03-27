@@ -295,20 +295,27 @@ export async function ensureOracleReady(
     return oracleConfig;
   }
 
-  await program.methods
-    .updateOracleConfig(
-      authority.publicKey,
-      reporter,
-      finalizer,
-      challenger,
-      new BN(disputeWindowSecs),
-    )
-    .accountsPartial({
-      authority: authority.publicKey,
-      oracleConfig,
-    })
-    .signers([authority])
-    .rpc();
+  try {
+    await program.methods
+      .updateOracleConfig(
+        authority.publicKey,
+        reporter,
+        finalizer,
+        challenger,
+        new BN(disputeWindowSecs),
+      )
+      .accountsPartial({
+        authority: authority.publicKey,
+        oracleConfig,
+      })
+      .signers([authority])
+      .rpc();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (!/ConfigFrozen/i.test(message)) {
+      throw error;
+    }
+  }
 
   return oracleConfig;
 }

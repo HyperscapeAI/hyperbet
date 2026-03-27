@@ -7,6 +7,13 @@ import {
   rootDir,
   writeJsonArtifact,
 } from "./ci-lib";
+import {
+  parseAcceptanceDeployment,
+  resolveAcceptanceUrls,
+  resolveEvmAcceptanceRuntime,
+  resolveSolanaAcceptanceRuntime,
+  type AcceptanceDeployment,
+} from "./testnet-acceptance-env";
 
 type ProofMode = "read-only" | "canary-write";
 type RunScope = "LIVE_INDICATOR" | "LIVE_CANARY";
@@ -92,6 +99,7 @@ type ChainCanaryResult = {
 };
 
 type ProofSummary = {
+  deployment: AcceptanceDeployment;
   mode: ProofMode;
   runScope: RunScope;
   target: ProofTarget;
@@ -147,11 +155,16 @@ function resolveRunScope(mode: ProofMode): RunScope {
 }
 
 function parseArgs(): {
+  deployment: AcceptanceDeployment;
   mode: ProofMode;
   target: ProofTarget;
   runScope: RunScope;
 } {
   const args = process.argv.slice(2);
+  const deploymentArg =
+    args.find((arg) => arg.startsWith("--deployment="))?.slice("--deployment=".length) ??
+    process.env.HYPERBET_ACCEPTANCE_DEPLOYMENT ??
+    "testnet";
   const modeArg =
     args.find((arg) => arg.startsWith("--mode="))?.slice("--mode=".length) ??
     "read-only";
@@ -171,6 +184,7 @@ function parseArgs(): {
     throw new Error(`unsupported proof target ${targetArg}`);
   }
   return {
+    deployment: parseAcceptanceDeployment(deploymentArg),
     mode: modeArg,
     target: targetArg,
     runScope: resolveRunScope(modeArg),
@@ -190,26 +204,11 @@ function normalizeUrl(value: string): string {
 }
 
 function chainUrls(chain: SupportedChain): ChainUrls {
-  if (chain === "solana") {
-    return {
-      pagesUrl: normalizeUrl(requireEnv("HYPERBET_SOLANA_PAGES_STAGING_URL")),
-      keeperUrl: normalizeUrl(requireEnv("HYPERBET_SOLANA_KEEPER_STAGING_URL")),
-      wsUrl: normalizeUrl(requireEnv("HYPERBET_SOLANA_KEEPER_STAGING_WS_URL")),
-    };
-  }
-
-  if (chain === "avax") {
-    return {
-      pagesUrl: normalizeUrl(requireEnv("HYPERBET_AVAX_PAGES_STAGING_URL")),
-      keeperUrl: normalizeUrl(requireEnv("HYPERBET_AVAX_KEEPER_STAGING_URL")),
-      wsUrl: normalizeUrl(requireEnv("HYPERBET_AVAX_KEEPER_STAGING_WS_URL")),
-    };
-  }
-
+  const urls = resolveAcceptanceUrls(chain, process.env);
   return {
-    pagesUrl: normalizeUrl(requireEnv("HYPERBET_BSC_PAGES_STAGING_URL")),
-    keeperUrl: normalizeUrl(requireEnv("HYPERBET_BSC_KEEPER_STAGING_URL")),
-    wsUrl: normalizeUrl(requireEnv("HYPERBET_BSC_KEEPER_STAGING_WS_URL")),
+    pagesUrl: normalizeUrl(urls.pagesUrl),
+    keeperUrl: normalizeUrl(urls.keeperUrl),
+    wsUrl: normalizeUrl(urls.wsUrl),
   };
 }
 
@@ -427,79 +426,55 @@ function runAudit(
   };
 }
 
-function runVerifyChains(readOnly: {
+function runVerifyChains(
+  deployment: AcceptanceDeployment,
+  readOnly: {
   solana?: ReadOnlyChainResult;
   bsc?: ReadOnlyChainResult;
   avax?: ReadOnlyChainResult;
-}): CheckResult[] {
+},
+): CheckResult[] {
   const env: Record<string, string> = {};
   const chains: string[] = [];
 
   if (readOnly.solana) {
+    const runtime = resolveSolanaAcceptanceRuntime(process.env);
     chains.push("solana");
-    env.SOLANA_VERIFY_RPC_URL = requireEnv("HYPERBET_SOLANA_STAGING_RPC_URL");
+    env.SOLANA_VERIFY_RPC_URL = runtime.rpcUrl;
     env.SOLANA_VERIFY_GOLD_CLOB_PROGRAM_ID =
       readOnly.solana.canonicalMarket?.programId ||
-      requireEnv("HYPERBET_SOLANA_STAGING_GOLD_CLOB_PROGRAM_ID");
+      runtime.goldClobProgramId;
     env.SOLANA_VERIFY_PROGRAM_ID = env.SOLANA_VERIFY_GOLD_CLOB_PROGRAM_ID;
-    env.SOLANA_VERIFY_GOLD_AMM_PROGRAM_ID = requireEnv(
-      "HYPERBET_SOLANA_STAGING_GOLD_AMM_PROGRAM_ID",
-    );
-    env.SOLANA_VERIFY_GOLD_PERPS_PROGRAM_ID = requireEnv(
-      "HYPERBET_SOLANA_STAGING_GOLD_PERPS_PROGRAM_ID",
-    );
+    env.SOLANA_VERIFY_GOLD_AMM_PROGRAM_ID = runtime.goldAmmProgramId;
+    env.SOLANA_VERIFY_GOLD_PERPS_PROGRAM_ID = runtime.goldPerpsProgramId;
   }
 
   if (readOnly.bsc) {
+    const runtime = resolveEvmAcceptanceRuntime("bsc", process.env);
     chains.push("bsc");
-    env.BSC_STAGING_RPC_URL = requireEnv("HYPERBET_BSC_STAGING_RPC_URL");
-    env.BSC_STAGING_DUEL_ORACLE_ADDRESS = requireEnv(
-      "HYPERBET_BSC_STAGING_DUEL_ORACLE_ADDRESS",
-    );
-    env.BSC_STAGING_GOLD_CLOB_ADDRESS =
-      readOnly.bsc.canonicalMarket?.contractAddress ||
-      requireEnv("HYPERBET_BSC_STAGING_GOLD_CLOB_ADDRESS");
-    env.BSC_STAGING_GOLD_AMM_ROUTER_ADDRESS = requireEnv(
-      "HYPERBET_BSC_STAGING_GOLD_AMM_ROUTER_ADDRESS",
-    );
-    env.BSC_STAGING_MUSD_TOKEN_ADDRESS = requireEnv(
-      "HYPERBET_BSC_STAGING_MUSD_TOKEN_ADDRESS",
-    );
-    env.BSC_STAGING_GOLD_TOKEN_ADDRESS = requireEnv(
-      "HYPERBET_BSC_STAGING_GOLD_TOKEN_ADDRESS",
-    );
-    env.BSC_STAGING_SKILL_ORACLE_ADDRESS = requireEnv(
-      "HYPERBET_BSC_STAGING_SKILL_ORACLE_ADDRESS",
-    );
-    env.BSC_STAGING_PERP_ENGINE_ADDRESS = requireEnv(
-      "HYPERBET_BSC_STAGING_PERP_ENGINE_ADDRESS",
-    );
+    env.HYPERBET_BSC_TESTNET_RPC_URL = runtime.rpcUrl;
+    env.HYPERBET_BSC_TESTNET_DUEL_ORACLE_ADDRESS = runtime.duelOracleAddress;
+    env.HYPERBET_BSC_TESTNET_GOLD_CLOB_ADDRESS =
+      readOnly.bsc.canonicalMarket?.contractAddress || runtime.goldClobAddress;
+    env.HYPERBET_BSC_TESTNET_GOLD_AMM_ROUTER_ADDRESS = runtime.goldAmmRouterAddress;
+    env.HYPERBET_BSC_TESTNET_MUSD_TOKEN_ADDRESS = runtime.mUsdTokenAddress;
+    env.HYPERBET_BSC_TESTNET_GOLD_TOKEN_ADDRESS = runtime.goldTokenAddress;
+    env.HYPERBET_BSC_TESTNET_SKILL_ORACLE_ADDRESS = runtime.skillOracleAddress;
+    env.HYPERBET_BSC_TESTNET_PERP_ENGINE_ADDRESS = runtime.perpEngineAddress;
   }
 
   if (readOnly.avax) {
+    const runtime = resolveEvmAcceptanceRuntime("avax", process.env);
     chains.push("avax");
-    env.AVAX_STAGING_RPC_URL = requireEnv("HYPERBET_AVAX_STAGING_RPC_URL");
-    env.AVAX_STAGING_DUEL_ORACLE_ADDRESS = requireEnv(
-      "HYPERBET_AVAX_STAGING_DUEL_ORACLE_ADDRESS",
-    );
-    env.AVAX_STAGING_GOLD_CLOB_ADDRESS =
-      readOnly.avax.canonicalMarket?.contractAddress ||
-      requireEnv("HYPERBET_AVAX_STAGING_GOLD_CLOB_ADDRESS");
-    env.AVAX_STAGING_GOLD_AMM_ROUTER_ADDRESS = requireEnv(
-      "HYPERBET_AVAX_STAGING_GOLD_AMM_ROUTER_ADDRESS",
-    );
-    env.AVAX_STAGING_MUSD_TOKEN_ADDRESS = requireEnv(
-      "HYPERBET_AVAX_STAGING_MUSD_TOKEN_ADDRESS",
-    );
-    env.AVAX_STAGING_GOLD_TOKEN_ADDRESS = requireEnv(
-      "HYPERBET_AVAX_STAGING_GOLD_TOKEN_ADDRESS",
-    );
-    env.AVAX_STAGING_SKILL_ORACLE_ADDRESS = requireEnv(
-      "HYPERBET_AVAX_STAGING_SKILL_ORACLE_ADDRESS",
-    );
-    env.AVAX_STAGING_PERP_ENGINE_ADDRESS = requireEnv(
-      "HYPERBET_AVAX_STAGING_PERP_ENGINE_ADDRESS",
-    );
+    env.HYPERBET_AVAX_TESTNET_RPC_URL = runtime.rpcUrl;
+    env.HYPERBET_AVAX_TESTNET_DUEL_ORACLE_ADDRESS = runtime.duelOracleAddress;
+    env.HYPERBET_AVAX_TESTNET_GOLD_CLOB_ADDRESS =
+      readOnly.avax.canonicalMarket?.contractAddress || runtime.goldClobAddress;
+    env.HYPERBET_AVAX_TESTNET_GOLD_AMM_ROUTER_ADDRESS = runtime.goldAmmRouterAddress;
+    env.HYPERBET_AVAX_TESTNET_MUSD_TOKEN_ADDRESS = runtime.mUsdTokenAddress;
+    env.HYPERBET_AVAX_TESTNET_GOLD_TOKEN_ADDRESS = runtime.goldTokenAddress;
+    env.HYPERBET_AVAX_TESTNET_SKILL_ORACLE_ADDRESS = runtime.skillOracleAddress;
+    env.HYPERBET_AVAX_TESTNET_PERP_ENGINE_ADDRESS = runtime.perpEngineAddress;
   }
 
   const results = runJsonCommand<CheckResult[]>(
@@ -509,7 +484,7 @@ function runVerifyChains(readOnly: {
       "--bun",
       "packages/market-maker-bot/src/verify-chains.ts",
       "--json",
-      "--deployment=staging",
+      `--deployment=${deployment}`,
       `--chains=${chains.join(",")}`,
     ],
     env,
@@ -586,7 +561,12 @@ function runAvaxCanary(): ChainCanaryResult {
 
 function summarizeCanarySurface(result: ChainCanaryResult): string {
   const pmLabel =
-    result.pm.claimTx ?? result.pm.syncTx ?? result.pm.placeOrderTx ?? "missing";
+    result.pm.takerClaimTx ??
+    result.pm.makerClaimTx ??
+    result.pm.syncTx ??
+    result.pm.takerOrderTx ??
+    result.pm.makerOrderTx ??
+    "missing";
   const perpsLabel =
     result.perps.closePositionTx ??
     result.perps.openPositionTx ??
@@ -598,7 +578,7 @@ function summarizeCanarySurface(result: ChainCanaryResult): string {
 
 function humanSummary(summary: ProofSummary): string {
   const lines = [
-    `staged live proof: mode=${summary.mode} scope=${summary.runScope} target=${summary.target}`,
+    `staged live proof: deployment=${summary.deployment} mode=${summary.mode} scope=${summary.runScope} target=${summary.target}`,
     `started=${summary.startedAt}`,
     `completed=${summary.completedAt ?? "in-progress"}`,
   ];
@@ -636,7 +616,7 @@ function humanSummary(summary: ProofSummary): string {
 }
 
 async function main(): Promise<void> {
-  const { mode, target, runScope } = parseArgs();
+  const { deployment, mode, target, runScope } = parseArgs();
   mkdirSync(artifactRoot, { recursive: true });
 
   const includeSolana = target === "all" || target === "solana";
@@ -644,6 +624,7 @@ async function main(): Promise<void> {
   const includeAvax = target === "all" || target === "avax";
 
   const summary: ProofSummary = {
+    deployment,
     mode,
     runScope,
     target,
@@ -661,16 +642,18 @@ async function main(): Promise<void> {
     }
     if (includeAvax) {
       summary.readOnly.avax = await runReadOnly("avax");
-      summary.avaxEnvAudit = runAvaxEnvAudits();
-      if (!summary.avaxEnvAudit.app.ok || !summary.avaxEnvAudit.keeper.ok) {
-        throw new Error(
-          `avax env audit failed: app=${summary.avaxEnvAudit.app.ok} keeper=${summary.avaxEnvAudit.keeper.ok}`,
-        );
+      if (deployment === "staging") {
+        summary.avaxEnvAudit = runAvaxEnvAudits();
+        if (!summary.avaxEnvAudit.app.ok || !summary.avaxEnvAudit.keeper.ok) {
+          throw new Error(
+            `avax env audit failed: app=${summary.avaxEnvAudit.app.ok} keeper=${summary.avaxEnvAudit.keeper.ok}`,
+          );
+        }
       }
     }
   }
 
-  const verifyResults = runVerifyChains(summary.readOnly ?? {});
+  const verifyResults = runVerifyChains(deployment, summary.readOnly ?? {});
   summary.verifyChains = verifyResults;
   const unexpectedVerifyFailures = verifyResults.filter((result) => !result.ok);
   if (unexpectedVerifyFailures.length > 0) {
