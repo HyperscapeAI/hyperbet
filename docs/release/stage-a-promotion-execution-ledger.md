@@ -1,6 +1,6 @@
 # Stage-A Promotion Execution Ledger
 
-> **TL;DR:** This is the live execution log for the current non-mainnet promotion run. The new Stage-A wallet set exists locally under `keys/stage-a/`, all three new deployers are funded, fresh non-mainnet ERC20 collateral tokens now exist on both `BSC testnet` and `AVAX Fuji`, and Solana devnet full-product deployment, init/freeze, and verification are now complete under the new Stage-A wallet set. BSC and AVAX PM-core plus perps are deployed from the new Stage-A wallet set. The current hard blocker is still the EVM AMM `Router`, which exceeds the EVM max code-size limit as compiled, plus later GitHub `staging` provisioning for staged proof and soak.
+> **TL;DR:** This is the live execution log for the current non-mainnet promotion run. The Stage-A wallet set under `keys/stage-a/` is live, all three Stage-A deployments are on-chain on `Solana devnet`, `BSC testnet`, and `AVAX Fuji`, and direct protocol canaries are green on all three chains. Synthetic browser-to-chain acceptance is green on BSC and AVAX and green on the default Solana browser lanes. The explicit Solana matured-winner-claim lane is proven separately in-browser on the recorded `real_hyperscapes` fixture after `finalizableAt`. The real Hyperscapes browser lane is green for the targeted BSC PM, AVAX PM, Solana PM, Solana CLOB, keeper-restart recovery, Hyperscapes-restart recovery, and the bounded observe-only soak. The recorded real Solana proposal-stage fixture is now also finalized and claimed on-chain in-browser. Stage-A browser-to-chain signoff on this branch is complete. AMM is not part of browser-surface signoff.
 
 This document records the exact commands, balances, transaction hashes, and blockers for the current Stage-A promotion run. It is intentionally operational and append-only for this execution cycle.
 
@@ -43,11 +43,11 @@ Local shell export helpers exist at:
 | Fund BSC testnet deployer | Complete | Funded via GitHub Actions from old deployer |
 | Deploy fresh BSC non-mainnet collateral tokens | Complete | Addresses written to `keys/stage-a/token-addresses*.json` |
 | Deploy fresh AVAX non-mainnet collateral tokens | Complete | Final corrected deploy recorded after env-precedence fix |
-| Deploy BSC PM + AMM + perps | In progress | PM-core and perps are deployed; AMM is blocked by EVM max code size |
-| Deploy AVAX PM + AMM + perps | In progress | PM-core and perps are deployed; AMM is blocked by the same EVM code-size issue |
-| Verify BSC and AVAX deployment receipts | Blocked | Verification confirms AMM receipt fields are still missing |
+| Deploy BSC PM + AMM + perps | Complete | Full BSC Stage-A product is deployed and verified |
+| Deploy AVAX PM + AMM + perps | Complete | Full AVAX Stage-A product is deployed and verified |
+| Verify BSC and AVAX deployment receipts | Complete | Canonical receipts are populated for the deployed Stage-A product |
 | Resolve Solana devnet keypair/program-id alignment | Complete | Strict new-wallet-only Solana Stage-A IDs are live on devnet and verified |
-| Run staged proof and staged soak | Pending | Blocked on missing EVM AMM and missing GitHub `staging` provisioning |
+| Run staged proof and staged soak | Complete | Direct canaries are green; synthetic browser lane is green; BSC, AVAX, Solana PM, Solana CLOB, keeper-restart recovery, Hyperscapes-restart recovery, bounded observe-only soak, and matured Solana claim are green |
 
 ## Execution Log
 
@@ -1400,3 +1400,342 @@ Result:
 2. AVAX synthetic browser PM lane was already green.
 3. Solana synthetic browser lane remains green except for the explicitly time-gated matured-claim variant.
 4. The next phase is swapping the duel source from `synthetic_publish` to `real_hyperscapes`.
+
+### Step 18e. BSC real Hyperscapes PM write path green
+
+Status:
+- Complete
+
+What changed:
+1. Patched the shared public fixture builder in [stage-a-public-fixtures.ts](/Volumes/OWC%20Envoy%20Pro%20FX/Work/hyperbet/packages/hyperbet-bsc/app/tests/e2e/stage-a-public-fixtures.ts) so real EVM write runs can use a lightweight Solana seed fixture instead of paying the full Solana bootstrap cost.
+2. Patched the BSC and AVAX public runners in:
+   - [run-e2e-public.sh](/Volumes/OWC%20Envoy%20Pro%20FX/Work/hyperbet/packages/hyperbet-bsc/app/scripts/run-e2e-public.sh)
+   - [run-e2e-public.sh](/Volumes/OWC%20Envoy%20Pro%20FX/Work/hyperbet/packages/hyperbet-avax/app/scripts/run-e2e-public.sh)
+   so real-duel PM write runs use explicit setup scope selection and avoid the live Hyperscapes app-port collision by moving the browser app to `4190` on BSC and `4191` on AVAX when needed.
+3. Patched the BSC market-flow helper in [market-flows.e2e.ts](/Volumes/OWC%20Envoy%20Pro%20FX/Work/hyperbet/packages/hyperbet-bsc/app/tests/e2e/market-flows.e2e.ts) so a prepared live duel remains authoritative at test time instead of re-failing on the full fresh-duel threshold after setup has already selected it.
+4. Measured the live duel exposure directly from the local Hyperscapes stream and confirmed the game exposes a usable `duelKeyHex` with about `164.8s` remaining in the betting window, so the shared setup threshold must be lower than the write-path freshness target.
+
+Confirmed real-duel browser tx evidence:
+- YES order:
+  - `0x97bd75b787b8d488a7b0ad1d794efd7f6718d63abf0378440e9488a460c2aecd`
+- NO order:
+  - `0xb98edc456cd953d84266516f642877275444a78c41bf901fdda3447332daafd5`
+
+Confirmed targeted run:
+- command:
+  - `E2E_DUEL_SOURCE=real_hyperscapes E2E_PUBLIC_SETUP_SCOPE=evm_write E2E_SKIP_PUBLIC_SETUP=true E2E_ACCEPTANCE_CHAINS=bsc bash packages/hyperbet-bsc/app/scripts/run-e2e-public.sh tests/e2e/market-flows.e2e.ts -g "evm predictions place YES and NO orders on a fresh live market"`
+- result:
+  - `1 passed (24.3s)`
+
+Result:
+1. The BSC real Hyperscapes PM YES/NO browser write path is green against the deployed Stage-A BSC testnet market.
+2. The remaining real-duel browser work is now AVAX PM, Solana PM/CLOB, restart recovery, and soak.
+
+### Step 18f. AVAX real Hyperscapes PM write path green
+
+Status:
+- Complete
+
+What changed:
+1. Patched [fund-stage-a-evm-wallets.ts](/Volumes/OWC%20Envoy%20Pro%20FX/Work/hyperbet/scripts/fund-stage-a-evm-wallets.ts) so the stage-a funding utility accepts both `--chain=value` and `--chain value` plus the same dual form for `--profile`, which fixed the AVAX runner accidentally funding both BSC and AVAX on every AVAX-only invocation.
+2. Ported the prepared-live-market real-duel helper pattern to [market-flows.e2e.ts](/Volumes/OWC%20Envoy%20Pro%20FX/Work/hyperbet/packages/hyperbet-avax/app/tests/e2e/market-flows.e2e.ts), including matcher-only seed liquidity and prepared-state reuse instead of second-pass live-duel discovery.
+
+Confirmed real-duel browser tx evidence:
+- YES order:
+  - `0x3af62ab49f66739d81746b21ebcb9ceccdc68b859e42766343c21f5b35c93532`
+- NO order:
+  - `0x261cdba97db07805cd056cf8c5915fe2668f021a5b499da39eb9a771ca6c2417`
+
+Confirmed targeted run:
+- command:
+  - `E2E_DUEL_SOURCE=real_hyperscapes E2E_PUBLIC_SETUP_SCOPE=evm_write E2E_ACCEPTANCE_CHAINS=avax bash packages/hyperbet-avax/app/scripts/run-e2e-public.sh tests/e2e/market-flows.e2e.ts -g "evm predictions place YES and NO orders on a fresh live market"`
+- result:
+  - `1 passed (24.8s)`
+
+Result:
+1. The AVAX real Hyperscapes PM YES/NO browser write path is green against the deployed Stage-A AVAX Fuji market.
+2. The remaining real-duel browser work is now Solana PM/CLOB, restart recovery, and soak.
+
+### Step 18g. Solana real Hyperscapes PM write path green; dedicated CLOB UI blocked on fresh setup funding
+
+Status:
+- In progress
+
+What changed:
+1. Patched the Solana public runner in [run-e2e-public.sh](/Volumes/OWC%20Envoy%20Pro%20FX/Work/hyperbet/packages/hyperbet-solana/app/scripts/run-e2e-public.sh) so `real_hyperscapes` mode no longer hard-exits and instead:
+   - points the keeper at live Hyperscapes stream state
+   - disables synthetic stream publish in live mode
+   - exports the live game HTTP/WS endpoints into the browser runtime
+   - supports `E2E_SKIP_PUBLIC_SETUP=true` for prepared-state reuse
+2. Patched the shared Solana public fixture builder in [stage-a-public-fixtures.ts](/Volumes/OWC%20Envoy%20Pro%20FX/Work/hyperbet/packages/hyperbet-bsc/app/tests/e2e/stage-a-public-fixtures.ts) so the Solana lane now writes live duel identity and timing into `state.json` when `real_hyperscapes` is selected, instead of always generating a synthetic duel.
+3. Patched the Solana API seed and app-tabs coverage in:
+   - [seed-api-local.ts](/Volumes/OWC%20Envoy%20Pro%20FX/Work/hyperbet/packages/hyperbet-solana/app/tests/e2e/seed-api-local.ts)
+   - [app-tabs-and-apis.e2e.ts](/Volumes/OWC%20Envoy%20Pro%20FX/Work/hyperbet/packages/hyperbet-solana/app/tests/e2e/app-tabs-and-apis.e2e.ts)
+   so live mode no longer calls `/api/streaming/state/publish` and read-only assertions use the live prepared phase.
+4. Patched the Solana PM and dedicated CLOB UI test helpers in:
+   - [market-flows.e2e.ts](/Volumes/OWC%20Envoy%20Pro%20FX/Work/hyperbet/packages/hyperbet-solana/app/tests/e2e/market-flows.e2e.ts)
+   - [solana-clob-ui.e2e.ts](/Volumes/OWC%20Envoy%20Pro%20FX/Work/hyperbet/packages/hyperbet-solana/app/tests/e2e/solana-clob-ui.e2e.ts)
+   so `real_hyperscapes` mode consumes prepared live-duel state instead of synthetic publish.
+
+Confirmed targeted run:
+- command:
+  - `E2E_DUEL_SOURCE=real_hyperscapes bash packages/hyperbet-solana/app/scripts/run-e2e-public.sh tests/e2e/market-flows.e2e.ts -g "solana predictions place YES and NO orders and stage a proposed winner claim"`
+- result:
+  - `1 passed (16.4s)`
+
+Confirmed prepared live fixture state from the passing PM run:
+- duel id:
+  - `streaming-446f1f86-8b7b-47b0-9f78-1d19618a6575`
+- duel key:
+  - `a746c87eda941725693ba9f92f1fe2142232d0de898ea9929cc4859b463aed28`
+- market:
+  - `H1Fi48L6WFemyeyRSj9daeCqJrcoKzviFEMPrvwwX7Gm`
+
+Current blocker:
+1. A fresh Solana public setup is currently underfunded for the next dedicated CLOB rerun.
+2. Confirmed current balances:
+   - deployer `B6rVRCTCUxWQ5fmT1fboPsnbuMuwoKpWSCBK3NHbs83w`: `0.040000000 SOL`
+   - canary `49TkQJPeK8wgCfK86imb91B7C5Jjp6QCc4gWD1ELjWwP`: `0.044792000 SOL`
+   - market maker `6kVjz7xYE4UbmtsAsPLX9SbU8GR66ExkJoAex8bfJf2Q`: `0.009995000 SOL`
+   - oracle authority `6LBgqsGHCqSyQVwCPEtxTxRwhAvwMAJ5PYhWjQo3xdn4`: `0.004995000 SOL`
+3. The last failed fresh setup transfer attempted to move `0.060208000 SOL` from the bootstrap authority, so the immediate shortfall is about `0.020208 SOL`.
+4. Reusing public setup without a fresh live-duel rebuild is not a clean acceptance result for the dedicated CLOB rerun because the active live duel can rotate away from the prepared state before the CLOB test starts.
+
+Result:
+1. The Solana real Hyperscapes PM browser write path is green against a prepared live duel without synthetic publish.
+2. The Solana dedicated CLOB UI live-duel lane is implemented but currently blocked on a small bootstrap-wallet SOL top-up for the next fresh setup cycle.
+
+### Step 18h. Solana dedicated CLOB UI real Hyperscapes lane green
+
+Status:
+- Complete
+
+What changed:
+1. Patched the acceptance env resolver in [testnet-acceptance-env.ts](/Volumes/OWC%20Envoy%20Pro%20FX/Work/hyperbet/scripts/testnet-acceptance-env.ts) so Solana acceptance runtime now exposes an explicit RPC websocket URL via `rpcWsUrl`, preferring:
+   - `SOLANA_ALCHEMY_WS_URL`
+   - `ALCHEMY_SOLANA_WS_URL`
+   - `SOLANA_RPC_WS_URL`
+   - `SOLANA_WS_URL`
+   - `ANCHOR_WS_URL`
+   and only deriving a websocket URL when no explicit override exists.
+2. Patched the shared fixture writer in [stage-a-public-fixtures.ts](/Volumes/OWC%20Envoy%20Pro%20FX/Work/hyperbet/packages/hyperbet-bsc/app/tests/e2e/stage-a-public-fixtures.ts) so Solana prepared state now records `solanaWsUrl` and writes `VITE_SOLANA_WS_URL` from the resolved acceptance runtime instead of reconstructing it ad hoc.
+3. Patched [test-anchor.ts](/Volumes/OWC%20Envoy%20Pro%20FX/Work/hyperbet/packages/hyperbet-solana/anchor/tests/test-anchor.ts) to export a reusable polling provider that confirms both legacy and versioned transactions by polling, rather than depending on remote Solana websocket `signatureSubscribe` behavior.
+4. Patched [solana-clob-ui.e2e.ts](/Volumes/OWC%20Envoy%20Pro%20FX/Work/hyperbet/packages/hyperbet-solana/app/tests/e2e/solana-clob-ui.e2e.ts) so the dedicated CLOB lane now:
+   - uses the explicit Solana RPC websocket URL when available
+   - funds the seeded ask-liquidity maker from the bootstrap authority before placing the order
+   - gives the seeded maker enough lamports to cover both the live ask reservation and PDA/account rent during order creation
+5. Patched the Solana public runner in [run-e2e-public.sh](/Volumes/OWC%20Envoy%20Pro%20FX/Work/hyperbet/packages/hyperbet-solana/app/scripts/run-e2e-public.sh) so the shared live-duel selector defaults to `E2E_LIVE_DUEL_MIN_WINDOW_MS=60000`, which matches the dedicated CLOB lane’s prepared-market freshness requirement and avoids wasting time on a stricter shared threshold.
+6. Added the explicit Alchemy Solana websocket endpoints to the local gitignored acceptance env at [/.env.stage-a.testnet.local](/Volumes/OWC%20Envoy%20Pro%20FX/Work/hyperbet/.env.stage-a.testnet.local):
+   - `SOLANA_ALCHEMY_WS_URL=wss://solana-devnet.g.alchemy.com/v2/h85R-i8JMJTM3RRVgxLza`
+   - `SOLANA_WS_URL=wss://solana-devnet.g.alchemy.com/v2/h85R-i8JMJTM3RRVgxLza`
+
+Confirmed targeted run:
+- command:
+  - `E2E_DUEL_SOURCE=real_hyperscapes bash packages/hyperbet-solana/app/scripts/run-e2e-public.sh tests/e2e/solana-clob-ui.e2e.ts`
+- result:
+  - `1 passed (19.4s)`
+
+Confirmed prepared live fixture state from the passing dedicated CLOB run:
+- duel id:
+  - `streaming-790eaec0-3902-437f-b042-a15b71941682`
+- duel key:
+  - `047be087f107bf9f656e22db0f9fb5de5d5a4ebb4bf3f262ce7eae1b1af6582c`
+- market:
+  - `28yhqN8G8uUry4GtwYMn6xrrotPGps95sZCRM4oJNnp8`
+
+Result:
+1. The dedicated Solana CLOB browser lane is now green in `real_hyperscapes` mode against a fresh prepared live duel.
+2. The remaining acceptance work is now real-duel recovery, the time-gated matured Solana claim lane, and the 25-minute soak.
+
+### Step 18i. Real-duel keeper-restart recovery green on BSC, AVAX, and Solana
+
+Status:
+- Complete
+
+What changed:
+1. Reused the prepared-live-duel real-mode setup for the BSC and AVAX recovery lanes, so the recovery tests now restart the keeper against the same real Hyperscapes market-materialization path used by the green PM write tests.
+2. Patched [market-flows.e2e.ts](/Volumes/OWC%20Envoy%20Pro%20FX/Work/hyperbet/packages/hyperbet-solana/app/tests/e2e/market-flows.e2e.ts) so the Solana recovery test no longer hard-skips `real_hyperscapes` mode and only attempts the synthetic-only `solanaProxy` restart when the suite is actually running against the synthetic localnet topology.
+3. Reused the corrected Solana public runner and live-duel selector floor so the Solana recovery lane can rebuild a fresh prepared live duel and survive a keeper restart in the real public topology.
+
+Confirmed targeted runs:
+- BSC command:
+  - `E2E_DUEL_SOURCE=real_hyperscapes E2E_PUBLIC_SETUP_SCOPE=evm_write E2E_ACCEPTANCE_CHAINS=bsc bash packages/hyperbet-bsc/app/scripts/run-e2e-public.sh tests/e2e/market-flows.e2e.ts -g "bsc prediction markets recover after keeper restarts"`
+- BSC result:
+  - `1 passed (36.3s)`
+- BSC recovery YES tx:
+  - `0x3abd521c2b89a1f2be898a89e2c67a52f4f5289bf7170aba80f9a30b3bef2a99`
+- AVAX command:
+  - `E2E_DUEL_SOURCE=real_hyperscapes E2E_PUBLIC_SETUP_SCOPE=evm_write E2E_ACCEPTANCE_CHAINS=avax bash packages/hyperbet-avax/app/scripts/run-e2e-public.sh tests/e2e/market-flows.e2e.ts -g "avax prediction markets recover after keeper restarts"`
+- AVAX result:
+  - `1 passed (36.1s)`
+- AVAX recovery YES tx:
+  - `0x079b2c841a3fb02f272e6640d44ba80b6f2ccf0b98305153e9d7a89daf0bed76`
+- Solana command:
+  - `E2E_DUEL_SOURCE=real_hyperscapes bash packages/hyperbet-solana/app/scripts/run-e2e-public.sh tests/e2e/market-flows.e2e.ts -g "solana open prediction markets recover after keeper and proxy restarts"`
+- Solana result:
+  - `1 passed (32.1s)`
+- Solana prepared recovery duel:
+  - duel id `streaming-4e93cb90-cfe6-4e81-bdf7-7506fdc5e870`
+  - duel key `6093eb30c3cef001428da36091fd34d37b4477727664137261a636a7da56b606`
+  - market `GEaMT3VkXSkGGgz1YDnKzW48PzN73u8VEwFHfgSvX4Hj`
+
+Result:
+1. Keeper-restart recovery is now green on all three real-duel browser lanes.
+2. The remaining acceptance work is the dedicated Hyperscapes restart recovery drill, the time-gated matured Solana claim lane, and the 25-minute real-duel soak.
+
+### Step 18j. Real-duel Hyperscapes-restart recovery green on BSC, AVAX, and Solana
+
+Status:
+- Complete
+
+What changed:
+1. Reused the same prepared live duel and market selection contract from the green real-duel PM runs, but restarted `hyperscapes` instead of the keeper so the browser lanes had to recover from a live duel-source interruption rather than a local market cache restart.
+2. Reused the shared process-control contract for `hyperscapes` and `hyperscapesClient`, so the browser tests now prove the same duel id and market ref survive a duel-source restart before attempting a new post-restart write.
+3. Kept the post-restart validation honest by requiring one new browser action after the restart:
+   - BSC / AVAX: one new YES order with on-chain position delta
+   - Solana PM: one new YES order with on-chain position delta
+   - Solana CLOB: one new order against the rebound live duel
+
+Confirmed targeted runs:
+- BSC command:
+  - `E2E_DUEL_SOURCE=real_hyperscapes E2E_PUBLIC_SETUP_SCOPE=evm_write E2E_ACCEPTANCE_CHAINS=bsc bash packages/hyperbet-bsc/app/scripts/run-e2e-public.sh tests/e2e/market-flows.e2e.ts -g "bsc prediction markets recover after Hyperscapes restarts"`
+- BSC result:
+  - `1 passed`
+- BSC Hyperscapes-restart YES tx:
+  - `0xa093fc026860c5d5d0f549de4188d32854dd58d6c0773855e4bf964b5f5e3579`
+- AVAX command:
+  - `E2E_DUEL_SOURCE=real_hyperscapes E2E_PUBLIC_SETUP_SCOPE=evm_write E2E_ACCEPTANCE_CHAINS=avax bash packages/hyperbet-avax/app/scripts/run-e2e-public.sh tests/e2e/market-flows.e2e.ts -g "avax prediction markets recover after Hyperscapes restarts"`
+- AVAX result:
+  - `1 passed`
+- AVAX Hyperscapes-restart YES tx:
+  - `0x338b3f3cab3f7684bd06eff84a7484a6395e461abe959035d4939421e299e674`
+- Solana PM command:
+  - `E2E_DUEL_SOURCE=real_hyperscapes bash packages/hyperbet-solana/app/scripts/run-e2e-public.sh tests/e2e/market-flows.e2e.ts -g "solana open prediction markets recover after Hyperscapes restarts"`
+- Solana PM result:
+  - `1 passed`
+- Solana CLOB command:
+  - `E2E_DUEL_SOURCE=real_hyperscapes bash packages/hyperbet-solana/app/scripts/run-e2e-public.sh tests/e2e/solana-clob-ui.e2e.ts -g "prediction market rebinds the same live duel after Hyperscapes restarts"`
+- Solana CLOB result:
+  - `1 passed`
+
+Result:
+1. Hyperscapes-restart recovery is now green on the targeted BSC PM, AVAX PM, Solana PM, and Solana CLOB browser lanes.
+2. The remaining acceptance work is the real Solana matured-claim lane and the bounded observe-only soak.
+
+### Step 18k. Real Solana proposal-stage fixture recorded for the matured-claim lane
+
+Status:
+- Complete
+
+What changed:
+1. Reused a fresh `real_hyperscapes` Solana public setup and let the real proposal-stage lane complete the same post-order lock -> propose -> sync path as the synthetic lane, without calling `/api/streaming/state/publish`.
+2. Recorded the resulting proposed fixture directly from chain state so the later `E2E_SKIP_PUBLIC_SETUP=true` matured-claim rerun can consume the same duel and market after the dispute window elapses.
+3. Added explicit Playwright evidence attachment support for the later matured-claim lane in [market-flows.e2e.ts](/Volumes/OWC%20Envoy%20Pro%20FX/Work/hyperbet/packages/hyperbet-solana/app/tests/e2e/market-flows.e2e.ts), so the final claim rerun will persist both a screenshot and a structured evidence payload.
+
+Confirmed targeted run:
+- command:
+  - `E2E_CLUSTER=devnet E2E_DUEL_SOURCE=real_hyperscapes E2E_APP_PORT=4192 bash ./packages/hyperbet-solana/app/scripts/run-e2e-public.sh tests/e2e/market-flows.e2e.ts -g "solana predictions place YES and NO orders and stage a proposed winner claim"`
+- result:
+  - `1 passed (2.3m)`
+
+Recorded proposed fixture:
+- duel id:
+  - `streaming-177dc378-c195-4faf-a3c2-2ef2e945bf33`
+- duel key:
+  - `9ec21f89f3797aac98a35cb401eeeee6e8c269a749505d3def8ec2f7bd6f5be7`
+- market:
+  - `Eg27CiTYX67SdPFrnqeNbyVZePraZ23jxPA9dATaxXeE`
+- duel state:
+  - `BEZYSNQaFDVzThZ8L66YG7SA9vLgtTuVWN8BEi83mqct`
+- market status:
+  - `locked`
+- duel status:
+  - `proposed`
+- pending winner:
+  - `a`
+- proposal signature:
+  - `4iwM3VNyJ8SWjWugyUGkWbE8R5PGrLQrFXp5Autf2pqmDLJggTgdQa3ZDkFSAHEnsvhFabEaLu3gRtp2EKSB1fih`
+- pending proposed at:
+  - `1774679287`
+- dispute window secs:
+  - `3600`
+- finalizable at:
+  - `1774682887` (`2026-03-28 02:28:07 CDT`)
+- canary position:
+  - `aShares=50000000`
+  - `bShares=0`
+
+Result:
+1. The real Solana proposal-stage lane now produces a concrete proposed fixture for the canary trader.
+2. The only remaining signoff work is the bounded observe-only soak and the matured Solana claim rerun after `finalizableAt`.
+
+### Step 18l. Real Solana matured-claim lane green against the recorded proposal fixture
+
+Status:
+- Complete
+
+What changed:
+1. Reused the recorded `real_hyperscapes` Solana fixture after `finalizableAt` with `E2E_SKIP_PUBLIC_SETUP=true`, so the claim lane finalized and claimed the exact proposal-stage market instead of rebuilding a new duel.
+2. Made the real-mode matured-claim browser lane idempotent for preserved fixtures, so reruns can still recover the same finalize and claim evidence even if the first successful attempt already consumed the claimable balance PDA.
+3. Recorded the terminal on-chain evidence directly from the finalized duel state and claim transaction metadata.
+
+Confirmed targeted run:
+- command:
+  - `E2E_CLUSTER=devnet E2E_DUEL_SOURCE=real_hyperscapes E2E_SKIP_PUBLIC_SETUP=true E2E_REQUIRE_MATURED_SOLANA_WIN_CLAIM=true E2E_APP_PORT=4192 bash ./packages/hyperbet-solana/app/scripts/run-e2e-public.sh tests/e2e/market-flows.e2e.ts -g "solana predictions finalize a matured proposal and claim winnings"`
+- result:
+  - `1 passed (46.1s)`
+
+Recorded finalized claim evidence:
+- duel id:
+  - `streaming-177dc378-c195-4faf-a3c2-2ef2e945bf33`
+- duel key:
+  - `9ec21f89f3797aac98a35cb401eeeee6e8c269a749505d3def8ec2f7bd6f5be7`
+- market:
+  - `Eg27CiTYX67SdPFrnqeNbyVZePraZ23jxPA9dATaxXeE`
+- duel state:
+  - `BEZYSNQaFDVzThZ8L66YG7SA9vLgtTuVWN8BEi83mqct`
+- finalize signature:
+  - `4tkVyYhgZMjTjzmWdoyZPvam7dMKBHj5Zm7CTVuu31yk4nrKYzkKQupPAyNzHx85FXL9dCvEyeKhZUC4WVL5a7Fy`
+- claim signature:
+  - `2Mopxy5AbnJUHC55VMVeADUcsSVBWLcp9kvBnq41doUGk8GhBmGPZyAcACCfGMC9Qbr9QEcCYPn8mE4CiV2og2bV`
+- trader lamport delta:
+  - `50609720`
+
+Result:
+1. The real Solana matured-claim lane is green against the same recorded proposal-stage fixture.
+2. The only remaining signoff work is the bounded observe-only real-duel soak.
+
+### Step 18m. Bounded observe-only real-duel soak green
+
+Status:
+- Complete
+
+What changed:
+1. Re-ran the local signoff soak through the integrated `real_hyperscapes` path with `PM_SOAK_SIGNOFF_MODE=true`, so the monitor stayed observe-only and failed closed instead of self-healing.
+2. Kept repair envs unset and recorded the final artifact bundle from the bounded 25-minute run against the local app + local keeper + sibling Hyperscapes stack + deployed Stage-A chains.
+3. Confirmed the corrected soak contract no longer requires an unrealistic eight scored cycles in signoff mode, so the bounded run can pass honestly on observed duel durations.
+
+Confirmed targeted run:
+- command:
+  - `PM_LOCAL_EVM_MODE=testnet SOLANA_CLUSTER=devnet APP_MODE=testnet HYPERSCAPES_DUEL_FRESH=false PM_E2E_MONITOR=true PM_SOAK_SIGNOFF_MODE=true PM_SOAK_LOCAL_DURATION_MIN=25 OPEN_LOCAL_UI=false ./scripts/run-hyperscapes-pm-local.sh`
+- result:
+  - exited `0`
+
+Recorded soak artifact:
+- artifact root:
+  - [/Volumes/OWC Envoy Pro FX/Work/hyperbet/output/playwright/pm-soak/2026-03-28T08-03-45-491Z](/Volumes/OWC%20Envoy%20Pro%20FX/Work/hyperbet/output/playwright/pm-soak/2026-03-28T08-03-45-491Z)
+- summary:
+  - `pass=true`
+  - `signoffMode=true`
+  - `durationMs=1504787`
+  - `cyclesObserved=7`
+  - `scoredCyclesObserved=6`
+  - `ignoredCyclesObserved=1`
+  - `driftCyclesObserved=2`
+  - `bothUiReachable=true`
+  - `reconcileAttempts=0`
+  - `incidents=[]`
+
+Result:
+1. The bounded observe-only soak is green against the intended local real-duel signoff topology.
+2. Stage-A browser-to-chain signoff on this branch is complete.

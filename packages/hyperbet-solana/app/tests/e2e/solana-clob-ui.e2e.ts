@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import fsp from "node:fs/promises";
+import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -40,15 +41,29 @@ import {
   uniqueDuelKey,
   upsertDuel,
 } from "../../../anchor/tests/clob-test-helpers";
+import { createPollingProvider } from "../../../anchor/tests/test-anchor";
 
 type E2eState = {
   solanaRpcUrl?: string;
+  solanaWsUrl?: string;
   placeBetAmount?: string;
   bootstrapWalletPath?: string;
   clobConfig?: string;
   clobTreasury?: string;
   clobMarketMaker?: string;
+  clobDuelState?: string;
+  clobMarketState?: string;
+  currentDuelId?: string;
+  currentDuelKeyHex?: string;
+  currentBetOpenTimeMs?: number;
+  currentBetCloseTimeMs?: number;
+  currentFightStartTimeMs?: number;
+  currentDuelSource?: "synthetic_publish" | "real_hyperscapes";
   solanaTraderPublicKey?: string;
+};
+
+type HarnessControl = {
+  controlPath: string;
 };
 
 type UserBalanceAccount = {
@@ -70,6 +85,11 @@ type AccountNamespaceFetcher = {
 };
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const processControlScriptPath = path.resolve(
+  __dirname,
+  "../../../../../scripts/e2e-process-control.sh",
+);
+const controlPath = path.resolve(__dirname, "./control.json");
 const anchorIdlDir = path.resolve(__dirname, "../../../anchor/target/idl");
 const goldClobIdl = JSON.parse(
   fs.readFileSync(path.join(anchorIdlDir, "gold_clob_market.json"), "utf8"),
@@ -87,8 +107,11 @@ const E2E_ARENA_WRITE_KEY =
   "";
 const E2E_DUEL_SOURCE =
   process.env.E2E_DUEL_SOURCE?.trim().toLowerCase() || "synthetic_publish";
+const PREPARED_LIVE_DUEL_MIN_OPEN_WINDOW_MS = 60_000;
 const SEEDED_ASK_LIQUIDITY_LAMPORTS = "100000000";
+const MIN_ASK_LIQUIDITY_MAKER_LAMPORTS = 100_000_000n;
 const MIN_BOOTSTRAP_AUTHORITY_LAMPORTS = 50_000_000n;
+const SOLANA_LAMPORT_TOP_UP_CUSHION = 5_000_000n;
 const ASK_LIQUIDITY_MAKER_SEED = Uint8Array.from([
   14, 22, 189, 71, 203, 44, 97, 156, 18, 240, 85, 132, 53, 199, 4, 220, 91,
   11, 144, 201, 32, 77, 165, 118, 246, 17, 63, 154, 208, 39, 121, 6,
@@ -98,6 +121,25 @@ async function loadState(): Promise<E2eState> {
   const statePath = path.resolve(__dirname, "./state.json");
   const raw = await fsp.readFile(statePath, "utf8");
   return JSON.parse(raw) as E2eState;
+}
+
+async function loadControl(): Promise<HarnessControl> {
+  const raw = await fsp.readFile(controlPath, "utf8");
+  return JSON.parse(raw) as HarnessControl;
+}
+
+function runProcessControl(
+  control: HarnessControl,
+  action: "restart",
+  service: "hyperscapes" | "hyperscapesClient",
+): void {
+  execFileSync(
+    "bash",
+    [processControlScriptPath, action, control.controlPath, service],
+    {
+      stdio: "inherit",
+    },
+  );
 }
 
 function bnLikeToBigInt(value: unknown): bigint {
@@ -153,6 +195,38 @@ function seededAskLiquidityMaker(): Keypair {
   return Keypair.fromSeed(ASK_LIQUIDITY_MAKER_SEED);
 }
 
+function deriveWsUrl(httpUrl: string): string {
+  if (httpUrl.startsWith("https://")) {
+    return httpUrl.replace(/^https:\/\//, "wss://");
+  }
+  if (httpUrl.startsWith("http://")) {
+    return httpUrl.replace(/^http:\/\//, "ws://");
+  }
+  return httpUrl;
+}
+
+function resolveSolanaRpcWsUrl(
+  rpcUrl: string,
+  stateWsUrl?: string,
+): string {
+  return (
+    stateWsUrl?.trim() ||
+    process.env.SOLANA_ALCHEMY_WS_URL?.trim() ||
+    process.env.ALCHEMY_SOLANA_WS_URL?.trim() ||
+    process.env.SOLANA_RPC_WS_URL?.trim() ||
+    process.env.SOLANA_WS_URL?.trim() ||
+    process.env.ANCHOR_WS_URL?.trim() ||
+    deriveWsUrl(rpcUrl)
+  );
+}
+
+function createConfirmedConnection(rpcUrl: string, stateWsUrl?: string): Connection {
+  return new Connection(rpcUrl, {
+    commitment: "confirmed",
+    wsEndpoint: resolveSolanaRpcWsUrl(rpcUrl, stateWsUrl),
+  });
+}
+
 async function ensureBootstrapAuthorityLamportBuffer(
   connection: Connection,
   state: E2eState,
@@ -205,10 +279,7 @@ async function ensureBootstrapAuthorityLamportBuffer(
       transferableLamports < requiredLamports
         ? transferableLamports
         : requiredLamports;
-    const provider = new AnchorProvider(connection, toWallet(candidate.signer), {
-      commitment: "confirmed",
-      preflightCommitment: "confirmed",
-    });
+    const provider = createPollingProvider(connection, toWallet(candidate.signer));
     await provider.sendAndConfirm(
       new Transaction().add(
         SystemProgram.transfer({
@@ -241,10 +312,35 @@ async function seedAskLiquidity(
   },
 ): Promise<void> {
   const maker = seededAskLiquidityMaker();
-  const provider = new AnchorProvider(connection, toWallet(maker), {
-    commitment: "confirmed",
-    preflightCommitment: "confirmed",
-  });
+  const makerTargetLamports =
+    MIN_ASK_LIQUIDITY_MAKER_LAMPORTS + SOLANA_LAMPORT_TOP_UP_CUSHION;
+  const makerBalance = BigInt(
+    await connection.getBalance(maker.publicKey, "confirmed"),
+  );
+  if (makerBalance < makerTargetLamports) {
+    const authority = loadBootstrapAuthority(state);
+    const fundAmount = makerTargetLamports - makerBalance;
+    await ensureBootstrapAuthorityLamportBuffer(
+      connection,
+      state,
+      MIN_BOOTSTRAP_AUTHORITY_LAMPORTS + fundAmount,
+    );
+    const authorityProvider = createPollingProvider(
+      connection,
+      toWallet(authority),
+    );
+    await authorityProvider.sendAndConfirm(
+      new Transaction().add(
+        SystemProgram.transfer({
+          fromPubkey: authority.publicKey,
+          toPubkey: maker.publicKey,
+          lamports: Number(fundAmount),
+        }),
+      ),
+      [],
+    );
+  }
+  const provider = createPollingProvider(connection, toWallet(maker));
   const clobProgram = new Program(goldClobIdl, provider);
   const marketState = market?.marketState ?? new PublicKey("");
   const duelState = market?.duelState ?? new PublicKey("");
@@ -356,6 +452,15 @@ function createReadonlyClobProgram(
   return new Program(goldClobIdl, provider);
 }
 
+async function fetchJson<T>(
+  request: APIRequestContext,
+  pathname: string,
+): Promise<T> {
+  const response = await request.get(`${GAME_API_URL}${pathname}`);
+  expect(response.ok(), `GET ${pathname} should succeed`).toBeTruthy();
+  return (await response.json()) as T;
+}
+
 async function postJson<T>(
   request: APIRequestContext,
   pathname: string,
@@ -371,6 +476,108 @@ async function postJson<T>(
   return (await response.json()) as T;
 }
 
+async function sleepMs(ms: number): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function normalizePreparedSolanaDuelKey(
+  duelKeyHex: string | undefined,
+): string {
+  const normalized = duelKeyHex?.trim().replace(/^0x/i, "").toLowerCase() || "";
+  if (!/^[0-9a-f]{64}$/.test(normalized)) {
+    throw new Error(`Missing or invalid currentDuelKeyHex in Solana e2e state`);
+  }
+  return normalized;
+}
+
+async function waitForPreparedRealSolanaOpenMarket(
+  request: APIRequestContext,
+  state: E2eState,
+  connection: Connection,
+): Promise<{
+  duelId: string;
+  duelState: PublicKey;
+  marketState: PublicKey;
+  vault: PublicKey;
+}> {
+  const duelId = (state.currentDuelId || "").trim();
+  if (!duelId) {
+    throw new Error("Missing currentDuelId in Solana e2e state");
+  }
+  const duelKeyHex = normalizePreparedSolanaDuelKey(state.currentDuelKeyHex);
+  const duelState = new PublicKey(state.clobDuelState || "");
+  const marketState = new PublicKey(state.clobMarketState || "");
+  const deadline = Date.now() + 180_000;
+  let lastError = `prepared solana duel ${duelId} is not active yet`;
+
+  while (Date.now() < deadline) {
+    try {
+      const predictionMarkets = await fetchJson<{
+        duel: { duelId: string | null; duelKey: string | null; betCloseTime: number | null };
+        markets: Array<{ chainKey: string; marketRef: string | null; lifecycleStatus: string }>;
+      }>(request, "/api/arena/prediction-markets/active");
+      const solanaMarket =
+        predictionMarkets.markets.find((market) => market.chainKey === "solana") ??
+        null;
+      if (!solanaMarket) {
+        lastError = "active Solana market is missing from prediction-markets API";
+        await sleepMs(1_000);
+        continue;
+      }
+      if ((predictionMarkets.duel.duelId || "").trim() !== duelId) {
+        lastError = `prepared Solana duel drifted to ${predictionMarkets.duel.duelId || "missing duel id"}`;
+        await sleepMs(1_000);
+        continue;
+      }
+      if (
+        (predictionMarkets.duel.duelKey || "").trim().toLowerCase() !== duelKeyHex
+      ) {
+        lastError = `prepared Solana duel key drifted to ${predictionMarkets.duel.duelKey || "missing duel key"}`;
+        await sleepMs(1_000);
+        continue;
+      }
+      if ((solanaMarket.marketRef || "").trim() !== marketState.toBase58()) {
+        lastError = `prepared Solana market drifted to ${solanaMarket.marketRef || "missing market ref"}`;
+        await sleepMs(1_000);
+        continue;
+      }
+      if (solanaMarket.lifecycleStatus !== "OPEN") {
+        lastError = `prepared Solana market ${duelId} is ${solanaMarket.lifecycleStatus || "missing lifecycle"}`;
+        await sleepMs(1_000);
+        continue;
+      }
+      const betCloseTimeMs =
+        typeof predictionMarkets.duel.betCloseTime === "number"
+          ? predictionMarkets.duel.betCloseTime
+          : state.currentBetCloseTimeMs ?? null;
+      if (
+        betCloseTimeMs != null &&
+        betCloseTimeMs - Date.now() < PREPARED_LIVE_DUEL_MIN_OPEN_WINDOW_MS
+      ) {
+        lastError = `prepared Solana duel ${duelId} has less than ${PREPARED_LIVE_DUEL_MIN_OPEN_WINDOW_MS}ms left in the betting window`;
+        await sleepMs(1_000);
+        continue;
+      }
+      return {
+        duelId,
+        duelState,
+        marketState,
+        vault: deriveClobVaultPda(
+          createReadonlyClobProgram(connection, state).programId,
+          marketState,
+        ),
+      };
+    } catch (error) {
+      lastError = error instanceof Error ? error.message : String(error);
+      await sleepMs(1_000);
+    }
+  }
+
+  throw new Error(
+    `Timed out waiting for the prepared live Solana duel on the keeper API: ${lastError}`,
+  );
+}
+
 async function createFreshSolanaOpenMarket(
   request: APIRequestContext,
   state: E2eState,
@@ -381,12 +588,12 @@ async function createFreshSolanaOpenMarket(
   marketState: PublicKey;
   vault: PublicKey;
 }> {
+  if (E2E_DUEL_SOURCE === "real_hyperscapes") {
+    return waitForPreparedRealSolanaOpenMarket(request, state, connection);
+  }
   await ensureBootstrapAuthorityLamportBuffer(connection, state);
   const authority = loadBootstrapAuthority(state);
-  const provider = new AnchorProvider(connection, toWallet(authority), {
-    commitment: "confirmed",
-    preflightCommitment: "confirmed",
-  });
+  const provider = createPollingProvider(connection, toWallet(authority));
   const fightProgram = new Program(fightOracleIdl, provider);
   const clobProgram = new Program(goldClobIdl, provider);
   const duelKey = uniqueDuelKey("solana-clob-ui");
@@ -602,9 +809,9 @@ test("prediction market loads the current duel and mints YES shares on-chain", a
 }) => {
   test.setTimeout(900_000);
   const state = await loadState();
-  const connection = new Connection(
+  const connection = createConfirmedConnection(
     state.solanaRpcUrl || "http://127.0.0.1:8899",
-    "confirmed",
+    state.solanaWsUrl,
   );
   const clobProgram = createReadonlyClobProgram(connection, state);
   const authority = loadBootstrapAuthority(state);
@@ -715,4 +922,148 @@ test("prediction market loads the current duel and mints YES shares on-chain", a
       ].join("\n"),
     );
   }
+});
+
+test("prediction market rebinds the same live duel after Hyperscapes restarts", async ({
+  page,
+  request,
+}) => {
+  test.setTimeout(900_000);
+  test.skip(
+    E2E_DUEL_SOURCE !== "real_hyperscapes",
+    "Hyperscapes restart recovery is only meaningful in real-duel mode",
+  );
+  const state = await loadState();
+  const control = await loadControl();
+  const connection = createConfirmedConnection(
+    state.solanaRpcUrl || "http://127.0.0.1:8899",
+    state.solanaWsUrl,
+  );
+  const clobProgram = createReadonlyClobProgram(connection, state);
+  const authority = loadBootstrapAuthority(state);
+  const trader = new PublicKey(
+    state.solanaTraderPublicKey || authority.publicKey.toBase58(),
+  );
+  const freshMarket = await createFreshSolanaOpenMarket(
+    request,
+    state,
+    connection,
+  );
+  const userBalanceAddress = deriveUserBalancePda(
+    clobProgram.programId,
+    freshMarket.marketState,
+    trader,
+  );
+
+  await gotoApp(page);
+  await ensureWalletConnected(page);
+  await page.getByTestId("refresh-market").click();
+  await expect(page.getByTestId("current-match-id")).toContainText(
+    freshMarket.duelId,
+    {
+      timeout: 60_000,
+    },
+  );
+  await expect
+    .poll(() => readText(page, "solana-clob-match"), {
+      timeout: 60_000,
+      intervals: [1_000, 2_000, 5_000],
+    })
+    .toContain(freshMarket.marketState.toBase58());
+
+  await seedAskLiquidity(connection, state, freshMarket);
+  runProcessControl(control, "restart", "hyperscapes");
+
+  await expect
+    .poll(
+      async () => {
+        const response = await request.get(`${GAME_API_URL}/api/streaming/state`);
+        if (!response.ok()) {
+          return { duelId: "", duelKeyHex: "" };
+        }
+        const payload = (await response.json()) as {
+          cycle?: { duelId?: string | number | null; duelKeyHex?: string | null } | null;
+        };
+        return {
+          duelId:
+            payload.cycle?.duelId != null ? String(payload.cycle.duelId) : "",
+          duelKeyHex: payload.cycle?.duelKeyHex ?? "",
+        };
+      },
+      {
+        timeout: 90_000,
+        intervals: [1_000, 2_000, 5_000],
+      },
+    )
+    .toEqual({
+      duelId: freshMarket.duelId,
+      duelKeyHex: state.currentDuelKeyHex ?? "",
+    });
+
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await gotoApp(page);
+  await ensureWalletConnected(page);
+  await page.getByTestId("refresh-market").click();
+  await expect(page.getByTestId("current-match-id")).toContainText(
+    freshMarket.duelId,
+    {
+      timeout: 60_000,
+    },
+  );
+  await expect
+    .poll(() => readText(page, "solana-clob-match"), {
+      timeout: 60_000,
+      intervals: [1_000, 2_000, 5_000],
+    })
+    .toContain(freshMarket.marketState.toBase58());
+
+  const beforeBalance = (await clobProgram.account.userBalance.fetchNullable(
+    userBalanceAddress,
+  )) as UserBalanceAccount | null;
+  const beforeYes = bnLikeToBigInt(beforeBalance?.aShares);
+  const previousOrderTx = await readText(page, "solana-clob-place-order-tx");
+
+  await page.getByTestId("prediction-select-yes").click({ force: true });
+  await page
+    .getByTestId("prediction-amount-input")
+    .fill(state.placeBetAmount ?? "1");
+  await page.getByTestId("prediction-submit").click({ force: true });
+
+  await expect
+    .poll(
+      async () => {
+        const currentTx = await readText(page, "solana-clob-place-order-tx");
+        const balance = (await clobProgram.account.userBalance.fetchNullable(
+          userBalanceAddress,
+        )) as UserBalanceAccount | null;
+        return {
+          tx: currentTx,
+          aShares: Number(bnLikeToBigInt(balance?.aShares) - beforeYes),
+        };
+      },
+      {
+        timeout: 120_000,
+        intervals: [1_000, 2_000, 5_000],
+      },
+    )
+    .toEqual(
+      expect.objectContaining({
+        tx: expect.not.stringMatching(`^${previousOrderTx}$`),
+        aShares: expect.any(Number),
+      }),
+    );
+  await expect
+    .poll(
+      async () => {
+        const balance = (await clobProgram.account.userBalance.fetchNullable(
+          userBalanceAddress,
+        )) as UserBalanceAccount | null;
+        return Number(bnLikeToBigInt(balance?.aShares) - beforeYes);
+      },
+      {
+        timeout: 120_000,
+        intervals: [1_000, 2_000, 5_000],
+      },
+    )
+    .toBeGreaterThan(0);
 });

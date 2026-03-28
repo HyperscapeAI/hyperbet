@@ -15,6 +15,8 @@ type E2eState = {
   perpsMarketId?: number;
   currentDuelId?: string;
   currentDuelKeyHex?: string;
+  currentPhase?: string;
+  currentDuelSource?: "synthetic_publish" | "real_hyperscapes";
   clobMarketState?: string;
 };
 
@@ -258,11 +260,12 @@ test.describe("app tabs and api coverage", () => {
     const status = await fetchJson<{ service: string }>(request, "/status");
     expect(status.service).toBe("hyperbet-solana-backend");
 
+    const expectedPhase = state.currentPhase || "ANNOUNCEMENT";
     const streamState = await fetchJson<StreamingStateResponse>(
       request,
       "/api/streaming/state",
     );
-    expect(streamState.cycle.phase).toBe("ANNOUNCEMENT");
+    expect(streamState.cycle.phase).toBe(expectedPhase);
     expect(streamState.cycle.agent1?.name).toBeTruthy();
     expect(streamState.leaderboard.length).toBeGreaterThan(0);
 

@@ -40,6 +40,8 @@ import {
   type BettingSolanaCluster,
 } from "../../../../hyperbet-chain-registry/src/index.ts";
 import {
+  deriveClobVaultPda,
+  deriveMarketStatePda,
   deriveOracleConfigPda,
   deriveMarketConfigPda,
   deriveUserBalancePda,
@@ -56,6 +58,7 @@ import { modelMarketIdFromCharacterId } from "../../../../hyperbet-ui/src/lib/mo
 import {
   resolveAcceptanceDuelSource,
   resolveEvmAcceptanceRuntime,
+  resolveSolanaAcceptanceRuntime,
   resolveReachableSolanaAcceptanceRuntime,
   type AcceptanceEvmChain,
 } from "../../../../../scripts/testnet-acceptance-env";
@@ -64,10 +67,12 @@ type IdlWithAddress = Idl & { address?: string };
 type SignableTransaction = Transaction | VersionedTransaction;
 type AnchorLikeWallet = Wallet & { payer: Keypair };
 type EnvMap = Record<string, string | undefined>;
+type PublicSetupScope = "default" | "evm_write";
 type SolanaFixtureState = {
   mode: "public";
   cluster: BettingSolanaCluster;
   solanaRpcUrl: string;
+  solanaWsUrl: string;
   authority: string;
   bootstrapWalletPath: string;
   solanaTraderPublicKey: string;
@@ -75,6 +80,11 @@ type SolanaFixtureState = {
   currentMatchId: number;
   currentDuelId: string;
   currentDuelKeyHex: string;
+  currentBetOpenTimeMs: number;
+  currentBetCloseTimeMs: number;
+  currentFightStartTimeMs: number;
+  currentPhase: "ANNOUNCEMENT" | "COUNTDOWN" | "RESOLUTION";
+  currentDuelSource: "synthetic_publish" | "real_hyperscapes";
   clobConfig: string;
   clobMatchState: string;
   clobMarketState: string;
@@ -105,6 +115,9 @@ type EvmFixtureState = {
   evmDuelId: string;
   evmDuelKeyHex: string;
   evmMarketKey: string;
+  evmBetCloseTimeMs: number | null;
+  evmLifecycleStatus: string;
+  evmDuelSource: "synthetic_publish" | "real_hyperscapes";
   evmOracleAddress: string;
   evmCanaryPrivateKey: string;
   evmMatcherPrivateKey: string;
@@ -166,7 +179,9 @@ const DEFAULT_SOLANA_BROWSER_BET_AMOUNT = "0.05";
 const DEFAULT_EVM_SEED_ORDER_AMOUNT = "0.001";
 const DEFAULT_EVM_SEED_NO_PRICE = 600;
 const DEFAULT_EVM_SEED_YES_PRICE = 400;
-const LIVE_DUEL_MIN_OPEN_WINDOW_MS = 90_000;
+const DEFAULT_LIVE_DUEL_MIN_OPEN_WINDOW_MS = 90_000;
+const DEFAULT_LIVE_DUEL_FETCH_TIMEOUT_MS = 5_000;
+const DEFAULT_LIGHTWEIGHT_SOLANA_ORACLE_SPOT_INDEX = 120;
 const MARKET_KIND_DUEL_WINNER = 0;
 const BUY_SIDE = 1;
 const SELL_SIDE = 2;
@@ -296,6 +311,36 @@ function normalizeOptionalTimestamp(value: unknown): number | null {
   return Math.max(0, Math.trunc(value));
 }
 
+function parsePositiveInteger(
+  value: string | null | undefined,
+  fallback: number,
+): number {
+  const parsed = Number(value?.trim());
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return fallback;
+  }
+  return Math.trunc(parsed);
+}
+
+function resolveLiveDuelMinWindowMs(env: EnvMap = process.env): number {
+  return parsePositiveInteger(
+    firstNonEmptyEnv(env, ["E2E_LIVE_DUEL_MIN_WINDOW_MS"]),
+    DEFAULT_LIVE_DUEL_MIN_OPEN_WINDOW_MS,
+  );
+}
+
+function resolvePublicSetupScope(env: EnvMap = process.env): PublicSetupScope {
+  const scope = (
+    firstNonEmptyEnv(env, ["E2E_PUBLIC_SETUP_SCOPE"]) ?? "default"
+  )
+    .trim()
+    .toLowerCase();
+  if (scope === "default" || scope === "evm_write") {
+    return scope;
+  }
+  throw new Error(`Unsupported E2E_PUBLIC_SETUP_SCOPE=${scope}`);
+}
+
 async function resolveSharedEvmDuelContext(
   solanaState: SolanaFixtureState,
   env: EnvMap = process.env,
@@ -320,14 +365,27 @@ async function resolveSharedEvmDuelContext(
     ]) ?? "http://127.0.0.1:5555",
     "real Hyperscapes game HTTP URL",
   ).replace(/\/$/, "");
-  const deadline = Date.now() + 240_000;
+  const minimumWindowMs = resolveLiveDuelMinWindowMs(env);
+  const deadline = Date.now() + Math.max(240_000, minimumWindowMs + 300_000);
   let lastError = "live duel not available";
   let lastLoggedError = "";
   while (Date.now() < deadline) {
     try {
-      const response = await fetch(`${gameHttpUrl}/api/streaming/state`, {
-        headers: { "cache-control": "no-store" },
-      });
+      const liveStateUrl = new URL(`${gameHttpUrl}/api/streaming/state`);
+      liveStateUrl.searchParams.set("_", String(Date.now()));
+      const controller = new AbortController();
+      const timeoutId = setTimeout(
+        () => controller.abort(new Error("live Hyperscapes duel fetch timed out")),
+        DEFAULT_LIVE_DUEL_FETCH_TIMEOUT_MS,
+      );
+      const response = await fetch(liveStateUrl, {
+        headers: {
+          "cache-control": "no-store",
+          pragma: "no-cache",
+          connection: "close",
+        },
+        signal: controller.signal,
+      }).finally(() => clearTimeout(timeoutId));
       if (!response.ok) {
         throw new Error(
           `Failed to load live Hyperscapes cycle from ${gameHttpUrl}: ${response.status} ${response.statusText}`,
@@ -354,9 +412,9 @@ async function resolveSharedEvmDuelContext(
       }
       if (
         betCloseTimeMs != null &&
-        betCloseTimeMs - Date.now() < LIVE_DUEL_MIN_OPEN_WINDOW_MS
+        betCloseTimeMs - Date.now() < minimumWindowMs
       ) {
-        lastError = `live duel ${duelId} has less than ${LIVE_DUEL_MIN_OPEN_WINDOW_MS}ms left in the betting window`;
+        lastError = `live duel ${duelId} has less than ${minimumWindowMs}ms left in the betting window`;
         if (lastError !== lastLoggedError) {
           console.log(`[stage-a-fixture][evm] waiting for live duel: ${lastError}`);
           lastLoggedError = lastError;
@@ -585,6 +643,112 @@ function numberLikeToBigInt(value: unknown): bigint {
   return 0n;
 }
 
+async function buildLightweightSolanaSeedFixture(
+  env: EnvMap = process.env,
+): Promise<FixtureResult> {
+  const runtime = resolveSolanaAcceptanceRuntime(env);
+  const deployment = resolveBettingSolanaDeployment(runtime.cluster);
+  const directCanaryArtifact = await loadDirectCanarySolanaArtifact();
+  const currentMatchId = Date.now();
+  const currentDuelKeyHex = Buffer.from(
+    uniqueDuelKey(`stage-a-evm-write-${currentMatchId}`),
+  ).toString("hex");
+  const perpsCharacterId = assertNonEmpty(
+    env.E2E_PERPS_CHARACTER_ID ?? "stage-a-model-alpha",
+    "E2E_PERPS_CHARACTER_ID",
+  );
+  const perpsModelName = assertNonEmpty(
+    env.E2E_PERPS_MODEL_NAME ?? "Stage-A Model Alpha",
+    "E2E_PERPS_MODEL_NAME",
+  );
+  const perpsMarketId =
+    parseNumberish(directCanaryArtifact?.perps?.marketId) ??
+    modelMarketIdFromCharacterId(perpsCharacterId);
+  const perpsMarketPda = directCanaryArtifact?.perps?.marketPda?.trim() || null;
+  const solanaTraderPublicKey = assertNonEmpty(
+    firstNonEmptyEnv(env, [
+      "LOCAL_STAGE_A_SOLANA_CANARY_ADDRESS",
+      "LOCAL_STAGE_A_SOLANA_DEPLOYER_ADDRESS",
+    ]),
+    "LOCAL_STAGE_A_SOLANA_CANARY_ADDRESS",
+  );
+  const authority = assertNonEmpty(
+    firstNonEmptyEnv(env, [
+      "LOCAL_STAGE_A_SOLANA_DEPLOYER_ADDRESS",
+      "SOLANA_EXPECTED_AUTHORITY",
+    ]),
+    "LOCAL_STAGE_A_SOLANA_DEPLOYER_ADDRESS",
+  );
+
+  const envLines = dedupeEnvLines([
+    `VITE_SOLANA_CLUSTER=${runtime.cluster}`,
+    `VITE_SOLANA_RPC_URL=${runtime.rpcUrl}`,
+    `VITE_SOLANA_WS_URL=${runtime.rpcWsUrl}`,
+    `VITE_FIGHT_ORACLE_PROGRAM_ID=${runtime.fightOracleProgramId}`,
+    `VITE_GOLD_CLOB_MARKET_PROGRAM_ID=${runtime.goldClobProgramId}`,
+    `VITE_GOLD_BINARY_MARKET_PROGRAM_ID=${runtime.goldClobProgramId}`,
+    `VITE_GOLD_PERPS_MARKET_PROGRAM_ID=${runtime.goldPerpsProgramId}`,
+    `VITE_GOLD_AMM_MARKET_PROGRAM_ID=${runtime.goldAmmProgramId}`,
+    `VITE_GOLD_MINT=${deployment.goldMint}`,
+    `VITE_ACTIVE_MATCH_ID=${currentMatchId}`,
+    `VITE_BET_WINDOW_SECONDS=${DEFAULT_SOLANA_BET_WINDOW_SECONDS}`,
+    `VITE_NEW_ROUND_BET_WINDOW_SECONDS=${DEFAULT_SOLANA_BET_WINDOW_SECONDS}`,
+    `VITE_E2E_MODEL_CHARACTER_ID=${perpsCharacterId}`,
+    `VITE_E2E_MODEL_MARKET_ID=${perpsMarketId}`,
+    `VITE_E2E_MODEL_NAME=${perpsModelName}`,
+    "VITE_E2E_MODEL_PROVIDER=Hyperscape",
+    "VITE_E2E_MODEL_SLUG=stage-a-model-alpha",
+    "VITE_E2E_MODEL_WINS=12",
+    "VITE_E2E_MODEL_LOSSES=4",
+    "VITE_E2E_MODEL_COMBAT_LEVEL=88",
+    "VITE_E2E_MODEL_STREAK=4",
+    `VITE_E2E_MODEL_SPOT_INDEX=${DEFAULT_LIGHTWEIGHT_SOLANA_ORACLE_SPOT_INDEX}`,
+    "VITE_E2E_MODEL_MU=28",
+    "VITE_E2E_MODEL_SIGMA=4",
+    "VITE_E2E_MODEL_INSURANCE=12",
+    `VITE_E2E_MODEL_ORACLE_RECORDED_AT=${Date.now()}`,
+  ]);
+
+  const state: Record<string, unknown> = {
+    mode: "public",
+    cluster: runtime.cluster,
+    solanaRpcUrl: runtime.rpcUrl,
+    solanaWsUrl: runtime.rpcWsUrl,
+    authority,
+    bootstrapWalletPath: runtime.anchorWallet ?? "",
+    solanaTraderPublicKey,
+    goldMint: deployment.goldMint,
+    currentMatchId,
+    currentDuelId: String(currentMatchId),
+    currentDuelKeyHex,
+    expectedSeedSuccess: true,
+    canStartNewRound: false,
+    placeBetPayAsset: "SOL",
+    placeBetAmount: DEFAULT_SOLANA_BROWSER_BET_AMOUNT,
+    placeBetSide: "YES",
+    currentBetWindowSeconds: DEFAULT_SOLANA_BET_WINDOW_SECONDS,
+    perpsCharacterId,
+    perpsModelName,
+    perpsMarketId,
+    perpsMarketPda,
+    perpsOracleSpotIndex: DEFAULT_LIGHTWEIGHT_SOLANA_ORACLE_SPOT_INDEX,
+  };
+
+  return {
+    envLines,
+    state,
+    summary: {
+      cluster: runtime.cluster,
+      authority,
+      solanaTraderPublicKey,
+      currentMatchId,
+      currentDuelKeyHex,
+      perpsMarketId,
+      lightweight: true,
+    },
+  };
+}
+
 async function buildStageASolanaPublicFixture(
   env: EnvMap = process.env,
 ): Promise<FixtureResult> {
@@ -611,7 +775,10 @@ async function buildStageASolanaPublicFixture(
     runtime.marketMakerKeypair !== traderPath
       ? await readKeypairFromPath(runtime.marketMakerKeypair)
       : null;
-  const connection = new Connection(runtime.rpcUrl, "confirmed");
+  const connection = new Connection(runtime.rpcUrl, {
+    commitment: "confirmed",
+    wsEndpoint: runtime.rpcWsUrl,
+  });
   const provider = new AnchorProvider(connection, toWallet(bootstrapAuthority), {
     commitment: "confirmed",
     preflightCommitment: "confirmed",
@@ -738,14 +905,49 @@ async function buildStageASolanaPublicFixture(
     MIN_PUBLIC_SOLANA_TRADER_BALANCE_LAMPORTS,
   );
 
+  const duelSource = resolveAcceptanceDuelSource(env);
   const now = Math.floor(Date.now() / 1000);
-  const currentMatchId = Date.now();
-  const duelKey = uniqueDuelKey(`stage-a-public-${currentMatchId}`);
-  const currentDuelKeyHex = Buffer.from(duelKey).toString("hex");
-  const currentDuelId = String(currentMatchId);
-  const betOpenTs = now - 60;
-  const betCloseTs = now + DEFAULT_SOLANA_BET_WINDOW_SECONDS;
-  const duelStartTs = betCloseTs + 60;
+  let currentMatchId = Date.now();
+  let currentDuelId = String(currentMatchId);
+  let duelKey = uniqueDuelKey(`stage-a-public-${currentMatchId}`);
+  let currentDuelKeyHex = Buffer.from(duelKey).toString("hex");
+  let betOpenTs = now - 60;
+  let betCloseTs = now + DEFAULT_SOLANA_BET_WINDOW_SECONDS;
+  let duelStartTs = betCloseTs + 60;
+  if (duelSource === "real_hyperscapes") {
+    const liveDuel = await resolveSharedEvmDuelContext(
+      {
+        currentMatchId,
+        currentDuelKeyHex,
+      } as SolanaFixtureState,
+      env,
+    );
+    currentDuelId = liveDuel.duelId;
+    currentMatchId = Number.parseInt(liveDuel.duelId, 10);
+    if (!Number.isFinite(currentMatchId)) {
+      currentMatchId = Date.now();
+    }
+    currentDuelKeyHex = normalizeDuelKeyHex(liveDuel.duelKeyHex);
+    duelKey = Array.from(Buffer.from(currentDuelKeyHex, "hex"));
+    betOpenTs =
+      liveDuel.betOpenTimeMs != null
+        ? Math.floor(liveDuel.betOpenTimeMs / 1000)
+        : now - 60;
+    betCloseTs =
+      liveDuel.betCloseTimeMs != null
+        ? Math.floor(liveDuel.betCloseTimeMs / 1000)
+        : now + DEFAULT_SOLANA_BET_WINDOW_SECONDS;
+    duelStartTs =
+      liveDuel.fightStartTimeMs != null
+        ? Math.floor(liveDuel.fightStartTimeMs / 1000)
+        : betCloseTs + 60;
+  }
+  const currentPhase =
+    now < betCloseTs
+      ? "ANNOUNCEMENT"
+      : now < duelStartTs
+        ? "COUNTDOWN"
+        : "RESOLUTION";
 
   const duelState = await upsertDuel(
     fightProgram as never,
@@ -756,17 +958,33 @@ async function buildStageASolanaPublicFixture(
       betOpenTs,
       betCloseTs,
       duelStartTs,
-      metadataUri: `https://hyperbet.win/e2e/${currentMatchId}`,
+      metadataUri:
+        duelSource === "real_hyperscapes"
+          ? `https://hyperbet.win/live/${currentDuelId}`
+          : `https://hyperbet.win/e2e/${currentMatchId}`,
     },
   );
   const clobConfig = deriveMarketConfigPda(clobProgram.programId);
-  const { marketState, vault } = await initializeCanonicalMarket(
-    clobProgram as never,
-    bootstrapAuthority,
+  const derivedMarketState = deriveMarketStatePda(
+    clobProgram.programId,
     duelState,
-    duelKey,
-    clobConfig,
   );
+  let marketState = derivedMarketState;
+  let vault = deriveClobVaultPda(clobProgram.programId, marketState);
+  try {
+    ({ marketState, vault } = await initializeCanonicalMarket(
+      clobProgram as never,
+      bootstrapAuthority,
+      duelState,
+      duelKey,
+      clobConfig,
+    ));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (!/already in use/i.test(message)) {
+      throw error;
+    }
+  }
   await ensureVaultRentExempt(clobProgram as never, bootstrapAuthority, vault);
   await syncMarketFromDuel(clobProgram as never, marketState, duelState);
 
@@ -834,7 +1052,7 @@ async function buildStageASolanaPublicFixture(
   const envLines = dedupeEnvLines([
     `VITE_SOLANA_CLUSTER=${runtime.cluster}`,
     `VITE_SOLANA_RPC_URL=${runtime.rpcUrl}`,
-    `VITE_SOLANA_WS_URL=${deriveWsUrl(runtime.rpcUrl)}`,
+    `VITE_SOLANA_WS_URL=${runtime.rpcWsUrl}`,
     `VITE_GAME_API_URL=${keeperUrl}`,
     `VITE_GAME_WS_URL=${deriveWsUrl(keeperUrl)}/ws`,
     "VITE_USE_GAME_RPC_PROXY=false",
@@ -881,6 +1099,7 @@ async function buildStageASolanaPublicFixture(
     mode: "public",
     cluster: runtime.cluster,
     solanaRpcUrl: runtime.rpcUrl,
+    solanaWsUrl: runtime.rpcWsUrl,
     authority: bootstrapAuthority.publicKey.toBase58(),
     bootstrapWalletPath: bootstrapPath,
     solanaTraderPublicKey: trader.publicKey.toBase58(),
@@ -888,6 +1107,11 @@ async function buildStageASolanaPublicFixture(
     currentMatchId,
     currentDuelId,
     currentDuelKeyHex,
+    currentBetOpenTimeMs: betOpenTs * 1000,
+    currentBetCloseTimeMs: betCloseTs * 1000,
+    currentFightStartTimeMs: duelStartTs * 1000,
+    currentPhase,
+    currentDuelSource: duelSource,
     clobConfig: clobConfig.toBase58(),
     clobMatchState: marketState.toBase58(),
     clobMarketState: marketState.toBase58(),
@@ -919,6 +1143,8 @@ async function buildStageASolanaPublicFixture(
       trader: trader.publicKey.toBase58(),
       currentDuelId,
       currentDuelKeyHex,
+      currentPhase,
+      duelSource,
       clobMarketState: marketState.toBase58(),
       perpsMarketId,
     },
@@ -950,6 +1176,7 @@ async function buildStageAEvmPublicFixture(
   console.log(
     `[stage-a-fixture][${chain}] building EVM public fixture for duel ${sharedDuel.duelId}`,
   );
+  const duelSource = resolveAcceptanceDuelSource(env);
   const runtime = resolveEvmAcceptanceRuntime(chain, env);
   const canaryPrivateKey = assertNonEmpty(
     runtime.canaryPrivateKey,
@@ -1051,46 +1278,58 @@ async function buildStageAEvmPublicFixture(
     functionName: "getMarket",
     args: [duelKey, MARKET_KIND_DUEL_WINNER],
   })) as { exists?: boolean };
+  const lifecycleStatus =
+    duelSource === "real_hyperscapes"
+      ? existingMarket?.exists
+        ? "OPEN"
+        : "PENDING"
+      : "OPEN";
   console.log(
     `[stage-a-fixture][${chain}] existing market=${existingMarket?.exists === true ? "yes" : "no"} duelKey=${duelKey}`,
   );
-  if (hasExistingOracleDuel) {
+  if (duelSource === "real_hyperscapes") {
     console.log(
-      `[stage-a-fixture][${chain}] reusing existing oracle duel duelKey=${duelKey}`,
+      `[stage-a-fixture][${chain}] prepared live duel source=${duelSource} oracle=${hasExistingOracleDuel ? "yes" : "no"} market=${existingMarket?.exists === true ? "yes" : "no"}`,
     );
   } else {
-    const upsertTransaction = await reporterWalletClient.writeContract({
-      address: runtime.duelOracleAddress as Address,
-      abi: duelOutcomeOracleArtifact.abi,
-      functionName: "upsertDuel",
-      args: [
-        duelKey,
-        participantAHash,
-        participantBHash,
-        betOpenTs,
-        betCloseTs,
-        duelStartTs,
-        `https://hyperbet.win/e2e/${chain}/${duelId}`,
-        2,
-      ],
-    });
-    console.log(
-      `[stage-a-fixture][${chain}] upsertDuel tx=${upsertTransaction} reporter=${reporterAccount.address}`,
-    );
-    await waitForEvmReceipt(publicClient, upsertTransaction);
-  }
+    if (hasExistingOracleDuel) {
+      console.log(
+        `[stage-a-fixture][${chain}] reusing existing oracle duel duelKey=${duelKey}`,
+      );
+    } else {
+      const upsertTransaction = await reporterWalletClient.writeContract({
+        address: runtime.duelOracleAddress as Address,
+        abi: duelOutcomeOracleArtifact.abi,
+        functionName: "upsertDuel",
+        args: [
+          duelKey,
+          participantAHash,
+          participantBHash,
+          betOpenTs,
+          betCloseTs,
+          duelStartTs,
+          `https://hyperbet.win/e2e/${chain}/${duelId}`,
+          2,
+        ],
+      });
+      console.log(
+        `[stage-a-fixture][${chain}] upsertDuel tx=${upsertTransaction} reporter=${reporterAccount.address}`,
+      );
+      await waitForEvmReceipt(publicClient, upsertTransaction);
+    }
 
-  if (!existingMarket?.exists) {
-    const createMarketTransaction = await marketOperatorWalletClient.writeContract({
-      address: runtime.goldClobAddress as Address,
-      abi: goldClobArtifact.abi,
-      functionName: "createMarketForDuel",
-      args: [duelKey, MARKET_KIND_DUEL_WINNER],
-    });
-    console.log(
-      `[stage-a-fixture][${chain}] createMarketForDuel tx=${createMarketTransaction} operator=${marketOperatorAccount.address}`,
-    );
-    await waitForEvmReceipt(publicClient, createMarketTransaction);
+    if (!existingMarket?.exists) {
+      const createMarketTransaction = await marketOperatorWalletClient.writeContract({
+        address: runtime.goldClobAddress as Address,
+        abi: goldClobArtifact.abi,
+        functionName: "createMarketForDuel",
+        args: [duelKey, MARKET_KIND_DUEL_WINNER],
+      });
+      console.log(
+        `[stage-a-fixture][${chain}] createMarketForDuel tx=${createMarketTransaction} operator=${marketOperatorAccount.address}`,
+      );
+      await waitForEvmReceipt(publicClient, createMarketTransaction);
+    }
   }
 
   const marketKey = (await publicClient.readContract({
@@ -1106,43 +1345,45 @@ async function buildStageAEvmPublicFixture(
   const seedNoFee = seedNoCost / 100n;
   const seedYesFee = seedYesCost / 100n;
 
-  const seedNoTransaction = await matcherWalletClient.writeContract({
-    address: runtime.goldClobAddress as Address,
-    abi: goldClobArtifact.abi,
-    functionName: "placeOrder",
-    args: [
-      duelKey,
-      MARKET_KIND_DUEL_WINNER,
-      SELL_SIDE,
-      DEFAULT_EVM_SEED_NO_PRICE,
-      seedAmount,
-      ORDER_FLAG_GTC,
-    ],
-    value: seedNoCost + seedNoFee + seedNoFee,
-  });
-  console.log(
-    `[stage-a-fixture][${chain}] seed NO order tx=${seedNoTransaction} matcher=${matcherAccount.address}`,
-  );
-  await waitForEvmReceipt(publicClient, seedNoTransaction);
+  if (duelSource !== "real_hyperscapes") {
+    const seedNoTransaction = await matcherWalletClient.writeContract({
+      address: runtime.goldClobAddress as Address,
+      abi: goldClobArtifact.abi,
+      functionName: "placeOrder",
+      args: [
+        duelKey,
+        MARKET_KIND_DUEL_WINNER,
+        SELL_SIDE,
+        DEFAULT_EVM_SEED_NO_PRICE,
+        seedAmount,
+        ORDER_FLAG_GTC,
+      ],
+      value: seedNoCost + seedNoFee + seedNoFee,
+    });
+    console.log(
+      `[stage-a-fixture][${chain}] seed NO order tx=${seedNoTransaction} matcher=${matcherAccount.address}`,
+    );
+    await waitForEvmReceipt(publicClient, seedNoTransaction);
 
-  const seedYesTransaction = await matcherWalletClient.writeContract({
-    address: runtime.goldClobAddress as Address,
-    abi: goldClobArtifact.abi,
-    functionName: "placeOrder",
-    args: [
-      duelKey,
-      MARKET_KIND_DUEL_WINNER,
-      BUY_SIDE,
-      DEFAULT_EVM_SEED_YES_PRICE,
-      seedAmount,
-      ORDER_FLAG_GTC,
-    ],
-    value: seedYesCost + seedYesFee + seedYesFee,
-  });
-  console.log(
-    `[stage-a-fixture][${chain}] seed YES order tx=${seedYesTransaction} matcher=${matcherAccount.address}`,
-  );
-  await waitForEvmReceipt(publicClient, seedYesTransaction);
+    const seedYesTransaction = await matcherWalletClient.writeContract({
+      address: runtime.goldClobAddress as Address,
+      abi: goldClobArtifact.abi,
+      functionName: "placeOrder",
+      args: [
+        duelKey,
+        MARKET_KIND_DUEL_WINNER,
+        BUY_SIDE,
+        DEFAULT_EVM_SEED_YES_PRICE,
+        seedAmount,
+        ORDER_FLAG_GTC,
+      ],
+      value: seedYesCost + seedYesFee + seedYesFee,
+    });
+    console.log(
+      `[stage-a-fixture][${chain}] seed YES order tx=${seedYesTransaction} matcher=${matcherAccount.address}`,
+    );
+    await waitForEvmReceipt(publicClient, seedYesTransaction);
+  }
 
   const envLines = dedupeEnvLines([
     ...(runtime.keeperUrl
@@ -1170,6 +1411,9 @@ async function buildStageAEvmPublicFixture(
     evmDuelId: String(duelId),
     evmDuelKeyHex: duelKey,
     evmMarketKey: marketKey,
+    evmBetCloseTimeMs: sharedDuel.betCloseTimeMs,
+    evmLifecycleStatus: lifecycleStatus,
+    evmDuelSource: duelSource,
     evmOracleAddress: runtime.duelOracleAddress,
     evmCanaryPrivateKey: canaryPrivateKey,
     evmMatcherPrivateKey: matcherPrivateKey,
@@ -1191,6 +1435,11 @@ async function buildStageAEvmPublicFixture(
       duelId,
       duelKey,
       marketKey,
+      betCloseTimeMs: sharedDuel.betCloseTimeMs,
+      lifecycleStatus,
+      duelSource,
+      oracleDuelExists: hasExistingOracleDuel,
+      marketExists: existingMarket?.exists === true,
       headlessAddress: userAccount.address,
     },
   };
@@ -1203,8 +1452,16 @@ export async function writeStageAPublicFixture(options: {
   env?: EnvMap;
 }): Promise<void> {
   const env = options.env ?? process.env;
-  console.log("[stage-a-fixture] building Solana public fixture");
-  const solanaFixture = await buildStageASolanaPublicFixture(env);
+  const useLightweightSolanaFixture =
+    options.evmChain !== null &&
+    resolveAcceptanceDuelSource(env) === "real_hyperscapes" &&
+    resolvePublicSetupScope(env) === "evm_write";
+  console.log(
+    `[stage-a-fixture] building ${useLightweightSolanaFixture ? "lightweight" : "full"} Solana public fixture`,
+  );
+  const solanaFixture = useLightweightSolanaFixture
+    ? await buildLightweightSolanaSeedFixture(env)
+    : await buildStageASolanaPublicFixture(env);
   const solanaState = solanaFixture.state as SolanaFixtureState;
   const envLines = [...solanaFixture.envLines, ...buildSharedEvmConfigEnvLines(env)];
   const state: Record<string, unknown> = { ...solanaFixture.state };

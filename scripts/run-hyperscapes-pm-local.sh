@@ -429,6 +429,15 @@ LOCAL_AVAX_SETUP_SCRIPT="$ROOT/packages/hyperbet-avax/app/tests/e2e/setup-evm-lo
 LOCAL_BSC_ENV_PATH="$ROOT/packages/hyperbet-bsc/app/.env.e2e"
 LOCAL_AVAX_ENV_PATH="$ROOT/packages/hyperbet-avax/app/.env.e2e"
 LOCAL_EVM_BUILD_LOG="/tmp/hyperbet-pm-local-evm-build.log"
+ACCEPTANCE_SERVICE_DIR="${ACCEPTANCE_SERVICE_DIR:-$ROOT/.ci-artifacts/stage-a/acceptance-services}"
+HYPERSCAPES_DUEL_PID_FILE="$ACCEPTANCE_SERVICE_DIR/hyperscapes.pid"
+HYPERSCAPES_DUEL_LOG_FILE="$ACCEPTANCE_SERVICE_DIR/hyperscapes.log"
+HYPERSCAPES_DUEL_ENV_FILE="$ACCEPTANCE_SERVICE_DIR/hyperscapes.env"
+HYPERSCAPES_CLIENT_PID_FILE="$ACCEPTANCE_SERVICE_DIR/hyperscapes-client.pid"
+HYPERSCAPES_CLIENT_LOG_FILE="$ACCEPTANCE_SERVICE_DIR/hyperscapes-client.log"
+HYPERSCAPES_CLIENT_ENV_FILE="$ACCEPTANCE_SERVICE_DIR/hyperscapes-client.env"
+
+mkdir -p "$ACCEPTANCE_SERVICE_DIR"
 
 DUEL_PID=""
 LOCAL_BSC_ANVIL_PID=""
@@ -460,6 +469,7 @@ cleanup() {
     kill "$HYPERSCAPES_CLIENT_PID" >/dev/null 2>&1 || true
     wait "$HYPERSCAPES_CLIENT_PID" >/dev/null 2>&1 || true
   fi
+  rm -f "$HYPERSCAPES_CLIENT_PID_FILE"
 
   if [[ -n "$KEEPER_PID" ]] && kill -0 "$KEEPER_PID" >/dev/null 2>&1; then
     kill "$KEEPER_PID" >/dev/null 2>&1 || true
@@ -470,6 +480,7 @@ cleanup() {
     kill "$DUEL_PID" >/dev/null 2>&1 || true
     wait "$DUEL_PID" >/dev/null 2>&1 || true
   fi
+  rm -f "$HYPERSCAPES_DUEL_PID_FILE"
 
   if [[ -n "$LOCAL_AVAX_ANVIL_PID" ]] && kill -0 "$LOCAL_AVAX_ANVIL_PID" >/dev/null 2>&1; then
     kill "$LOCAL_AVAX_ANVIL_PID" >/dev/null 2>&1 || true
@@ -574,6 +585,64 @@ json_field() {
   local field="$2"
   "$NODE_BIN" -e 'const fs=require("fs"); const file=process.argv[1]; const key=process.argv[2]; const data=JSON.parse(fs.readFileSync(file,"utf8")); process.stdout.write(String(data[key] ?? ""));' "$path" "$field"
 }
+
+write_shell_env_file() {
+  local output_path="$1"
+  shift
+  : >"$output_path"
+  while (($#)); do
+    local key="$1"
+    local value="$2"
+    shift 2
+    printf '%s=%q\n' "$key" "$value" >>"$output_path"
+  done
+}
+
+write_hyperscapes_service_envs() {
+  write_shell_env_file \
+    "$HYPERSCAPES_DUEL_ENV_FILE" \
+    HYPERSCAPES_ROOT "$HYPERSCAPES_ROOT" \
+    BUN_BIN "$BUN_BIN" \
+    NODE_BIN "$NODE_BIN" \
+    DUEL_CLIENT_NODE_BIN "$DUEL_CLIENT_NODE_BIN" \
+    GAME_HTTP_URL "$GAME_HTTP_URL" \
+    GAME_WS_URL "$GAME_WS_URL" \
+    GAME_CLIENT_URL "$GAME_CLIENT_URL" \
+    GAME_PORT "$GAME_PORT" \
+    DUEL_BOTS "$DUEL_BOTS" \
+    HYPERSCAPES_SKIP_CHAIN_SETUP "$HYPERSCAPES_SKIP_CHAIN_SETUP" \
+    HYPERSCAPES_DUEL_NODE_ENV "$HYPERSCAPES_DUEL_NODE_ENV" \
+    HYPERSCAPES_USE_PRODUCTION_CLIENT "$HYPERSCAPES_USE_PRODUCTION_CLIENT" \
+    HYPERSCAPES_REUSE_EXISTING_CLIENT "$HYPERSCAPES_REUSE_EXISTING_CLIENT" \
+    HYPERSCAPES_DUEL_FRESH "$HYPERSCAPES_DUEL_FRESH" \
+    HYPERSCAPES_DUEL_DATABASE_URL "$HYPERSCAPES_DUEL_DATABASE_URL" \
+    DUEL_ALLOW_FRAME_EMBED "$DUEL_ALLOW_FRAME_EMBED" \
+    HYPERSCAPES_JWT_SECRET "$HYPERSCAPES_JWT_SECRET" \
+    HYPERSCAPES_PUBLIC_CDN_URL "$HYPERSCAPES_PUBLIC_CDN_URL" \
+    STREAMING_ANNOUNCEMENT_MS "$STREAMING_ANNOUNCEMENT_MS" \
+    STREAMING_FIGHTING_MS "$STREAMING_FIGHTING_MS" \
+    STREAMING_END_WARNING_MS "$STREAMING_END_WARNING_MS" \
+    STREAMING_RESOLUTION_MS "$STREAMING_RESOLUTION_MS" \
+    STREAMING_COUNTDOWN_TICKS "$STREAMING_COUNTDOWN_TICKS" \
+    STREAMING_VIEWER_ACCESS_TOKEN "$STREAMING_VIEWER_ACCESS_TOKEN" \
+    BETTING_FEED_ACCESS_TOKEN "$BETTING_FEED_ACCESS_TOKEN" \
+    STREAM_CAPTURE_HEADLESS "$STREAM_CAPTURE_HEADLESS" \
+    STREAM_CAPTURE_CHANNEL "$STREAM_CAPTURE_CHANNEL" \
+    STREAM_CAPTURE_WIDTH "$STREAM_CAPTURE_WIDTH" \
+    STREAM_CAPTURE_HEIGHT "$STREAM_CAPTURE_HEIGHT"
+
+  write_shell_env_file \
+    "$HYPERSCAPES_CLIENT_ENV_FILE" \
+    HYPERSCAPES_ROOT "$HYPERSCAPES_ROOT" \
+    GAME_HTTP_URL "$GAME_HTTP_URL" \
+    GAME_WS_URL "$GAME_WS_URL" \
+    HYPERSCAPES_PUBLIC_CDN_URL "$HYPERSCAPES_PUBLIC_CDN_URL" \
+    GAME_CLIENT_PORT "$GAME_CLIENT_PORT" \
+    NODE_BIN "$NODE_BIN" \
+    DUEL_CLIENT_NODE_BIN "$DUEL_CLIENT_NODE_BIN"
+}
+
+write_hyperscapes_service_envs
 
 seed_hyperscapes_agents() {
   local agents_url="${GAME_HTTP_URL}/api/embedded-agents"
@@ -987,17 +1056,10 @@ start_hyperscapes_client_preview() {
   write_hyperscapes_client_runtime_env "$client_dist"
 
   echo "[pm-local] starting Hyperscapes preview client at $GAME_CLIENT_URL"
-  (
-    cd "$client_dir"
-    NODE_ENV=production \
-      "$DUEL_CLIENT_NODE_BIN" \
-      ./node_modules/vite/bin/vite.js \
-      preview \
-      --host 127.0.0.1 \
-      --port "$GAME_CLIENT_PORT" \
-      --strictPort
-  ) &
+  nohup bash -lc "set -a; source \"$HYPERSCAPES_CLIENT_ENV_FILE\"; set +a; exec \"$ROOT/scripts/start-hyperscapes-client-preview.sh\"" \
+    >>"$HYPERSCAPES_CLIENT_LOG_FILE" 2>&1 < /dev/null &
   HYPERSCAPES_CLIENT_PID=$!
+  printf '%s\n' "$HYPERSCAPES_CLIENT_PID" >"$HYPERSCAPES_CLIENT_PID_FILE"
 
   wait_for_http "$GAME_CLIENT_URL" "Hyperscapes game client preview"
 }
@@ -1013,49 +1075,10 @@ elif [[ "$HYPERSCAPES_REUSE_EXISTING_CLIENT" == "true" ]]; then
   echo "[pm-local] reusing externally managed Hyperscapes client at $GAME_CLIENT_URL"
 fi
 ensure_hyperscapes_physx_dist
-(
-  cd "$HYPERSCAPES_ROOT"
-  duel_args=(
-    run
-    duel
-    --skip-betting
-    --skip-keeper
-    "--bots=${DUEL_BOTS}"
-    "--server-url=${GAME_HTTP_URL}"
-    "--ws-url=${GAME_WS_URL}"
-    "--client-url=${GAME_CLIENT_URL}"
-  )
-  if [[ "$HYPERSCAPES_SKIP_CHAIN_SETUP" == "true" ]]; then
-    duel_args+=(--skip-chain-setup)
-  fi
-  if [[ "$HYPERSCAPES_DUEL_FRESH" == "true" ]]; then
-    duel_args+=(--fresh)
-  fi
-  DUEL_WITH_HYPERBET=false \
-    PORT="$GAME_PORT" \
-    DUEL_NODE_ENV="$HYPERSCAPES_DUEL_NODE_ENV" \
-    DUEL_USE_PRODUCTION_CLIENT="$HYPERSCAPES_USE_PRODUCTION_CLIENT" \
-    DUEL_REUSE_EXISTING_CLIENT="$HYPERSCAPES_REUSE_EXISTING_CLIENT" \
-    DUEL_DATABASE_URL="$HYPERSCAPES_DUEL_DATABASE_URL" \
-    DUEL_ALLOW_FRAME_EMBED="$DUEL_ALLOW_FRAME_EMBED" \
-    DUEL_SERVER_NODE_BIN="$NODE_BIN" \
-    DUEL_CLIENT_NODE_BIN="$DUEL_CLIENT_NODE_BIN" \
-    JWT_SECRET="$HYPERSCAPES_JWT_SECRET" \
-    PUBLIC_CDN_URL="$HYPERSCAPES_PUBLIC_CDN_URL" \
-    STREAMING_ANNOUNCEMENT_MS="$STREAMING_ANNOUNCEMENT_MS" \
-    STREAMING_FIGHTING_MS="$STREAMING_FIGHTING_MS" \
-    STREAMING_END_WARNING_MS="$STREAMING_END_WARNING_MS" \
-    STREAMING_RESOLUTION_MS="$STREAMING_RESOLUTION_MS" \
-    STREAMING_COUNTDOWN_TICKS="$STREAMING_COUNTDOWN_TICKS" \
-    STREAMING_VIEWER_ACCESS_TOKEN="$STREAMING_VIEWER_ACCESS_TOKEN" \
-    BETTING_FEED_ACCESS_TOKEN="$BETTING_FEED_ACCESS_TOKEN" \
-    STREAM_CAPTURE_HEADLESS="$STREAM_CAPTURE_HEADLESS" \
-    STREAM_CAPTURE_CHANNEL="$STREAM_CAPTURE_CHANNEL" \
-    STREAM_CAPTURE_WIDTH="$STREAM_CAPTURE_WIDTH" \
-    STREAM_CAPTURE_HEIGHT="$STREAM_CAPTURE_HEIGHT" \
-    "$BUN_BIN" "${duel_args[@]}"
-) &
+nohup bash -lc "set -a; source \"$HYPERSCAPES_DUEL_ENV_FILE\"; set +a; exec \"$ROOT/scripts/start-hyperscapes-duel-service.sh\"" \
+  >>"$HYPERSCAPES_DUEL_LOG_FILE" 2>&1 < /dev/null &
 DUEL_PID=$!
+printf '%s\n' "$DUEL_PID" >"$HYPERSCAPES_DUEL_PID_FILE"
 
 wait_for_http "${GAME_HTTP_URL}/api/streaming/state" "Hyperscapes streaming state"
 seed_hyperscapes_agents
@@ -1176,32 +1199,46 @@ if [[ "$PM_E2E_MONITOR" == "true" ]]; then
   echo "[pm-local] starting local PM follow monitor"
   (
     cd "$ROOT"
-      HYPERSCAPES_UI_URL="$HYPERSCAPES_UI_URL" \
-      HYPERBET_UI_URL="$HYPERBET_UI_URL" \
-      ACCEPTANCE_DUEL_SOURCE="real_hyperscapes" \
-      E2E_DUEL_SOURCE="real_hyperscapes" \
-      VITE_STREAM_URL="${VITE_STREAM_URL:-$HYPERSCAPES_UI_URL}" \
-      SOURCE_STREAM_STATE_URL="${SOURCE_STREAM_STATE_URL:-${GAME_HTTP_URL}/api/streaming/state}" \
-      SOURCE_BET_SYNC_STATE_URL="${SOURCE_BET_SYNC_STATE_URL:-${GAME_HTTP_URL}/api/internal/bet-sync/state}" \
-      SOURCE_BET_SYNC_BEARER_TOKEN="${SOURCE_BET_SYNC_BEARER_TOKEN:-$BETTING_FEED_ACCESS_TOKEN}" \
-      SOURCE_RTMP_STATUS_URL="${SOURCE_RTMP_STATUS_URL:-${GAME_HTTP_URL}/api/streaming/rtmp/status}" \
-      STREAM_STATE_URL="${STREAM_STATE_URL:-${KEEPER_URL}/api/streaming/state}" \
-      ACTIVE_MARKETS_URL="${KEEPER_URL}/api/arena/prediction-markets/active" \
-      OVERVIEW_MARKETS_URL="${OVERVIEW_MARKETS_URL:-${KEEPER_URL}/api/arena/prediction-markets/overview}" \
-      SYNC_STATUS_URL="${SYNC_STATUS_URL:-${KEEPER_URL}/api/sync/status}" \
-      PM_SOAK_RECONCILE_PUBLISH_URL="${PM_SOAK_RECONCILE_PUBLISH_URL:-${KEEPER_URL}/api/streaming/state/publish}" \
-      PM_SOAK_RECONCILE_PUBLISH_KEY="${PM_SOAK_RECONCILE_PUBLISH_KEY:-$LOCAL_STREAM_PUBLISH_KEY}" \
-      PM_SOAK_SCREENSHOTS="${PM_SOAK_SCREENSHOTS:-true}" \
-      PM_SOAK_HEADLESS="${PM_SOAK_HEADLESS}" \
-      PM_SOAK_BROWSER_CHANNEL="${PM_SOAK_BROWSER_CHANNEL}" \
-      PM_SOAK_WEBGPU_ARGS="${PM_SOAK_WEBGPU_ARGS}" \
-      PM_SOAK_SCREENSHOT_WIDTH="${PM_SOAK_SCREENSHOT_WIDTH}" \
-      PM_SOAK_SCREENSHOT_HEIGHT="${PM_SOAK_SCREENSHOT_HEIGHT}" \
-      RUN_SCOPE="LOCALNET" \
-      PERPS_MARKETS_URL="${KEEPER_URL}/api/perps/markets" \
-      PERPS_ORACLE_HISTORY_URL="${KEEPER_URL}/api/perps/oracle-history" \
-      BUN_BIN="$BUN_BIN" \
-      "$NODE_BIN" --import tsx scripts/pm-soak-monitor.ts --mode=local --follow --duration-min="${PM_SOAK_LOCAL_DURATION_MIN}" --poll-ms="${PM_SOAK_POLL_MS}"
+      soak_args=(
+        --mode=local
+        --duration-min="${PM_SOAK_LOCAL_DURATION_MIN}"
+        --poll-ms="${PM_SOAK_POLL_MS}"
+      )
+      soak_env=(
+        HYPERSCAPES_UI_URL="$HYPERSCAPES_UI_URL"
+        HYPERBET_UI_URL="$HYPERBET_UI_URL"
+        ACCEPTANCE_DUEL_SOURCE="real_hyperscapes"
+        E2E_DUEL_SOURCE="real_hyperscapes"
+        VITE_STREAM_URL="${VITE_STREAM_URL:-$HYPERSCAPES_UI_URL}"
+        SOURCE_STREAM_STATE_URL="${SOURCE_STREAM_STATE_URL:-${GAME_HTTP_URL}/api/streaming/state}"
+        SOURCE_BET_SYNC_STATE_URL="${SOURCE_BET_SYNC_STATE_URL:-${GAME_HTTP_URL}/api/internal/bet-sync/state}"
+        SOURCE_BET_SYNC_BEARER_TOKEN="${SOURCE_BET_SYNC_BEARER_TOKEN:-$BETTING_FEED_ACCESS_TOKEN}"
+        SOURCE_RTMP_STATUS_URL="${SOURCE_RTMP_STATUS_URL:-${GAME_HTTP_URL}/api/streaming/rtmp/status}"
+        STREAM_STATE_URL="${STREAM_STATE_URL:-${KEEPER_URL}/api/streaming/state}"
+        ACTIVE_MARKETS_URL="${KEEPER_URL}/api/arena/prediction-markets/active"
+        OVERVIEW_MARKETS_URL="${OVERVIEW_MARKETS_URL:-${KEEPER_URL}/api/arena/prediction-markets/overview}"
+        SYNC_STATUS_URL="${SYNC_STATUS_URL:-${KEEPER_URL}/api/sync/status}"
+        PM_SOAK_SIGNOFF_MODE="${PM_SOAK_SIGNOFF_MODE:-false}"
+        PM_SOAK_SCREENSHOTS="${PM_SOAK_SCREENSHOTS:-true}"
+        PM_SOAK_HEADLESS="${PM_SOAK_HEADLESS}"
+        PM_SOAK_BROWSER_CHANNEL="${PM_SOAK_BROWSER_CHANNEL}"
+        PM_SOAK_WEBGPU_ARGS="${PM_SOAK_WEBGPU_ARGS}"
+        PM_SOAK_SCREENSHOT_WIDTH="${PM_SOAK_SCREENSHOT_WIDTH}"
+        PM_SOAK_SCREENSHOT_HEIGHT="${PM_SOAK_SCREENSHOT_HEIGHT}"
+        RUN_SCOPE="LOCALNET"
+        PERPS_MARKETS_URL="${KEEPER_URL}/api/perps/markets"
+        PERPS_ORACLE_HISTORY_URL="${KEEPER_URL}/api/perps/oracle-history"
+        BUN_BIN="$BUN_BIN"
+      )
+      if [[ "${PM_SOAK_SIGNOFF_MODE:-false}" != "true" ]]; then
+        soak_args+=(--follow)
+        soak_env+=(
+          PM_SOAK_RECONCILE_PUBLISH_URL="${PM_SOAK_RECONCILE_PUBLISH_URL:-${KEEPER_URL}/api/streaming/state/publish}"
+          PM_SOAK_RECONCILE_PUBLISH_KEY="${PM_SOAK_RECONCILE_PUBLISH_KEY:-$LOCAL_STREAM_PUBLISH_KEY}"
+        )
+      fi
+      env "${soak_env[@]}" \
+        "$NODE_BIN" --import tsx scripts/pm-soak-monitor.ts "${soak_args[@]}"
   ) &
   CAPTURE_PID=$!
 fi

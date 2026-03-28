@@ -396,6 +396,8 @@ export function SolanaClobPanel({
   const [lastPlaceOrderTx, setLastPlaceOrderTx] = useState("-");
   const [lastPlaceOrderError, setLastPlaceOrderError] = useState("-");
   const [lastPlaceOrderDebug, setLastPlaceOrderDebug] = useState("-");
+  const [lastClaimTx, setLastClaimTx] = useState("-");
+  const [lastClaimError, setLastClaimError] = useState("-");
   const [showDebug, setShowDebug] = useState(
     () =>
       isE2eMode &&
@@ -1346,6 +1348,8 @@ export function SolanaClobPanel({
     }
 
     try {
+      setLastClaimTx("-");
+      setLastClaimError("-");
       const userBalance = findUserBalancePda(
         clobProgram.programId,
         activeMarket.marketState,
@@ -1368,11 +1372,14 @@ export function SolanaClobPanel({
         })
         .transaction();
 
-      await submitTransaction(tx, copy.claimingWinningsContext);
+      const signature = await submitTransaction(tx, copy.claimingWinningsContext);
+      setLastClaimTx(signature);
       setStatus(copy.claimComplete);
       await refreshData();
     } catch (error) {
-      setStatus(copy.claimFailed((error as Error).message));
+      const message = (error as Error).message;
+      setLastClaimError(message);
+      setStatus(copy.claimFailed(message));
     }
   }, [
     activeMarket,
@@ -1721,6 +1728,12 @@ export function SolanaClobPanel({
               </div>
               <div data-testid="solana-clob-place-order-debug" style={{ fontSize: 8, opacity: 0.4, wordBreak: "break-all", fontFamily: "var(--hm-font-mono)" }}>
                 LAST_DEBUG: {lastPlaceOrderDebug}
+              </div>
+              <div data-testid="solana-clob-claim-tx" style={{ fontSize: 8, opacity: 0.4, wordBreak: "break-all", fontFamily: "var(--hm-font-mono)" }}>
+                CLAIM_TX: {lastClaimTx}
+              </div>
+              <div data-testid="solana-clob-claim-error" style={{ fontSize: 8, opacity: 0.4, wordBreak: "break-all", fontFamily: "var(--hm-font-mono)" }}>
+                CLAIM_ERROR: {lastClaimError}
               </div>
               
               {showAdminPanel && (

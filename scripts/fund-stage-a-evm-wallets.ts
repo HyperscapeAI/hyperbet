@@ -87,12 +87,20 @@ const DEFAULT_CONFIG: Record<ChainKey, ChainConfig> = {
 };
 
 function parseFundingProfile(): FundingProfile {
-  const profileArg = process.argv
-    .slice(2)
-    .find((arg) => arg.startsWith("--profile="))
-    ?.slice("--profile=".length)
-    .trim()
-    .toLowerCase();
+  const args = process.argv.slice(2);
+  let profileArg: string | undefined;
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (arg.startsWith("--profile=")) {
+      profileArg = arg.slice("--profile=".length);
+      break;
+    }
+    if (arg === "--profile") {
+      profileArg = args[index + 1];
+      break;
+    }
+  }
+  profileArg = profileArg?.trim().toLowerCase();
 
   if (!profileArg || profileArg === "default") return "default";
   if (profileArg === "browser-acceptance") return "browser-acceptance";
@@ -120,12 +128,20 @@ function resolveConfig(chainKey: ChainKey, profile: FundingProfile): ChainConfig
 }
 
 function parseChains(): ChainKey[] {
-  const chainArg = process.argv
-    .slice(2)
-    .find((arg) => arg.startsWith("--chain="))
-    ?.slice("--chain=".length)
-    .trim()
-    .toLowerCase();
+  const args = process.argv.slice(2);
+  let chainArg: string | undefined;
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (arg.startsWith("--chain=")) {
+      chainArg = arg.slice("--chain=".length);
+      break;
+    }
+    if (arg === "--chain") {
+      chainArg = args[index + 1];
+      break;
+    }
+  }
+  chainArg = chainArg?.trim().toLowerCase();
 
   if (!chainArg || chainArg === "all") return ["bsc", "avax"];
   if (chainArg === "bsc" || chainArg === "avax") return [chainArg];

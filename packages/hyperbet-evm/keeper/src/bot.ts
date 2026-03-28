@@ -57,6 +57,7 @@ const EVM_DUEL_STATUS_LOCKED = 3;
 const EVM_DUEL_STATUS_PROPOSED = 4;
 const EVM_DUEL_STATUS_RESOLVED = 6;
 const EVM_DUEL_STATUS_CANCELLED = 7;
+const DEFAULT_DUEL_START_DELAY_MS = 60_000;
 
 function asNum(value: unknown, fallback = 0): number {
   if (typeof value === "number") return value;
@@ -2214,6 +2215,28 @@ function buildDuelMetadata(data: DuelLifecycleEvent): string {
   });
 }
 
+function deriveCanonicalDuelTimes(data: DuelLifecycleEvent): {
+  betOpenTs: number;
+  betCloseTs: number;
+  duelStartTs: number;
+} {
+  const nowMs = Date.now();
+  const betOpenTimeMs = data.betOpenTime ?? nowMs;
+  const betCloseTimeMs = Math.max(
+    betOpenTimeMs + 1_000,
+    data.betCloseTime ?? data.fightStartTime ?? nowMs + 1_000,
+  );
+  const duelStartTimeMs = Math.max(
+    betCloseTimeMs,
+    data.fightStartTime ?? betCloseTimeMs + DEFAULT_DUEL_START_DELAY_MS,
+  );
+  return {
+    betOpenTs: Math.floor(betOpenTimeMs / 1000),
+    betCloseTs: Math.floor(betCloseTimeMs / 1000),
+    duelStartTs: Math.floor(duelStartTimeMs / 1000),
+  };
+}
+
 function duelStatusEnum(
   status: "scheduled" | "bettingOpen" | "locked",
 ): DuelStatusState {
@@ -2233,17 +2256,7 @@ async function upsertDuelLifecycle(
   const duelKey = duelKeyHexToBytes(data.duelKeyHex);
   const duelState = findDuelStatePda(fightProgram.programId, duelKey);
   const nowSeconds = Math.floor(Date.now() / 1000);
-  const betOpenTs = Math.floor((data.betOpenTime ?? Date.now()) / 1000);
-  const betCloseTs = Math.max(
-    betOpenTs + 1,
-    Math.floor(
-      (data.betCloseTime ?? data.fightStartTime ?? Date.now() + 1_000) / 1000,
-    ),
-  );
-  const duelStartTs = Math.max(
-    betCloseTs,
-    Math.floor((data.fightStartTime ?? data.betCloseTime ?? Date.now()) / 1000),
-  );
+  const { betOpenTs, betCloseTs, duelStartTs } = deriveCanonicalDuelTimes(data);
   const requestedStatus =
     status === "scheduled" && betOpenTs <= nowSeconds ? "bettingOpen" : status;
 
@@ -2977,16 +2990,10 @@ async function upsertEvmDuelLifecycle(
   }
 
   const duelKey = normalizeHex32(data.duelKeyHex);
-  const betOpenTs = BigInt(Math.floor((data.betOpenTime ?? Date.now()) / 1000));
-  const betCloseTs = BigInt(
-    Math.floor((data.betCloseTime ?? data.fightStartTime ?? Date.now() + 1_000) / 1000),
-  );
-  const duelStartTs = BigInt(
-    Math.max(
-      Number(betCloseTs),
-      Math.floor((data.fightStartTime ?? data.betCloseTime ?? Date.now()) / 1000),
-    ),
-  );
+  const canonicalTimes = deriveCanonicalDuelTimes(data);
+  const betOpenTs = BigInt(canonicalTimes.betOpenTs);
+  const betCloseTs = BigInt(canonicalTimes.betCloseTs);
+  const duelStartTs = BigInt(canonicalTimes.duelStartTs);
   const metadata = buildDuelMetadata(data);
 
   const results = await Promise.allSettled(
@@ -3125,18 +3132,10 @@ async function reportEvmResult(data: DuelLifecycleEvent): Promise<void> {
   if (winner === 0) {
     return;
   }
-  const defaultBetOpenTs = BigInt(
-    Math.floor((data.betOpenTime ?? Date.now()) / 1000),
-  );
-  const defaultBetCloseTs = BigInt(
-    Math.floor((data.betCloseTime ?? data.fightStartTime ?? Date.now() + 1_000) / 1000),
-  );
-  const defaultDuelStartTs = BigInt(
-    Math.max(
-      Number(defaultBetCloseTs),
-      Math.floor((data.fightStartTime ?? data.betCloseTime ?? Date.now()) / 1000),
-    ),
-  );
+  const canonicalTimes = deriveCanonicalDuelTimes(data);
+  const defaultBetOpenTs = BigInt(canonicalTimes.betOpenTs);
+  const defaultBetCloseTs = BigInt(canonicalTimes.betCloseTs);
+  const defaultDuelStartTs = BigInt(canonicalTimes.duelStartTs);
   const duelEndTs = BigInt(Math.floor((data.duelEndTime ?? Date.now()) / 1000));
   const metadata = buildDuelMetadata(data);
 

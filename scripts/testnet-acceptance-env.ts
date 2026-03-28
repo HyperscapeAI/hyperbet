@@ -155,6 +155,35 @@ function solanaAlchemyRpc(
   return `https://solana-${network}.g.alchemy.com/v2/${apiKey}`;
 }
 
+export function deriveRpcWsUrl(rpcUrl: string): string {
+  const parsed = new URL(rpcUrl);
+  parsed.protocol = parsed.protocol === "https:" ? "wss:" : "ws:";
+  if (
+    (parsed.hostname === "127.0.0.1" || parsed.hostname === "localhost") &&
+    parsed.port === "8899"
+  ) {
+    parsed.port = "8900";
+  }
+  return parsed.toString();
+}
+
+function resolveSolanaRpcWsUrl(
+  env: EnvMap,
+  rpcUrl: string,
+): string {
+  return (
+    firstNonEmptyEnv(env, [
+      "SOLANA_ALCHEMY_WS_URL",
+      "ALCHEMY_SOLANA_WS_URL",
+      "SOLANA_RPC_WS_URL",
+      "SOLANA_WS_URL",
+      "ANCHOR_WS_URL",
+      "HYPERBET_SOLANA_TESTNET_RPC_WS_URL",
+      "HYPERBET_SOLANA_STAGING_RPC_WS_URL",
+    ]) ?? deriveRpcWsUrl(rpcUrl)
+  );
+}
+
 export function resolveAcceptanceUrls(
   chain: AcceptanceChain,
   env: EnvMap = process.env,
@@ -334,6 +363,7 @@ export function resolveSolanaAcceptanceRuntime(
 ): {
   cluster: BettingSolanaCluster;
   rpcUrl: string;
+  rpcWsUrl: string;
   keeperUrl: string | null;
   pagesUrl: string | null;
   wsUrl: string | null;
@@ -355,14 +385,18 @@ export function resolveSolanaAcceptanceRuntime(
   );
   const deployment = resolveBettingSolanaDeployment(cluster);
   const alchemyRpcUrl = solanaAlchemyRpc(cluster, env);
-  return {
-    cluster,
-    rpcUrl:
+  const rpcUrl =
+    firstNonEmptyValue(
+      alchemyRpcUrl,
       firstNonEmptyEnv(env, [
-        ...(alchemyRpcUrl ? [alchemyRpcUrl] : []),
         ...solanaCandidates("RPC_URL"),
         "SOLANA_RPC_URL",
-      ]) ?? solanaDefaultRpc(cluster),
+      ]),
+    ) ?? solanaDefaultRpc(cluster);
+  return {
+    cluster,
+    rpcUrl,
+    rpcWsUrl: resolveSolanaRpcWsUrl(env, rpcUrl),
     keeperUrl: firstNonEmptyEnv(env, [
       "HYPERBET_SOLANA_KEEPER_TESTNET_URL",
       "HYPERBET_SOLANA_KEEPER_STAGING_URL",
@@ -482,6 +516,7 @@ export async function resolveReachableSolanaAcceptanceRuntime(
       return {
         ...runtime,
         rpcUrl,
+        rpcWsUrl: resolveSolanaRpcWsUrl(env, rpcUrl),
       };
     }
   }

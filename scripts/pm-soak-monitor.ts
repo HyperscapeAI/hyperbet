@@ -408,6 +408,7 @@ type LocalSummary = {
   driftCyclesObserved: number;
   cycleDurationsMs: number[];
   bothUiReachable: boolean;
+  signoffMode: boolean;
   streamDuelKey: string | null;
   activeDuelKey: string | null;
   recentSettlementDuelKey: string | null;
@@ -458,6 +459,7 @@ type LocalContext = {
   mode: "local";
   artifactRoot: string;
   screenshotsEnabled: boolean;
+  signoffMode: boolean;
   screenshotTargets: ScreenshotTarget[];
   incidents: Incident[];
   captureIndex: number;
@@ -1506,6 +1508,23 @@ function localScreenshotTargets(): ScreenshotTarget[] {
   return targets;
 }
 
+function isLocalSignoffMode(): boolean {
+  return parseBooleanEnv("PM_SOAK_SIGNOFF_MODE", false);
+}
+
+function configuredLocalReconcileEnvNames(): string[] {
+  const names = [
+    "PM_SOAK_RECONCILE_PUBLISH_URL",
+    "PM_SOAK_RECONCILE_PUBLISH_KEY",
+    "STREAM_PUBLISH_URL",
+    "STREAM_PUBLISH_KEY",
+  ];
+  return names.filter((name) => {
+    const value = process.env[name]?.trim();
+    return Boolean(value);
+  });
+}
+
 function localReconcileTarget(): { url: string; key: string | null } {
   const url =
     optionalEnv("PM_SOAK_RECONCILE_PUBLISH_URL") ??
@@ -1778,6 +1797,7 @@ async function runLocalSoak(args: MonitorArgs): Promise<void> {
     mode: "local",
     artifactRoot: args.artifactRoot,
     screenshotsEnabled: (process.env.PM_SOAK_SCREENSHOTS ?? "true") !== "false",
+    signoffMode: isLocalSignoffMode(),
     screenshotTargets: localScreenshotTargets(),
     incidents: [],
     captureIndex: 0,
@@ -1788,6 +1808,12 @@ async function runLocalSoak(args: MonitorArgs): Promise<void> {
     reconcileAttempts: 0,
   };
   const startedAtMs = Date.now();
+  const configuredReconcileNames = configuredLocalReconcileEnvNames();
+  if (context.signoffMode && configuredReconcileNames.length > 0) {
+    throw new Error(
+      `local signoff soak cannot run with publish repair envs set: ${configuredReconcileNames.join(", ")}`,
+    );
+  }
   const deadline = args.follow
     ? Number.POSITIVE_INFINITY
     : startedAtMs + args.durationMin * 60_000;
@@ -1803,6 +1829,8 @@ async function runLocalSoak(args: MonitorArgs): Promise<void> {
   let driftHandled = false;
   let rendererDegradedPolls = 0;
   let syncDegradedPolls = 0;
+  let driftStartedAtMs: number | null = null;
+  let consecutivePollFailures = 0;
 
   await recordContextEvent(
     context,
@@ -1814,6 +1842,7 @@ async function runLocalSoak(args: MonitorArgs): Promise<void> {
       minCycleMs: LOCAL_MIN_DUEL_CYCLE_MS,
       maxCycleMs: LOCAL_MAX_DUEL_CYCLE_MS,
       follow: args.follow,
+      signoffMode: context.signoffMode,
     },
     context.screenshotTargets,
   );
@@ -1834,6 +1863,7 @@ async function runLocalSoak(args: MonitorArgs): Promise<void> {
       );
       const rendererHealth = currentRendererHealth(snapshot);
       const aligned = duelKeysAligned(sourceDuelKey, liveDuelKey);
+      consecutivePollFailures = 0;
       context.streamDuelKey = sourceDuelKey;
       context.activeDuelKey = liveDuelKey;
       context.recentSettlementDuelKey = recentSettlementDuelKey;
@@ -1957,6 +1987,7 @@ async function runLocalSoak(args: MonitorArgs): Promise<void> {
       if (driftRelevant && !aligned) {
         driftConsecutivePolls += 1;
         context.driftPolls = driftConsecutivePolls;
+        driftStartedAtMs ??= snapshot.fetchedAtMs;
         const driftCode =
           snapshot.syncStatus?.applyLagMs != null &&
           snapshot.syncStatus.applyLagMs > 0
@@ -1975,6 +2006,32 @@ async function runLocalSoak(args: MonitorArgs): Promise<void> {
               driftCode,
             },
           );
+        }
+
+        if (context.signoffMode) {
+          const driftDurationMs = snapshot.fetchedAtMs - driftStartedAtMs;
+          if (driftDurationMs >= 60_000) {
+            await recordIncident(
+              context,
+              "local",
+              "source_feed_lag_signoff",
+              "source and live market duel keys diverged for longer than 60000ms in signoff mode",
+              {
+                sourceDuelKey,
+                liveDuelKey,
+                recentSettlementDuelKey,
+                driftCode,
+                driftDurationMs,
+                pollIndex,
+              },
+              context.screenshotTargets,
+            );
+            throw new Error(
+              "local duel key drift persisted longer than 60000ms in signoff mode",
+            );
+          }
+          await sleep(args.pollMs);
+          continue;
         }
 
         if (driftConsecutivePolls >= 2) {
@@ -2086,6 +2143,7 @@ async function runLocalSoak(args: MonitorArgs): Promise<void> {
         driftConsecutivePolls = 0;
         context.driftPolls = 0;
         driftHandled = false;
+        driftStartedAtMs = null;
       }
 
       if (!currentCycle || currentCycle.cycleId !== cycleId) {
@@ -2165,6 +2223,7 @@ async function runLocalSoak(args: MonitorArgs): Promise<void> {
       }
     } catch (error) {
       bothUiReachable = false;
+      consecutivePollFailures += 1;
       await recordIncident(
         context,
         "local",
@@ -2179,6 +2238,9 @@ async function runLocalSoak(args: MonitorArgs): Promise<void> {
         },
         context.screenshotTargets,
       );
+      if (context.signoffMode && consecutivePollFailures >= 2) {
+        throw new Error("local signoff soak observed two consecutive poll failures");
+      }
       if (args.follow && lastSnapshot) {
         driftConsecutivePolls = 0;
       }
@@ -2210,6 +2272,8 @@ async function runLocalSoak(args: MonitorArgs): Promise<void> {
 
   const requiredCycles = args.follow
     ? 1
+    : context.signoffMode
+      ? 1
     : args.durationMin >= DEFAULT_LOCAL_DURATION_MIN
       ? 8
       : 1;
@@ -2236,6 +2300,7 @@ async function runLocalSoak(args: MonitorArgs): Promise<void> {
     driftCyclesObserved,
     cycleDurationsMs,
     bothUiReachable,
+    signoffMode: context.signoffMode,
     streamDuelKey: context.streamDuelKey,
     activeDuelKey: context.activeDuelKey,
     recentSettlementDuelKey: context.recentSettlementDuelKey,
