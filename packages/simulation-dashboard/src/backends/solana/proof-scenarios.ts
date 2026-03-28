@@ -814,7 +814,9 @@ async function finalizeOutcome(
                 }),
             );
         } catch (error) {
-            repeatClaimRejected = hasProgramError(error, "NothingToClaim");
+            repeatClaimRejected =
+                hasProgramError(error, "NothingToClaim") ||
+                hasProgramError(error, "AccountNotInitialized");
             traces.push(
                 buildTrace("repeat_claim_rejected", market, {
                     actor: options.repeatClaimant.name,
