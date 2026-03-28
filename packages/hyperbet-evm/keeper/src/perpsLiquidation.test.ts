@@ -21,9 +21,9 @@ import { mnemonicToAccount } from "viem/accounts";
 
 // ─── Artifacts ──────────────────────────────────────────────────────────────
 
-import skillOracleArtifact from "../../../evm-contracts/out/SkillOracle.sol/SkillOracle.json";
-import agentPerpEngineArtifact from "../../../evm-contracts/out/AgentPerpEngine.sol/AgentPerpEngine.json";
-import mockErc20Artifact from "../../../evm-contracts/out/MockERC20.sol/MockERC20.json";
+import skillOracleArtifact from "../../../evm-contracts/artifacts/contracts/perps/SkillOracle.sol/SkillOracle.json";
+import agentPerpEngineArtifact from "../../../evm-contracts/artifacts/contracts/perps/AgentPerpEngine.sol/AgentPerpEngine.json";
+import mockErc20Artifact from "../../../evm-contracts/artifacts/contracts/MockERC20.sol/MockERC20.json";
 
 // ─── Setup ──────────────────────────────────────────────────────────────────
 
