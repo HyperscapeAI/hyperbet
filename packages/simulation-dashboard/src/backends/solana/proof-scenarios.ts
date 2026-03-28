@@ -779,7 +779,9 @@ async function finalizeOutcome(
         const balanceAfter = await runtime.getBalanceLamports(
             claimant.keypair.publicKey,
         );
-        const userBalanceAfter = await runtime.fetchUserBalance(claimResult.userBalance);
+        const userBalanceAfter = await runtime.fetchUserBalanceNullable(
+            claimResult.userBalance,
+        );
         claimRecords.push({
             actor: claimant.name,
             userBalancePda: claimResult.userBalance.toBase58(),

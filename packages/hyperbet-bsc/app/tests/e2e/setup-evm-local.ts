@@ -30,7 +30,12 @@ type E2eState = Record<string, unknown> & {
   evmDuelKeyHex?: string;
   evmMarketKey?: string;
   evmOracleAddress?: string;
+  evmCanaryPrivateKey?: string;
+  evmMatcherPrivateKey?: string;
+  evmReporterPrivateKey?: string;
+  evmMarketOperatorPrivateKey?: string;
   evmAdminPrivateKey?: string;
+  evmPauserPrivateKey?: string;
   evmFinalizerPrivateKey?: string;
   evmSeedNoPrice?: number;
   evmSeedYesPrice?: number;
@@ -41,6 +46,8 @@ const DEFAULT_RPC_URL = "http://127.0.0.1:8545";
 const DEFAULT_CHAIN_ID = 97;
 const DEFAULT_ADMIN_PRIVATE_KEY =
   "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
+const DEFAULT_MAKER_PRIVATE_KEY =
+  "0x59c6995e998f97a5a0044966f0945382d7d46f71fbb8f7a1a5b2d3c6f90ad7d4";
 const DEFAULT_ANVIL_MNEMONIC =
   "test test test test test test test test test test test junk";
 const MARKET_KIND_DUEL_WINNER = 0;
@@ -161,7 +168,8 @@ async function main(): Promise<void> {
   const chainId = Number(process.env.E2E_EVM_CHAIN_ID || DEFAULT_CHAIN_ID);
   const adminPrivateKey =
     process.env.E2E_EVM_ADMIN_PRIVATE_KEY || DEFAULT_ADMIN_PRIVATE_KEY;
-  const makerPrivateKey = process.env.E2E_EVM_MAKER_PRIVATE_KEY || "";
+  const makerPrivateKey =
+    process.env.E2E_EVM_MAKER_PRIVATE_KEY || DEFAULT_MAKER_PRIVATE_KEY;
   const reuseDeployment = process.env.E2E_EVM_REUSE_DEPLOYMENT === "true";
   const seedNoOrderPrice = Number(
     process.env.E2E_EVM_SEED_NO_ORDER_PRICE || 600,
@@ -191,12 +199,7 @@ async function main(): Promise<void> {
   });
 
   const adminAccount = privateKeyToAccount(adminPrivateKey as `0x${string}`);
-  const makerAccount = makerPrivateKey
-    ? privateKeyToAccount(makerPrivateKey as `0x${string}`)
-    : mnemonicToAccount(DEFAULT_ANVIL_MNEMONIC, {
-        accountIndex: 0,
-        addressIndex: 1,
-      });
+  const makerAccount = privateKeyToAccount(makerPrivateKey as `0x${string}`);
   const finalizerAccount = adminAccount;
   const challengerAccount = mnemonicToAccount(DEFAULT_ANVIL_MNEMONIC, {
     accountIndex: 0,
@@ -237,6 +240,20 @@ async function main(): Promise<void> {
     nextMakerNonce += 1;
     return nonce;
   };
+  if (makerAccount.address !== adminAccount.address) {
+    const minimumMakerBalance = parseUnits("5", 18);
+    const makerBalance = await publicClient.getBalance({
+      address: makerAccount.address,
+    });
+    if (makerBalance < minimumMakerBalance) {
+      const fundMakerTx = await walletClient.sendTransaction({
+        to: makerAccount.address,
+        value: parseUnits("10", 18),
+        nonce: consumeNonce(),
+      });
+      await publicClient.waitForTransactionReceipt({ hash: fundMakerTx });
+    }
+  }
   const existingState = (await readJson<E2eState>(statePath)) || {};
   const latestBlock = await publicClient.getBlock({ blockTag: "latest" });
   const duelKey = ensureHex32(
@@ -495,7 +512,12 @@ async function main(): Promise<void> {
     evmDuelKeyHex: duelKey,
     evmMarketKey: marketKey,
     evmOracleAddress: oracleAddress,
+    evmCanaryPrivateKey: adminPrivateKey,
+    evmMatcherPrivateKey: makerPrivateKey,
+    evmReporterPrivateKey: adminPrivateKey,
+    evmMarketOperatorPrivateKey: adminPrivateKey,
     evmAdminPrivateKey: adminPrivateKey,
+    evmPauserPrivateKey: adminPrivateKey,
     evmFinalizerPrivateKey: adminPrivateKey,
     evmSeedNoPrice: seedNoOrderPrice,
     evmSeedYesPrice: seedYesOrderPrice,

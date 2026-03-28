@@ -56,6 +56,7 @@
       "name": "hyperbet-avax-app",
       "version": "0.1.0",
       "dependencies": {
+        "@coral-xyz/anchor": "0.32.1",
         "@hyperbet/ui": "workspace:*",
         "@noble/curves": "^2.0.1",
         "@rainbow-me/rainbowkit": "^2.2.10",

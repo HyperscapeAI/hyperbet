@@ -50,7 +50,18 @@ function parseArgs(): ScenarioTarget {
   return targetArg;
 }
 
+function parseScenarioFilter(): string | null {
+  const scenarioArg =
+    process.argv
+      .slice(2)
+      .find((arg) => arg.startsWith("--scenario="))
+      ?.slice("--scenario=".length)
+      .trim() ?? "";
+  return scenarioArg.length > 0 ? scenarioArg : null;
+}
+
 const target = parseArgs();
+const scenarioFilter = parseScenarioFilter();
 const artifactRoot = resolveArtifactRoot(
   target === "evm" ? "evm-exploit-gate" : "solana-exploit-gate",
 );
@@ -353,9 +364,9 @@ async function withSimulationServer<T>(
 
     const server = await spawnBackground(
       "bun",
-      ["run", "--cwd", "packages/simulation-dashboard", "dev"],
+      ["src/server.ts"],
       {
-        cwd: rootDir,
+        cwd: path.join(rootDir, "packages/simulation-dashboard"),
         env: {
           SIM_HTTP_PORT: httpPort,
           SIM_WS_PORT: wsPort,
@@ -428,9 +439,24 @@ try {
 
   const canonical = target === "evm" ? evmCanonical : solanaCanonical;
   const matrix = target === "evm" ? evmMatrix : solanaMatrix;
+  const selectedCanonical = scenarioFilter
+    ? canonical.filter((scenarioId) => scenarioId === scenarioFilter)
+    : canonical;
+  const selectedMatrix = scenarioFilter
+    ? matrix.filter((scenarioId) => scenarioId === scenarioFilter)
+    : matrix;
+  if (
+    scenarioFilter &&
+    selectedCanonical.length === 0 &&
+    selectedMatrix.length === 0
+  ) {
+    throw new Error(
+      `unknown ${target} scenario filter ${scenarioFilter}`,
+    );
+  }
   const executions = [
-    ...buildScenarioExecutions(canonical, "canonical"),
-    ...buildScenarioExecutions(matrix, "matrix"),
+    ...buildScenarioExecutions(selectedCanonical, "canonical"),
+    ...buildScenarioExecutions(selectedMatrix, "matrix"),
   ];
   writeJsonArtifact(artifactRoot, "executions.json", executions);
 

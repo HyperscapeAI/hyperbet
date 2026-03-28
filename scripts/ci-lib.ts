@@ -15,6 +15,28 @@ import { fileURLToPath } from "node:url";
 
 export const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
+function buildCommandEnv(extraEnv: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
+  const home = process.env.HOME ?? "";
+  const pathEntries = [
+    process.env.PATH ?? "",
+    "/opt/homebrew/bin",
+    home ? path.join(home, ".bun", "bin") : "",
+    home ? path.join(home, ".cargo", "bin") : "",
+    home
+      ? path.join(home, ".local", "share", "solana", "install", "active_release", "bin")
+      : "",
+  ]
+    .flatMap((entry) => entry.split(path.delimiter))
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+
+  return {
+    ...process.env,
+    ...extraEnv,
+    PATH: Array.from(new Set(pathEntries)).join(path.delimiter),
+  };
+}
+
 export function resolveArtifactRoot(name: string): string {
   const base =
     process.env.HYPERBET_CI_ARTIFACT_DIR?.trim() ||
@@ -79,7 +101,7 @@ export function runSync(
 ): void {
   const result = spawnSync(command, args, {
     cwd: options.cwd ?? rootDir,
-    env: { ...process.env, ...options.env },
+    env: buildCommandEnv(options.env),
     stdio: "inherit",
   });
   if (result.status !== 0) {
@@ -123,7 +145,7 @@ export async function runCommand(
       );
     const child = spawn(command, args, {
       cwd: options.cwd ?? rootDir,
-      env: { ...process.env, ...options.env },
+      env: buildCommandEnv(options.env),
       stdio: [
         "ignore",
         options.stdoutFile ? "pipe" : "inherit",
@@ -169,7 +191,7 @@ export async function spawnBackground(
   const logFd = openSync(options.logFile, "a");
   const child = spawn(command, args, {
     cwd: options.cwd ?? rootDir,
-    env: { ...process.env, ...options.env },
+    env: buildCommandEnv(options.env),
     detached: true,
     stdio: ["ignore", logFd, logFd],
   });

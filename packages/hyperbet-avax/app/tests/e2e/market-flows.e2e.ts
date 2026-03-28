@@ -48,8 +48,18 @@ type E2eState = {
   evmReporterPrivateKey?: string;
   evmMarketOperatorPrivateKey?: string;
   evmAdminPrivateKey?: string;
+  evmPauserPrivateKey?: string;
   evmFinalizerPrivateKey?: string;
 };
+
+type EvmPrivateKeyField =
+  | "evmCanaryPrivateKey"
+  | "evmMatcherPrivateKey"
+  | "evmReporterPrivateKey"
+  | "evmMarketOperatorPrivateKey"
+  | "evmAdminPrivateKey"
+  | "evmPauserPrivateKey"
+  | "evmFinalizerPrivateKey";
 
 type PageDiagnostics = {
   consoleMessages: string[];
@@ -224,6 +234,19 @@ function parsePositiveInteger(
 
 function loadState(): E2eState {
   return JSON.parse(fs.readFileSync(statePath, "utf8")) as E2eState;
+}
+
+function requireStatePrivateKey(
+  state: E2eState,
+  field: EvmPrivateKeyField,
+): `0x${string}` {
+  const value = state[field];
+  if (typeof value !== "string" || !/^0x[0-9a-fA-F]{64}$/.test(value.trim())) {
+    throw new Error(
+      `Missing ${field} in e2e state (${statePath}); rerun local setup to refresh EVM role keys.`,
+    );
+  }
+  return value.trim() as `0x${string}`;
 }
 
 function loadControl(): HarnessControl {
@@ -724,6 +747,31 @@ async function createFreshEvmOpenMarket(
     address: marketOperatorAddress,
     blockTag: "pending",
   });
+  const sharedReporterAndOperatorNonce =
+    reporterAddress.toLowerCase() === marketOperatorAddress.toLowerCase()
+      ? nextReporterNonce
+      : null;
+  const consumeReporterNonce = (): number => {
+    if (sharedReporterAndOperatorNonce !== null) {
+      nextReporterNonce += 1;
+      nextMarketOperatorNonce = nextReporterNonce;
+      return nextReporterNonce - 1;
+    }
+    const nonce = nextReporterNonce;
+    nextReporterNonce += 1;
+    return nonce;
+  };
+  const consumeMarketOperatorNonce = (): number => {
+    if (sharedReporterAndOperatorNonce !== null) {
+      const nonce = nextReporterNonce;
+      nextReporterNonce += 1;
+      nextMarketOperatorNonce = nextReporterNonce;
+      return nonce;
+    }
+    const nonce = nextMarketOperatorNonce;
+    nextMarketOperatorNonce += 1;
+    return nonce;
+  };
   const latestBlock = await publicClient.getBlock({ blockTag: "latest" });
   let betOpenTs = latestBlock.timestamp - 15n;
   let betCloseTs = betOpenTs + E2E_BET_WINDOW_SECONDS;
@@ -745,7 +793,7 @@ async function createFreshEvmOpenMarket(
       `${uniqueKey}-open`,
       DUEL_STATUS_BETTING_OPEN,
     ],
-    nonce: nextReporterNonce++,
+    nonce: consumeReporterNonce(),
   });
   await waitForEvmReceipt(publicClient, upsertTx);
 
@@ -761,7 +809,7 @@ async function createFreshEvmOpenMarket(
       abi: goldClobArtifact.abi,
       functionName: "createMarketForDuel",
       args: [duelKey, MARKET_KIND_DUEL_WINNER],
-      nonce: nextMarketOperatorNonce++,
+      nonce: consumeMarketOperatorNonce(),
     });
     await waitForEvmReceipt(publicClient, createMarketTx);
   }
@@ -1681,11 +1729,16 @@ test.describe("market flows", () => {
     const state = loadState();
     const rpcUrl = state.evmRpcUrl || "http://127.0.0.1:8545";
     const chainId = Number(state.evmChainId || 97);
-    const canaryPrivateKey = state.evmCanaryPrivateKey as `0x${string}`;
-    const reporterPrivateKey = state.evmReporterPrivateKey as `0x${string}`;
-    const marketOperatorPrivateKey =
-      state.evmMarketOperatorPrivateKey as `0x${string}`;
-    const matcherPrivateKey = state.evmMatcherPrivateKey as `0x${string}`;
+    const canaryPrivateKey = requireStatePrivateKey(state, "evmCanaryPrivateKey");
+    const reporterPrivateKey = requireStatePrivateKey(
+      state,
+      "evmReporterPrivateKey",
+    );
+    const marketOperatorPrivateKey = requireStatePrivateKey(
+      state,
+      "evmMarketOperatorPrivateKey",
+    );
+    const matcherPrivateKey = requireStatePrivateKey(state, "evmMatcherPrivateKey");
     const contractAddress = state.evmGoldClobAddress as Address;
     const oracleAddress = state.evmOracleAddress as Address;
     let lifecycleStatus = "OPEN";
@@ -1887,12 +1940,20 @@ test.describe("market flows", () => {
     const userAddress = state.evmHeadlessAddress as Address;
     const contractAddress = state.evmGoldClobAddress as Address;
     const oracleAddress = state.evmOracleAddress as Address;
-    const adminPrivateKey = state.evmAdminPrivateKey as `0x${string}`;
-    const reporterPrivateKey = state.evmReporterPrivateKey as `0x${string}`;
-    const marketOperatorPrivateKey =
-      state.evmMarketOperatorPrivateKey as `0x${string}`;
-    const matcherPrivateKey = state.evmMatcherPrivateKey as `0x${string}`;
-    const finalizerPrivateKey = state.evmFinalizerPrivateKey;
+    const adminPrivateKey = requireStatePrivateKey(state, "evmAdminPrivateKey");
+    const reporterPrivateKey = requireStatePrivateKey(
+      state,
+      "evmReporterPrivateKey",
+    );
+    const marketOperatorPrivateKey = requireStatePrivateKey(
+      state,
+      "evmMarketOperatorPrivateKey",
+    );
+    const matcherPrivateKey = requireStatePrivateKey(state, "evmMatcherPrivateKey");
+    const finalizerPrivateKey = requireStatePrivateKey(
+      state,
+      "evmFinalizerPrivateKey",
+    );
     const transport = createEvmTransport(rpcUrl);
     const publicClient = createPublicClient({
       chain: {
@@ -2180,10 +2241,15 @@ test.describe("market flows", () => {
     const userAddress = state.evmHeadlessAddress as Address;
     const contractAddress = state.evmGoldClobAddress as Address;
     const oracleAddress = state.evmOracleAddress as Address;
-    const reporterPrivateKey = state.evmReporterPrivateKey as `0x${string}`;
-    const marketOperatorPrivateKey =
-      state.evmMarketOperatorPrivateKey as `0x${string}`;
-    const matcherPrivateKey = state.evmMatcherPrivateKey as `0x${string}`;
+    const reporterPrivateKey = requireStatePrivateKey(
+      state,
+      "evmReporterPrivateKey",
+    );
+    const marketOperatorPrivateKey = requireStatePrivateKey(
+      state,
+      "evmMarketOperatorPrivateKey",
+    );
+    const matcherPrivateKey = requireStatePrivateKey(state, "evmMatcherPrivateKey");
     const transport = createEvmTransport(rpcUrl);
     const chainConfig = {
       id: chainId,
@@ -2339,13 +2405,21 @@ test.describe("market flows", () => {
     const userAddress = state.evmHeadlessAddress as Address;
     const contractAddress = state.evmGoldClobAddress as Address;
     const oracleAddress = state.evmOracleAddress as Address;
-    const adminPrivateKey = state.evmAdminPrivateKey as `0x${string}`;
-    const pauserPrivateKey = state.evmPauserPrivateKey as `0x${string}`;
-    const reporterPrivateKey = state.evmReporterPrivateKey as `0x${string}`;
-    const marketOperatorPrivateKey =
-      state.evmMarketOperatorPrivateKey as `0x${string}`;
-    const matcherPrivateKey = state.evmMatcherPrivateKey as `0x${string}`;
-    const finalizerPrivateKey = state.evmFinalizerPrivateKey;
+    const adminPrivateKey = requireStatePrivateKey(state, "evmAdminPrivateKey");
+    const pauserPrivateKey = requireStatePrivateKey(state, "evmPauserPrivateKey");
+    const reporterPrivateKey = requireStatePrivateKey(
+      state,
+      "evmReporterPrivateKey",
+    );
+    const marketOperatorPrivateKey = requireStatePrivateKey(
+      state,
+      "evmMarketOperatorPrivateKey",
+    );
+    const matcherPrivateKey = requireStatePrivateKey(state, "evmMatcherPrivateKey");
+    const finalizerPrivateKey = requireStatePrivateKey(
+      state,
+      "evmFinalizerPrivateKey",
+    );
     const transport = createEvmTransport(rpcUrl);
     const publicClient = createPublicClient({
       chain: {
@@ -2674,12 +2748,17 @@ test.describe("market flows", () => {
     const userAddress = state.evmHeadlessAddress as Address;
     const contractAddress = state.evmGoldClobAddress as Address;
     const oracleAddress = state.evmOracleAddress as Address;
-    const adminPrivateKey = state.evmAdminPrivateKey as `0x${string}`;
-    const pauserPrivateKey = state.evmPauserPrivateKey as `0x${string}`;
-    const reporterPrivateKey = state.evmReporterPrivateKey as `0x${string}`;
-    const marketOperatorPrivateKey =
-      state.evmMarketOperatorPrivateKey as `0x${string}`;
-    const matcherPrivateKey = state.evmMatcherPrivateKey as `0x${string}`;
+    const adminPrivateKey = requireStatePrivateKey(state, "evmAdminPrivateKey");
+    const pauserPrivateKey = requireStatePrivateKey(state, "evmPauserPrivateKey");
+    const reporterPrivateKey = requireStatePrivateKey(
+      state,
+      "evmReporterPrivateKey",
+    );
+    const marketOperatorPrivateKey = requireStatePrivateKey(
+      state,
+      "evmMarketOperatorPrivateKey",
+    );
+    const matcherPrivateKey = requireStatePrivateKey(state, "evmMatcherPrivateKey");
     const transport = createEvmTransport(rpcUrl);
     const publicClient = createPublicClient({
       chain: {

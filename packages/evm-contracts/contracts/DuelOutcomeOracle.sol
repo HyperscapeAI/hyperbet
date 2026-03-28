@@ -389,11 +389,11 @@ contract DuelOutcomeOracle is AccessControl {
         duel.duelEndTs = proposal.duelEndTs;
         duel.metadataUri = metadataUri;
 
-        bytes32 proposalId = duel.activeProposalId;
+        bytes32 activeProposalId = duel.activeProposalId;
 
         emit DuelResolved(
             duelKey,
-            proposalId,
+            activeProposalId,
             duel.winner,
             duel.seed,
             duel.duelEndTs,

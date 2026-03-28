@@ -131,6 +131,44 @@ async function airdrop(
     await confirmSignatureByPolling(connection, signature);
 }
 
+async function currentChainUnixTimestamp(
+    connection: anchor.web3.Connection,
+): Promise<number | null> {
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+        try {
+            const slot = await connection.getSlot("confirmed");
+            const blockTime = await connection.getBlockTime(slot);
+            if (
+                typeof blockTime === "number" &&
+                Number.isFinite(blockTime) &&
+                blockTime > 0
+            ) {
+                return blockTime;
+            }
+        } catch {
+            // Fall back below if the validator has not published block time yet.
+        }
+        await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+    return null;
+}
+
+async function waitForChainUnixTimestamp(
+    connection: anchor.web3.Connection,
+    minimumUnixTimestamp: number,
+    timeoutMs = 15_000,
+): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+        const current = await currentChainUnixTimestamp(connection);
+        if (current !== null && current >= minimumUnixTimestamp) {
+            return;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+    throw new Error(`Timed out waiting for chain time >= ${minimumUnixTimestamp}`);
+}
+
 function deriveProgramDataAddress(programId: PublicKey): PublicKey {
     return PublicKey.findProgramAddressSync(
         [programId.toBuffer()],
@@ -526,13 +564,7 @@ export class SolanaProgramRuntime {
     async waitForBettingWindowClose(duelState: PublicKey): Promise<void> {
         const duel = await this.fetchDuelState(duelState);
         const betCloseTs = Number(duel.betCloseTs);
-        const nowSec = Math.floor(Date.now() / 1000);
-        if (nowSec >= betCloseTs) {
-            return;
-        }
-
-        const waitMs = (betCloseTs - nowSec + 2) * 1000;
-        await new Promise((resolve) => setTimeout(resolve, waitMs));
+        await waitForChainUnixTimestamp(this.connection, betCloseTs + 1);
     }
 
     async lockDuel(

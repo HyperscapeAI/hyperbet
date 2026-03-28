@@ -29,6 +29,15 @@ PROGRAM_CLOB_ID="DYtd7AoyTX2tbmZ8vpC3mxZgqTpyaDei4TFXZukWBJEf"
 APP_PORT="${E2E_APP_PORT:-4181}"
 GAME_API_PORT="${E2E_GAME_API_PORT:-5555}"
 GAME_API_URL="http://127.0.0.1:${GAME_API_PORT}"
+BUN_BIN="${BUN_BIN:-$(command -v bun 2>/dev/null || true)}"
+if [[ -z "$BUN_BIN" && -x "$HOME/.bun/bin/bun" ]]; then
+  BUN_BIN="$HOME/.bun/bin/bun"
+fi
+if [[ -z "$BUN_BIN" ]]; then
+  echo "[e2e] bun not found" >&2
+  exit 1
+fi
+export PATH="$(dirname "$BUN_BIN"):/opt/homebrew/bin:/usr/local/bin:$PATH"
 PW_HEADLESS="${PW_HEADLESS:-1}"
 PW_WEBGPU_ARGS="${PW_WEBGPU_ARGS:---enable-unsafe-webgpu}"
 if [[ "$(uname -s)" == "Darwin" && -z "${PW_BROWSER_CHANNEL:-}" ]]; then
