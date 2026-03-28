@@ -2108,12 +2108,6 @@ test.describe("market flows", () => {
     });
     await page.getByTestId("refresh-market").click();
 
-    const beforeBalance = (await clobProgram.account.userBalance.fetchNullable(
-      userBalanceAddress,
-    )) as UserBalanceAccount | null;
-    const beforeYes = bnLikeToBigInt(beforeBalance?.aShares);
-    const beforeNo = bnLikeToBigInt(beforeBalance?.bShares);
-
     await clobPanel.getByTestId("prediction-tab-buy").click({ force: true });
     await clobPanel.getByTestId("prediction-amount-input").fill(
       SOLANA_PREDICTION_AMOUNT,

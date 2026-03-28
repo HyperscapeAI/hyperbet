@@ -183,7 +183,7 @@ const goldClobArtifact = readFirstExistingJson(
     path.join(evmFoundryOutDir, "GoldClob.sol", "GoldClob.json"),
   ],
 ) as { abi: readonly unknown[] };
-const perpsCoder = new BorshAccountsCoder(goldPerpsIdl);
+const _perpsCoder = new BorshAccountsCoder(goldPerpsIdl);
 const perpsProgramId = new PublicKey(
   (goldPerpsIdl as Idl & { address: string }).address,
 );
@@ -303,14 +303,14 @@ function encodeMarketId(marketId: number): Buffer {
   return bytes;
 }
 
-function derivePerpsPositionPda(owner: PublicKey, marketId: number): PublicKey {
+function _derivePerpsPositionPda(owner: PublicKey, marketId: number): PublicKey {
   return PublicKey.findProgramAddressSync(
     [Buffer.from("position"), owner.toBuffer(), encodeMarketId(marketId)],
     perpsProgramId,
   )[0];
 }
 
-function bnLikeToBigInt(value: unknown): bigint {
+function _bnLikeToBigInt(value: unknown): bigint {
   if (typeof value === "bigint") return value;
   if (typeof value === "number") return BigInt(value);
   if (value && typeof value === "object" && "toString" in value) {
@@ -360,7 +360,7 @@ async function fetchPredictionMarkets(
   );
 }
 
-async function fetchStreamState(
+async function _fetchStreamState(
   request: APIRequestContext,
 ): Promise<StreamStateResponse> {
   return fetchJson<StreamStateResponse>(request, "/api/streaming/state");
@@ -697,10 +697,9 @@ async function createFreshEvmOpenMarket(
     seedBuyAmount?: string;
   },
 ): Promise<{ duelKey: Hash; duelId: string; marketKey: Hash }> {
-  let uniqueKey = `${chainKey}-gate10-${Date.now()}`;
+  const uniqueKey = `${chainKey}-gate10-${Date.now()}`;
   let duelKey = keccak256(stringToHex(uniqueKey));
   let duelId = `${Date.now()}`;
-  let marketKey: Hash | null = null;
   const reporterAddress =
     reporterWalletClient.account?.address as Address | undefined;
   const marketOperatorAddress =
@@ -720,8 +719,6 @@ async function createFreshEvmOpenMarket(
     );
     duelKey = liveMarket.duelKey;
     duelId = liveMarket.duelId;
-    marketKey = liveMarket.marketKey;
-    uniqueKey = `${chainKey}-live-${duelId}`;
     await ensureEvmSeedLiquidity(
       publicClient,
       makerWalletClient,
@@ -733,10 +730,10 @@ async function createFreshEvmOpenMarket(
       request,
       chainKey,
       duelKey,
-      marketKey,
+      liveMarket.marketKey,
       "OPEN",
     );
-    return { duelKey, duelId, marketKey };
+    return { duelKey, duelId, marketKey: liveMarket.marketKey };
   }
 
   let nextReporterNonce = await publicClient.getTransactionCount({
@@ -773,11 +770,11 @@ async function createFreshEvmOpenMarket(
     return nonce;
   };
   const latestBlock = await publicClient.getBlock({ blockTag: "latest" });
-  let betOpenTs = latestBlock.timestamp - 15n;
-  let betCloseTs = betOpenTs + E2E_BET_WINDOW_SECONDS;
-  let duelStartTs = betCloseTs + E2E_DUEL_START_DELAY_SECONDS;
-  let participantALabel = `${chainKey}-fresh-agent-a`;
-  let participantBLabel = `${chainKey}-fresh-agent-b`;
+  const betOpenTs = latestBlock.timestamp - 15n;
+  const betCloseTs = betOpenTs + E2E_BET_WINDOW_SECONDS;
+  const duelStartTs = betCloseTs + E2E_DUEL_START_DELAY_SECONDS;
+  const participantALabel = `${chainKey}-fresh-agent-a`;
+  const participantBLabel = `${chainKey}-fresh-agent-b`;
 
   const upsertTx = await reporterWalletClient.writeContract({
     address: oracleAddress,
@@ -822,7 +819,7 @@ async function createFreshEvmOpenMarket(
     options,
   );
 
-  marketKey = (await publicClient.readContract({
+  const marketKey = (await publicClient.readContract({
     address: contractAddress,
     abi: GOLD_CLOB_ABI,
     functionName: "marketKey",
@@ -1104,7 +1101,7 @@ async function waitForEvmPanelReady(
 ): Promise<void> {
   const refreshButton = page.getByTestId("refresh-market").first();
   if (await refreshButton.isVisible().catch(() => false)) {
-    await refreshButton.click().catch(() => undefined);
+    await clickRefreshMarket(page).catch(() => undefined);
   }
 
   await expect
@@ -1122,7 +1119,21 @@ async function waitForEvmPanelReady(
     .toBe("ready");
 }
 
-async function waitForNewTxSignature(
+async function clickRefreshMarket(page: Page): Promise<void> {
+  const refreshButton = page.getByTestId("refresh-market").first();
+  await expect(refreshButton).toBeVisible({ timeout: 30_000 });
+  try {
+    await refreshButton.click({ timeout: 10_000 });
+  } catch {
+    try {
+      await refreshButton.click({ timeout: 10_000, force: true });
+    } catch {
+      await refreshButton.evaluate((button: HTMLButtonElement) => button.click());
+    }
+  }
+}
+
+async function _waitForNewTxSignature(
   page: Page,
   testId: string,
   previousSignature = "",
@@ -1148,7 +1159,7 @@ async function waitForNewTxSignature(
   return matched;
 }
 
-async function ensureWalletConnected(page: Page): Promise<void> {
+async function _ensureWalletConnected(page: Page): Promise<void> {
   const hasConnectedSolanaWallet = async (): Promise<boolean> => {
     const desktopWalletChip = page
       .getByRole("button", { name: /^SOL\s+[A-Za-z0-9].*/i })
@@ -1293,7 +1304,7 @@ async function selectChain(
   throw new Error(`Unable to locate a visible chain selector for ${chain}`);
 }
 
-async function openSolanaAdminPanel(page: Page): Promise<void> {
+async function _openSolanaAdminPanel(page: Page): Promise<void> {
   const adminPanel = page.getByTestId("solana-clob-admin-panel");
   if (await adminPanel.isVisible().catch(() => false)) return;
 
@@ -1304,7 +1315,7 @@ async function openSolanaAdminPanel(page: Page): Promise<void> {
   await expect(adminPanel).toBeVisible();
 }
 
-async function expectSolanaTxSuccess(
+async function _expectSolanaTxSuccess(
   connection: Connection,
   signature: string,
   label: string,
@@ -1342,7 +1353,7 @@ async function expectSolanaTxSuccess(
   expect(status?.err ?? null, `${label} failed on-chain`).toBeNull();
 }
 
-async function fetchDecodedAccount<T>(
+async function _fetchDecodedAccount<T>(
   connection: Connection,
   coder: BorshAccountsCoder,
   accountName: "UserBalance" | "PositionState",
@@ -1432,6 +1443,7 @@ async function ensureEvmSeedLiquidity(
     address: makerAddress,
     blockTag: "pending",
   });
+  const consumeMakerNonce = () => nextMakerNonce++;
 
   const existingSellOpen = await readEvmPriceLevelTotalOpen(
     publicClient,
@@ -1456,7 +1468,7 @@ async function ensureEvmSeedLiquidity(
         ORDER_FLAG_GTC,
       ],
       value: seededSellCost + seededSellFee + seededSellFee,
-      nonce: nextMakerNonce++,
+      nonce: consumeMakerNonce(),
     });
     await waitForEvmReceipt(publicClient, seededSellOrderTx);
   }
@@ -1485,7 +1497,7 @@ async function ensureEvmSeedLiquidity(
           ORDER_FLAG_GTC,
         ],
         value: seededBuyCost + seededBuyFee + seededBuyFee,
-        nonce: nextMakerNonce++,
+        nonce: consumeMakerNonce(),
       });
       await waitForEvmReceipt(publicClient, seededBuyOrderTx);
     }
@@ -1652,7 +1664,7 @@ async function readEvmPosition(
   })) as [bigint, bigint, bigint, bigint];
 }
 
-async function waitForSolanaUiPosition(
+async function _waitForSolanaUiPosition(
   page: Page,
   side: "YES" | "NO",
 ): Promise<void> {
@@ -1678,7 +1690,7 @@ async function waitForSolanaUiPosition(
     .toBeGreaterThan(0);
 }
 
-async function submitModelsTrade(
+async function _submitModelsTrade(
   page: Page,
   tradeButtonTestId:
     | "models-market-open-long"
@@ -1905,7 +1917,7 @@ test.describe("market flows", () => {
       value: orderCost + orderFee + orderFee,
     });
     await waitForEvmReceipt(publicClient, yesTx as Hash);
-    await page.getByTestId("refresh-market").click();
+    await clickRefreshMarket(page);
     await expect
       .poll(async () => {
         const result = await readEvmPosition(
@@ -2355,7 +2367,7 @@ test.describe("market flows", () => {
       e2eEvmDuelId: duelId,
     });
     await selectChain(page, "avax");
-    await page.getByTestId("refresh-market").click();
+    await clickRefreshMarket(page);
     await expect(page.getByTestId("market-status")).toContainText(/open/i, {
       timeout: 60_000,
     });
@@ -2406,7 +2418,6 @@ test.describe("market flows", () => {
     const contractAddress = state.evmGoldClobAddress as Address;
     const oracleAddress = state.evmOracleAddress as Address;
     const adminPrivateKey = requireStatePrivateKey(state, "evmAdminPrivateKey");
-    const pauserPrivateKey = requireStatePrivateKey(state, "evmPauserPrivateKey");
     const reporterPrivateKey = requireStatePrivateKey(
       state,
       "evmReporterPrivateKey",
@@ -2436,7 +2447,6 @@ test.describe("market flows", () => {
     const reporterAccount = privateKeyToAccount(reporterPrivateKey);
     const marketOperatorAccount = privateKeyToAccount(marketOperatorPrivateKey);
     const adminAccount = privateKeyToAccount(adminPrivateKey);
-    const pauserAccount = privateKeyToAccount(pauserPrivateKey);
     const makerAccount = privateKeyToAccount(matcherPrivateKey);
     const finalizerAccount =
       typeof finalizerPrivateKey === "string"
@@ -2473,19 +2483,6 @@ test.describe("market flows", () => {
     });
     const adminWalletClient = createWalletClient({
       account: adminAccount,
-      chain: {
-        id: chainId,
-        name: "e2e-local-evm",
-        nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
-        rpcUrls: {
-          default: { http: [rpcUrl] },
-          public: { http: [rpcUrl] },
-        },
-      },
-      transport,
-    });
-    const pauserWalletClient = createWalletClient({
-      account: pauserAccount,
       chain: {
         id: chainId,
         name: "e2e-local-evm",
@@ -2614,7 +2611,7 @@ test.describe("market flows", () => {
       e2eEvmDuelId: duelId,
     });
     await selectChain(page, "avax");
-    await page.getByTestId("refresh-market").click();
+    await clickRefreshMarket(page);
 
     await waitForPredictionMarketState(
       request,
@@ -2666,7 +2663,7 @@ test.describe("market flows", () => {
       e2eEvmDuelId: duelId,
     });
     await selectChain(page, "avax");
-    await page.getByTestId("refresh-market").click();
+    await clickRefreshMarket(page);
 
     await waitForPredictionMarketState(
       request,
@@ -2715,7 +2712,7 @@ test.describe("market flows", () => {
       );
     }
 
-    await page.getByTestId("refresh-market").click();
+    await clickRefreshMarket(page);
     await expect(claimButton).toBeEnabled({ timeout: 30_000 });
     const previousClaimTx = await readText(page, "evm-last-claim-tx");
     await claimButton.click();
@@ -2901,7 +2898,7 @@ test.describe("market flows", () => {
     const evmPanel = page.getByTestId("evm-panel").first();
     const claimButton = evmPanel.getByTestId("evm-claim-payout");
     await expect(evmPanel).toBeVisible({ timeout: 60_000 });
-    await page.getByTestId("refresh-market").click();
+    await clickRefreshMarket(page);
     await expect(page.getByTestId("market-status")).toContainText(/open/i, {
       timeout: 60_000,
     });
@@ -2956,7 +2953,7 @@ test.describe("market flows", () => {
       )
       .toBe("CANCELLED");
 
-    await page.getByTestId("refresh-market").click();
+    await clickRefreshMarket(page);
     await expect(claimButton).toBeEnabled({ timeout: 30_000 });
     const previousClaimTx = await readText(page, "evm-last-claim-tx");
     await claimButton.click();

@@ -244,7 +244,7 @@ test.describe("app tabs and api coverage", () => {
     const wallet = state.solanaTraderPublicKey || "";
 
     const status = await fetchJson<{ service: string }>(request, "/status");
-    expect(status.service).toBe("hyperbet-evm-backend");
+    expect(status.service).toBe("hyperbet-avax-backend");
 
     const streamState = await fetchJson<StreamingStateResponse>(
       request,

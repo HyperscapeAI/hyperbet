@@ -849,11 +849,6 @@ test("prediction market loads the current duel and mints YES shares on-chain", a
   await seedAskLiquidity(connection, state, freshMarket);
   await page.getByTestId("refresh-market").click();
 
-  const beforeBalance = (await clobProgram.account.userBalance.fetchNullable(
-    userBalanceAddress,
-  )) as UserBalanceAccount | null;
-  const beforeYes = bnLikeToBigInt(beforeBalance?.aShares);
-
   await expect
     .poll(
       async () => await page.getByTestId("prediction-submit").isDisabled(),
