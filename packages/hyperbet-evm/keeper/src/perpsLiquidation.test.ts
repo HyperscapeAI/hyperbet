@@ -8,6 +8,9 @@
  *   anvil --host 127.0.0.1 --port 18545 --chain-id 97 --accounts 20 --balance 10000
  */
 import { describe, test, expect, beforeAll } from "bun:test";
+import fs from "node:fs/promises";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   createPublicClient,
   createWalletClient,
@@ -19,16 +22,11 @@ import {
 } from "viem";
 import { mnemonicToAccount } from "viem/accounts";
 
-// ─── Artifacts ──────────────────────────────────────────────────────────────
-
-import skillOracleArtifact from "../../../evm-contracts/artifacts/contracts/perps/SkillOracle.sol/SkillOracle.json";
-import agentPerpEngineArtifact from "../../../evm-contracts/artifacts/contracts/perps/AgentPerpEngine.sol/AgentPerpEngine.json";
-import mockErc20Artifact from "../../../evm-contracts/artifacts/contracts/MockERC20.sol/MockERC20.json";
-
 // ─── Setup ──────────────────────────────────────────────────────────────────
 
 const ANVIL_MNEMONIC = "test test test test test test test test test test test junk";
 const RPC_URL = process.env.PERPS_TEST_RPC || "http://127.0.0.1:18545";
+const TEST_DIR = path.dirname(fileURLToPath(import.meta.url));
 
 const localChain = {
   id: 97, name: "test-bsc",
@@ -36,7 +34,31 @@ const localChain = {
   rpcUrls: { default: { http: [RPC_URL] } },
 } as const;
 
-function resolveBytecode(artifact: any): `0x${string}` {
+type EvmArtifact = {
+  abi: unknown[];
+  bytecode:
+    | string
+    | {
+        object?: string;
+      };
+};
+
+async function loadArtifact(
+  label: string,
+  candidatePaths: string[],
+): Promise<EvmArtifact | null> {
+  for (const candidatePath of candidatePaths) {
+    try {
+      const body = await fs.readFile(path.resolve(TEST_DIR, candidatePath), "utf8");
+      return JSON.parse(body) as EvmArtifact;
+    } catch {}
+  }
+
+  console.log(`  ${label} artifact not available — skipping perps liquidation tests`);
+  return null;
+}
+
+function resolveBytecode(artifact: EvmArtifact): `0x${string}` {
   const raw = typeof artifact.bytecode === "string"
     ? artifact.bytecode : artifact.bytecode?.object || "";
   return (raw.startsWith("0x") ? raw : `0x${raw}`) as `0x${string}`;
@@ -61,6 +83,10 @@ let oracleAddr: Address;
 let engineAddr: Address;
 let tokenAddr: Address;
 let snapshotId: string;
+let suiteAvailable = false;
+let skillOracleArtifact: EvmArtifact | null = null;
+let agentPerpEngineArtifact: EvmArtifact | null = null;
+let mockErc20Artifact: EvmArtifact | null = null;
 
 async function waitReceipt(hash: `0x${string}`) {
   return pub.waitForTransactionReceipt({ hash, timeout: 15_000 });
@@ -87,33 +113,33 @@ async function revert(id: string) {
 
 async function getMarketState() {
   return pub.readContract({
-    address: engineAddr, abi: agentPerpEngineArtifact.abi,
+    address: engineAddr, abi: agentPerpEngineArtifact!.abi,
     functionName: "markets", args: [agentId],
   }) as any;
 }
 
 async function getPositionHealth(addr: Address) {
   return pub.readContract({
-    address: engineAddr, abi: agentPerpEngineArtifact.abi,
+    address: engineAddr, abi: agentPerpEngineArtifact!.abi,
     functionName: "getPositionHealth", args: [agentId, addr],
   }) as any;
 }
 
 async function crashOracle(mu: number) {
   await waitReceipt(await admin.wallet.writeContract({
-    address: oracleAddr, abi: skillOracleArtifact.abi,
+    address: oracleAddr, abi: skillOracleArtifact!.abi,
     functionName: "updateAgentSkill", args: [agentId, mu, 0],
   }));
   // Propagate new price into the perps engine's stored state
   await waitReceipt(await admin.wallet.writeContract({
-    address: engineAddr, abi: agentPerpEngineArtifact.abi,
+    address: engineAddr, abi: agentPerpEngineArtifact!.abi,
     functionName: "syncOracle", args: [agentId],
   }));
 }
 
 async function getPosition(addr: Address) {
   return pub.readContract({
-    address: engineAddr, abi: agentPerpEngineArtifact.abi,
+    address: engineAddr, abi: agentPerpEngineArtifact!.abi,
     functionName: "positions", args: [agentId, addr],
   }) as any;
 }
@@ -129,6 +155,22 @@ beforeAll(async () => {
     anvilAvailable = true;
   } catch {
     console.log("  Anvil not available at", RPC_URL, "— skipping perps liquidation tests");
+    return;
+  }
+
+  skillOracleArtifact = await loadArtifact("SkillOracle", [
+    "../../../evm-contracts/out/SkillOracle.sol/SkillOracle.json",
+    "../../../evm-contracts/artifacts/contracts/perps/SkillOracle.sol/SkillOracle.json",
+  ]);
+  agentPerpEngineArtifact = await loadArtifact("AgentPerpEngine", [
+    "../../../evm-contracts/out/AgentPerpEngine.sol/AgentPerpEngine.json",
+    "../../../evm-contracts/artifacts/contracts/perps/AgentPerpEngine.sol/AgentPerpEngine.json",
+  ]);
+  mockErc20Artifact = await loadArtifact("MockERC20", [
+    "../../../evm-contracts/out/MockERC20.sol/MockERC20.json",
+    "../../../evm-contracts/artifacts/contracts/MockERC20.sol/MockERC20.json",
+  ]);
+  if (!skillOracleArtifact || !agentPerpEngineArtifact || !mockErc20Artifact) {
     return;
   }
 
@@ -192,6 +234,7 @@ beforeAll(async () => {
 
   // Take base snapshot — each test reverts to this then re-snapshots
   snapshotId = await snapshot();
+  suiteAvailable = true;
 });
 
 async function isolate<T>(fn: () => Promise<T>): Promise<T> {
@@ -205,13 +248,13 @@ async function isolate<T>(fn: () => Promise<T>): Promise<T> {
 
 describe("keeper perps liquidation flow", () => {
   test("happy path: oracle crash → position underwater → keeper liquidates", async () => {
-    if (!anvilAvailable) return;
+    if (!suiteAvailable) return;
     await revert(snapshotId); snapshotId = await snapshot();
     const sid = await snapshot();
 
     // Trader opens long position: 100 margin, 5 size
     await waitReceipt(await trader.wallet.writeContract({
-      address: engineAddr, abi: agentPerpEngineArtifact.abi,
+      address: engineAddr, abi: agentPerpEngineArtifact!.abi,
       functionName: "modifyPosition",
       args: [agentId, parseUnits("100", 18), parseUnits("5", 18)],
     }));
@@ -229,7 +272,7 @@ describe("keeper perps liquidation flow", () => {
 
     // Keeper executes liquidation
     const liqHash = await keeperBot.wallet.writeContract({
-      address: engineAddr, abi: agentPerpEngineArtifact.abi,
+      address: engineAddr, abi: agentPerpEngineArtifact!.abi,
       functionName: "liquidate", args: [agentId, trader.address],
     });
     const receipt = await waitReceipt(liqHash);
@@ -245,7 +288,7 @@ describe("keeper perps liquidation flow", () => {
   });
 
   test("insurance fund covers liquidation losses", async () => {
-    if (!anvilAvailable) return;
+    if (!suiteAvailable) return;
     const sid = await snapshot();
 
     const mktBefore = await getMarketState();
@@ -253,7 +296,7 @@ describe("keeper perps liquidation flow", () => {
 
     // Trader opens leveraged long
     await waitReceipt(await trader.wallet.writeContract({
-      address: engineAddr, abi: agentPerpEngineArtifact.abi,
+      address: engineAddr, abi: agentPerpEngineArtifact!.abi,
       functionName: "modifyPosition",
       args: [agentId, parseUnits("120", 18), parseUnits("5", 18)], // near max leverage
     }));
@@ -264,7 +307,7 @@ describe("keeper perps liquidation flow", () => {
     // Liquidate
     try {
       await waitReceipt(await keeperBot.wallet.writeContract({
-        address: engineAddr, abi: agentPerpEngineArtifact.abi,
+        address: engineAddr, abi: agentPerpEngineArtifact!.abi,
         functionName: "liquidate", args: [agentId, trader.address],
       }));
     } catch {}
@@ -280,19 +323,19 @@ describe("keeper perps liquidation flow", () => {
   });
 
   test("no liquidation needed when price move is small", async () => {
-    if (!anvilAvailable) return;
+    if (!suiteAvailable) return;
     const sid = await snapshot();
 
     // Trader opens well-collateralized position
     await waitReceipt(await trader.wallet.writeContract({
-      address: engineAddr, abi: agentPerpEngineArtifact.abi,
+      address: engineAddr, abi: agentPerpEngineArtifact!.abi,
       functionName: "modifyPosition",
       args: [agentId, parseUnits("500", 18), parseUnits("5", 18)], // 100x margin
     }));
 
     // Small oracle move (within delta caps but not enough to liquidate)
     await waitReceipt(await admin.wallet.writeContract({
-      address: oracleAddr, abi: skillOracleArtifact.abi,
+      address: oracleAddr, abi: skillOracleArtifact!.abi,
       functionName: "updateAgentSkill", args: [agentId, 1400, 0], // -100 mu
     }));
 
@@ -304,7 +347,7 @@ describe("keeper perps liquidation flow", () => {
     let reverted = false;
     try {
       await waitReceipt(await keeperBot.wallet.writeContract({
-        address: engineAddr, abi: agentPerpEngineArtifact.abi,
+        address: engineAddr, abi: agentPerpEngineArtifact!.abi,
         functionName: "liquidate", args: [agentId, trader.address],
       }));
     } catch {
@@ -316,17 +359,17 @@ describe("keeper perps liquidation flow", () => {
   });
 
   test("keeper earns liquidation reward", async () => {
-    if (!anvilAvailable) return;
+    if (!suiteAvailable) return;
     const sid = await snapshot();
 
     const keeperBalBefore = await pub.readContract({
-      address: tokenAddr, abi: mockErc20Artifact.abi,
+      address: tokenAddr, abi: mockErc20Artifact!.abi,
       functionName: "balanceOf", args: [keeperBot.address],
     }) as bigint;
 
     // Trader opens leveraged long
     await waitReceipt(await trader.wallet.writeContract({
-      address: engineAddr, abi: agentPerpEngineArtifact.abi,
+      address: engineAddr, abi: agentPerpEngineArtifact!.abi,
       functionName: "modifyPosition",
       args: [agentId, parseUnits("100", 18), parseUnits("5", 18)],
     }));
@@ -337,13 +380,13 @@ describe("keeper perps liquidation flow", () => {
     // Liquidate
     try {
       await waitReceipt(await keeperBot.wallet.writeContract({
-        address: engineAddr, abi: agentPerpEngineArtifact.abi,
+        address: engineAddr, abi: agentPerpEngineArtifact!.abi,
         functionName: "liquidate", args: [agentId, trader.address],
       }));
     } catch {}
 
     const keeperBalAfter = await pub.readContract({
-      address: tokenAddr, abi: mockErc20Artifact.abi,
+      address: tokenAddr, abi: mockErc20Artifact!.abi,
       functionName: "balanceOf", args: [keeperBot.address],
     }) as bigint;
 
@@ -354,7 +397,7 @@ describe("keeper perps liquidation flow", () => {
   });
 
   test("position equity goes negative → bad debt recorded", async () => {
-    if (!anvilAvailable) return;
+    if (!suiteAvailable) return;
     const sid = await snapshot();
 
     // Drain insurance to minimum
@@ -363,7 +406,7 @@ describe("keeper perps liquidation flow", () => {
     if (currentInsurance > parseUnits("1", 18)) {
       try {
         await waitReceipt(await admin.wallet.writeContract({
-          address: engineAddr, abi: agentPerpEngineArtifact.abi,
+          address: engineAddr, abi: agentPerpEngineArtifact!.abi,
           functionName: "withdrawInsuranceFund",
           args: [agentId, admin.address, currentInsurance - parseUnits("1", 18)],
         }));
@@ -372,7 +415,7 @@ describe("keeper perps liquidation flow", () => {
 
     // Trader opens very leveraged position
     await waitReceipt(await trader.wallet.writeContract({
-      address: engineAddr, abi: agentPerpEngineArtifact.abi,
+      address: engineAddr, abi: agentPerpEngineArtifact!.abi,
       functionName: "modifyPosition",
       args: [agentId, parseUnits("110", 18), parseUnits("5", 18)], // near max leverage, minimal cushion
     }));
@@ -383,7 +426,7 @@ describe("keeper perps liquidation flow", () => {
     // Liquidate — may create bad debt if insurance insufficient
     try {
       await waitReceipt(await keeperBot.wallet.writeContract({
-        address: engineAddr, abi: agentPerpEngineArtifact.abi,
+        address: engineAddr, abi: agentPerpEngineArtifact!.abi,
         functionName: "liquidate", args: [agentId, trader.address],
       }));
     } catch {}
