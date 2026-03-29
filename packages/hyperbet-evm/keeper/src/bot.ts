@@ -51,6 +51,8 @@ import {
 
 const EVM_DUEL_WINNER_MARKET_KIND = 0;
 const EVM_KEEPER_DEFER_FINALIZE = process.env.EVM_KEEPER_DEFER_FINALIZE === "true";
+const EVM_KEEPER_ENABLE_LIFECYCLE_WRITES =
+  process.env.EVM_KEEPER_ENABLE_LIFECYCLE_WRITES !== "false";
 const EVM_DUEL_STATUS_NULL = 0;
 const EVM_DUEL_STATUS_BETTING_OPEN = 2;
 const EVM_DUEL_STATUS_LOCKED = 3;
@@ -3497,10 +3499,12 @@ gameClient.onDuelStart(async (data) => {
     }
   }
 
-  try {
-    await upsertEvmDuelLifecycle(data, 2);
-  } catch (err) {
-    console.error("Failed to upsert EVM market lifecycle for duel:", err);
+  if (EVM_KEEPER_ENABLE_LIFECYCLE_WRITES) {
+    try {
+      await upsertEvmDuelLifecycle(data, 2);
+    } catch (err) {
+      console.error("Failed to upsert EVM market lifecycle for duel:", err);
+    }
   }
   writeBotHealthSnapshot();
 });
@@ -3525,10 +3529,12 @@ gameClient.onBettingLocked(async (data) => {
     }
   }
 
-  try {
-    await upsertEvmDuelLifecycle(data, 3);
-  } catch (error) {
-    console.error("Failed to lock EVM market for duel:", error);
+  if (EVM_KEEPER_ENABLE_LIFECYCLE_WRITES) {
+    try {
+      await upsertEvmDuelLifecycle(data, 3);
+    } catch (error) {
+      console.error("Failed to lock EVM market for duel:", error);
+    }
   }
   writeBotHealthSnapshot();
 });
@@ -3605,8 +3611,10 @@ gameClient.onDuelEnd(async (data) => {
       }
     }
 
-    await reportEvmResult(data);
-    console.log(`Resolved market for duel ${data.duelId}`);
+    if (EVM_KEEPER_ENABLE_LIFECYCLE_WRITES) {
+      await reportEvmResult(data);
+      console.log(`Resolved market for duel ${data.duelId}`);
+    }
   } catch (err) {
     console.error("Failed to resolve market:", err);
   }

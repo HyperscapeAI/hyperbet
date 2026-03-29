@@ -14,13 +14,22 @@ fi
 
 resolve_hyperscapes_root() {
   local -a candidates=()
+  if [[ -n "${E2E_HYPERSCAPES_ROOT:-}" ]]; then
+    candidates+=("${E2E_HYPERSCAPES_ROOT}")
+  fi
   if [[ -n "${HYPERSCAPES_ROOT:-}" ]]; then
     candidates+=("${HYPERSCAPES_ROOT}")
   fi
   candidates+=(
+    "$WORKSPACE_ROOT/.worktrees/hyperscapes-main-latest-e2e"
+    "$WORKSPACE_ROOT/.worktrees/hyperscapes-main-acceptance"
+    "$WORKSPACE_ROOT/.worktrees/hyperscapes-main-sync"
     "$WORKSPACE_ROOT/.worktrees/hyperscapes-stream-bet-sync"
     "$WORKSPACE_ROOT/hyperscapes-stream-bet-sync"
     "$WORKSPACE_ROOT/hyperscapes-mono"
+    "$ROOT/../.worktrees/hyperscapes-main-latest-e2e"
+    "$ROOT/../.worktrees/hyperscapes-main-acceptance"
+    "$ROOT/../.worktrees/hyperscapes-main-sync"
     "$ROOT/../.worktrees/hyperscapes-stream-bet-sync"
     "$ROOT/../hyperscapes-stream-bet-sync"
     "$ROOT/../hyperscapes-mono"
@@ -319,7 +328,13 @@ HYPERSCAPES_DUEL_NODE_ENV="${HYPERSCAPES_DUEL_NODE_ENV:-development}"
 HYPERSCAPES_USE_PRODUCTION_CLIENT="${HYPERSCAPES_USE_PRODUCTION_CLIENT:-true}"
 HYPERSCAPES_REUSE_EXISTING_CLIENT="${HYPERSCAPES_REUSE_EXISTING_CLIENT:-false}"
 HYPERSCAPES_DUEL_FRESH="${HYPERSCAPES_DUEL_FRESH:-false}"
-STREAMING_ANNOUNCEMENT_MS="${STREAMING_ANNOUNCEMENT_MS:-180000}"
+if [[ -n "${STREAMING_ANNOUNCEMENT_MS:-}" ]]; then
+  STREAMING_ANNOUNCEMENT_MS="$STREAMING_ANNOUNCEMENT_MS"
+elif [[ "$HYPERSCAPES_DUEL_FRESH" == "true" ]]; then
+  STREAMING_ANNOUNCEMENT_MS="420000"
+else
+  STREAMING_ANNOUNCEMENT_MS="180000"
+fi
 STREAMING_FIGHTING_MS="${STREAMING_FIGHTING_MS:-60000}"
 STREAMING_END_WARNING_MS="${STREAMING_END_WARNING_MS:-5000}"
 STREAMING_RESOLUTION_MS="${STREAMING_RESOLUTION_MS:-5000}"

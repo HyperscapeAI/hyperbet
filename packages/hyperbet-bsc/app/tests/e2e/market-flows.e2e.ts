@@ -205,9 +205,9 @@ const E2E_CANCEL_PREDICTION_AMOUNT = "0.00025";
 const ACTIVE_MARKET_UI = /open|live/i;
 const LIVE_DUEL_MIN_OPEN_WINDOW_MS = parsePositiveInteger(
   process.env.E2E_LIVE_DUEL_TRADE_WINDOW_MS,
-  175_000,
+  240_000,
 );
-const PREPARED_LIVE_DUEL_MIN_OPEN_WINDOW_MS = 60_000;
+const PREPARED_LIVE_DUEL_MIN_OPEN_WINDOW_MS = LIVE_DUEL_MIN_OPEN_WINDOW_MS;
 const LIVE_DUEL_FRESH_WAIT_MS = 480_000;
 const ZERO_HASH =
   "0x0000000000000000000000000000000000000000000000000000000000000000";
@@ -721,6 +721,8 @@ async function createFreshEvmOpenMarket(
     const liveMarket = await waitForPreparedOrFreshRealEvmMarket(
       request,
       publicClient,
+      reporterWalletClient,
+      marketOperatorWalletClient,
       oracleAddress,
       contractAddress,
       chainKey,
@@ -1592,9 +1594,115 @@ async function ensureEvmSeedLiquidity(
   }
 }
 
+async function materializeRealEvmLiveDuelIfNeeded(
+  request: APIRequestContext,
+  publicClient: ReturnType<typeof createPublicClient>,
+  reporterWalletClient: ReturnType<typeof createWalletClient>,
+  marketOperatorWalletClient: ReturnType<typeof createWalletClient>,
+  oracleAddress: Address,
+  contractAddress: Address,
+  chainKey: "bsc" | "avax",
+  expected: {
+    duelId: string;
+    duelKey: Hash;
+  },
+): Promise<boolean> {
+  const cycle = (await _fetchStreamState(request)).cycle;
+  const duelId = cycle?.duelId == null ? "" : String(cycle.duelId).trim();
+  const duelKey =
+    typeof cycle?.duelKeyHex === "string"
+      ? normalizeHex32(
+          cycle.duelKeyHex.startsWith("0x")
+            ? cycle.duelKeyHex
+            : `0x${cycle.duelKeyHex}`,
+          "real EVM live duel key",
+        )
+      : null;
+  if (!duelId || !duelKey || duelId !== expected.duelId || duelKey !== expected.duelKey) {
+    return false;
+  }
+
+  const agent1Id = cycle?.agent1?.id?.trim() || "";
+  const agent2Id = cycle?.agent2?.id?.trim() || "";
+  if (!agent1Id || !agent2Id) {
+    return false;
+  }
+
+  const latestBlock = await publicClient.getBlock({ blockTag: "latest" });
+  const fallbackBetOpenTs = latestBlock.timestamp - 15n;
+  const fallbackBetCloseTs = fallbackBetOpenTs + E2E_BET_WINDOW_SECONDS;
+  const fallbackDuelStartTs = fallbackBetCloseTs + E2E_DUEL_START_DELAY_SECONDS;
+  const betOpenTs =
+    typeof cycle?.betOpenTime === "number"
+      ? BigInt(Math.floor(cycle.betOpenTime / 1000))
+      : fallbackBetOpenTs;
+  const betCloseTs =
+    typeof cycle?.betCloseTime === "number"
+      ? BigInt(Math.floor(cycle.betCloseTime / 1000))
+      : fallbackBetCloseTs;
+  const duelStartTs =
+    typeof cycle?.fightStartTime === "number"
+      ? BigInt(Math.floor(cycle.fightStartTime / 1000))
+      : fallbackDuelStartTs;
+  const participantAHash = hashLabel(`${chainKey}:${agent1Id}`);
+  const participantBHash = hashLabel(`${chainKey}:${agent2Id}`);
+  const existingOracleDuel = (await publicClient.readContract({
+    address: oracleAddress,
+    abi: duelOutcomeOracleArtifact.abi,
+    functionName: "getDuel",
+    args: [duelKey],
+  })) as {
+    participantAHash?: Hash;
+    participantBHash?: Hash;
+  };
+  const hasExistingOracleDuel =
+    (existingOracleDuel.participantAHash != null &&
+      existingOracleDuel.participantAHash !== ZERO_HASH) ||
+    (existingOracleDuel.participantBHash != null &&
+      existingOracleDuel.participantBHash !== ZERO_HASH);
+  if (!hasExistingOracleDuel) {
+    const upsertTx = await reporterWalletClient.writeContract({
+      address: oracleAddress,
+      abi: duelOutcomeOracleArtifact.abi,
+      functionName: "upsertDuel",
+      args: [
+        duelKey,
+        participantAHash,
+        participantBHash,
+        betOpenTs,
+        betCloseTs,
+        duelStartTs,
+        `https://hyperbet.win/e2e/${chainKey}/${duelId}`,
+        DUEL_STATUS_BETTING_OPEN,
+      ],
+    });
+    await waitForEvmReceipt(publicClient, upsertTx);
+  }
+
+  const existingMarket = (await publicClient.readContract({
+    address: contractAddress,
+    abi: GOLD_CLOB_ABI,
+    functionName: "getMarket",
+    args: [duelKey, MARKET_KIND_DUEL_WINNER],
+  })) as { exists?: boolean };
+  if (!existingMarket?.exists) {
+    const createMarketTx = await marketOperatorWalletClient.writeContract({
+      address: contractAddress,
+      abi: goldClobArtifact.abi,
+      functionName: "createMarketForDuel",
+      args: [duelKey, MARKET_KIND_DUEL_WINNER],
+    });
+    await waitForEvmReceipt(publicClient, createMarketTx);
+  }
+
+  return true;
+}
+
 async function waitForPreparedOrFreshRealEvmMarket(
   request: APIRequestContext,
   publicClient: ReturnType<typeof createPublicClient>,
+  reporterWalletClient: ReturnType<typeof createWalletClient>,
+  marketOperatorWalletClient: ReturnType<typeof createWalletClient>,
   oracleAddress: Address,
   contractAddress: Address,
   chainKey: "bsc" | "avax",
@@ -1674,11 +1782,6 @@ async function waitForPreparedOrFreshRealEvmMarket(
         await sleepMs(1_000);
         continue;
       }
-      if (activeMarket.lifecycleStatus !== "OPEN") {
-        liveError = `${preparedFixture ? "prepared" : "active"} ${chainKey} market ${duelId} is ${activeMarket.lifecycleStatus ?? "missing lifecycle"}`;
-        await sleepMs(1_000);
-        continue;
-      }
       const betCloseTimeMs =
         typeof activeMarket.betCloseTime === "number"
           ? activeMarket.betCloseTime
@@ -1708,19 +1811,47 @@ async function waitForPreparedOrFreshRealEvmMarket(
           existingOracleDuel.participantAHash !== ZERO_HASH) ||
         (existingOracleDuel.participantBHash &&
           existingOracleDuel.participantBHash !== ZERO_HASH);
-      if (!hasOracleDuel) {
-        liveError = `${preparedFixture ? "prepared" : "active"} ${chainKey} duel ${duelId} is not materialized in the oracle yet`;
-        await sleepMs(1_000);
-        continue;
-      }
       const existingMarket = (await publicClient.readContract({
         address: contractAddress,
         abi: GOLD_CLOB_ABI,
         functionName: "getMarket",
         args: [duelKey, MARKET_KIND_DUEL_WINNER],
       })) as { exists?: boolean };
-      if (!existingMarket?.exists) {
-        liveError = `${preparedFixture ? "prepared" : "active"} ${chainKey} duel ${duelId} has no on-chain market yet`;
+      if (!hasOracleDuel || !existingMarket?.exists) {
+        const materialized = await materializeRealEvmLiveDuelIfNeeded(
+          request,
+          publicClient,
+          reporterWalletClient,
+          marketOperatorWalletClient,
+          oracleAddress,
+          contractAddress,
+          chainKey,
+          { duelId, duelKey },
+        );
+        if (materialized) {
+          await sleepMs(1_000);
+          continue;
+        }
+        liveError = !hasOracleDuel
+          ? `${preparedFixture ? "prepared" : "active"} ${chainKey} duel ${duelId} is not materialized in the oracle yet`
+          : `${preparedFixture ? "prepared" : "active"} ${chainKey} duel ${duelId} has no on-chain market yet`;
+        await sleepMs(1_000);
+        continue;
+      }
+      marketKey = normalizeHex32(
+        (await publicClient.readContract({
+          address: contractAddress,
+          abi: GOLD_CLOB_ABI,
+          functionName: "marketKey",
+          args: [duelKey, MARKET_KIND_DUEL_WINNER],
+        })) as Hash,
+        "on-chain market key",
+      );
+      if (
+        activeMarket.lifecycleStatus !== "OPEN" &&
+        activeMarket.lifecycleStatus !== "PENDING"
+      ) {
+        liveError = `${preparedFixture ? "prepared" : "active"} ${chainKey} market ${duelId} is ${activeMarket.lifecycleStatus ?? "missing lifecycle"}`;
         await sleepMs(1_000);
         continue;
       }

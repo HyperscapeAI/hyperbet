@@ -1,3 +1,6 @@
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
 import { defineConfig, devices } from "@playwright/test";
 
 const IS_LINUX = process.platform === "linux";
@@ -21,6 +24,10 @@ const DESKTOP_CHROMIUM = {
   viewport: { width: 1280, height: 720 },
   screen: { width: 1280, height: 720 },
 };
+const E2E_DIR = path.dirname(fileURLToPath(import.meta.url));
+const APP_DIR = path.resolve(E2E_DIR, "../..");
+const PLAYWRIGHT_OUTPUT_DIR = path.join(APP_DIR, "test-results");
+const PLAYWRIGHT_REPORT_DIR = path.join(APP_DIR, "playwright-report");
 
 // Playwright sets FORCE_COLOR; if NO_COLOR is also present it emits noisy startup warnings.
 delete process.env.NO_COLOR;
@@ -28,6 +35,7 @@ delete process.env.NO_COLOR;
 export default defineConfig({
   testDir: ".",
   testMatch: "**/*.e2e.ts",
+  outputDir: PLAYWRIGHT_OUTPUT_DIR,
   timeout: 180_000,
   expect: {
     timeout: 30_000,
@@ -36,12 +44,12 @@ export default defineConfig({
   retries: process.env.CI ? 1 : 0,
   reporter: process.env.CI
     ? [
-        ["html", { open: "never", outputFolder: "playwright-report" }],
+        ["html", { open: "never", outputFolder: PLAYWRIGHT_REPORT_DIR }],
         ["github"],
       ]
     : [
         ["list"],
-        ["html", { open: "never", outputFolder: "playwright-report" }],
+        ["html", { open: "never", outputFolder: PLAYWRIGHT_REPORT_DIR }],
       ],
   use: {
     baseURL: process.env.E2E_BASE_URL || "http://127.0.0.1:4181",
