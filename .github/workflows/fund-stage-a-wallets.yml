@@ -17,10 +17,14 @@ on:
         required: true
         type: string
 
+permissions:
+  contents: read
+
 jobs:
   fund-stage-a-wallets:
     name: Fund Stage A wallets
     runs-on: ubuntu-latest
+    environment: staging
     env:
       TARGET_CHAIN: ${{ github.event_name == 'workflow_dispatch' && inputs.chain || 'bsc' }}
       RECIPIENTS: ${{ github.event_name == 'workflow_dispatch' && inputs.recipients || '0x4f2714dc431dc948B5B138Ef9b998e943568DE4d=0.20ether' }}
@@ -97,6 +101,12 @@ jobs:
 
               if [[ -z "$value" || "$value" == "$target" ]]; then
                 echo "Invalid amount pair: $target" >&2
+                exit 1
+              fi
+
+              # Validate Solana address: base58 characters, 32-44 chars
+              if [[ ! "$address" =~ ^[1-9A-HJ-NP-Za-km-z]{32,44}$ ]]; then
+                echo "ERROR: Invalid Solana address: $address" >&2
                 exit 1
               fi
 
