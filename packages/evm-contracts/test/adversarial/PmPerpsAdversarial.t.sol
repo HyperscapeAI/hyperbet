@@ -112,6 +112,8 @@ contract PmPerpsAdversarialTest is Test {
     // ─── Test 1: Sandwich attack on CLOB ─────────────────────────────────
 
     function test_sandwichAttackBoundedImpact() public {
+        uint256 attackerBalBefore = attacker.balance;
+
         // Attacker places buy before victim's large buy (sandwich front-run)
         vm.prank(attacker);
         clob.placeOrder{value: 0.3 ether}(duelKey, MARKET_KIND, BUY_SIDE, 600, 0.5e18, GTC_FLAG);
@@ -125,11 +127,11 @@ contract PmPerpsAdversarialTest is Test {
         clob.placeOrder{value: 0.2 ether}(duelKey, MARKET_KIND, SELL_SIDE, 600, 0.5e18, GTC_FLAG);
 
         // The CLOB is a binary market (prices 0-1000), so price impact is
-        // inherently bounded by the orderbook depth. The attacker can only
-        // profit from the spread between their buy and sell fills.
-        // Key assertion: attacker cannot extract more than the spread * size
-        // This is verified by the CLOB's fill mechanics.
-        assertTrue(true, "Sandwich completed without revert -- bounded by CLOB mechanics");
+        // inherently bounded by the orderbook depth. The attacker's net
+        // ETH balance should not increase — any profit is locked in position
+        // shares, not extractable as free ETH via the sandwich alone.
+        uint256 attackerBalAfter = attacker.balance;
+        assertLe(attackerBalAfter, attackerBalBefore, "Sandwich should not yield free ETH profit to attacker");
     }
 
     // ─── Test 2: Oracle manipulation -- SkillOracle rejects large delta ───
