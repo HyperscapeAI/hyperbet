@@ -1,11 +1,6 @@
 name: Fund Stage A Wallets
 
 on:
-  push:
-    branches:
-      - audit/develop-pm-hardening
-    paths:
-      - .github/workflows/fund-stage-a-wallets.yml
   workflow_dispatch:
     inputs:
       chain:
