@@ -1,9 +1,10 @@
 type WebSocketLike = {
-  on: (
-    event: "message" | "error" | "close",
-    listener: (...args: any[]) => void,
-  ) => void;
-  close: () => void;
+  addEventListener(
+    event: string,
+    listener: (event: any) => void,
+  ): void;
+  close(): void;
+  readyState: number;
 };
 
 type WebSocketCtor = new (url: string) => WebSocketLike;
@@ -25,21 +26,29 @@ export class HyperbetStreamClient {
         }
 
         this.ws = new ctor(this.url);
-        
-        this.ws.on("message", (data) => {
+
+        this.ws.addEventListener("message", (event: any) => {
             try {
-                const parsed = JSON.parse(data.toString());
+                // Browser MessageEvent wraps payload in .data; Node.js ws may
+                // pass the raw buffer directly depending on version.
+                const raw =
+                    typeof event === "string"
+                        ? event
+                        : typeof event.data === "string"
+                          ? event.data
+                          : event.data?.toString?.() ?? String(event);
+                const parsed = JSON.parse(raw);
                 this.callbacks.forEach(cb => cb(parsed));
             } catch (e) {
                 console.error("HyperbetStreamClient parse error:", e);
             }
         });
 
-        this.ws.on("error", (err) => {
+        this.ws.addEventListener("error", (err: any) => {
             console.error("HyperbetStreamClient ws error:", err);
         });
 
-        this.ws.on("close", () => {
+        this.ws.addEventListener("close", () => {
              // Optional auto-reconnect logic could go here
         });
     }
