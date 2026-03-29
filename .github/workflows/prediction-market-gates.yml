@@ -318,7 +318,16 @@ jobs:
 
       - name: Run launch-scope registry gate
         run: |
-          if [[ "$GITHUB_EVENT_NAME" == "pull_request" && "$GITHUB_BASE_REF" == "develop" ]] || [[ "$GITHUB_EVENT_NAME" == "push" && "$GITHUB_REF_NAME" == "develop" ]]; then
+          strict_launch_gate=false
+          if [[ "$GITHUB_EVENT_NAME" == "pull_request" ]]; then
+            if [[ "$GITHUB_BASE_REF" == "main" || "$GITHUB_BASE_REF" == "staging" ]]; then
+              strict_launch_gate=true
+            fi
+          elif [[ "$GITHUB_REF_NAME" == "main" || "$GITHUB_REF_NAME" == "staging" ]]; then
+            strict_launch_gate=true
+          fi
+
+          if [[ "$strict_launch_gate" == "false" ]]; then
             echo "::notice title=Registry gate mode::Using Stage-A closeout registry contract for Solana devnet and BSC testnet; AVAX remains deferred for this PR."
             bun run ci:gate:registry:launch --solana-cluster=devnet --evm-environment=testnet --include-evm=bsc --ignore-solana-fields=usdcMint
           else
