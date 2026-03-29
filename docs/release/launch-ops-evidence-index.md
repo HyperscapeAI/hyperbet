@@ -23,7 +23,7 @@ records what still needs live evidence before release signoff.
 | Surface | Path | Status |
 |---|---|---|
 | Shared registry schema | `packages/hyperbet-chain-registry/src/index.ts` | Full-product launch gating is merged. |
-| Launch registry gate | `scripts/ci-gate-registry.ts` | Correctly fails on missing launch-chain mainnet truth. |
+| Launch registry gate | `scripts/ci-gate-registry.ts` | Develop-side PRs now validate the Stage-A closeout registry contract (`Solana devnet + BSC testnet`, AVAX deferred); strict launch-branch runs still enforce canonical mainnet truth. |
 | Canonical EVM receipt writer | `packages/evm-contracts/scripts/deployment-receipt.ts` | Merged; writes registry-shaped PM, AMM, and perps fields. |
 | EVM verify script | `packages/evm-contracts/scripts/verify-deployment.ts` | Merged; full-product verification exists. |
 | Solana verify script | `packages/hyperbet-solana/scripts/verify-deployment.ts` | Merged; full-product verification now includes AMM. |

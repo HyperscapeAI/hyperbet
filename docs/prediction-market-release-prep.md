@@ -36,15 +36,17 @@ closeout train on `audit/develop-pm-hardening`.
 
 ### 1. Launch-chain canonical truth is incomplete
 
-The launch gate remains correctly red because canonical mainnet registry values
-are still missing for the phase-1 launch chains:
+Strict launch-chain mainnet canonical truth is still incomplete, even though the
+develop-side Stage-A closeout gate now validates the real PR contract for
+`Solana devnet + BSC testnet` while AVAX is intentionally deferred:
 
 - `solana`: `goldAmmMarketProgramId`
 - `bsc`: `goldAmmRouterAddress`, `mUsdTokenAddress`, `goldTokenAddress`,
   `skillOracleAddress`, `perpEngineAddress`
 - `avax`: PM-core plus AMM and perps canonical fields
 
-Those values must come from final mainnet deployment receipts only.
+Those values must still come from final mainnet deployment receipts only before
+any true launch promotion to `main` or `staging`.
 
 ### 2. Staged proof and staged soak are structurally ready but operationally blocked
 
