@@ -22,6 +22,7 @@ contract AgentPerpEngine is AccessControl, ReentrancyGuard {
     uint256 public constant DEFAULT_MAX_ORACLE_DELAY = 2 minutes;
     uint256 public constant PARTIAL_LIQUIDATION_TARGET_MARGIN_RATIO = 2_000; // 20% = 2x maintenance (10%)
     uint256 public constant MAX_SOCIALIZED_LOSS_BPS = 50; // 0.5% cap per position
+    uint256 public constant MAX_INSURANCE_DRAW_DIVISOR = 4; // max 25% of insurance fund per liquidation
     uint256 public constant MAX_FEE_BPS = 500; // 5% individual fee cap
 
     SkillOracle public immutable oracle;
@@ -445,6 +446,16 @@ contract AgentPerpEngine is AccessControl, ReentrancyGuard {
             }
         }
 
+        // Min position size check — block new/increased dust positions but allow closes
+        if (config.minPositionSize != 0 && position.size != 0 && sizeDelta != 0) {
+            uint256 newAbsSize = _abs(position.size);
+            if (newAbsSize < config.minPositionSize) {
+                // Allow size-reducing trades (user is closing down toward zero)
+                bool isReducing = oldSize != 0 && newAbsSize < _abs(oldSize);
+                if (!isReducing) revert PositionTooSmall();
+            }
+        }
+
         // Oracle price step validation
         if (config.maxOraclePriceDeltaBps > 0 && sizeDelta != 0) {
             uint256 prevPrice = market.lastOraclePrice;
@@ -588,7 +599,8 @@ contract AgentPerpEngine is AccessControl, ReentrancyGuard {
             closedSize,
             absSize
         );
-        uint256 maxReward = position.margin + market.insuranceFund;
+        uint256 maxInsuranceDraw = market.insuranceFund / MAX_INSURANCE_DRAW_DIVISOR;
+        uint256 maxReward = position.margin + maxInsuranceDraw;
         if (reward > maxReward) reward = maxReward;
         uint256 rewardFromInsurance = reward > position.margin ? reward - position.margin : 0;
         if (rewardFromInsurance != 0) {

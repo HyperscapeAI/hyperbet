@@ -22,7 +22,6 @@ contract LvrMarket is ReentrancyGuard {
     event MarketInitialized(uint256 liquidity, uint256 collateralIn, uint256 timestamp);
 
     event OutcomeProposed(uint256 outcome, address indexed proposer, uint256 resolutionTimestamp);
-    event MarketDisputed();
     event MarketSettled(uint256 outcome, address indexed proposer, uint256 bondReturned);
 
     event MarketBuy(address indexed buyer, bool isBuyYes, uint256 amountIn, uint256 amountOut);
@@ -42,7 +41,7 @@ contract LvrMarket is ReentrancyGuard {
         OPEN,
         CLOSED,
         PENDING,
-        DISPUTED,
+        DISPUTED, // DEPRECATED: unreachable after dispute() removal; kept for ABI stability
         RESOLVED
     }
 
@@ -123,15 +122,6 @@ contract LvrMarket is ReentrancyGuard {
         proposer = proposerAddress;
 
         emit OutcomeProposed(outcomeValue, proposerAddress, resolutionTimestamp);
-    }
-
-    function dispute() external isRouter nonReentrant {
-        require(state == MarketState.PENDING, "Challenge Window Not opened");
-        // Break the bond
-        state = MarketState.DISPUTED;
-        // set the market outcome through creator/resolver voting/admin
-
-        emit MarketDisputed();
     }
 
     function settleMarket() external isRouter nonReentrant {

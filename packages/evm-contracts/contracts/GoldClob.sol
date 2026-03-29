@@ -143,6 +143,11 @@ contract GoldClob is AccessControl, ReentrancyGuard {
 
     event MarketCreated(bytes32 indexed duelKey, bytes32 indexed marketKey, uint8 marketKind);
     event MarketSynced(bytes32 indexed duelKey, bytes32 indexed marketKey, MarketStatus status, Side winner);
+    /// @notice Emitted after a new order is placed and matching is complete.
+    /// @dev L-4: This event fires AFTER matching (OrderMatched / OrderFilled events),
+    /// not before.  The `amount` field reflects the original order amount, not the
+    /// remaining/unfilled quantity.  Indexers that rely on event ordering within a
+    /// transaction should expect fill events to precede OrderPlaced.
     event OrderPlaced(
         bytes32 indexed marketKey,
         uint64 indexed orderId,
