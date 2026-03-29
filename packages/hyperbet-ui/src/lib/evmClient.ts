@@ -157,7 +157,7 @@ export function createUnlockedRpcWalletClient(
       const data = (encodeFunctionData as (params: { abi: typeof abi; functionName: string; args: readonly unknown[] }) => Hex)({
         abi,
         functionName,
-        args: args ?? [],
+        args: (args ?? []) as readonly unknown[],
       });
       const response = await fetch(chainConfig.rpcUrl, {
         method: "POST",
