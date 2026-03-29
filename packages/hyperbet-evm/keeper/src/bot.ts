@@ -57,6 +57,7 @@ const EVM_DUEL_STATUS_NULL = 0;
 const EVM_DUEL_STATUS_BETTING_OPEN = 2;
 const EVM_DUEL_STATUS_LOCKED = 3;
 const EVM_DUEL_STATUS_PROPOSED = 4;
+const EVM_DUEL_STATUS_CHALLENGED = 5;
 const EVM_DUEL_STATUS_RESOLVED = 6;
 const EVM_DUEL_STATUS_CANCELLED = 7;
 const DEFAULT_DUEL_START_DELAY_MS = 60_000;
@@ -3175,6 +3176,29 @@ async function reportEvmResult(data: DuelLifecycleEvent): Promise<void> {
         existingStatus >= EVM_DUEL_STATUS_RESOLVED ||
         existingStatus === EVM_DUEL_STATUS_CANCELLED
       ) {
+        return;
+      }
+
+      // Fail-closed: if the result proposal has been challenged, sync the
+      // market from the oracle (so it reflects the latest on-chain truth)
+      // and leave the duel for manual resolution.  Mirrors Solana keeper
+      // behaviour at packages/hyperbet-solana/keeper/src/bot.ts L2662-2668.
+      if (existingStatus === EVM_DUEL_STATUS_CHALLENGED) {
+        const syncHash = await chain.operator.walletClient.writeContract({
+          chain: undefined,
+          address: chain.goldClobAddress,
+          abi: EVM_GOLD_CLOB_ADMIN_ABI,
+          functionName: "syncMarketFromOracle",
+          args: [duelKey, EVM_DUEL_WINNER_MARKET_KIND],
+          account: chain.operator.account,
+        });
+        await chain.publicClient.waitForTransactionReceipt({
+          hash: syncHash,
+          confirmations: 1,
+        });
+        console.warn(
+          `[bot] Duel ${data.duelId} result proposal is challenged on ${chain.chainKey}; leaving market fail-closed until manual resolution.`,
+        );
         return;
       }
 
