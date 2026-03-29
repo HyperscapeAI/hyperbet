@@ -2075,6 +2075,13 @@ async function main() {
     // Revert to base snapshot — resets time, nonces, balances
     await revertAndResnap();
 
+    // Chain state was reverted — reset accumulation counters so the
+    // balance-sheet reconciliation stays meaningful across cycles.
+    if (config.resetBetweenCycles) {
+      totalDeposited = 0n;
+      totalClaimed = 0n;
+    }
+
     // Refresh perps oracle timestamp only when a reset rewound it to deploy-time.
     if (config.resetBetweenCycles && skillOracleAddress) {
       try {

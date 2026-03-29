@@ -14,6 +14,10 @@ import {
   resolveSolanaAcceptanceRuntime,
   type AcceptanceDeployment,
 } from "./testnet-acceptance-env";
+import {
+  BETTING_DEPLOYMENTS,
+  isBettingEvmDeploymentCanonicalReady,
+} from "../packages/hyperbet-chain-registry/src/index";
 
 type ProofMode = "read-only" | "canary-write";
 type RunScope = "LIVE_INDICATOR" | "LIVE_CANARY";
@@ -671,7 +675,13 @@ async function main(): Promise<void> {
       summary.canary.bsc = runBscCanary();
     }
     if (includeAvax) {
-      summary.canary.avax = runAvaxCanary();
+      if (!isBettingEvmDeploymentCanonicalReady(BETTING_DEPLOYMENTS.evm.avax)) {
+        console.warn(
+          "AVAX deployment is not canonical-ready; skipping AVAX canary writes.",
+        );
+      } else {
+        summary.canary.avax = runAvaxCanary();
+      }
     }
   }
 
