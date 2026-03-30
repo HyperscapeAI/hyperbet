@@ -20,6 +20,9 @@ export class HyperbetStreamClient {
     constructor(public url: string) {}
 
     public connect() {
+        if (this.ws) {
+            this.disconnect();
+        }
         const ctor = (globalThis as unknown as GlobalWithWebSocket).WebSocket;
         if (!ctor) {
             throw new Error("WebSocket is not available in this environment.");

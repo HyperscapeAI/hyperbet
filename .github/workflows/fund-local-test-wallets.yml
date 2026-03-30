@@ -10,6 +10,9 @@ on:
       - scripts/export-local-pm-wallet-env.sh
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   fund-local-test-wallets:
     name: Fund local PM test wallets
