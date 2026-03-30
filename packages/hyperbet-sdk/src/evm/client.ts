@@ -1,4 +1,5 @@
-import { ethers, Contract, JsonRpcProvider, Wallet } from "ethers";
+import { ethers } from "ethers";
+import type { Contract, JsonRpcProvider, Wallet } from "ethers";
 import {
   CreateOrderParams,
   CancelOrderParams,
@@ -37,10 +38,10 @@ export class HyperbetEVMClient {
     clobAddress: string,
     oracleAddress: string
   ) {
-    this.provider = new JsonRpcProvider(rpcUrl);
-    this.wallet = new Wallet(privateKey, this.provider);
-    this.clob = new Contract(clobAddress, goldClobAbi.abi, this.wallet);
-    this.oracle = new Contract(oracleAddress, oracleAbi.abi, this.wallet);
+    this.provider = new ethers.JsonRpcProvider(rpcUrl);
+    this.wallet = new ethers.Wallet(privateKey, this.provider);
+    this.clob = new ethers.Contract(clobAddress, goldClobAbi.abi, this.wallet);
+    this.oracle = new ethers.Contract(oracleAddress, oracleAbi.abi, this.wallet);
   }
 
   // Helper to convert frontend "buy"/"sell" and number prices into EVM parameters

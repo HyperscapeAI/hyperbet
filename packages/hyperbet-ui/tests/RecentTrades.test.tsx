@@ -1,3 +1,4 @@
+import "./setup";
 import { afterEach, describe, expect, it } from "bun:test";
 
 import { RecentTrades } from "../src/components/RecentTrades";

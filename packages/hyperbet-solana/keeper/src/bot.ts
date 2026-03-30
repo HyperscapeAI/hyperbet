@@ -102,6 +102,22 @@ function hashParticipant(agent: { id?: string; name?: string } | null): number[]
   return Array.from(createHash("sha256").update(id).digest());
 }
 
+function toByteArray32(value: unknown): number[] | null {
+  if (Array.isArray(value) && value.length === 32) {
+    const normalized = value.map((entry) => Number(entry));
+    return normalized.every((entry) => Number.isInteger(entry) && entry >= 0 && entry <= 255)
+      ? normalized
+      : null;
+  }
+  if (value instanceof Uint8Array && value.length === 32) {
+    return Array.from(value);
+  }
+  if (Buffer.isBuffer(value) && value.length === 32) {
+    return Array.from(value);
+  }
+  return null;
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -1818,6 +1834,7 @@ async function upsertDuelLifecycle(
 ): Promise<PublicKey> {
   const duelKey = duelKeyHexToBytes(data.duelKeyHex);
   const duelState = findDuelStatePda(fightProgram.programId, duelKey);
+  const existingDuelState = await getDuelState(duelState);
   const nowSeconds = Math.floor(Date.now() / 1000);
   const betOpenTs = Math.floor((data.betOpenTime ?? Date.now()) / 1000);
   const betCloseTs = Math.max(
@@ -1832,14 +1849,18 @@ async function upsertDuelLifecycle(
   );
   const requestedStatus =
     status === "scheduled" && betOpenTs <= nowSeconds ? "bettingOpen" : status;
+  const participantAHash =
+    toByteArray32(existingDuelState?.participantAHash) ?? hashParticipant(data.agent1);
+  const participantBHash =
+    toByteArray32(existingDuelState?.participantBHash) ?? hashParticipant(data.agent2);
 
   await runWithRecovery(
     () =>
       fightProgram.methods
         .upsertDuel(
           Array.from(duelKey),
-          hashParticipant(data.agent1),
-          hashParticipant(data.agent2),
+          participantAHash,
+          participantBHash,
           new BN(betOpenTs),
           new BN(betCloseTs),
           new BN(duelStartTs),

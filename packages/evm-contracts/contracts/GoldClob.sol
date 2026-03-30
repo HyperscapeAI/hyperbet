@@ -70,6 +70,7 @@ contract GoldClob is AccessControl, ReentrancyGuard {
     error MarketCreationIsPaused();
     error OrderPlacementIsPaused();
     error MarketStillOpen();
+    error InvalidSweepRecipient();
 
     enum MarketStatus {
         NULL,
@@ -130,7 +131,7 @@ contract GoldClob is AccessControl, ReentrancyGuard {
         uint16 boundaryPrice;
         uint8 matchesCount;
         uint256 executedCost;
-        uint256 totalImprovement;
+        uint256 totalImprovement; // L-12: Computed but unused after fee refactor. Kept for ABI stability.
         bool selfTradePrevented;
     }
 
@@ -142,6 +143,11 @@ contract GoldClob is AccessControl, ReentrancyGuard {
 
     event MarketCreated(bytes32 indexed duelKey, bytes32 indexed marketKey, uint8 marketKind);
     event MarketSynced(bytes32 indexed duelKey, bytes32 indexed marketKey, MarketStatus status, Side winner);
+    /// @notice Emitted after a new order is placed and matching is complete.
+    /// @dev L-4: This event fires AFTER matching (OrderMatched / OrderFilled events),
+    /// not before.  The `amount` field reflects the original order amount, not the
+    /// remaining/unfilled quantity.  Indexers that rely on event ordering within a
+    /// transaction should expect fill events to precede OrderPlaced.
     event OrderPlaced(
         bytes32 indexed marketKey,
         uint64 indexed orderId,
@@ -351,11 +357,15 @@ contract GoldClob is AccessControl, ReentrancyGuard {
 
         uint64 takerOrderId = market.nextOrderId;
         market.nextOrderId += 1;
-        emit OrderPlaced(key, takerOrderId, msg.sender, side, price, amount);
 
         MatchProgress memory progress = side == BUY_SIDE
             ? _matchBuyOrder(key, market, price, amount, takerOrderId)
             : _matchSellOrder(key, market, price, amount, takerOrderId);
+
+        // L-4: Emit after matching so the event reflects actual outcome.
+        // For IOC orders that fully fill, the event still records the original amount
+        // but indexers can compare amount vs remainingAmount to detect full fills.
+        emit OrderPlaced(key, takerOrderId, msg.sender, side, price, amount);
 
         uint256 restingCost = 0;
         if (progress.remainingAmount > 0 && _isGoodTilCancelled(orderFlags) && !progress.selfTradePrevented) {
@@ -891,5 +901,17 @@ contract GoldClob is AccessControl, ReentrancyGuard {
         return market.bestBid > 0 && market.bestBid >= price;
     }
 
+    // L-2: Accepts ETH for market vault operations.
     receive() external payable {}
+
+    event SweepETH(address indexed to, uint256 amount);
+
+    function sweepETH(address payable to) external onlyRole(DEFAULT_ADMIN_ROLE) nonReentrant {
+        uint256 bal = address(this).balance;
+        require(bal > 0, "NothingToSweep");
+        address payable treasuryRecipient = payable(treasury);
+        if (to == address(0) || to != treasuryRecipient) revert InvalidSweepRecipient();
+        treasuryRecipient.sendValue(bal);
+        emit SweepETH(treasuryRecipient, bal);
+    }
 }

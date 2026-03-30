@@ -1,5 +1,7 @@
 # PR #27 plan execution (local)
 
+> **TL;DR:** Historical local review record for PR #27 on the older branch model. Status: closed. Keep this as evidence history only, not as the current release-status source of truth.
+
 Branch: `enoomian/pm16-17-20-21` (synced with `origin/enoomian/pm16-17-20-21`).
 
 ## Verification run

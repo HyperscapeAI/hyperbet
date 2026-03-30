@@ -22,6 +22,7 @@ contract AgentPerpEngine is AccessControl, ReentrancyGuard {
     uint256 public constant DEFAULT_MAX_ORACLE_DELAY = 2 minutes;
     uint256 public constant PARTIAL_LIQUIDATION_TARGET_MARGIN_RATIO = 2_000; // 20% = 2x maintenance (10%)
     uint256 public constant MAX_SOCIALIZED_LOSS_BPS = 50; // 0.5% cap per position
+    uint256 public constant MAX_INSURANCE_DRAW_DIVISOR = 4; // max 25% of insurance fund per liquidation
     uint256 public constant MAX_FEE_BPS = 500; // 5% individual fee cap
 
     SkillOracle public immutable oracle;
@@ -438,13 +439,20 @@ contract AgentPerpEngine is AccessControl, ReentrancyGuard {
 
         _addOpenInterest(market, position.size);
 
-        // H-4: Enforce minimum position size to prevent dust positions
-        if (position.size != 0 && _abs(position.size) < config.minPositionSize) revert PositionTooSmall();
-
         // OI cap check
         if (config.maxOpenInterest > 0 && sizeDelta != 0) {
             if (market.totalLongOI > config.maxOpenInterest || market.totalShortOI > config.maxOpenInterest) {
                 revert MaxOpenInterestExceeded();
+            }
+        }
+
+        // Min position size check — block new/increased dust positions but allow closes
+        if (config.minPositionSize != 0 && position.size != 0 && sizeDelta != 0) {
+            uint256 newAbsSize = _abs(position.size);
+            if (newAbsSize < config.minPositionSize) {
+                // Allow size-reducing trades (user is closing down toward zero)
+                bool isReducing = oldSize != 0 && newAbsSize < _abs(oldSize);
+                if (!isReducing) revert PositionTooSmall();
             }
         }
 
@@ -538,6 +546,7 @@ contract AgentPerpEngine is AccessControl, ReentrancyGuard {
         int256 fundingPayment = _settleFunding(position, market, true);
 
         uint256 markPrice = _markPrice(market, config);
+        uint256 startingMargin = position.margin;
         uint256 absSize = _abs(position.size);
         int256 unrealizedPnl = _realizePnl(position.size, position.entryPrice, markPrice, absSize);
         int256 equity = int256(position.margin) + unrealizedPnl;
@@ -584,15 +593,21 @@ contract AgentPerpEngine is AccessControl, ReentrancyGuard {
 
         _removeOpenInterest(market, position.size);
 
-        // Reward: proportional to closed fraction, based on POST-PnL margin (not pre-PnL)
+        // Reward: proportional to closed fraction, based on starting margin (before liquidation accounting).
         uint256 reward = Math.mulDiv(
-            Math.mulDiv(position.margin, config.liquidationRewardBps, BPS),
+            Math.mulDiv(startingMargin, config.liquidationRewardBps, BPS),
             closedSize,
             absSize
         );
-        // Cap reward at position margin only — insurance is for bad debt, not liquidator rewards
-        if (reward > position.margin) reward = position.margin;
-        position.margin -= reward;
+        uint256 maxInsuranceDraw = market.insuranceFund / MAX_INSURANCE_DRAW_DIVISOR;
+        uint256 maxReward = position.margin + maxInsuranceDraw;
+        if (reward > maxReward) reward = maxReward;
+        uint256 rewardFromInsurance = reward > position.margin ? reward - position.margin : 0;
+        if (rewardFromInsurance != 0) {
+            market.insuranceFund -= rewardFromInsurance;
+        }
+        uint256 rewardFromMargin = reward > position.margin ? position.margin : reward;
+        position.margin -= rewardFromMargin;
 
         if (isPartial) {
             // Update position for partial close
@@ -620,8 +635,8 @@ contract AgentPerpEngine is AccessControl, ReentrancyGuard {
             market.openPositions -= 1;
 
             if (seizedMargin > 0) {
-                // Cap socialized loss per position (use seizedMargin as basis since position is fully closed)
-                uint256 maxSocLoss = Math.mulDiv(seizedMargin, MAX_SOCIALIZED_LOSS_BPS, BPS);
+                // Cap socialized loss per position using the position's starting margin from this liquidation.
+                uint256 maxSocLoss = Math.mulDiv(startingMargin, MAX_SOCIALIZED_LOSS_BPS, BPS);
                 uint256 toInsurance = seizedMargin > maxSocLoss ? maxSocLoss : seizedMargin;
                 market.insuranceFund += toInsurance;
                 uint256 toVault = seizedMargin - toInsurance;
@@ -754,7 +769,7 @@ contract AgentPerpEngine is AccessControl, ReentrancyGuard {
             tradeMarketMakerFeeBps: tradeMarketMakerFeeBps,
             maxOraclePriceDeltaBps: maxOraclePriceDeltaBps,
             minInsuranceFund: minInsuranceFund,
-            minPositionSize: 1e18,
+            minPositionSize: 0,
             exists: true
         });
 
@@ -947,8 +962,6 @@ contract AgentPerpEngine is AccessControl, ReentrancyGuard {
         uint256 fromVault = profit > market.vaultBalance ? market.vaultBalance : profit;
         uint256 remaining = profit - fromVault;
         if (remaining > 0) {
-            // During CLOSE_ONLY settlement, allow insurance as last resort to avoid deadlock.
-            // In ACTIVE markets, vault must fully cover trader profits.
             if (market.status != MarketStatus.CLOSE_ONLY) revert InsufficientMarketLiquidity();
             if (remaining > market.insuranceFund) revert InsufficientMarketLiquidity();
             market.insuranceFund -= remaining;

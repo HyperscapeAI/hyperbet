@@ -21,6 +21,30 @@ on:
         description: "Optional BSC Testnet GoldClob override"
         required: false
         type: string
+      bsc_gold_amm_router_address:
+        description: "Optional BSC Testnet AMM router override"
+        required: false
+        type: string
+      bsc_musd_token_address:
+        description: "Optional BSC Testnet mUSD override"
+        required: false
+        type: string
+      bsc_gold_token_address:
+        description: "Optional BSC Testnet gold token override"
+        required: false
+        type: string
+      bsc_skill_oracle_address:
+        description: "Optional BSC Testnet SkillOracle override"
+        required: false
+        type: string
+      bsc_perp_engine_address:
+        description: "Optional BSC Testnet perp engine override"
+        required: false
+        type: string
+      bsc_perp_margin_token_address:
+        description: "Optional BSC Testnet perp margin token override"
+        required: false
+        type: string
       avax_duel_oracle_address:
         description: "Optional AVAX Fuji DuelOutcomeOracle override"
         required: false
@@ -29,6 +53,33 @@ on:
         description: "Optional AVAX Fuji GoldClob override"
         required: false
         type: string
+      avax_gold_amm_router_address:
+        description: "Optional AVAX Fuji AMM router override"
+        required: false
+        type: string
+      avax_musd_token_address:
+        description: "Optional AVAX Fuji mUSD override"
+        required: false
+        type: string
+      avax_gold_token_address:
+        description: "Optional AVAX Fuji gold token override"
+        required: false
+        type: string
+      avax_skill_oracle_address:
+        description: "Optional AVAX Fuji SkillOracle override"
+        required: false
+        type: string
+      avax_perp_engine_address:
+        description: "Optional AVAX Fuji perp engine override"
+        required: false
+        type: string
+      avax_perp_margin_token_address:
+        description: "Optional AVAX Fuji perp margin token override"
+        required: false
+        type: string
+
+permissions:
+  contents: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -67,42 +118,71 @@ jobs:
           TESTNET_TREASURY_PRIVATE_KEY: ${{ secrets.TESTNET_TREASURY_PRIVATE_KEY }}
           TESTNET_MARKET_MAKER_PRIVATE_KEY: ${{ secrets.TESTNET_MARKET_MAKER_PRIVATE_KEY }}
           TESTNET_SOLANA_DEPLOYER_KEYPAIR: ${{ secrets.TESTNET_SOLANA_DEPLOYER_KEYPAIR }}
+          BSC_TESTNET_MUSD_TOKEN_ADDRESS: ${{ secrets.BSC_TESTNET_MUSD_TOKEN_ADDRESS }}
+          AVAX_FUJI_MUSD_TOKEN_ADDRESS: ${{ secrets.AVAX_FUJI_MUSD_TOKEN_ADDRESS }}
+          BSC_TESTNET_GOLD_TOKEN_ADDRESS: ${{ secrets.BSC_TESTNET_GOLD_TOKEN_ADDRESS }}
+          AVAX_FUJI_GOLD_TOKEN_ADDRESS: ${{ secrets.AVAX_FUJI_GOLD_TOKEN_ADDRESS }}
+          BSC_TESTNET_PERPS_MARGIN_TOKEN_ADDRESS: ${{ secrets.BSC_TESTNET_PERPS_MARGIN_TOKEN_ADDRESS }}
+          AVAX_FUJI_PERPS_MARGIN_TOKEN_ADDRESS: ${{ secrets.AVAX_FUJI_PERPS_MARGIN_TOKEN_ADDRESS }}
           DISPUTE_WINDOW_SECONDS: "3600"
         run: bash scripts/export-stage-a-env.sh
 
       - name: Prepare verification artifact directory
         run: mkdir -p .ci-artifacts/testnet-verification
 
-      - name: Verify BSC Testnet PM deployment
+      - name: Verify BSC Testnet full-product deployment
         if: ${{ inputs.target == 'all' || inputs.target == 'bsc' }}
         run: |
           node --import tsx packages/evm-contracts/scripts/verify-deployment.ts \
             --network bscTestnet \
             ${BSC_DUEL_ORACLE:+--duel-oracle-address "$BSC_DUEL_ORACLE"} \
             ${BSC_GOLD_CLOB:+--gold-clob-address "$BSC_GOLD_CLOB"} \
+            ${BSC_GOLD_AMM_ROUTER:+--gold-amm-router-address "$BSC_GOLD_AMM_ROUTER"} \
+            ${BSC_MUSD_TOKEN:+--musd-token-address "$BSC_MUSD_TOKEN"} \
+            ${BSC_GOLD_TOKEN:+--gold-token-address "$BSC_GOLD_TOKEN"} \
+            ${BSC_SKILL_ORACLE:+--skill-oracle-address "$BSC_SKILL_ORACLE"} \
+            ${BSC_PERP_ENGINE:+--perp-engine-address "$BSC_PERP_ENGINE"} \
+            ${BSC_PERP_MARGIN_TOKEN:+--perp-margin-token-address "$BSC_PERP_MARGIN_TOKEN"} \
             --out .ci-artifacts/testnet-verification/bscTestnet.json
         env:
           BSC_DUEL_ORACLE: ${{ inputs.bsc_duel_oracle_address }}
           BSC_GOLD_CLOB: ${{ inputs.bsc_gold_clob_address }}
+          BSC_GOLD_AMM_ROUTER: ${{ inputs.bsc_gold_amm_router_address || env.BSC_TESTNET_GOLD_AMM_ROUTER_ADDRESS }}
+          BSC_MUSD_TOKEN: ${{ inputs.bsc_musd_token_address || env.BSC_TESTNET_MUSD_TOKEN_ADDRESS }}
+          BSC_GOLD_TOKEN: ${{ inputs.bsc_gold_token_address || env.BSC_TESTNET_GOLD_TOKEN_ADDRESS }}
+          BSC_SKILL_ORACLE: ${{ inputs.bsc_skill_oracle_address }}
+          BSC_PERP_ENGINE: ${{ inputs.bsc_perp_engine_address }}
+          BSC_PERP_MARGIN_TOKEN: ${{ inputs.bsc_perp_margin_token_address || env.BSC_TESTNET_PERPS_MARGIN_TOKEN_ADDRESS }}
 
-      - name: Verify AVAX Fuji PM deployment
+      - name: Verify AVAX Fuji full-product deployment
         if: ${{ inputs.target == 'all' || inputs.target == 'avax' }}
         run: |
           node --import tsx packages/evm-contracts/scripts/verify-deployment.ts \
             --network avaxFuji \
             ${AVAX_DUEL_ORACLE:+--duel-oracle-address "$AVAX_DUEL_ORACLE"} \
             ${AVAX_GOLD_CLOB:+--gold-clob-address "$AVAX_GOLD_CLOB"} \
+            ${AVAX_GOLD_AMM_ROUTER:+--gold-amm-router-address "$AVAX_GOLD_AMM_ROUTER"} \
+            ${AVAX_MUSD_TOKEN:+--musd-token-address "$AVAX_MUSD_TOKEN"} \
+            ${AVAX_GOLD_TOKEN:+--gold-token-address "$AVAX_GOLD_TOKEN"} \
+            ${AVAX_SKILL_ORACLE:+--skill-oracle-address "$AVAX_SKILL_ORACLE"} \
+            ${AVAX_PERP_ENGINE:+--perp-engine-address "$AVAX_PERP_ENGINE"} \
+            ${AVAX_PERP_MARGIN_TOKEN:+--perp-margin-token-address "$AVAX_PERP_MARGIN_TOKEN"} \
             --out .ci-artifacts/testnet-verification/avaxFuji.json
         env:
           AVAX_DUEL_ORACLE: ${{ inputs.avax_duel_oracle_address }}
           AVAX_GOLD_CLOB: ${{ inputs.avax_gold_clob_address }}
+          AVAX_GOLD_AMM_ROUTER: ${{ inputs.avax_gold_amm_router_address || env.AVAX_FUJI_GOLD_AMM_ROUTER_ADDRESS }}
+          AVAX_MUSD_TOKEN: ${{ inputs.avax_musd_token_address || env.AVAX_FUJI_MUSD_TOKEN_ADDRESS }}
+          AVAX_GOLD_TOKEN: ${{ inputs.avax_gold_token_address || env.AVAX_FUJI_GOLD_TOKEN_ADDRESS }}
+          AVAX_SKILL_ORACLE: ${{ inputs.avax_skill_oracle_address }}
+          AVAX_PERP_ENGINE: ${{ inputs.avax_perp_engine_address }}
+          AVAX_PERP_MARGIN_TOKEN: ${{ inputs.avax_perp_margin_token_address || env.AVAX_FUJI_PERPS_MARGIN_TOKEN_ADDRESS }}
 
-      - name: Verify Solana PM deployment
+      - name: Verify Solana full-product deployment
         if: ${{ inputs.target == 'all' || inputs.target == 'solana' }}
         run: |
           node --import tsx packages/hyperbet-solana/scripts/verify-deployment.ts \
             --cluster devnet \
-            --pm-only \
             --out .ci-artifacts/testnet-verification/solana-devnet.json
 
       - name: Upload verification artifacts

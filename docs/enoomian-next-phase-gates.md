@@ -1,5 +1,7 @@
 # Enoomian Next-Phase Gates
 
+> **TL;DR:** Historical planning artifact from the `enoomian/prediction-market-sprint-base` multi-branch gate model. Status: closed. Do not use this as the current launch execution plan. The current source of truth is [`docs/release/pm-launch-execution-plan.md`](release/pm-launch-execution-plan.md) plus [`docs/release/prediction-market-launch-freeze-tracker.md`](release/prediction-market-launch-freeze-tracker.md).
+
 This document defines the post-sprint launch-completion work for
 `enoomian/prediction-market-sprint-base`.
 

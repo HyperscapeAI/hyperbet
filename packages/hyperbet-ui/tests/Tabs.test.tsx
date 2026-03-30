@@ -1,3 +1,4 @@
+import "./setup";
 import { describe, expect, it } from "bun:test";
 
 import { Tabs } from "../src/components/Tabs";

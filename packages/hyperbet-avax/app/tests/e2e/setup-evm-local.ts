@@ -30,7 +30,12 @@ type E2eState = Record<string, unknown> & {
   evmDuelKeyHex?: string;
   evmMarketKey?: string;
   evmOracleAddress?: string;
+  evmCanaryPrivateKey?: string;
+  evmMatcherPrivateKey?: string;
+  evmReporterPrivateKey?: string;
+  evmMarketOperatorPrivateKey?: string;
   evmAdminPrivateKey?: string;
+  evmPauserPrivateKey?: string;
   evmFinalizerPrivateKey?: string;
   evmSeedNoPrice?: number;
   evmSeedYesPrice?: number;
@@ -41,15 +46,20 @@ const DEFAULT_RPC_URL = "http://127.0.0.1:8545";
 const DEFAULT_CHAIN_ID = 43113;
 const DEFAULT_ADMIN_PRIVATE_KEY =
   "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
+const DEFAULT_MAKER_PRIVATE_KEY =
+  "0x59c6995e998f97a5a0044966f0945382d7d46f71fbb8f7a1a5b2d3c6f90ad7d4";
 const DEFAULT_ANVIL_MNEMONIC =
   "test test test test test test test test test test test junk";
 const MARKET_KIND_DUEL_WINNER = 0;
 const BUY_SIDE = 1;
 const SELL_SIDE = 2;
+const DUEL_STATUS_NULL = 0;
 const DUEL_STATUS_BETTING_OPEN = 2;
 const ORDER_FLAG_GTC = 0x01;
 const DUEL_ORACLE_DISPUTE_WINDOW_SECONDS = 3_600;
 const E2E_BET_WINDOW_SECONDS = 3_600n;
+const SEED_ORDERS =
+  (process.env.E2E_EVM_SEED_ORDERS || "true") !== "false";
 
 type EvmArtifact = {
   abi: unknown[];
@@ -58,6 +68,15 @@ type EvmArtifact = {
     | {
         object?: string;
       };
+};
+
+type OracleDuelState = {
+  participantAHash: `0x${string}`;
+  participantBHash: `0x${string}`;
+  status: number | bigint;
+  betOpenTs: bigint;
+  betCloseTs: bigint;
+  duelStartTs: bigint;
 };
 
 function resolveArtifactBytecode(artifact: EvmArtifact): `0x${string}` {
@@ -149,7 +168,8 @@ async function main(): Promise<void> {
   const chainId = Number(process.env.E2E_EVM_CHAIN_ID || DEFAULT_CHAIN_ID);
   const adminPrivateKey =
     process.env.E2E_EVM_ADMIN_PRIVATE_KEY || DEFAULT_ADMIN_PRIVATE_KEY;
-  const makerPrivateKey = process.env.E2E_EVM_MAKER_PRIVATE_KEY || "";
+  const makerPrivateKey =
+    process.env.E2E_EVM_MAKER_PRIVATE_KEY || DEFAULT_MAKER_PRIVATE_KEY;
   const reuseDeployment = process.env.E2E_EVM_REUSE_DEPLOYMENT === "true";
   const seedNoOrderPrice = Number(
     process.env.E2E_EVM_SEED_NO_ORDER_PRICE || 600,
@@ -179,12 +199,7 @@ async function main(): Promise<void> {
   });
 
   const adminAccount = privateKeyToAccount(adminPrivateKey as `0x${string}`);
-  const makerAccount = makerPrivateKey
-    ? privateKeyToAccount(makerPrivateKey as `0x${string}`)
-    : mnemonicToAccount(DEFAULT_ANVIL_MNEMONIC, {
-        accountIndex: 0,
-        addressIndex: 1,
-      });
+  const makerAccount = privateKeyToAccount(makerPrivateKey as `0x${string}`);
   const finalizerAccount = adminAccount;
   const challengerAccount = mnemonicToAccount(DEFAULT_ANVIL_MNEMONIC, {
     accountIndex: 0,
@@ -225,6 +240,20 @@ async function main(): Promise<void> {
     nextMakerNonce += 1;
     return nonce;
   };
+  if (makerAccount.address !== adminAccount.address) {
+    const minimumMakerBalance = parseUnits("5", 18);
+    const makerBalance = await publicClient.getBalance({
+      address: makerAccount.address,
+    });
+    if (makerBalance < minimumMakerBalance) {
+      const fundMakerTx = await walletClient.sendTransaction({
+        to: makerAccount.address,
+        value: parseUnits("10", 18),
+        nonce: consumeNonce(),
+      });
+      await publicClient.waitForTransactionReceipt({ hash: fundMakerTx });
+    }
+  }
   const existingState = (await readJson<E2eState>(statePath)) || {};
   const latestBlock = await publicClient.getBlock({ blockTag: "latest" });
   const duelKey = ensureHex32(
@@ -340,17 +369,40 @@ async function main(): Promise<void> {
     }
   }
 
+  let participantAHash = hashParticipantLabel(participantAId);
+  let participantBHash = hashParticipantLabel(participantBId);
+  let canonicalBetOpenTs = duelBetOpenTs;
+  let canonicalBetCloseTs = duelBetCloseTs;
+  let canonicalDuelStartTs = duelStartTs;
+
+  if (reuseDeployment) {
+    const existingDuel = (await publicClient.readContract({
+      address: oracleAddress as Address,
+      abi: duelOutcomeOracleArtifact.abi,
+      functionName: "getDuel",
+      args: [duelKey],
+    })) as OracleDuelState;
+    const existingStatus = Number(existingDuel.status ?? DUEL_STATUS_NULL);
+    if (existingStatus >= DUEL_STATUS_BETTING_OPEN) {
+      participantAHash = existingDuel.participantAHash;
+      participantBHash = existingDuel.participantBHash;
+      canonicalBetOpenTs = existingDuel.betOpenTs;
+      canonicalBetCloseTs = existingDuel.betCloseTs;
+      canonicalDuelStartTs = existingDuel.duelStartTs;
+    }
+  }
+
   const upsertDuelTx = await walletClient.writeContract({
     address: oracleAddress as Address,
     abi: duelOutcomeOracleArtifact.abi,
     functionName: "upsertDuel",
     args: [
       duelKey,
-      hashParticipantLabel(participantAId),
-      hashParticipantLabel(participantBId),
-      duelBetOpenTs,
-      duelBetCloseTs,
-      duelStartTs,
+      participantAHash,
+      participantBHash,
+      canonicalBetOpenTs,
+      canonicalBetCloseTs,
+      canonicalDuelStartTs,
       "hyperbet-local-evm",
       DUEL_STATUS_BETTING_OPEN,
     ],
@@ -375,54 +427,63 @@ async function main(): Promise<void> {
     functionName: "marketKey",
     args: [duelKey, MARKET_KIND_DUEL_WINNER],
   })) as `0x${string}`;
+  let seedNoOrderTx: `0x${string}` | null = null;
+  let seedYesOrderTx: `0x${string}` | null = null;
+  const blockBeforeSeeding = await publicClient.getBlock({ blockTag: "latest" });
 
-  const seedNoOrderTx = await makerWalletClient.writeContract({
-    address: goldClobAddress as Address,
-    abi: goldClobArtifact.abi,
-    functionName: "placeOrder",
-    args: [
-      duelKey,
-      MARKET_KIND_DUEL_WINNER,
-      SELL_SIDE,
-      seedNoOrderPrice,
-      parseUnits(seedOrderAmountUi, 18),
-      ORDER_FLAG_GTC,
-    ],
-    value: (() => {
-      const amount = parseUnits(seedOrderAmountUi, 18);
-      const cost = quoteCost(SELL_SIDE, seedNoOrderPrice, amount);
-      const tradeTreasuryFee = cost / 100n;
-      const tradeMarketMakerFee = cost / 100n;
-      return cost + tradeTreasuryFee + tradeMarketMakerFee;
-    })(),
-    account: makerAccount,
-    nonce: consumeMakerNonce(),
-  });
-  await publicClient.waitForTransactionReceipt({ hash: seedNoOrderTx });
+  if (SEED_ORDERS && blockBeforeSeeding.timestamp < canonicalBetCloseTs) {
+    seedNoOrderTx = await makerWalletClient.writeContract({
+      address: goldClobAddress as Address,
+      abi: goldClobArtifact.abi,
+      functionName: "placeOrder",
+      args: [
+        duelKey,
+        MARKET_KIND_DUEL_WINNER,
+        SELL_SIDE,
+        seedNoOrderPrice,
+        parseUnits(seedOrderAmountUi, 18),
+        ORDER_FLAG_GTC,
+      ],
+      value: (() => {
+        const amount = parseUnits(seedOrderAmountUi, 18);
+        const cost = quoteCost(SELL_SIDE, seedNoOrderPrice, amount);
+        const tradeTreasuryFee = cost / 100n;
+        const tradeMarketMakerFee = cost / 100n;
+        return cost + tradeTreasuryFee + tradeMarketMakerFee;
+      })(),
+      account: makerAccount,
+      nonce: consumeMakerNonce(),
+    });
+    await publicClient.waitForTransactionReceipt({ hash: seedNoOrderTx });
 
-  const seedYesOrderTx = await makerWalletClient.writeContract({
-    address: goldClobAddress as Address,
-    abi: goldClobArtifact.abi,
-    functionName: "placeOrder",
-    args: [
-      duelKey,
-      MARKET_KIND_DUEL_WINNER,
-      BUY_SIDE,
-      seedYesOrderPrice,
-      parseUnits(seedOrderAmountUi, 18),
-      ORDER_FLAG_GTC,
-    ],
-    value: (() => {
-      const amount = parseUnits(seedOrderAmountUi, 18);
-      const cost = quoteCost(BUY_SIDE, seedYesOrderPrice, amount);
-      const tradeTreasuryFee = cost / 100n;
-      const tradeMarketMakerFee = cost / 100n;
-      return cost + tradeTreasuryFee + tradeMarketMakerFee;
-    })(),
-    account: makerAccount,
-    nonce: consumeMakerNonce(),
-  });
-  await publicClient.waitForTransactionReceipt({ hash: seedYesOrderTx });
+    seedYesOrderTx = await makerWalletClient.writeContract({
+      address: goldClobAddress as Address,
+      abi: goldClobArtifact.abi,
+      functionName: "placeOrder",
+      args: [
+        duelKey,
+        MARKET_KIND_DUEL_WINNER,
+        BUY_SIDE,
+        seedYesOrderPrice,
+        parseUnits(seedOrderAmountUi, 18),
+        ORDER_FLAG_GTC,
+      ],
+      value: (() => {
+        const amount = parseUnits(seedOrderAmountUi, 18);
+        const cost = quoteCost(BUY_SIDE, seedYesOrderPrice, amount);
+        const tradeTreasuryFee = cost / 100n;
+        const tradeMarketMakerFee = cost / 100n;
+        return cost + tradeTreasuryFee + tradeMarketMakerFee;
+      })(),
+      account: makerAccount,
+      nonce: consumeMakerNonce(),
+    });
+    await publicClient.waitForTransactionReceipt({ hash: seedYesOrderTx });
+  } else if (SEED_ORDERS) {
+    console.warn(
+      `Skipping local seed orders because betting is already closed for duel ${duelKey}`,
+    );
+  }
 
   const env = await readEnv(envPath);
   env.VITE_AVAX_RPC_URL = rpcUrl;
@@ -451,7 +512,12 @@ async function main(): Promise<void> {
     evmDuelKeyHex: duelKey,
     evmMarketKey: marketKey,
     evmOracleAddress: oracleAddress,
+    evmCanaryPrivateKey: adminPrivateKey,
+    evmMatcherPrivateKey: makerPrivateKey,
+    evmReporterPrivateKey: adminPrivateKey,
+    evmMarketOperatorPrivateKey: adminPrivateKey,
     evmAdminPrivateKey: adminPrivateKey,
+    evmPauserPrivateKey: adminPrivateKey,
     evmFinalizerPrivateKey: adminPrivateKey,
     evmSeedNoPrice: seedNoOrderPrice,
     evmSeedYesPrice: seedYesOrderPrice,

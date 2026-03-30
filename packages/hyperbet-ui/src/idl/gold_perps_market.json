@@ -1,5 +1,5 @@
 {
-  "address": "EoZdHN8U3qWQje48ToxB1SLWjucsFGqcWaRUJQYX3eoT",
+  "address": "BFbmQbSbf3R6fMDdXKMKQZCTyMhMs9MCcjAhGDBLETXS",
   "metadata": {
     "name": "gold_perps_market",
     "version": "0.1.0",
@@ -155,7 +155,7 @@
         },
         {
           "name": "program",
-          "address": "EoZdHN8U3qWQje48ToxB1SLWjucsFGqcWaRUJQYX3eoT"
+          "address": "BFbmQbSbf3R6fMDdXKMKQZCTyMhMs9MCcjAhGDBLETXS"
         },
         {
           "name": "program_data"

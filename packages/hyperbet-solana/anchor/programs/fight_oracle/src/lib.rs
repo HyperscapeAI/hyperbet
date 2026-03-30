@@ -3,7 +3,7 @@
 
 use anchor_lang::prelude::*;
 
-declare_id!("B5mRCRDJk9BrnH7regMWW5mpTQ8QG1CcCGSnDxMt8hmo");
+declare_id!("GFdnu7kUnZGiXh4ejWiJSBCUxvq4UfdEeUv9jjFzr5EM");
 
 pub const ORACLE_CONFIG_SEED: &[u8] = b"oracle_config";
 pub const DUEL_SEED: &[u8] = b"duel";
@@ -125,6 +125,8 @@ pub mod fight_oracle {
         status: DuelStatus,
     ) -> Result<()> {
         require!(!ctx.accounts.oracle_config.paused, ErrorCode::OraclePaused);
+        // L-7: Validate metadata_uri fits in the 200-byte allocation
+        require!(metadata_uri.len() <= 200, ErrorCode::MetadataUriTooLong);
         require!(
             status == DuelStatus::Scheduled
                 || status == DuelStatus::BettingOpen
@@ -204,6 +206,7 @@ pub mod fight_oracle {
         metadata_uri: String,
     ) -> Result<()> {
         require!(!ctx.accounts.oracle_config.paused, ErrorCode::OraclePaused);
+        require!(metadata_uri.len() <= 200, ErrorCode::MetadataUriTooLong);
         let duel_state = &mut ctx.accounts.duel_state;
         require!(
             duel_state.status != DuelStatus::Resolved && duel_state.status != DuelStatus::Cancelled,
@@ -230,6 +233,7 @@ pub mod fight_oracle {
         metadata_uri: String,
     ) -> Result<()> {
         require!(!ctx.accounts.oracle_config.paused, ErrorCode::OraclePaused);
+        require!(metadata_uri.len() <= 200, ErrorCode::MetadataUriTooLong);
         require!(
             winner == MarketSide::A || winner == MarketSide::B,
             ErrorCode::InvalidWinner
@@ -288,6 +292,7 @@ pub mod fight_oracle {
         metadata_uri: String,
     ) -> Result<()> {
         require!(!ctx.accounts.oracle_config.paused, ErrorCode::OraclePaused);
+        require!(metadata_uri.len() <= 200, ErrorCode::MetadataUriTooLong);
         let duel_state = &mut ctx.accounts.duel_state;
         let oracle_config = &ctx.accounts.oracle_config;
         require!(
@@ -327,6 +332,7 @@ pub mod fight_oracle {
         metadata_uri: String,
     ) -> Result<()> {
         require!(!ctx.accounts.oracle_config.paused, ErrorCode::OraclePaused);
+        require!(metadata_uri.len() <= 200, ErrorCode::MetadataUriTooLong);
         let duel_state = &mut ctx.accounts.duel_state;
         require!(
             duel_state.status == DuelStatus::Challenged,
@@ -387,6 +393,7 @@ pub mod fight_oracle {
         metadata_uri: String,
     ) -> Result<()> {
         require!(!ctx.accounts.oracle_config.paused, ErrorCode::OraclePaused);
+        require!(metadata_uri.len() <= 200, ErrorCode::MetadataUriTooLong);
         let duel_state = &mut ctx.accounts.duel_state;
         let oracle_config = &ctx.accounts.oracle_config;
         require!(
@@ -497,7 +504,8 @@ pub struct CancelDuel<'info> {
     #[account(
         seeds = [ORACLE_CONFIG_SEED],
         bump = oracle_config.bump,
-        constraint = oracle_config.authority == authority.key() @ ErrorCode::Unauthorized,
+        // M-4: Allow authority OR reporter to cancel (parity with EVM PAUSER_ROLE)
+        constraint = (oracle_config.authority == authority.key() || oracle_config.reporter == authority.key()) @ ErrorCode::Unauthorized,
     )]
     pub oracle_config: Account<'info, OracleConfig>,
     #[account(mut, seeds = [DUEL_SEED, duel_key.as_ref()], bump = duel_state.bump)]
@@ -723,4 +731,6 @@ pub enum ErrorCode {
     OraclePaused,
     #[msg("Config is permanently frozen")]
     ConfigFrozen,
+    #[msg("Metadata URI exceeds 200 byte limit")]
+    MetadataUriTooLong,
 }

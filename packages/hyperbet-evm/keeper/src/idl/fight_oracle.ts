@@ -5,7 +5,7 @@
  * IDL can be found at `target/idl/fight_oracle.json`.
  */
 export type FightOracle = {
-  "address": "B5mRCRDJk9BrnH7regMWW5mpTQ8QG1CcCGSnDxMt8hmo",
+  "address": "GFdnu7kUnZGiXh4ejWiJSBCUxvq4UfdEeUv9jjFzr5EM",
   "metadata": {
     "name": "fightOracle",
     "version": "0.1.0",
@@ -349,7 +349,7 @@ export type FightOracle = {
         },
         {
           "name": "program",
-          "address": "B5mRCRDJk9BrnH7regMWW5mpTQ8QG1CcCGSnDxMt8hmo"
+          "address": "GFdnu7kUnZGiXh4ejWiJSBCUxvq4UfdEeUv9jjFzr5EM"
         },
         {
           "name": "programData"
@@ -1078,6 +1078,11 @@ export type FightOracle = {
       "code": 6025,
       "name": "configFrozen",
       "msg": "Config is permanently frozen"
+    },
+    {
+      "code": 6026,
+      "name": "metadataUriTooLong",
+      "msg": "Metadata URI exceeds 200 byte limit"
     }
   ],
   "types": [

@@ -5,7 +5,7 @@
  * IDL can be found at `target/idl/lvr_amm.json`.
  */
 export type LvrAmm = {
-  "address": "Af4LMYfaBtcFFM6dBjwLYH6QJLMqEwneQ8VHfn2z7NY5",
+  "address": "12E8Lz5w8Qxyj8Fh6LgsCgPDQNJMCLMV1y43LhPrH66w",
   "metadata": {
     "name": "lvrAmm",
     "version": "0.1.0",
@@ -1203,7 +1203,7 @@ export type LvrAmm = {
         {
           "name": "ammConfig",
           "docs": [
-            "Optional: AmmConfig for oracle program ID validation (required when duel_state is provided)"
+            "Optional to preserve the instruction interface, but required in practice for settlement validation."
           ],
           "optional": true,
           "pda": {
@@ -1229,8 +1229,7 @@ export type LvrAmm = {
         {
           "name": "duelState",
           "docs": [
-            "Optional: fight_oracle DuelState account. When provided, winner is read",
-            "from the oracle rather than trusting the caller's `side_won` argument."
+            "Optional to preserve the instruction interface, but required in practice for settlement validation."
           ],
           "optional": true
         }

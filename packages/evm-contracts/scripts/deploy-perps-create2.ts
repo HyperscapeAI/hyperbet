@@ -18,6 +18,7 @@
  */
 
 import { ethers } from "hardhat";
+import { writeDeploymentReceipt } from "./deployment-receipt";
 
 const CREATE2_FACTORY = "0x4e59b44847b379578588920cA78FbF26c0B4956C"; // deterministic deployer
 
@@ -105,6 +106,26 @@ async function main() {
   console.log("Pauser:", pauser);
   console.log("Margin Token:", marginToken);
   console.log("Salt:", salt);
+
+  writeDeploymentReceipt((await ethers.provider.getNetwork()).name, {
+    network: (await ethers.provider.getNetwork()).name,
+    goldTokenAddress:
+      process.env.GOLD_TOKEN_ADDRESS?.trim() || marginToken,
+    skillOracleAddress: oracleAddress,
+    perpEngineAddress: engineAddress,
+    perpMarginTokenAddress: marginToken,
+    perpsAdminAddress: admin,
+    perpsReporterAddress: reporter,
+    perpsMarketOperatorAddress: marketOperator,
+    perpsPauserAddress: pauser,
+    perpsInitialBasePrice: initialBasePrice.toString(),
+    perpsMaxOracleDelay: maxOracleDelay.toString(),
+    perpsDefaultSkewScale: defaultSkewScale.toString(),
+    skillOracleDeploymentTxHash: oracleReceipt?.hash ?? null,
+    perpEngineDeploymentTxHash: engineReceipt?.hash ?? null,
+    perpsCreate2Salt: salt,
+    perpsDeployedAt: new Date().toISOString(),
+  });
 }
 
 main().catch((error) => {

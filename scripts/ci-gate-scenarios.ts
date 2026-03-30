@@ -50,7 +50,18 @@ function parseArgs(): ScenarioTarget {
   return targetArg;
 }
 
+function parseScenarioFilter(): string | null {
+  const scenarioArg =
+    process.argv
+      .slice(2)
+      .find((arg) => arg.startsWith("--scenario="))
+      ?.slice("--scenario=".length)
+      .trim() ?? "";
+  return scenarioArg.length > 0 ? scenarioArg : null;
+}
+
 const target = parseArgs();
+const scenarioFilter = parseScenarioFilter();
 const artifactRoot = resolveArtifactRoot(
   target === "evm" ? "evm-exploit-gate" : "solana-exploit-gate",
 );
@@ -59,6 +70,12 @@ const bootstrapKeypairPath = path.join(
   "solana-bootstrap-keypair.json",
 );
 const ciHome = path.join(artifactRoot, "home");
+const solanaAnchorRoot = path.join(rootDir, "packages/hyperbet-solana/anchor");
+const solanaDeployRoot = path.join(solanaAnchorRoot, "target", "deploy");
+const requiredSolanaDeployArtifacts = [
+  "fight_oracle.so",
+  "gold_clob_market.so",
+] as const;
 const reservedPorts = new Set<number>();
 const MAX_SCENARIO_SERVER_STARTUP_RETRIES = 3;
 const preferredPorts =
@@ -181,6 +198,36 @@ async function ensureBootstrapWallet(): Promise<void> {
   }
 
   materializeCiSolanaWallet(bootstrapKeypairPath, ciHome);
+}
+
+function getMissingSolanaDeployArtifacts(): string[] {
+  return requiredSolanaDeployArtifacts.filter(
+    (artifact) => !existsSync(path.join(solanaDeployRoot, artifact)),
+  );
+}
+
+async function ensureSolanaDeployArtifacts(): Promise<void> {
+  if (target !== "solana") {
+    return;
+  }
+
+  const missingArtifacts = getMissingSolanaDeployArtifacts();
+  if (missingArtifacts.length === 0) {
+    return;
+  }
+
+  const buildLogPath = path.join(artifactRoot, "solana-anchor-build.log");
+  await runCommand("bun", ["run", "--cwd", solanaAnchorRoot, "build"], {
+    stdoutFile: buildLogPath,
+    stderrFile: buildLogPath,
+  });
+
+  const remainingMissingArtifacts = getMissingSolanaDeployArtifacts();
+  if (remainingMissingArtifacts.length > 0) {
+    throw new Error(
+      `Solana deploy artifacts still missing after build: ${remainingMissingArtifacts.join(", ")}`,
+    );
+  }
 }
 
 async function fetchScenarioJson(
@@ -353,9 +400,9 @@ async function withSimulationServer<T>(
 
     const server = await spawnBackground(
       "bun",
-      ["run", "--cwd", "packages/simulation-dashboard", "dev"],
+      ["src/server.ts"],
       {
-        cwd: rootDir,
+        cwd: path.join(rootDir, "packages/simulation-dashboard"),
         env: {
           SIM_HTTP_PORT: httpPort,
           SIM_WS_PORT: wsPort,
@@ -416,6 +463,7 @@ async function allocateDistinctPort(
 
 try {
   await ensureBootstrapWallet();
+  await ensureSolanaDeployArtifacts();
 
   await runCommand(
     "bun",
@@ -428,9 +476,24 @@ try {
 
   const canonical = target === "evm" ? evmCanonical : solanaCanonical;
   const matrix = target === "evm" ? evmMatrix : solanaMatrix;
+  const selectedCanonical = scenarioFilter
+    ? canonical.filter((scenarioId) => scenarioId === scenarioFilter)
+    : canonical;
+  const selectedMatrix = scenarioFilter
+    ? matrix.filter((scenarioId) => scenarioId === scenarioFilter)
+    : matrix;
+  if (
+    scenarioFilter &&
+    selectedCanonical.length === 0 &&
+    selectedMatrix.length === 0
+  ) {
+    throw new Error(
+      `unknown ${target} scenario filter ${scenarioFilter}`,
+    );
+  }
   const executions = [
-    ...buildScenarioExecutions(canonical, "canonical"),
-    ...buildScenarioExecutions(matrix, "matrix"),
+    ...buildScenarioExecutions(selectedCanonical, "canonical"),
+    ...buildScenarioExecutions(selectedMatrix, "matrix"),
   ];
   writeJsonArtifact(artifactRoot, "executions.json", executions);
 

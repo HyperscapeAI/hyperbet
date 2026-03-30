@@ -7,7 +7,7 @@ use fight_oracle::{
     self, DuelState as OracleDuelState, DuelStatus as OracleDuelStatus, MarketSide,
 };
 
-declare_id!("DYtd7AoyTX2tbmZ8vpC3mxZgqTpyaDei4TFXZukWBJEf");
+declare_id!("3QUVoaKJqo1rg9eXe7vyFewJrY75NWdtH8JZfvTb79Uy");
 
 const CONFIG_SEED: &[u8] = b"config";
 const MARKET_SEED: &[u8] = b"market";
@@ -209,6 +209,9 @@ pub mod gold_clob_market {
         Ok(())
     }
 
+    /// M-7: Intentionally NOT pause-gated. Market status must sync from oracle
+    /// even during pause so that resolved/cancelled markets can transition and
+    /// users can claim funds. Blocking sync during pause would lock user funds.
     pub fn sync_market_from_duel(ctx: Context<SyncMarketFromDuel>) -> Result<()> {
         let market_key = ctx.accounts.market_state.key();
         let duel_key = ctx.accounts.duel_state.key();
@@ -886,6 +889,10 @@ pub mod gold_clob_market {
             ),
             payout,
         )?;
+
+        // L-5: Close user_balance PDA to reclaim rent (~0.002 SOL per account).
+        // All shares and locked lamports are already zeroed above.
+        ctx.accounts.user_balance.close(ctx.accounts.user.to_account_info())?;
 
         Ok(())
     }

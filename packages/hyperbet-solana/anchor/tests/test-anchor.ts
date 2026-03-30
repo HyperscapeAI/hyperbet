@@ -361,6 +361,76 @@ export async function sendVersionedTransactionWithLookupTable(
   throw lastError instanceof Error ? lastError : new Error(String(lastError));
 }
 
+async function sendVersionedTransactionWithPolling(
+  provider: anchor.AnchorProvider,
+  transaction: anchor.web3.VersionedTransaction,
+  signers: anchor.web3.Signer[] = [],
+  options?: anchor.web3.ConfirmOptions,
+): Promise<string> {
+  const opts = {
+    ...provider.opts,
+    ...options,
+  };
+  const commitment =
+    opts.preflightCommitment || opts.commitment || DEFAULT_COMMITMENT;
+  let lastError: unknown = null;
+
+  for (let attempt = 1; attempt <= 4; attempt += 1) {
+    try {
+      if (signers.length > 0) {
+        transaction.sign(signers);
+      }
+      const signedTx = await provider.wallet.signTransaction(transaction);
+      const signature = await provider.connection.sendRawTransaction(
+        signedTx.serialize(),
+        {
+          maxRetries: 8,
+          preflightCommitment: commitment,
+          skipPreflight: opts.skipPreflight ?? false,
+        },
+      );
+      await confirmSignatureByPolling(provider.connection, signature);
+      return signature;
+    } catch (error) {
+      lastError = error;
+      if (attempt < 4) {
+        await sleep(250 * attempt);
+      }
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error(String(lastError));
+}
+
+export function createPollingProvider(
+  connection: anchor.web3.Connection,
+  wallet: anchor.Wallet,
+  options?: Partial<anchor.AnchorProvider["opts"]>,
+): anchor.AnchorProvider {
+  const provider = new anchor.AnchorProvider(connection, wallet, {
+    commitment: DEFAULT_COMMITMENT,
+    preflightCommitment: DEFAULT_COMMITMENT,
+    ...(options ?? {}),
+  });
+  provider.sendAndConfirm = async (tx, signers, overrideOptions) => {
+    if (tx instanceof anchor.web3.VersionedTransaction) {
+      return sendVersionedTransactionWithPolling(
+        provider,
+        tx,
+        signers ?? [],
+        overrideOptions,
+      );
+    }
+    return sendAndConfirmWithPolling(
+      provider,
+      tx,
+      signers ?? [],
+      overrideOptions,
+    );
+  };
+  return provider;
+}
+
 export function configureAnchorTests(): anchor.AnchorProvider {
   process.env.ANCHOR_WALLET = resolveAnchorWalletPath();
   const providerUrl =
@@ -374,19 +444,9 @@ export function configureAnchorTests(): anchor.AnchorProvider {
     confirmTransactionInitialTimeout: CONFIRM_TIMEOUT_MS,
     wsEndpoint: process.env.ANCHOR_WS_URL,
   });
-  const provider = new anchor.AnchorProvider(connection, envProvider.wallet, {
+  const provider = createPollingProvider(connection, envProvider.wallet, {
     ...envProvider.opts,
-    commitment: DEFAULT_COMMITMENT,
-    preflightCommitment: DEFAULT_COMMITMENT,
   });
-  provider.sendAndConfirm = async (tx, signers, options) => {
-    if (!(tx instanceof anchor.web3.Transaction)) {
-      throw new Error(
-        "Versioned transactions are not supported in local tests",
-      );
-    }
-    return sendAndConfirmWithPolling(provider, tx, signers ?? [], options);
-  };
   anchor.setProvider(provider);
   return provider;
 }

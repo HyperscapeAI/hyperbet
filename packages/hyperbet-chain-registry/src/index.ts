@@ -125,6 +125,46 @@ export interface BettingDeploymentManifest {
   evm: Record<BettingEvmNetwork, BettingEvmDeployment>;
 }
 
+export const BETTING_SOLANA_CANONICAL_FIELDS = [
+  "fightOracleProgramId",
+  "goldClobMarketProgramId",
+] as const;
+
+export type BettingSolanaCanonicalField =
+  (typeof BETTING_SOLANA_CANONICAL_FIELDS)[number];
+
+export const BETTING_SOLANA_AMM_FIELDS = [
+  "goldAmmMarketProgramId",
+  "usdcMint",
+] as const;
+
+export type BettingSolanaAmmField =
+  (typeof BETTING_SOLANA_AMM_FIELDS)[number];
+
+export const BETTING_SOLANA_PERPS_FIELDS = [
+  "goldPerpsMarketProgramId",
+  "goldMint",
+] as const;
+
+export type BettingSolanaPerpsField =
+  (typeof BETTING_SOLANA_PERPS_FIELDS)[number];
+
+export const BETTING_SOLANA_FULL_PRODUCT_FIELDS = [
+  ...BETTING_SOLANA_CANONICAL_FIELDS,
+  ...BETTING_SOLANA_AMM_FIELDS,
+  ...BETTING_SOLANA_PERPS_FIELDS,
+] as const;
+
+export type BettingSolanaFullProductField =
+  (typeof BETTING_SOLANA_FULL_PRODUCT_FIELDS)[number];
+
+export const BETTING_SOLANA_RELEASE_FIELDS = [
+  ...BETTING_SOLANA_FULL_PRODUCT_FIELDS,
+] as const;
+
+export type BettingSolanaReleaseField =
+  (typeof BETTING_SOLANA_RELEASE_FIELDS)[number];
+
 export const BETTING_EVM_CANONICAL_ADDRESS_FIELDS = [
   "duelOracleAddress",
   "goldClobAddress",
@@ -137,6 +177,23 @@ export const BETTING_EVM_CANONICAL_ADDRESS_FIELDS = [
 export type BettingEvmCanonicalAddressField =
   (typeof BETTING_EVM_CANONICAL_ADDRESS_FIELDS)[number];
 
+export const BETTING_EVM_AMM_ADDRESS_FIELDS = [
+  "goldAmmRouterAddress",
+  "mUsdTokenAddress",
+] as const;
+
+export type BettingEvmAmmAddressField =
+  (typeof BETTING_EVM_AMM_ADDRESS_FIELDS)[number];
+
+export const BETTING_EVM_PERPS_ADDRESS_FIELDS = [
+  "goldTokenAddress",
+  "skillOracleAddress",
+  "perpEngineAddress",
+] as const;
+
+export type BettingEvmPerpsAddressField =
+  (typeof BETTING_EVM_PERPS_ADDRESS_FIELDS)[number];
+
 export const BETTING_EVM_GOVERNANCE_ADDRESS_FIELDS = [
   "reporterAddress",
   "finalizerAddress",
@@ -148,6 +205,23 @@ export const BETTING_EVM_GOVERNANCE_ADDRESS_FIELDS = [
 
 export type BettingEvmGovernanceAddressField =
   (typeof BETTING_EVM_GOVERNANCE_ADDRESS_FIELDS)[number];
+
+export const BETTING_EVM_FULL_PRODUCT_ADDRESS_FIELDS = [
+  ...BETTING_EVM_CANONICAL_ADDRESS_FIELDS,
+  ...BETTING_EVM_AMM_ADDRESS_FIELDS,
+  ...BETTING_EVM_PERPS_ADDRESS_FIELDS,
+] as const;
+
+export type BettingEvmFullProductAddressField =
+  (typeof BETTING_EVM_FULL_PRODUCT_ADDRESS_FIELDS)[number];
+
+export const BETTING_EVM_RELEASE_ADDRESS_FIELDS = [
+  ...BETTING_EVM_FULL_PRODUCT_ADDRESS_FIELDS,
+  ...BETTING_EVM_GOVERNANCE_ADDRESS_FIELDS,
+] as const;
+
+export type BettingEvmReleaseAddressField =
+  (typeof BETTING_EVM_RELEASE_ADDRESS_FIELDS)[number];
 
 export interface EvmChainRuntimeConfig {
   chainKey: BettingEvmChain;
@@ -224,6 +298,14 @@ export const BETTING_EVM_CHAIN_ORDER: BettingEvmChain[] = [
   "avax",
 ] as const;
 
+export const BETTING_LAUNCH_SOLANA_CLUSTER: BettingSolanaCluster =
+  "mainnet-beta";
+
+export const BETTING_LAUNCH_EVM_CHAIN_ORDER: BettingEvmChain[] = [
+  "bsc",
+  "avax",
+] as const;
+
 const DEFAULT_FEATURE_FLAGS: ChainFeatureFlags = {
   predictionMarkets: true,
   perps: false,
@@ -234,28 +316,28 @@ const SOLANA_DEPLOYMENTS: Record<BettingSolanaCluster, BettingSolanaDeployment> 
   {
     localnet: {
       cluster: "localnet",
-      fightOracleProgramId: "B5mRCRDJk9BrnH7regMWW5mpTQ8QG1CcCGSnDxMt8hmo",
-      goldClobMarketProgramId: "DYtd7AoyTX2tbmZ8vpC3mxZgqTpyaDei4TFXZukWBJEf",
-      goldPerpsMarketProgramId: "EoZdHN8U3qWQje48ToxB1SLWjucsFGqcWaRUJQYX3eoT",
-      goldAmmMarketProgramId: "Af4LMYfaBtcFFM6dBjwLYH6QJLMqEwneQ8VHfn2z7NY5",
+      fightOracleProgramId: "GFdnu7kUnZGiXh4ejWiJSBCUxvq4UfdEeUv9jjFzr5EM",
+      goldClobMarketProgramId: "3QUVoaKJqo1rg9eXe7vyFewJrY75NWdtH8JZfvTb79Uy",
+      goldPerpsMarketProgramId: "BFbmQbSbf3R6fMDdXKMKQZCTyMhMs9MCcjAhGDBLETXS",
+      goldAmmMarketProgramId: "12E8Lz5w8Qxyj8Fh6LgsCgPDQNJMCLMV1y43LhPrH66w",
       goldMint: "DK9nBUMfdu4XprPRWeh8f6KnQiGWD8Z4xz3yzs9gpump",
       usdcMint: "",
     },
     devnet: {
       cluster: "devnet",
-      fightOracleProgramId: "B5mRCRDJk9BrnH7regMWW5mpTQ8QG1CcCGSnDxMt8hmo",
-      goldClobMarketProgramId: "DYtd7AoyTX2tbmZ8vpC3mxZgqTpyaDei4TFXZukWBJEf",
-      goldPerpsMarketProgramId: "EoZdHN8U3qWQje48ToxB1SLWjucsFGqcWaRUJQYX3eoT",
-      goldAmmMarketProgramId: "Af4LMYfaBtcFFM6dBjwLYH6QJLMqEwneQ8VHfn2z7NY5",
+      fightOracleProgramId: "GFdnu7kUnZGiXh4ejWiJSBCUxvq4UfdEeUv9jjFzr5EM",
+      goldClobMarketProgramId: "3QUVoaKJqo1rg9eXe7vyFewJrY75NWdtH8JZfvTb79Uy",
+      goldPerpsMarketProgramId: "BFbmQbSbf3R6fMDdXKMKQZCTyMhMs9MCcjAhGDBLETXS",
+      goldAmmMarketProgramId: "12E8Lz5w8Qxyj8Fh6LgsCgPDQNJMCLMV1y43LhPrH66w",
       goldMint: "DK9nBUMfdu4XprPRWeh8f6KnQiGWD8Z4xz3yzs9gpump",
       usdcMint: "",
     },
     testnet: {
       cluster: "testnet",
-      fightOracleProgramId: "B5mRCRDJk9BrnH7regMWW5mpTQ8QG1CcCGSnDxMt8hmo",
-      goldClobMarketProgramId: "DYtd7AoyTX2tbmZ8vpC3mxZgqTpyaDei4TFXZukWBJEf",
-      goldPerpsMarketProgramId: "EoZdHN8U3qWQje48ToxB1SLWjucsFGqcWaRUJQYX3eoT",
-      goldAmmMarketProgramId: "",
+      fightOracleProgramId: "GFdnu7kUnZGiXh4ejWiJSBCUxvq4UfdEeUv9jjFzr5EM",
+      goldClobMarketProgramId: "3QUVoaKJqo1rg9eXe7vyFewJrY75NWdtH8JZfvTb79Uy",
+      goldPerpsMarketProgramId: "BFbmQbSbf3R6fMDdXKMKQZCTyMhMs9MCcjAhGDBLETXS",
+      goldAmmMarketProgramId: "12E8Lz5w8Qxyj8Fh6LgsCgPDQNJMCLMV1y43LhPrH66w",
       goldMint: "",
       usdcMint: "",
     },
@@ -263,7 +345,7 @@ const SOLANA_DEPLOYMENTS: Record<BettingSolanaCluster, BettingSolanaDeployment> 
       cluster: "mainnet-beta",
       fightOracleProgramId: "B5mRCRDJk9BrnH7regMWW5mpTQ8QG1CcCGSnDxMt8hmo",
       goldClobMarketProgramId: "DYtd7AoyTX2tbmZ8vpC3mxZgqTpyaDei4TFXZukWBJEf",
-      goldPerpsMarketProgramId: "EoZdHN8U3qWQje48ToxB1SLWjucsFGqcWaRUJQYX3eoT",
+      goldPerpsMarketProgramId: "6YjWiway8kaSjwtAinJxqWPvV3DqBVapDWAsSEZjjmbP",
       goldAmmMarketProgramId: "",
       goldMint: "DK9nBUMfdu4XprPRWeh8f6KnQiGWD8Z4xz3yzs9gpump",
       usdcMint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
@@ -278,24 +360,24 @@ const EVM_DEPLOYMENTS: Record<BettingEvmNetwork, BettingEvmDeployment> = {
     label: "BSC Testnet",
     targetKind: "testnet",
     rpcEnvVar: "BSC_TESTNET_RPC",
-    duelOracleAddress: "0xAd13D36b02f0F6C44d508824Ae9D407931D91f91",
-    goldClobAddress: "0x067335E0b1F226a8e345a289B3b93Ed5377d636e",
-    goldAmmRouterAddress: "",
-    mUsdTokenAddress: "",
-    adminAddress: "0x7908b93DF1A91A5e1B83a4538107Db3c9131eED8",
-    marketOperatorAddress: "0x99622633cF1e476C8bD9161f5B9d4F290a1D2Ea1",
-    treasuryAddress: "0x5c5A3554F12875aBB63a6b8027b9A23C423F5C84",
-    marketMakerAddress: "0x1bC49a0d5232cAc83fe696AB604B0b1E58C54A41",
-    reporterAddress: "0xe94d0c1bBA64da68310DbfC07149E264E77b58AC",
-    finalizerAddress: "0x17D1495dB7374f1814801275bB9dac84Fcb0079e",
-    challengerAddress: "0x2b073F23C61a420c208963C5C650FB54c82f893a",
+    duelOracleAddress: "0x5B0a0D5cf66F2A725560fCdb3bF74067c8c50A3C",
+    goldClobAddress: "0xb7b2833875A17d5E5401C310C694Bb75a21a2582",
+    goldAmmRouterAddress: "0xc053e98CC2Ef1CF1328E6c9d467B433E1abcEf6d",
+    mUsdTokenAddress: "0x08e621f503aCe8cCCE745fe7441561536AE8445F",
+    adminAddress: "0xd75676D9466db83a74E55572e45828751e2e8101",
+    marketOperatorAddress: "0x7E82E3553f1baB7964c6dbd760d565be14D566bb",
+    treasuryAddress: "0xae6bd4dAC4731995980EEdFF70ccC6B29E8FbD62",
+    marketMakerAddress: "0xc2Aac21a8bb955c3D6a76b77A9824C8cd81d6f5B",
+    reporterAddress: "0x8FA91419FDC9d25A646c6B9684C148DeFa1C2df0",
+    finalizerAddress: "0x67e3078B238F9eAA04C60834ccCc6A4685F704b7",
+    challengerAddress: "0x3A123B14bca41E14d12d4854F6a1180ECC38b42b",
     timelockAddress: "",
     multisigAddress: "",
-    emergencyCouncilAddress: "0xdCDeC0c831ED7Af279E724fddb127dc6134e5df6",
+    emergencyCouncilAddress: "0xdeB6a5897C5B2FbB3C7dCe821b5ffe69aeA60d51",
     deploymentVersion: "v3",
-    goldTokenAddress: "",
-    skillOracleAddress: "",
-    perpEngineAddress: "",
+    goldTokenAddress: "0xB5e215607565808d00b16c69a8074d35060438DE",
+    skillOracleAddress: "0x9064B86E9050bb9C01868B36740D6d9F12a18F0d",
+    perpEngineAddress: "0x0c6c9B3A7C374F121a0Ad0bBFB01945d1F567cfc",
     nativeCurrency: { name: "BNB", symbol: "BNB", decimals: 18 },
     blockExplorerUrl: "https://testnet.bscscan.com",
     featureFlags: DEFAULT_FEATURE_FLAGS,
@@ -410,24 +492,24 @@ const EVM_DEPLOYMENTS: Record<BettingEvmNetwork, BettingEvmDeployment> = {
     label: "Avalanche Fuji",
     targetKind: "testnet",
     rpcEnvVar: "AVAX_FUJI_RPC",
-    duelOracleAddress: "0xAd13D36b02f0F6C44d508824Ae9D407931D91f91",
-    goldClobAddress: "0x067335E0b1F226a8e345a289B3b93Ed5377d636e",
-    goldAmmRouterAddress: "",
-    mUsdTokenAddress: "",
-    adminAddress: "0x7908b93DF1A91A5e1B83a4538107Db3c9131eED8",
-    marketOperatorAddress: "0x99622633cF1e476C8bD9161f5B9d4F290a1D2Ea1",
-    treasuryAddress: "0x5c5A3554F12875aBB63a6b8027b9A23C423F5C84",
-    marketMakerAddress: "0x1bC49a0d5232cAc83fe696AB604B0b1E58C54A41",
-    reporterAddress: "0xe94d0c1bBA64da68310DbfC07149E264E77b58AC",
-    finalizerAddress: "0x17D1495dB7374f1814801275bB9dac84Fcb0079e",
-    challengerAddress: "0x2b073F23C61a420c208963C5C650FB54c82f893a",
+    duelOracleAddress: "0x5B0a0D5cf66F2A725560fCdb3bF74067c8c50A3C",
+    goldClobAddress: "0xb7b2833875A17d5E5401C310C694Bb75a21a2582",
+    goldAmmRouterAddress: "0x537b46C2Cd80f18E47f700825d1Bf886701AA8Dd",
+    mUsdTokenAddress: "0x08e621f503aCe8cCCE745fe7441561536AE8445F",
+    adminAddress: "0xd75676D9466db83a74E55572e45828751e2e8101",
+    marketOperatorAddress: "0x7E82E3553f1baB7964c6dbd760d565be14D566bb",
+    treasuryAddress: "0xae6bd4dAC4731995980EEdFF70ccC6B29E8FbD62",
+    marketMakerAddress: "0xc2Aac21a8bb955c3D6a76b77A9824C8cd81d6f5B",
+    reporterAddress: "0x8FA91419FDC9d25A646c6B9684C148DeFa1C2df0",
+    finalizerAddress: "0x67e3078B238F9eAA04C60834ccCc6A4685F704b7",
+    challengerAddress: "0x3A123B14bca41E14d12d4854F6a1180ECC38b42b",
     timelockAddress: "",
     multisigAddress: "",
-    emergencyCouncilAddress: "0xdCDeC0c831ED7Af279E724fddb127dc6134e5df6",
+    emergencyCouncilAddress: "0xdeB6a5897C5B2FbB3C7dCe821b5ffe69aeA60d51",
     deploymentVersion: "v3",
-    goldTokenAddress: "",
-    skillOracleAddress: "",
-    perpEngineAddress: "",
+    goldTokenAddress: "0xB5e215607565808d00b16c69a8074d35060438DE",
+    skillOracleAddress: "0x249db7Bf653b4Dfe20201B1d578F1df77b9f2a94",
+    perpEngineAddress: "0x9064B86E9050bb9C01868B36740D6d9F12a18F0d",
     nativeCurrency: { name: "Avalanche", symbol: "AVAX", decimals: 18 },
     blockExplorerUrl: "https://testnet.snowtrace.io",
     featureFlags: DEFAULT_FEATURE_FLAGS,
@@ -487,6 +569,76 @@ export const BETTING_DEPLOYMENTS: BettingDeploymentManifest = {
   evm: EVM_DEPLOYMENTS,
 };
 
+export function getMissingBettingSolanaCanonicalFields(
+  deployment: BettingSolanaDeployment,
+): BettingSolanaCanonicalField[] {
+  return BETTING_SOLANA_CANONICAL_FIELDS.filter(
+    (field) => deployment[field].trim().length === 0,
+  );
+}
+
+export function isBettingSolanaDeploymentCanonicalReady(
+  deployment: BettingSolanaDeployment,
+): boolean {
+  return getMissingBettingSolanaCanonicalFields(deployment).length === 0;
+}
+
+export function getMissingBettingSolanaAmmFields(
+  deployment: BettingSolanaDeployment,
+): BettingSolanaAmmField[] {
+  return BETTING_SOLANA_AMM_FIELDS.filter(
+    (field) => deployment[field].trim().length === 0,
+  );
+}
+
+export function isBettingSolanaDeploymentAmmReady(
+  deployment: BettingSolanaDeployment,
+): boolean {
+  return getMissingBettingSolanaAmmFields(deployment).length === 0;
+}
+
+export function getMissingBettingSolanaPerpsFields(
+  deployment: BettingSolanaDeployment,
+): BettingSolanaPerpsField[] {
+  return BETTING_SOLANA_PERPS_FIELDS.filter(
+    (field) => deployment[field].trim().length === 0,
+  );
+}
+
+export function isBettingSolanaDeploymentPerpsReady(
+  deployment: BettingSolanaDeployment,
+): boolean {
+  return getMissingBettingSolanaPerpsFields(deployment).length === 0;
+}
+
+export function getMissingBettingSolanaFullProductFields(
+  deployment: BettingSolanaDeployment,
+): BettingSolanaFullProductField[] {
+  return BETTING_SOLANA_FULL_PRODUCT_FIELDS.filter(
+    (field) => deployment[field].trim().length === 0,
+  );
+}
+
+export function isBettingSolanaDeploymentFullProductReady(
+  deployment: BettingSolanaDeployment,
+): boolean {
+  return getMissingBettingSolanaFullProductFields(deployment).length === 0;
+}
+
+export function getMissingBettingSolanaReleaseFields(
+  deployment: BettingSolanaDeployment,
+): BettingSolanaReleaseField[] {
+  return BETTING_SOLANA_RELEASE_FIELDS.filter(
+    (field) => deployment[field].trim().length === 0,
+  );
+}
+
+export function isBettingSolanaDeploymentReleaseReady(
+  deployment: BettingSolanaDeployment,
+): boolean {
+  return getMissingBettingSolanaReleaseFields(deployment).length === 0;
+}
+
 export function getMissingBettingEvmCanonicalFields(
   deployment: BettingEvmDeployment,
 ): BettingEvmCanonicalAddressField[] {
@@ -513,6 +665,62 @@ export function isBettingEvmDeploymentGovernanceReady(
   deployment: BettingEvmDeployment,
 ): boolean {
   return getMissingBettingEvmGovernanceFields(deployment).length === 0;
+}
+
+export function getMissingBettingEvmAmmFields(
+  deployment: BettingEvmDeployment,
+): BettingEvmAmmAddressField[] {
+  return BETTING_EVM_AMM_ADDRESS_FIELDS.filter(
+    (field) => deployment[field].trim().length === 0,
+  );
+}
+
+export function isBettingEvmDeploymentAmmReady(
+  deployment: BettingEvmDeployment,
+): boolean {
+  return getMissingBettingEvmAmmFields(deployment).length === 0;
+}
+
+export function getMissingBettingEvmPerpsFields(
+  deployment: BettingEvmDeployment,
+): BettingEvmPerpsAddressField[] {
+  return BETTING_EVM_PERPS_ADDRESS_FIELDS.filter(
+    (field) => deployment[field].trim().length === 0,
+  );
+}
+
+export function isBettingEvmDeploymentPerpsReady(
+  deployment: BettingEvmDeployment,
+): boolean {
+  return getMissingBettingEvmPerpsFields(deployment).length === 0;
+}
+
+export function getMissingBettingEvmFullProductFields(
+  deployment: BettingEvmDeployment,
+): BettingEvmFullProductAddressField[] {
+  return BETTING_EVM_FULL_PRODUCT_ADDRESS_FIELDS.filter(
+    (field) => deployment[field].trim().length === 0,
+  );
+}
+
+export function isBettingEvmDeploymentFullProductReady(
+  deployment: BettingEvmDeployment,
+): boolean {
+  return getMissingBettingEvmFullProductFields(deployment).length === 0;
+}
+
+export function getMissingBettingEvmReleaseFields(
+  deployment: BettingEvmDeployment,
+): BettingEvmReleaseAddressField[] {
+  return BETTING_EVM_RELEASE_ADDRESS_FIELDS.filter(
+    (field) => deployment[field].trim().length === 0,
+  );
+}
+
+export function isBettingEvmDeploymentReleaseReady(
+  deployment: BettingEvmDeployment,
+): boolean {
+  return getMissingBettingEvmReleaseFields(deployment).length === 0;
 }
 
 export function normalizeSolanaCluster(cluster: string): BettingSolanaCluster {

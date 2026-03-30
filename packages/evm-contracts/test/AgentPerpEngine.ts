@@ -74,10 +74,10 @@ describe("AgentPerpEngine", function () {
 
     await engine.connect(owner).createMarket(agentId);
     await engine.connect(owner).depositInsuranceFund(agentId, ethers.parseEther("100"));
-
     await engine
       .connect(trader)
       .modifyPosition(agentId, ethers.parseEther("30"), ethers.parseEther("1"));
+    await engine.connect(owner).setMarketStatus(agentId, 2); // CLOSE_ONLY
 
     const opened = await engine.positions(agentId, trader.address);
     expect(opened.size).to.equal(ethers.parseEther("1"));
@@ -98,12 +98,12 @@ describe("AgentPerpEngine", function () {
     expect(reduced.size).to.equal(ethers.parseEther("0.8"));
     expect(reduced.entryPrice).to.equal(opened.entryPrice);
     expect(reduced.margin).to.be.closeTo(
-      ethers.parseEther("35"),
-      ethers.parseEther("0.001"),
+      ethers.parseEther("30"),
+      ethers.parseEther("0.01"),
     );
     expect(marketAfterReduce.insuranceFund).to.be.closeTo(
-      ethers.parseEther("95"),
-      ethers.parseEther("0.001"),
+      ethers.parseEther("99.999"),
+      ethers.parseEther("0.002"),
     );
 
     await expect(
@@ -192,7 +192,6 @@ describe("AgentPerpEngine", function () {
 
     const position = await engine.positions(agentId, trader.address);
     const market = await engine.markets(agentId);
-
     expect(position.size).to.equal(0n);
     expect(position.margin).to.equal(0n);
     expect(market.vaultBalance).to.be.closeTo(
@@ -220,20 +219,11 @@ describe("AgentPerpEngine", function () {
       .connect(trader)
       .modifyPosition(agentId, ethers.parseEther("30"), ethers.parseEther("1"));
 
-    await oracle.connect(owner).updateAgentSkill(agentId, 800, 0);
+    await oracle.connect(owner).updateAgentSkill(agentId, 1_000, 0);
 
     await expect(
       engine.connect(trader).modifyPosition(agentId, 0, -ethers.parseEther("1")),
     ).to.be.revertedWithCustomError(engine, "Underwater");
-
-    await engine.connect(owner).updateMarketConfig(
-      agentId,
-      ethers.parseEther("1000000"),
-      ethers.parseEther("5"),
-      4_000,
-      500,
-      120,
-    );
 
     await expect(engine.connect(trader).liquidate(agentId, trader.address)).to.emit(
       engine,
@@ -251,7 +241,7 @@ describe("AgentPerpEngine", function () {
     );
     expect(market.insuranceFund).to.equal(0n);
     expect(market.badDebt).to.be.closeTo(
-      ethers.parseEther("30"),
+      ethers.parseEther("10"),
       ethers.parseEther("0.001"),
     );
 
@@ -259,11 +249,11 @@ describe("AgentPerpEngine", function () {
     const recapitalizedMarket = await engine.markets(agentId);
     expect(recapitalizedMarket.badDebt).to.equal(0n);
     expect(recapitalizedMarket.vaultBalance).to.be.closeTo(
-      ethers.parseEther("70"),
+      ethers.parseEther("50"),
       ethers.parseEther("0.001"),
     );
     expect(recapitalizedMarket.insuranceFund).to.be.closeTo(
-      ethers.parseEther("10"),
+      ethers.parseEther("30"),
       ethers.parseEther("0.001"),
     );
   });

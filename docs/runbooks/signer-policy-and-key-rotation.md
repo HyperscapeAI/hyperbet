@@ -26,6 +26,8 @@ receipts and committed manifests should show the separated owners directly.
   material
 - no private key, seed phrase, or signer JSON belongs in git-tracked files
 - Cloudflare Pages variables must not hold production private keys
+- any deploy keypair or signer material ever committed to git must be treated as
+  burned, removed from the repo, and rotated before release or audit handoff
 
 ## Routine Rotation
 

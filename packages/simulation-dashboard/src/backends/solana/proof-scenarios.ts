@@ -779,7 +779,9 @@ async function finalizeOutcome(
         const balanceAfter = await runtime.getBalanceLamports(
             claimant.keypair.publicKey,
         );
-        const userBalanceAfter = await runtime.fetchUserBalance(claimResult.userBalance);
+        const userBalanceAfter = await runtime.fetchUserBalanceNullable(
+            claimResult.userBalance,
+        );
         claimRecords.push({
             actor: claimant.name,
             userBalancePda: claimResult.userBalance.toBase58(),
@@ -812,7 +814,9 @@ async function finalizeOutcome(
                 }),
             );
         } catch (error) {
-            repeatClaimRejected = hasProgramError(error, "NothingToClaim");
+            repeatClaimRejected =
+                hasProgramError(error, "NothingToClaim") ||
+                hasProgramError(error, "AccountNotInitialized");
             traces.push(
                 buildTrace("repeat_claim_rejected", market, {
                     actor: options.repeatClaimant.name,

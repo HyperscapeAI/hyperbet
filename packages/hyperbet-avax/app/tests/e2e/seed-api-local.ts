@@ -47,6 +47,8 @@ async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
 
 async function main(): Promise<void> {
   const state = await readState();
+  const duelSource =
+    process.env.E2E_DUEL_SOURCE?.trim().toLowerCase() || "synthetic_publish";
   const gameApiUrl = (process.env.E2E_GAME_API_URL || "http://127.0.0.1:5555")
     .trim()
     .replace(/\/$/, "");
@@ -63,15 +65,6 @@ async function main(): Promise<void> {
     "perpsCharacterId",
   );
   const perpsModelName = state.perpsModelName?.trim() || "E2E Model Alpha";
-  const duelKeyHex = requireString(
-    state.currentDuelKeyHex,
-    "currentDuelKeyHex",
-  );
-  const duelId = String(state.currentMatchId || Date.now());
-  const currentBetWindowSeconds = Math.max(
-    30,
-    Number(state.currentBetWindowSeconds || 45),
-  );
   const uplineWallet = "0x1000000000000000000000000000000000000001";
   const leaderboardWallet = "0x1000000000000000000000000000000000000002";
   const inviteeWallet = "0x1000000000000000000000000000000000000003";
@@ -165,128 +158,140 @@ async function main(): Promise<void> {
     }),
   });
 
-  const publishedState = await requestJson<{ seq: number }>(
-    `${gameApiUrl}/api/streaming/state/publish`,
-    {
-      method: "POST",
-      body: JSON.stringify({
-        cycle: {
-          cycleId: "e2e-cycle-active",
-          phase: "FIGHTING",
-          duelId,
-          duelKeyHex,
-          cycleStartTime: Date.now() - 90_000,
-          phaseStartTime: Date.now() - 30_000,
-          phaseEndTime: Date.now() + 30_000,
-          betOpenTime: Date.now() - 15_000,
-          betCloseTime: Date.now() + currentBetWindowSeconds * 1_000,
-          fightStartTime: Date.now() + 60_000,
-          duelEndTime: null,
-          countdown: 30,
-          timeRemaining: 30_000,
-          winnerId: null,
-          winnerName: null,
-          winReason: null,
-          seed: null,
-          replayHash: null,
-          agent1: {
-            id: perpsCharacterId,
-            name: perpsModelName,
-            provider: "Hyperscape",
-            model: "alpha-local",
-            hp: 68,
-            maxHp: 100,
-            combatLevel: 88,
-            wins: 12,
-            losses: 4,
-            damageDealtThisFight: 148,
-            inventory: [
-              { slot: 0, itemId: "dragon_scimitar", quantity: 1 },
-              { slot: 1, itemId: "shark", quantity: 2 },
-            ],
-            monologues: [
-              {
-                id: "mono-alpha-1",
-                type: "thought",
-                content: "Pressure the midpoint and deny the comeback window.",
-                timestamp: Date.now() - 12_000,
-              },
-              {
-                id: "mono-alpha-2",
-                type: "action",
-                content: "Heavy swing lands cleanly on the left flank.",
-                timestamp: Date.now() - 7_000,
-              },
-            ],
+  let duelId: string | null = null;
+  let duelKeyHex: string | null = null;
+  let publishedState: { seq: number } | null = null;
+  if (duelSource === "synthetic_publish") {
+    duelKeyHex = requireString(state.currentDuelKeyHex, "currentDuelKeyHex");
+    duelId = String(state.currentMatchId || Date.now());
+    const currentBetWindowSeconds = Math.max(
+      30,
+      Number(state.currentBetWindowSeconds || 45),
+    );
+    publishedState = await requestJson<{ seq: number }>(
+      `${gameApiUrl}/api/streaming/state/publish`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          cycle: {
+            cycleId: "e2e-cycle-active",
+            phase: "FIGHTING",
+            duelId,
+            duelKeyHex,
+            cycleStartTime: Date.now() - 90_000,
+            phaseStartTime: Date.now() - 30_000,
+            phaseEndTime: Date.now() + 30_000,
+            betOpenTime: Date.now() - 15_000,
+            betCloseTime: Date.now() + currentBetWindowSeconds * 1_000,
+            fightStartTime: Date.now() + 60_000,
+            duelEndTime: null,
+            countdown: 30,
+            timeRemaining: 30_000,
+            winnerId: null,
+            winnerName: null,
+            winReason: null,
+            seed: null,
+            replayHash: null,
+            agent1: {
+              id: perpsCharacterId,
+              name: perpsModelName,
+              provider: "Hyperscape",
+              model: "alpha-local",
+              hp: 68,
+              maxHp: 100,
+              combatLevel: 88,
+              wins: 12,
+              losses: 4,
+              damageDealtThisFight: 148,
+              inventory: [
+                { slot: 0, itemId: "dragon_scimitar", quantity: 1 },
+                { slot: 1, itemId: "shark", quantity: 2 },
+              ],
+              monologues: [
+                {
+                  id: "mono-alpha-1",
+                  type: "thought",
+                  content:
+                    "Pressure the midpoint and deny the comeback window.",
+                  timestamp: Date.now() - 12_000,
+                },
+                {
+                  id: "mono-alpha-2",
+                  type: "action",
+                  content: "Heavy swing lands cleanly on the left flank.",
+                  timestamp: Date.now() - 7_000,
+                },
+              ],
+            },
+            agent2: {
+              id: "e2e-rival-beta",
+              name: "Rival Beta",
+              provider: "OpenRouter",
+              model: "beta-local",
+              hp: 41,
+              maxHp: 100,
+              combatLevel: 84,
+              wins: 9,
+              losses: 6,
+              damageDealtThisFight: 97,
+              inventory: [
+                { slot: 0, itemId: "abyssal_whip", quantity: 1 },
+                { slot: 1, itemId: "anglerfish", quantity: 1 },
+              ],
+              monologues: [
+                {
+                  id: "mono-beta-1",
+                  type: "thought",
+                  content:
+                    "Need one clean punish to get back into price discovery.",
+                  timestamp: Date.now() - 10_000,
+                },
+                {
+                  id: "mono-beta-2",
+                  type: "action",
+                  content: "Retreating toward the pillar to reset the exchange.",
+                  timestamp: Date.now() - 4_000,
+                },
+              ],
+            },
           },
-          agent2: {
-            id: "e2e-rival-beta",
-            name: "Rival Beta",
-            provider: "OpenRouter",
-            model: "beta-local",
-            hp: 41,
-            maxHp: 100,
-            combatLevel: 84,
-            wins: 9,
-            losses: 6,
-            damageDealtThisFight: 97,
-            inventory: [
-              { slot: 0, itemId: "abyssal_whip", quantity: 1 },
-              { slot: 1, itemId: "anglerfish", quantity: 1 },
-            ],
-            monologues: [
-              {
-                id: "mono-beta-1",
-                type: "thought",
-                content:
-                  "Need one clean punish to get back into price discovery.",
-                timestamp: Date.now() - 10_000,
-              },
-              {
-                id: "mono-beta-2",
-                type: "action",
-                content: "Retreating toward the pillar to reset the exchange.",
-                timestamp: Date.now() - 4_000,
-              },
-            ],
-          },
-        },
-        leaderboard: [
-          {
-            rank: 1,
-            name: perpsModelName,
-            provider: "Hyperscape",
-            model: "alpha-local",
-            wins: 12,
-            losses: 4,
-            winRate: 75,
-            currentStreak: 4,
-          },
-          {
-            rank: 2,
-            name: "Rival Beta",
-            provider: "OpenRouter",
-            model: "beta-local",
-            wins: 9,
-            losses: 6,
-            winRate: 60,
-            currentStreak: 2,
-          },
-          {
-            rank: 3,
-            name: "Gamma Spec",
-            provider: "Anthropic",
-            model: "gamma-local",
-            wins: 7,
-            losses: 8,
-            winRate: 46.7,
-            currentStreak: 1,
-          },
-        ],
-        cameraTarget: null,
-      }),
-    },
-  );
+          leaderboard: [
+            {
+              rank: 1,
+              name: perpsModelName,
+              provider: "Hyperscape",
+              model: "alpha-local",
+              wins: 12,
+              losses: 4,
+              winRate: 75,
+              currentStreak: 4,
+            },
+            {
+              rank: 2,
+              name: "Rival Beta",
+              provider: "OpenRouter",
+              model: "beta-local",
+              wins: 9,
+              losses: 6,
+              winRate: 60,
+              currentStreak: 2,
+            },
+            {
+              rank: 3,
+              name: "Gamma Spec",
+              provider: "Anthropic",
+              model: "gamma-local",
+              wins: 7,
+              losses: 8,
+              winRate: 46.7,
+              currentStreak: 1,
+            },
+          ],
+          cameraTarget: null,
+        }),
+      },
+    );
+  }
 
   const points = await requestJson<{ totalPoints: number }>(
     `${gameApiUrl}/api/arena/points/${encodeURIComponent(primaryWallet)}?scope=linked`,
@@ -303,8 +308,9 @@ async function main(): Promise<void> {
         duelKeyHex,
         uplineInviteCode: uplineInvite.inviteCode,
         primaryInviteCode: primaryInvite.inviteCode,
-        publishedSeq: publishedState.seq,
+        publishedSeq: publishedState?.seq ?? null,
         primaryLinkedPoints: points.totalPoints,
+        duelSource,
       },
       null,
       2,

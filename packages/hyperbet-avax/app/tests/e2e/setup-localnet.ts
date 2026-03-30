@@ -199,6 +199,33 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+async function advanceChainUnixTimestamp(
+  connection: Connection,
+  provider: AnchorProvider,
+  authority: Keypair,
+  minimumUnixTimestamp: number,
+  timeoutMs = 30_000,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const current = await currentChainUnixTimestamp(connection);
+    if (current >= minimumUnixTimestamp) {
+      return;
+    }
+    const tickTx = new Transaction().add(
+      SystemProgram.transfer({
+        fromPubkey: authority.publicKey,
+        toPubkey: authority.publicKey,
+        lamports: 1,
+      }),
+    );
+    await provider.sendAndConfirm(tickTx, [authority]);
+  }
+  throw new Error(
+    `Timed out advancing chain time to ${minimumUnixTimestamp}`,
+  );
+}
+
 function markStage(label: string): void {
   currentSendStage = label;
   console.log(`[e2e:setup-localnet] ${label}`);
@@ -617,7 +644,13 @@ async function main(): Promise<void> {
   const existingResolvedDuel =
     await fight.account.duelState.fetchNullable(resolvedDuelPda);
   const resolvedStatus = enumKey(existingResolvedDuel?.status);
-  if (resolvedStatus !== "resolved" && resolvedStatus !== "cancelled") {
+  const seedResolvedDuel =
+    process.env.E2E_SEED_RESOLVED_DUEL === "true";
+  if (
+    seedResolvedDuel &&
+    resolvedStatus !== "resolved" &&
+    resolvedStatus !== "cancelled"
+  ) {
     markStage("seed resolved duel");
     await fight.methods
       .upsertDuel(
@@ -657,7 +690,13 @@ async function main(): Promise<void> {
       })
       .signers([authority])
       .rpc();
-    await sleep((localDisputeWindowSeconds + 3) * 1000);
+    const proposalRecordedAt = await currentChainUnixTimestamp(connection);
+    await advanceChainUnixTimestamp(
+      connection,
+      provider,
+      authority,
+      proposalRecordedAt + localDisputeWindowSeconds + 1,
+    );
     markStage("finalize resolved duel result");
     await fight.methods
       .finalizeResult(

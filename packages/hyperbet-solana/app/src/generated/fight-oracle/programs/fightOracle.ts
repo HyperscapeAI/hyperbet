@@ -9,7 +9,7 @@
 import { assertIsInstructionWithAccounts, containsBytes, fixEncoderSize, getBytesEncoder, type Address, type Instruction, type InstructionWithData, type ReadonlyUint8Array } from '@solana/kit';
 import { parseCancelDuelInstruction, parseChallengeResultInstruction, parseFinalizeResultInstruction, parseFreezeOracleConfigInstruction, parseInitializeOracleInstruction, parseProposeResultInstruction, parseReproposeResultInstruction, parseSetOraclePausedInstruction, parseUpdateOracleConfigInstruction, parseUpsertDuelInstruction, type ParsedCancelDuelInstruction, type ParsedChallengeResultInstruction, type ParsedFinalizeResultInstruction, type ParsedFreezeOracleConfigInstruction, type ParsedInitializeOracleInstruction, type ParsedProposeResultInstruction, type ParsedReproposeResultInstruction, type ParsedSetOraclePausedInstruction, type ParsedUpdateOracleConfigInstruction, type ParsedUpsertDuelInstruction } from '../instructions/index.js';
 
-export const FIGHT_ORACLE_PROGRAM_ADDRESS = 'B5mRCRDJk9BrnH7regMWW5mpTQ8QG1CcCGSnDxMt8hmo' as Address<'B5mRCRDJk9BrnH7regMWW5mpTQ8QG1CcCGSnDxMt8hmo'>;
+export const FIGHT_ORACLE_PROGRAM_ADDRESS = 'GFdnu7kUnZGiXh4ejWiJSBCUxvq4UfdEeUv9jjFzr5EM' as Address<'GFdnu7kUnZGiXh4ejWiJSBCUxvq4UfdEeUv9jjFzr5EM'>;
 
 export enum FightOracleAccount { DuelState, OracleConfig }
 
@@ -37,7 +37,7 @@ if (containsBytes(data, fixEncoderSize(getBytesEncoder(), 8).encode(new Uint8Arr
 throw new Error("The provided instruction could not be identified as a fightOracle instruction.")
 }
 
-export type ParsedFightOracleInstruction<TProgram extends string = 'B5mRCRDJk9BrnH7regMWW5mpTQ8QG1CcCGSnDxMt8hmo'> =
+export type ParsedFightOracleInstruction<TProgram extends string = 'GFdnu7kUnZGiXh4ejWiJSBCUxvq4UfdEeUv9jjFzr5EM'> =
 | { instructionType: FightOracleInstruction.CancelDuel } & ParsedCancelDuelInstruction<TProgram>
 | { instructionType: FightOracleInstruction.ChallengeResult } & ParsedChallengeResultInstruction<TProgram>
 | { instructionType: FightOracleInstruction.FinalizeResult } & ParsedFinalizeResultInstruction<TProgram>

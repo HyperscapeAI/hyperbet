@@ -86,7 +86,7 @@ contract OracleFinalityTest is Test {
     }
 
     function testFuzz_tooSmallDisputeWindowReverts(uint64 window) public {
-        vm.assume(window < 60);
+        window = uint64(bound(uint256(window), 0, 59));
         vm.expectRevert(DuelOutcomeOracle.InvalidDisputeWindow.selector);
         new DuelOutcomeOracle(
             admin, reporter, finalizer, challenger, pauser, window
@@ -233,9 +233,8 @@ contract OracleFinalityTest is Test {
     // ── State transition: no regression ─────────────────────────
 
     function testFuzz_noStateRegression(uint8 initial, uint8 attempted) public {
-        vm.assume(initial >= 1 && initial <= 3); // valid upsert statuses
-        vm.assume(attempted >= 1 && attempted <= 3);
-        vm.assume(attempted < initial); // regression
+        initial = uint8(bound(uint256(initial), 2, 3)); // BETTING_OPEN or LOCKED (need room for regression)
+        attempted = uint8(bound(uint256(attempted), 1, initial - 1)); // strictly below initial
 
         bytes32 key = _duelKey(400 + uint256(initial) * 10 + attempted);
         if (initial == uint8(DuelOutcomeOracle.DuelStatus.LOCKED) && block.timestamp < 2_001) {

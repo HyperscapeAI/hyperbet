@@ -51,6 +51,16 @@ import {
 
 const EVM_DUEL_WINNER_MARKET_KIND = 0;
 const EVM_KEEPER_DEFER_FINALIZE = process.env.EVM_KEEPER_DEFER_FINALIZE === "true";
+const EVM_KEEPER_ENABLE_LIFECYCLE_WRITES =
+  process.env.EVM_KEEPER_ENABLE_LIFECYCLE_WRITES !== "false";
+const EVM_DUEL_STATUS_NULL = 0;
+const EVM_DUEL_STATUS_BETTING_OPEN = 2;
+const EVM_DUEL_STATUS_LOCKED = 3;
+const EVM_DUEL_STATUS_PROPOSED = 4;
+const EVM_DUEL_STATUS_CHALLENGED = 5;
+const EVM_DUEL_STATUS_RESOLVED = 6;
+const EVM_DUEL_STATUS_CANCELLED = 7;
+const DEFAULT_DUEL_START_DELAY_MS = 60_000;
 
 function asNum(value: unknown, fallback = 0): number {
   if (typeof value === "number") return value;
@@ -1517,8 +1527,31 @@ type EvmKeeperRuntime = {
   duelOracleAddress: Address;
   goldClobAddress: Address;
   publicClient: ReturnType<typeof createPublicClient>;
+  reporter: EvmRoleSigner;
+  operator: EvmRoleSigner;
+  finalizer: EvmRoleSigner | null;
+};
+
+type EvmRoleSigner = {
   walletClient: ReturnType<typeof createWalletClient>;
   account: ReturnType<typeof privateKeyToAccount>;
+};
+
+type EvmOracleDuelState = {
+  duelKey: Hex;
+  participantAHash: Hex;
+  participantBHash: Hex;
+  status: number;
+  winner: number;
+  betOpenTs: bigint;
+  betCloseTs: bigint;
+  duelStartTs: bigint;
+  duelEndTs: bigint;
+  seed: bigint;
+  resultHash: Hex;
+  replayHash: Hex;
+  activeProposalId: Hex;
+  metadataUri: string;
 };
 
 function parseAddressEnv(value: string | undefined): Address | null {
@@ -1537,6 +1570,18 @@ function parsePrivateKey(value: string | undefined): `0x${string}` | null {
     return null;
   }
   return withPrefix as `0x${string}`;
+}
+
+function firstDefinedPrivateKey(
+  names: readonly string[],
+): `0x${string}` | null {
+  for (const name of names) {
+    const parsed = parsePrivateKey(process.env[name]);
+    if (parsed) {
+      return parsed;
+    }
+  }
+  return null;
 }
 
 function isLocalRpcUrl(value: string): boolean {
@@ -1623,7 +1668,6 @@ async function alignLocalChainTime(
 
 function buildEvmRuntime(
   chainKey: BettingEvmChain,
-  privateKey: `0x${string}` | null,
 ): EvmKeeperRuntime | null {
   const runtimeEnv = resolveBettingEvmRuntimeEnv(
     chainKey,
@@ -1632,13 +1676,47 @@ function buildEvmRuntime(
   );
   const oracle = parseAddressEnv(runtimeEnv.duelOracleAddress);
   const clob = parseAddressEnv(runtimeEnv.goldClobAddress);
-  if (!oracle || !clob || !privateKey) {
+  if (!oracle || !clob) {
     return null;
   }
 
-  const account = privateKeyToAccount(privateKey);
+  const upper = chainKey.toUpperCase();
+  const reporterPrivateKey = firstDefinedPrivateKey([
+    `HYPERBET_${upper}_TESTNET_REPORTER_PRIVATE_KEY`,
+    `HYPERBET_${upper}_STAGING_REPORTER_PRIVATE_KEY`,
+    "EVM_REPORTER_PRIVATE_KEY",
+    "TESTNET_REPORTER_PRIVATE_KEY",
+    "EVM_KEEPER_PRIVATE_KEY",
+    "PRIVATE_KEY",
+  ]);
+  const operatorPrivateKey = firstDefinedPrivateKey([
+    `HYPERBET_${upper}_TESTNET_MARKET_OPERATOR_PRIVATE_KEY`,
+    `HYPERBET_${upper}_STAGING_MARKET_OPERATOR_PRIVATE_KEY`,
+    "EVM_MARKET_OPERATOR_PRIVATE_KEY",
+    "TESTNET_MARKET_OPERATOR_PRIVATE_KEY",
+    "TESTNET_ADMIN_PRIVATE_KEY",
+    "EVM_KEEPER_PRIVATE_KEY",
+    "PRIVATE_KEY",
+  ]);
+  const finalizerPrivateKey = firstDefinedPrivateKey([
+    `HYPERBET_${upper}_TESTNET_FINALIZER_PRIVATE_KEY`,
+    `HYPERBET_${upper}_STAGING_FINALIZER_PRIVATE_KEY`,
+    "EVM_FINALIZER_PRIVATE_KEY",
+    "TESTNET_FINALIZER_PRIVATE_KEY",
+    "EVM_KEEPER_PRIVATE_KEY",
+    "PRIVATE_KEY",
+  ]);
+  if (!reporterPrivateKey || !operatorPrivateKey) {
+    return null;
+  }
+
   const rpcUrl = runtimeEnv.rpcUrl.trim();
   const transport = http(rpcUrl);
+  const reporterAccount = privateKeyToAccount(reporterPrivateKey);
+  const operatorAccount = privateKeyToAccount(operatorPrivateKey);
+  const finalizerAccount = finalizerPrivateKey
+    ? privateKeyToAccount(finalizerPrivateKey)
+    : null;
   return {
     chainKey,
     rpcUrl,
@@ -1646,20 +1724,32 @@ function buildEvmRuntime(
     duelOracleAddress: oracle,
     goldClobAddress: clob,
     publicClient: createPublicClient({ transport }),
-    walletClient: createWalletClient({ account, transport }),
-    account,
+    reporter: {
+      account: reporterAccount,
+      walletClient: createWalletClient({ account: reporterAccount, transport }),
+    },
+    operator: {
+      account: operatorAccount,
+      walletClient: createWalletClient({ account: operatorAccount, transport }),
+    },
+    finalizer: finalizerAccount
+      ? {
+          account: finalizerAccount,
+          walletClient: createWalletClient({
+            account: finalizerAccount,
+            transport,
+          }),
+        }
+      : null,
   };
 }
 
-const evmKeeperPrivateKey = parsePrivateKey(
-  process.env.EVM_KEEPER_PRIVATE_KEY ?? process.env.PRIVATE_KEY,
-);
 const configuredEvmKeeperChains = parseBettingEvmChainList(
   process.env.EVM_KEEPER_CHAINS,
   BETTING_EVM_CHAIN_ORDER,
 );
 const evmKeeperChains = configuredEvmKeeperChains
-  .map((chainKey) => buildEvmRuntime(chainKey, evmKeeperPrivateKey))
+  .map((chainKey) => buildEvmRuntime(chainKey))
   .filter((chain): chain is EvmKeeperRuntime => chain !== null);
 
 const requiredPrograms = [
@@ -2128,6 +2218,28 @@ function buildDuelMetadata(data: DuelLifecycleEvent): string {
   });
 }
 
+function deriveCanonicalDuelTimes(data: DuelLifecycleEvent): {
+  betOpenTs: number;
+  betCloseTs: number;
+  duelStartTs: number;
+} {
+  const nowMs = Date.now();
+  const betOpenTimeMs = data.betOpenTime ?? nowMs;
+  const betCloseTimeMs = Math.max(
+    betOpenTimeMs + 1_000,
+    data.betCloseTime ?? data.fightStartTime ?? nowMs + 1_000,
+  );
+  const duelStartTimeMs = Math.max(
+    betCloseTimeMs,
+    data.fightStartTime ?? betCloseTimeMs + DEFAULT_DUEL_START_DELAY_MS,
+  );
+  return {
+    betOpenTs: Math.floor(betOpenTimeMs / 1000),
+    betCloseTs: Math.floor(betCloseTimeMs / 1000),
+    duelStartTs: Math.floor(duelStartTimeMs / 1000),
+  };
+}
+
 function duelStatusEnum(
   status: "scheduled" | "bettingOpen" | "locked",
 ): DuelStatusState {
@@ -2147,17 +2259,7 @@ async function upsertDuelLifecycle(
   const duelKey = duelKeyHexToBytes(data.duelKeyHex);
   const duelState = findDuelStatePda(fightProgram.programId, duelKey);
   const nowSeconds = Math.floor(Date.now() / 1000);
-  const betOpenTs = Math.floor((data.betOpenTime ?? Date.now()) / 1000);
-  const betCloseTs = Math.max(
-    betOpenTs + 1,
-    Math.floor(
-      (data.betCloseTime ?? data.fightStartTime ?? Date.now() + 1_000) / 1000,
-    ),
-  );
-  const duelStartTs = Math.max(
-    betCloseTs,
-    Math.floor((data.fightStartTime ?? data.betCloseTime ?? Date.now()) / 1000),
-  );
+  const { betOpenTs, betCloseTs, duelStartTs } = deriveCanonicalDuelTimes(data);
   const requestedStatus =
     status === "scheduled" && betOpenTs <= nowSeconds ? "bettingOpen" : status;
 
@@ -2891,43 +2993,64 @@ async function upsertEvmDuelLifecycle(
   }
 
   const duelKey = normalizeHex32(data.duelKeyHex);
-  const betOpenTs = BigInt(Math.floor((data.betOpenTime ?? Date.now()) / 1000));
-  const betCloseTs = BigInt(
-    Math.floor((data.betCloseTime ?? data.fightStartTime ?? Date.now() + 1_000) / 1000),
-  );
-  const duelStartTs = BigInt(
-    Math.max(
-      Number(betCloseTs),
-      Math.floor((data.fightStartTime ?? data.betCloseTime ?? Date.now()) / 1000),
-    ),
-  );
+  const canonicalTimes = deriveCanonicalDuelTimes(data);
+  const betOpenTs = BigInt(canonicalTimes.betOpenTs);
+  const betCloseTs = BigInt(canonicalTimes.betCloseTs);
+  const duelStartTs = BigInt(canonicalTimes.duelStartTs);
   const metadata = buildDuelMetadata(data);
 
   const results = await Promise.allSettled(
     evmKeeperChains.map(async (chain) => {
+      const existing = (await chain.publicClient.readContract({
+        address: chain.duelOracleAddress,
+        abi: DUEL_OUTCOME_ORACLE_ABI,
+        functionName: "getDuel",
+        args: [duelKey],
+      })) as EvmOracleDuelState;
+      const existingStatus = asNum(existing?.status, EVM_DUEL_STATUS_NULL);
+      const participantAHash =
+        existingStatus > EVM_DUEL_STATUS_NULL
+          ? existing.participantAHash
+          : participantHashHex(data.agent1);
+      const participantBHash =
+        existingStatus > EVM_DUEL_STATUS_NULL
+          ? existing.participantBHash
+          : participantHashHex(data.agent2);
+      const canonicalBetOpenTs =
+        existingStatus >= EVM_DUEL_STATUS_BETTING_OPEN
+          ? existing.betOpenTs
+          : betOpenTs;
+      const canonicalBetCloseTs =
+        existingStatus >= EVM_DUEL_STATUS_BETTING_OPEN
+          ? existing.betCloseTs
+          : betCloseTs;
+      const canonicalDuelStartTs =
+        existingStatus >= EVM_DUEL_STATUS_BETTING_OPEN
+          ? existing.duelStartTs
+          : duelStartTs;
       if (status >= 3) {
         await alignLocalChainTime(
           chain,
-          (data.betCloseTime ?? data.fightStartTime ?? Date.now()) + 1_000,
+          Number(canonicalBetCloseTs) * 1_000 + 1_000,
           `lock:${data.duelId}`,
         );
       }
-      const upsertHash = await chain.walletClient.writeContract({
+      const upsertHash = await chain.reporter.walletClient.writeContract({
         chain: undefined,
         address: chain.duelOracleAddress,
         abi: DUEL_OUTCOME_ORACLE_ABI,
         functionName: "upsertDuel",
         args: [
           duelKey,
-          participantHashHex(data.agent1),
-          participantHashHex(data.agent2),
-          betOpenTs,
-          betCloseTs,
-          duelStartTs,
+          participantAHash,
+          participantBHash,
+          canonicalBetOpenTs,
+          canonicalBetCloseTs,
+          canonicalDuelStartTs,
           metadata,
           status,
         ],
-        account: chain.account,
+        account: chain.reporter.account,
       });
       await chain.publicClient.waitForTransactionReceipt({
         hash: upsertHash,
@@ -2942,13 +3065,13 @@ async function upsertEvmDuelLifecycle(
       })) as { exists: boolean };
 
       if (!market.exists) {
-        const createHash = await chain.walletClient.writeContract({
+        const createHash = await chain.operator.walletClient.writeContract({
           chain: undefined,
           address: chain.goldClobAddress,
           abi: EVM_GOLD_CLOB_ADMIN_ABI,
           functionName: "createMarketForDuel",
           args: [duelKey, EVM_DUEL_WINNER_MARKET_KIND],
-          account: chain.account,
+          account: chain.operator.account,
         });
         await chain.publicClient.waitForTransactionReceipt({
           hash: createHash,
@@ -2956,13 +3079,13 @@ async function upsertEvmDuelLifecycle(
         });
       }
 
-      const syncHash = await chain.walletClient.writeContract({
+      const syncHash = await chain.operator.walletClient.writeContract({
         chain: undefined,
         address: chain.goldClobAddress,
         abi: EVM_GOLD_CLOB_ADMIN_ABI,
         functionName: "syncMarketFromOracle",
         args: [duelKey, EVM_DUEL_WINNER_MARKET_KIND],
-        account: chain.account,
+        account: chain.operator.account,
       });
       await chain.publicClient.waitForTransactionReceipt({
         hash: syncHash,
@@ -3012,21 +3135,144 @@ async function reportEvmResult(data: DuelLifecycleEvent): Promise<void> {
   if (winner === 0) {
     return;
   }
-
+  const canonicalTimes = deriveCanonicalDuelTimes(data);
+  const defaultBetOpenTs = BigInt(canonicalTimes.betOpenTs);
+  const defaultBetCloseTs = BigInt(canonicalTimes.betCloseTs);
+  const defaultDuelStartTs = BigInt(canonicalTimes.duelStartTs);
   const duelEndTs = BigInt(Math.floor((data.duelEndTime ?? Date.now()) / 1000));
   const metadata = buildDuelMetadata(data);
 
   const results = await Promise.allSettled(
     evmKeeperChains.map(async (chain) => {
+      const existing = (await chain.publicClient.readContract({
+        address: chain.duelOracleAddress,
+        abi: DUEL_OUTCOME_ORACLE_ABI,
+        functionName: "getDuel",
+        args: [duelKey],
+      })) as EvmOracleDuelState;
+      const existingStatus = asNum(existing?.status, EVM_DUEL_STATUS_NULL);
+      const participantAHash =
+        existingStatus > EVM_DUEL_STATUS_NULL
+          ? existing.participantAHash
+          : participantHashHex(data.agent1);
+      const participantBHash =
+        existingStatus > EVM_DUEL_STATUS_NULL
+          ? existing.participantBHash
+          : participantHashHex(data.agent2);
+      const canonicalBetOpenTs =
+        existingStatus >= EVM_DUEL_STATUS_BETTING_OPEN
+          ? existing.betOpenTs
+          : defaultBetOpenTs;
+      const canonicalBetCloseTs =
+        existingStatus >= EVM_DUEL_STATUS_BETTING_OPEN
+          ? existing.betCloseTs
+          : defaultBetCloseTs;
+      const canonicalDuelStartTs =
+        existingStatus >= EVM_DUEL_STATUS_BETTING_OPEN
+          ? existing.duelStartTs
+          : defaultDuelStartTs;
+
+      if (
+        existingStatus >= EVM_DUEL_STATUS_RESOLVED ||
+        existingStatus === EVM_DUEL_STATUS_CANCELLED
+      ) {
+        return;
+      }
+
+      // Fail-closed: if the result proposal has been challenged, sync the
+      // market from the oracle (so it reflects the latest on-chain truth)
+      // and leave the duel for manual resolution.  Mirrors Solana keeper
+      // behaviour at packages/hyperbet-solana/keeper/src/bot.ts L2662-2668.
+      if (existingStatus === EVM_DUEL_STATUS_CHALLENGED) {
+        const syncHash = await chain.operator.walletClient.writeContract({
+          chain: undefined,
+          address: chain.goldClobAddress,
+          abi: EVM_GOLD_CLOB_ADMIN_ABI,
+          functionName: "syncMarketFromOracle",
+          args: [duelKey, EVM_DUEL_WINNER_MARKET_KIND],
+          account: chain.operator.account,
+        });
+        await chain.publicClient.waitForTransactionReceipt({
+          hash: syncHash,
+          confirmations: 1,
+        });
+        console.warn(
+          `[bot] Duel ${data.duelId} result proposal is challenged on ${chain.chainKey}; leaving market fail-closed until manual resolution.`,
+        );
+        return;
+      }
+
       await alignLocalChainTime(
         chain,
-        Math.max(
-          data.betCloseTime ?? 0,
-          (data.duelEndTime ?? data.betCloseTime ?? Date.now()) + 1_000,
-        ),
+        Math.max(Number(canonicalBetCloseTs) * 1_000, data.duelEndTime ?? 0) + 1_000,
         `settle:${data.duelId}`,
       );
-      const proposeHash = await chain.walletClient.writeContract({
+
+      if (existingStatus < EVM_DUEL_STATUS_LOCKED) {
+        const lockHash = await chain.reporter.walletClient.writeContract({
+          chain: undefined,
+          address: chain.duelOracleAddress,
+          abi: DUEL_OUTCOME_ORACLE_ABI,
+          functionName: "upsertDuel",
+          args: [
+            duelKey,
+            participantAHash,
+            participantBHash,
+            canonicalBetOpenTs,
+            canonicalBetCloseTs,
+            canonicalDuelStartTs,
+            metadata,
+            EVM_DUEL_STATUS_LOCKED,
+          ],
+          account: chain.reporter.account,
+        });
+        await chain.publicClient.waitForTransactionReceipt({
+          hash: lockHash,
+          confirmations: 1,
+        });
+
+        const lockSyncHash = await chain.operator.walletClient.writeContract({
+          chain: undefined,
+          address: chain.goldClobAddress,
+          abi: EVM_GOLD_CLOB_ADMIN_ABI,
+          functionName: "syncMarketFromOracle",
+          args: [duelKey, EVM_DUEL_WINNER_MARKET_KIND],
+          account: chain.operator.account,
+        });
+        await chain.publicClient.waitForTransactionReceipt({
+          hash: lockSyncHash,
+          confirmations: 1,
+        });
+      }
+
+      if (existingStatus === EVM_DUEL_STATUS_PROPOSED) {
+        if (EVM_KEEPER_DEFER_FINALIZE) {
+          console.log(
+            `[bot] EVM finalization deferred on ${chain.chainKey}; existing result proposal left pending.`,
+          );
+          return;
+        }
+        if (!chain.finalizer) {
+          throw new Error(
+            `missing finalizer signer for ${chain.chainKey}; set TESTNET_FINALIZER_PRIVATE_KEY or EVM_FINALIZER_PRIVATE_KEY`,
+          );
+        }
+        const finalizeHash = await chain.finalizer.walletClient.writeContract({
+          chain: undefined,
+          address: chain.duelOracleAddress,
+          abi: DUEL_OUTCOME_ORACLE_ABI,
+          functionName: "finalizeResult",
+          args: [duelKey, metadata],
+          account: chain.finalizer.account,
+        });
+        await chain.publicClient.waitForTransactionReceipt({
+          hash: finalizeHash,
+          confirmations: 1,
+        });
+        return;
+      }
+
+      const proposeHash = await chain.reporter.walletClient.writeContract({
         chain: undefined,
         address: chain.duelOracleAddress,
         abi: DUEL_OUTCOME_ORACLE_ABI,
@@ -3045,20 +3291,20 @@ async function reportEvmResult(data: DuelLifecycleEvent): Promise<void> {
           duelEndTs,
           metadata,
         ],
-        account: chain.account,
+        account: chain.reporter.account,
       });
       await chain.publicClient.waitForTransactionReceipt({
         hash: proposeHash,
         confirmations: 1,
       });
 
-      const syncHash = await chain.walletClient.writeContract({
+      const syncHash = await chain.operator.walletClient.writeContract({
         chain: undefined,
         address: chain.goldClobAddress,
         abi: EVM_GOLD_CLOB_ADMIN_ABI,
         functionName: "syncMarketFromOracle",
         args: [duelKey, EVM_DUEL_WINNER_MARKET_KIND],
-        account: chain.account,
+        account: chain.operator.account,
       });
       await chain.publicClient.waitForTransactionReceipt({
         hash: syncHash,
@@ -3073,13 +3319,18 @@ async function reportEvmResult(data: DuelLifecycleEvent): Promise<void> {
         return;
       }
 
-      const finalizeHash = await chain.walletClient.writeContract({
+      if (!chain.finalizer) {
+        throw new Error(
+          `missing finalizer signer for ${chain.chainKey}; set TESTNET_FINALIZER_PRIVATE_KEY or EVM_FINALIZER_PRIVATE_KEY`,
+        );
+      }
+      const finalizeHash = await chain.finalizer.walletClient.writeContract({
         chain: undefined,
         address: chain.duelOracleAddress,
         abi: DUEL_OUTCOME_ORACLE_ABI,
         functionName: "finalizeResult",
         args: [duelKey, metadata],
-        account: chain.account,
+        account: chain.finalizer.account,
       });
       await chain.publicClient.waitForTransactionReceipt({
         hash: finalizeHash,
@@ -3272,10 +3523,12 @@ gameClient.onDuelStart(async (data) => {
     }
   }
 
-  try {
-    await upsertEvmDuelLifecycle(data, 2);
-  } catch (err) {
-    console.error("Failed to upsert EVM market lifecycle for duel:", err);
+  if (EVM_KEEPER_ENABLE_LIFECYCLE_WRITES) {
+    try {
+      await upsertEvmDuelLifecycle(data, 2);
+    } catch (err) {
+      console.error("Failed to upsert EVM market lifecycle for duel:", err);
+    }
   }
   writeBotHealthSnapshot();
 });
@@ -3300,10 +3553,12 @@ gameClient.onBettingLocked(async (data) => {
     }
   }
 
-  try {
-    await upsertEvmDuelLifecycle(data, 3);
-  } catch (error) {
-    console.error("Failed to lock EVM market for duel:", error);
+  if (EVM_KEEPER_ENABLE_LIFECYCLE_WRITES) {
+    try {
+      await upsertEvmDuelLifecycle(data, 3);
+    } catch (error) {
+      console.error("Failed to lock EVM market for duel:", error);
+    }
   }
   writeBotHealthSnapshot();
 });
@@ -3380,8 +3635,10 @@ gameClient.onDuelEnd(async (data) => {
       }
     }
 
-    await reportEvmResult(data);
-    console.log(`Resolved market for duel ${data.duelId}`);
+    if (EVM_KEEPER_ENABLE_LIFECYCLE_WRITES) {
+      await reportEvmResult(data);
+      console.log(`Resolved market for duel ${data.duelId}`);
+    }
   } catch (err) {
     console.error("Failed to resolve market:", err);
   }
