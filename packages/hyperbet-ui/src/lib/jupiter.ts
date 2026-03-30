@@ -2,6 +2,8 @@ import { CONFIG } from "./config";
 import { WalletContextState } from "@solana/wallet-adapter-react";
 import { Connection, VersionedTransaction } from "@solana/web3.js";
 
+import { confirmSignatureViaRpc, sendRawTransactionViaRpc } from "./solanaRpc";
+
 const DEFAULT_JUPITER_BASE_URL = CONFIG.jupiterBaseUrl;
 
 type QuoteResponse = {
@@ -70,12 +72,7 @@ export async function swapToGoldViaJupiter(params: {
   );
 
   const signed = await wallet.signTransaction(tx);
-  const signature = await connection.sendRawTransaction(signed.serialize(), {
-    maxRetries: 3,
-    skipPreflight: false,
-    preflightCommitment: "confirmed",
-  });
-
-  await connection.confirmTransaction(signature, "confirmed");
+  const signature = await sendRawTransactionViaRpc(connection, signed);
+  await confirmSignatureViaRpc(connection, signature);
   return signature;
 }

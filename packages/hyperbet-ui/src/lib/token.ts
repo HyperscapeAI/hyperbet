@@ -5,6 +5,8 @@ import {
 } from "@solana/spl-token";
 import { Connection, PublicKey, Transaction } from "@solana/web3.js";
 
+import { confirmSignatureViaRpc, sendRawTransactionViaRpc } from "./solanaRpc";
+
 function isMintLookupError(error: unknown): boolean {
   const message = (error as Error)?.message?.toLowerCase?.() ?? "";
   return message.includes("could not find mint");
@@ -92,25 +94,14 @@ export async function confirmTx(
   connection: Connection,
   signature: string,
 ): Promise<void> {
-  const latest = await connection.getLatestBlockhash("confirmed");
-  await connection.confirmTransaction(
-    {
-      signature,
-      blockhash: latest.blockhash,
-      lastValidBlockHeight: latest.lastValidBlockHeight,
-    },
-    "confirmed",
-  );
+  await confirmSignatureViaRpc(connection, signature);
 }
 
 export async function sendTx(
   connection: Connection,
   signedTx: Transaction,
 ): Promise<string> {
-  const signature = await connection.sendRawTransaction(signedTx.serialize(), {
-    skipPreflight: false,
-    preflightCommitment: "confirmed",
-  });
+  const signature = await sendRawTransactionViaRpc(connection, signedTx);
   await confirmTx(connection, signature);
   return signature;
 }

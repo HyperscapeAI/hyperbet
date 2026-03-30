@@ -5,7 +5,7 @@ import {
 } from "@hyperbet/chain-registry";
 import type { Chain } from "wagmi/chains";
 
-import { CONFIG, getEvmRpcUrl } from "./config";
+import { CONFIG, getEvmReadRpcUrl, getEvmSubmitRpcUrl } from "./config";
 
 export type ChainId = "solana" | BettingEvmChain;
 
@@ -15,6 +15,8 @@ export type EvmChainConfig = {
   name: string;
   shortName: string;
   rpcUrl: string;
+  readRpcUrl: string;
+  submitRpcUrl: string;
   goldClobAddress: string;
   nativeCurrency: { name: string; symbol: string; decimals: number };
   blockExplorer: string;
@@ -87,24 +89,28 @@ function getRuntimeChainConfig(chainKey: BettingEvmChain): EvmChainConfig | null
   const blockExplorer =
     runtime.chainId === runtime.deployment.chainId
       ? runtime.deployment.blockExplorerUrl
-      : getEvmRpcUrl(chainKey);
+      : getEvmReadRpcUrl(chainKey);
   const isTestnet =
     runtime.deployment.targetKind === "testnet" ||
     runtime.chainId !== runtime.deployment.chainId;
+  const readRpcUrl = getEvmReadRpcUrl(chainKey);
+  const submitRpcUrl = getEvmSubmitRpcUrl(chainKey);
 
   return {
     chainId: chainKey,
     evmChainId: runtime.chainId,
     name,
     shortName,
-    rpcUrl: getEvmRpcUrl(chainKey),
+    rpcUrl: readRpcUrl,
+    readRpcUrl,
+    submitRpcUrl,
     goldClobAddress: runtime.goldClobAddress,
     nativeCurrency: runtime.deployment.nativeCurrency,
     blockExplorer,
     wagmiChain: createCustomChain({
       chainId: runtime.chainId,
       name,
-      rpcUrl: getEvmRpcUrl(chainKey),
+      rpcUrl: readRpcUrl,
       blockExplorer,
       nativeCurrency: runtime.deployment.nativeCurrency,
       testnet: isTestnet,

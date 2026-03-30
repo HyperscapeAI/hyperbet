@@ -16,7 +16,10 @@ import {
   type RecordedBetChain,
 } from "@hyperbet/chain-registry";
 import {
+  findUnsupportedJsonRpcMethod,
+  isWriteRateLimitedRoute,
   mergePredictionMarketsWithHealth,
+  PUBLIC_SOLANA_RPC_READ_METHODS,
   type KeeperBotHealthSnapshot,
   type KeeperMarketHealthRecord,
 } from "@hyperbet/mm-core";
@@ -133,6 +136,10 @@ type ParserState = {
 type RateBucket = {
   tokens: number;
   lastRefillMs: number;
+};
+
+type JsonRpcRequestPayload = Record<string, unknown> & {
+  method: string;
 };
 
 const encoder = new TextEncoder();
@@ -2592,6 +2599,19 @@ async function handleSolanaRpcProxy(req: Request): Promise<Response> {
   if (!rpcBody.ok) {
     return rpcBody.response;
   }
+  const unsupportedMethod = findUnsupportedJsonRpcMethod(
+    rpcBody.requests,
+    PUBLIC_SOLANA_RPC_READ_METHODS,
+  );
+  if (unsupportedMethod) {
+    return jsonResponse(
+      req,
+      {
+        error: `JSON-RPC method ${unsupportedMethod} is not allowed on the public Solana RPC proxy`,
+      },
+      403,
+    );
+  }
 
   try {
     const upstream = await fetch(SOLANA_RPC_PROXY_URL, {
@@ -2730,7 +2750,7 @@ async function handleSolanaSenderProxy(req: Request): Promise<Response> {
 }
 
 type JsonRpcBodyResult =
-  | { ok: true; bodyText: string }
+  | { ok: true; bodyText: string; requests: JsonRpcRequestPayload[] }
   | { ok: false; response: Response };
 
 async function readJsonRpcBody(
@@ -2775,7 +2795,9 @@ async function readJsonRpcBody(
     };
   }
 
-  const requests = Array.isArray(parsedBody) ? parsedBody : [parsedBody];
+  const requests = (
+    Array.isArray(parsedBody) ? parsedBody : [parsedBody]
+  ) as JsonRpcRequestPayload[];
   const hasInvalidRequest = requests.some((entry) => {
     if (!entry || typeof entry !== "object") return true;
     const method = (entry as Record<string, unknown>).method;
@@ -2788,7 +2810,14 @@ async function readJsonRpcBody(
     };
   }
 
-  return { ok: true, bodyText };
+  return {
+    ok: true,
+    bodyText,
+    requests: requests.map((entry) => ({
+      ...entry,
+      method: entry.method.trim(),
+    })),
+  };
 }
 
 async function handleBirdeyePrice(req: Request, url: URL): Promise<Response> {
@@ -2904,8 +2933,7 @@ const server = Bun.serve({
   development: process.env.NODE_ENV !== "production",
   fetch: async (req: Request) => {
     const url = new URL(req.url);
-    const isWriteRoute =
-      req.method === "POST" || url.pathname === "/api/streaming/state/publish";
+    const isWriteRoute = isWriteRateLimitedRoute(req.method, url.pathname);
     const allowed = checkRateLimit(
       req,
       url.pathname,
