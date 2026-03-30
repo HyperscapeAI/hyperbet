@@ -6,24 +6,24 @@
  * @see https://github.com/codama-idl/codama
  */
 
-import { assertAccountExists, assertAccountsExist, combineCodec, decodeAccount, fetchEncodedAccount, fetchEncodedAccounts, fixDecoderSize, fixEncoderSize, getAddressDecoder, getAddressEncoder, getBytesDecoder, getBytesEncoder, getStructDecoder, getStructEncoder, getU16Decoder, getU16Encoder, getU8Decoder, getU8Encoder, transformEncoder, type Account, type Address, type EncodedAccount, type FetchAccountConfig, type FetchAccountsConfig, type FixedSizeCodec, type FixedSizeDecoder, type FixedSizeEncoder, type MaybeAccount, type MaybeEncodedAccount, type ReadonlyUint8Array } from '@solana/kit';
+import { assertAccountExists, assertAccountsExist, combineCodec, decodeAccount, fetchEncodedAccount, fetchEncodedAccounts, fixDecoderSize, fixEncoderSize, getAddressDecoder, getAddressEncoder, getBooleanDecoder, getBooleanEncoder, getBytesDecoder, getBytesEncoder, getStructDecoder, getStructEncoder, getU16Decoder, getU16Encoder, getU8Decoder, getU8Encoder, transformEncoder, type Account, type Address, type EncodedAccount, type FetchAccountConfig, type FetchAccountsConfig, type FixedSizeCodec, type FixedSizeDecoder, type FixedSizeEncoder, type MaybeAccount, type MaybeEncodedAccount, type ReadonlyUint8Array } from '@solana/kit';
 
 export const MARKET_CONFIG_DISCRIMINATOR: ReadonlyUint8Array = new Uint8Array([119, 255, 200, 88, 252, 82, 128, 24]);
 
 export function getMarketConfigDiscriminatorBytes(): ReadonlyUint8Array { return fixEncoderSize(getBytesEncoder(), 8).encode(MARKET_CONFIG_DISCRIMINATOR); }
 
-export type MarketConfig = { discriminator: ReadonlyUint8Array; authority: Address; marketOperator: Address; treasury: Address; marketMaker: Address; tradeTreasuryFeeBps: number; tradeMarketMakerFeeBps: number; winningsMarketMakerFeeBps: number; bump: number;  };
+export type MarketConfig = { discriminator: ReadonlyUint8Array; authority: Address; marketOperator: Address; treasury: Address; marketMaker: Address; tradeTreasuryFeeBps: number; tradeMarketMakerFeeBps: number; winningsMarketMakerFeeBps: number; orderPlacementPaused: boolean; marketCreationPaused: boolean; configFrozen: boolean; bump: number;  };
 
-export type MarketConfigArgs = { authority: Address; marketOperator: Address; treasury: Address; marketMaker: Address; tradeTreasuryFeeBps: number; tradeMarketMakerFeeBps: number; winningsMarketMakerFeeBps: number; bump: number;  };
+export type MarketConfigArgs = { authority: Address; marketOperator: Address; treasury: Address; marketMaker: Address; tradeTreasuryFeeBps: number; tradeMarketMakerFeeBps: number; winningsMarketMakerFeeBps: number; orderPlacementPaused: boolean; marketCreationPaused: boolean; configFrozen: boolean; bump: number;  };
 
 /** Gets the encoder for {@link MarketConfigArgs} account data. */
 export function getMarketConfigEncoder(): FixedSizeEncoder<MarketConfigArgs> {
-    return transformEncoder(getStructEncoder([['discriminator', fixEncoderSize(getBytesEncoder(), 8)], ['authority', getAddressEncoder()], ['marketOperator', getAddressEncoder()], ['treasury', getAddressEncoder()], ['marketMaker', getAddressEncoder()], ['tradeTreasuryFeeBps', getU16Encoder()], ['tradeMarketMakerFeeBps', getU16Encoder()], ['winningsMarketMakerFeeBps', getU16Encoder()], ['bump', getU8Encoder()]]), (value) => ({ ...value, discriminator: MARKET_CONFIG_DISCRIMINATOR }));
+    return transformEncoder(getStructEncoder([['discriminator', fixEncoderSize(getBytesEncoder(), 8)], ['authority', getAddressEncoder()], ['marketOperator', getAddressEncoder()], ['treasury', getAddressEncoder()], ['marketMaker', getAddressEncoder()], ['tradeTreasuryFeeBps', getU16Encoder()], ['tradeMarketMakerFeeBps', getU16Encoder()], ['winningsMarketMakerFeeBps', getU16Encoder()], ['orderPlacementPaused', getBooleanEncoder()], ['marketCreationPaused', getBooleanEncoder()], ['configFrozen', getBooleanEncoder()], ['bump', getU8Encoder()]]), (value) => ({ ...value, discriminator: MARKET_CONFIG_DISCRIMINATOR }));
 }
 
 /** Gets the decoder for {@link MarketConfig} account data. */
 export function getMarketConfigDecoder(): FixedSizeDecoder<MarketConfig> {
-    return getStructDecoder([['discriminator', fixDecoderSize(getBytesDecoder(), 8)], ['authority', getAddressDecoder()], ['marketOperator', getAddressDecoder()], ['treasury', getAddressDecoder()], ['marketMaker', getAddressDecoder()], ['tradeTreasuryFeeBps', getU16Decoder()], ['tradeMarketMakerFeeBps', getU16Decoder()], ['winningsMarketMakerFeeBps', getU16Decoder()], ['bump', getU8Decoder()]]);
+    return getStructDecoder([['discriminator', fixDecoderSize(getBytesDecoder(), 8)], ['authority', getAddressDecoder()], ['marketOperator', getAddressDecoder()], ['treasury', getAddressDecoder()], ['marketMaker', getAddressDecoder()], ['tradeTreasuryFeeBps', getU16Decoder()], ['tradeMarketMakerFeeBps', getU16Decoder()], ['winningsMarketMakerFeeBps', getU16Decoder()], ['orderPlacementPaused', getBooleanDecoder()], ['marketCreationPaused', getBooleanDecoder()], ['configFrozen', getBooleanDecoder()], ['bump', getU8Decoder()]]);
 }
 
 /** Gets the codec for {@link MarketConfig} account data. */

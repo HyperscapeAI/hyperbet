@@ -57,6 +57,26 @@
   --hm-font-body: "Inter", system-ui, -apple-system, sans-serif;
   --hm-font-mono: "IBM Plex Mono", "Menlo", monospace;
   --hm-font-display: "Orbitron", "Inter", system-ui, sans-serif;
+  --hm-header-control-bg: linear-gradient(180deg, rgba(28, 29, 33, 0.94) 0%, rgba(14, 14, 16, 0.99) 100%);
+  --hm-header-control-hover-bg: linear-gradient(180deg, rgba(38, 39, 44, 0.98) 0%, rgba(18, 18, 21, 1) 100%);
+  --hm-header-control-border: rgba(255, 255, 255, 0.1);
+  --hm-header-control-border-strong: rgba(229, 184, 74, 0.34);
+  --hm-header-control-text: #eceef2;
+  --hm-header-theme-icon: var(--hm-accent-gold);
+  --hm-header-control-shadow: 0 10px 24px rgba(0, 0, 0, 0.28);
+  --hm-chart-bg: #0d0e10;
+  --hm-chart-grid: rgba(255, 255, 255, 0.06);
+  --hm-chart-border: rgba(255, 255, 255, 0.08);
+  --hm-chart-text: rgba(236, 238, 242, 0.68);
+  --hm-chart-midline: rgba(255, 255, 255, 0.14);
+  --hm-chart-crosshair: rgba(236, 238, 242, 0.18);
+  --hm-chart-crosshair-label-bg: #16181b;
+  --hm-chart-yes: var(--hm-accent-gold);
+  --hm-chart-yes-dim: rgba(229, 184, 74, 0.22);
+  --hm-chart-yes-zero: rgba(229, 184, 74, 0);
+  --hm-chart-no: #22c55e;
+  --hm-chart-no-dim: rgba(34, 197, 94, 0.12);
+  --hm-chart-no-zero: rgba(34, 197, 94, 0);
 }
 
 * {
@@ -113,7 +133,8 @@ body {
    ============================================================ */
 .app-root {
   position: relative;
-  width: 100vw;
+  width: 100%;
+  max-width: 100%;
   height: 100vh;
   height: 100dvh;
   /* dynamic viewport height: avoids iOS toolbar overlap */
@@ -1685,6 +1706,54 @@ select:focus-visible {
   font-size: 9px;
 }
 
+.hm-theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border-radius: var(--hm-radius);
+  border: 1px solid var(--hm-header-control-border);
+  background: var(--hm-header-control-bg);
+  color: var(--hm-header-theme-icon);
+  box-shadow: var(--hm-header-control-shadow);
+  outline: none;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition:
+    background 0.2s,
+    border-color 0.2s,
+    color 0.2s,
+    box-shadow 0.2s;
+}
+
+.hm-theme-toggle:hover {
+  background: var(--hm-header-control-hover-bg);
+  border-color: var(--hm-header-control-border-strong);
+  color: var(--hm-header-control-text);
+}
+
+.hm-theme-toggle svg {
+  color: inherit;
+}
+
+.hm-theme-toggle:focus-visible {
+  border-color: var(--hm-header-control-border-strong);
+  outline: 2px solid var(--hm-header-control-border-strong);
+  outline-offset: 2px;
+}
+
+.hm-theme-toggle--compact {
+  width: 30px;
+  height: 30px;
+}
+
+[data-theme="light"] .hm-theme-toggle,
+[data-theme="light"] .hm-theme-toggle svg {
+  color: var(--hm-header-theme-icon);
+}
+
 /* ============================================================
    App Tabs
    ============================================================ */
@@ -1713,7 +1782,8 @@ select:focus-visible {
 .hm-root {
   display: flex;
   flex-direction: column;
-  width: 100vw;
+  width: 100%;
+  max-width: 100%;
   height: 100vh;
   height: 100dvh;
   overflow: hidden;
@@ -2061,6 +2131,7 @@ select:focus-visible {
   justify-content: space-between;
 }
 
+.hm-nav-tab,
 .hm-view-tab {
   border: 0;
   border-radius: 2px;
@@ -2075,6 +2146,18 @@ select:focus-visible {
   transition:
     background 0.2s ease,
     color 0.2s ease;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hm-nav-tab-label {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .hm-view-tab:hover {
@@ -2766,8 +2849,8 @@ select:focus-visible {
   pointer-events: none;
 }
 
-/* Hide resize handles on narrow screens where layout stacks differently */
-@media (max-width: 768px) {
+/* Hide resize handles once the desktop split layout is no longer active */
+@media (max-width: 1360px) {
   .resize-handle {
     display: none;
   }
@@ -4847,8 +4930,8 @@ select:focus-visible {
   pointer-events: none;
 }
 
-/* ── ≤960px: tablet landscape — stack content above sidebar ── */
-@media (max-width: 960px) {
+/* ── ≤1360px: mid desktop/tablet landscape — stack content above sidebar ── */
+@media (max-width: 1360px) {
   .hm-main {
     flex-direction: column;
     overflow: hidden;
@@ -5055,6 +5138,8 @@ select:focus-visible {
     -webkit-overflow-scrolling: touch;
     scrollbar-width: none;
     padding: 0 8px;
+    min-width: 0;
+    max-width: 100%;
   }
 
   .hm-bottom-tabs::-webkit-scrollbar {
@@ -5066,6 +5151,11 @@ select:focus-visible {
     font-size: 12px;
     /* Touch target */
     min-height: 44px;
+  }
+
+  .hm-trades-summary {
+    flex-wrap: wrap;
+    gap: 8px 16px;
   }
 
   .hm-trades-filters {
@@ -5147,9 +5237,33 @@ select:focus-visible {
   }
 
   .hm-header-mob-row2 {
-    height: 36px;
-    padding: 0 8px;
+    height: auto;
+    padding: 6px 8px;
     gap: 6px;
+  }
+
+  .hm-nav-tabs--mobile,
+  .hm-view-tabs--mobile {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    gap: 2px;
+    padding: 4px;
+  }
+
+  .hm-nav-tabs--mobile .hm-nav-tab,
+  .hm-view-tabs--mobile .hm-view-tab {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    padding: 8px 4px;
+    font-size: 9px;
+    letter-spacing: 0.04em;
   }
 
   .hm-header-mob-row2 .hm-market-name {
@@ -5193,13 +5307,21 @@ select:focus-visible {
   /* bottom-panel inherits flex:1 from ≤768px — no fixed height override needed */
 
   .hm-bottom-tabs {
-    padding: 0 4px;
+    padding: 0 6px;
+    flex-wrap: wrap;
+    gap: 0 4px;
+    overflow-x: visible;
   }
 
   .hm-bottom-tab {
-    padding: 9px 9px;
-    font-size: 11px;
-    min-height: 40px;
+    flex: 1 1 calc(33.333% - 4px);
+    min-width: 0;
+    padding: 8px 6px;
+    font-size: 10px;
+    line-height: 1.2;
+    min-height: 36px;
+    white-space: normal;
+    text-align: center;
   }
 
   .hm-sidebar {
@@ -5226,7 +5348,7 @@ select:focus-visible {
   }
 
   .hm-bet-fab {
-    bottom: 16px;
+    bottom: 72px;
     right: 16px;
     height: 48px;
     padding: 0 20px;

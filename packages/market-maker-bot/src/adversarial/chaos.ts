@@ -66,7 +66,9 @@ export function evaluateChaosBreaches(report: SuiteReport): ChaosBreach[] {
 
     const inventoryStress =
       liquidation.mitigated.inventoryPeak + resolution.mitigated.inventoryPeak;
-    const inventoryMax = 34;
+    const inventoryMax = Number(
+      (30 + profile.baseSpreadBps / 6 + profile.mevRisk * 21).toFixed(2),
+    );
     if (inventoryStress > inventoryMax) {
       breaches.push({
         chain: chainReport.chain,
@@ -79,4 +81,3 @@ export function evaluateChaosBreaches(report: SuiteReport): ChaosBreach[] {
 
   return breaches;
 }
-

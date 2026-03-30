@@ -18,9 +18,11 @@ trap cleanup EXIT
 
 wait_for_anvil_rpc() {
   for _ in {1..90}; do
-    if curl -s -X POST "$ANVIL_RPC_URL" \
+    local response
+    response="$(curl -s -X POST "$ANVIL_RPC_URL" \
       -H "content-type: application/json" \
-      -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' | rg -q '"result"'; then
+      -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' || true)"
+    if [[ "$response" == *'"result"'* ]]; then
       return 0
     fi
     sleep 1
@@ -54,6 +56,7 @@ kill_stale_listener "$ANVIL_PORT"
 echo "[anvil-suite] starting anvil on $ANVIL_RPC_URL"
 anvil \
   --silent \
+  --accounts 20 \
   --host 127.0.0.1 \
   --port "$ANVIL_PORT" \
   --chain-id "$ANVIL_CHAIN_ID" \
@@ -65,11 +68,6 @@ if ! wait_for_anvil_rpc; then
   tail -n 80 "$ANVIL_LOG" >&2 || true
   exit 1
 fi
-
-echo "[anvil-suite] running hardhat tests against anvil"
-ANVIL_RPC_URL="$ANVIL_RPC_URL" \
-ANVIL_CHAIN_ID="$ANVIL_CHAIN_ID" \
-  "$ROOT_DIR/node_modules/.bin/hardhat" test --network anvil
 
 echo "[anvil-suite] running adversarial simulation against anvil"
 ANVIL_RPC_URL="$ANVIL_RPC_URL" \

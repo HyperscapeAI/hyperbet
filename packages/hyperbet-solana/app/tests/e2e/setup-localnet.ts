@@ -23,7 +23,7 @@ import {
   deriveUserBalancePda,
   uniqueDuelKey,
 } from "../../../anchor/tests/clob-test-helpers";
-import { modelMarketIdFromCharacterId } from "../../src/lib/modelMarkets";
+import { modelMarketIdFromCharacterId } from "../../../../hyperbet-ui/src/lib/modelMarkets";
 
 type SignableTx = Transaction | VersionedTransaction;
 type AnchorLikeWallet = Wallet & { payer: Keypair };
@@ -112,6 +112,25 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+async function getChainUnixTimestamp(
+  connection: Connection,
+  fallbackUnixSeconds: number,
+): Promise<number> {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    try {
+      const slot = await connection.getSlot("confirmed");
+      const blockTime = await connection.getBlockTime(slot);
+      if (typeof blockTime === "number" && Number.isFinite(blockTime) && blockTime > 0) {
+        return blockTime;
+      }
+    } catch {
+      // Fall through to the retry sleep and use the host clock as a last resort.
+    }
+    await sleep(500);
+  }
+  return fallbackUnixSeconds;
+}
+
 function toWallet(keypair: Keypair): AnchorLikeWallet {
   const sign = <T extends SignableTx>(tx: T): T => {
     if (tx instanceof VersionedTransaction) tx.sign([keypair]);
@@ -187,7 +206,7 @@ async function ensureBalance(
   }
 }
 
-async function _ensureTransferredBalance(
+async function ensureTransferredBalance(
   connection: Connection,
   provider: AnchorProvider,
   recipient: PublicKey,
@@ -362,8 +381,9 @@ async function main(): Promise<void> {
   const e2eModelMu = 28;
   const e2eModelSigma = 4;
   const e2ePerpsMarketId = modelMarketIdFromCharacterId(e2eModelCharacterId);
-  const now = Math.floor(Date.now() / 1000);
-  const currentMatchId = Date.now();
+  const hostNow = Math.floor(Date.now() / 1000);
+  const now = await getChainUnixTimestamp(connection, hostNow);
+  const currentMatchId = Math.max(Date.now(), now * 1000);
   const currentDuelMetadata = JSON.stringify({
     duelId: currentMatchId,
     matchId: currentMatchId,
@@ -379,9 +399,8 @@ async function main(): Promise<void> {
         `e2e-current-duel:${Date.now()}:${Math.random().toString(16).slice(2)}`,
       ),
       betOpenTs: now - 30,
-      // Keep the duel market open long enough for the full local Playwright
-      // suite to seed liquidity and submit prediction trades across multiple
-      // specs without flaking on wall-clock expiry.
+      // Use validator time, not host wall clock, or the local chain can reject
+      // orders as already closed while the UI still thinks the market is open.
       betCloseTs: now + 3_600,
       duelStartTs: now + 3_660,
       metadataUri: currentDuelMetadata,

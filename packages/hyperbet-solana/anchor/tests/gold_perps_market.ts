@@ -26,6 +26,7 @@ import {
   SOL,
   airdrop,
   configPda,
+  crashOracle,
   ensurePerpsConfig,
   hasProgramError,
   marketIdBn,
@@ -895,11 +896,12 @@ describe("gold_perps_market", () => {
       program,
       authority,
       marketId,
-      PRICE(100),
+      PRICE(120),
       DEFAULT_MIN_MARKET_INSURANCE,
     );
     const position = positionPda(program.programId, trader.publicKey, marketId);
 
+    // Entry at ~PRICE(120), 4x leverage → crash to PRICE(80) gives -33% loss on 4x
     await program.methods
       .modifyPosition(marketIdBn(marketId), toBn(SOL(1)), toBn(SOL(4)), toBn(0))
       .accountsPartial({
@@ -912,21 +914,8 @@ describe("gold_perps_market", () => {
       .signers([trader])
       .rpc();
 
-    await program.methods
-      .updateMarketOracle(
-        marketIdBn(marketId),
-        toBn(PRICE(80)),
-        toBn(PRICE(80)),
-        toBn(PRICE(8)),
-      )
-      .accountsPartial({
-        config: configPda(program.programId),
-        market,
-        authority: authority.publicKey,
-        systemProgram: SystemProgram.programId,
-      })
-      .signers([authority])
-      .rpc();
+    // Crash oracle in steps to avoid max_oracle_price_delta_bps limit
+    await crashOracle(program, authority, marketId, PRICE(80));
 
     const liquidatorBalanceBefore = await provider.connection.getBalance(
       liquidator.publicKey,
@@ -1408,6 +1397,600 @@ describe("gold_perps_market", () => {
       assert.ok(
         hasProgramError(error, "SlippageExceeded"),
         `expected SlippageExceeded, got ${String(error)}`,
+      );
+    }
+  });
+
+  // --- P1B.9 integration tests ---
+
+  it("partially liquidates a position that is below maintenance but has positive equity", async () => {
+    const trader = Keypair.generate();
+    await airdrop(provider.connection, trader.publicKey, 10);
+
+    const marketId = uniqueMarketId(2_080);
+    const market = await seedMarket(
+      program,
+      authority,
+      marketId,
+      PRICE(100),
+      DEFAULT_MIN_MARKET_INSURANCE,
+    );
+    const position = positionPda(program.programId, trader.publicKey, marketId);
+
+    // Open 4x leveraged long: margin=1 SOL, size=4 SOL
+    await program.methods
+      .modifyPosition(marketIdBn(marketId), toBn(SOL(1)), toBn(SOL(4)), toBn(0))
+      .accountsPartial({
+        config: configPda(program.programId),
+        market,
+        position,
+        trader: trader.publicKey,
+        systemProgram: SystemProgram.programId,
+      })
+      .signers([trader])
+      .rpc();
+
+    // Drop price to 80 — equity ~ 0.175 SOL, maintenance ~ 0.2 SOL
+    // Positive equity but below maintenance → partial liquidation
+    await program.methods
+      .updateMarketOracle(
+        marketIdBn(marketId),
+        toBn(PRICE(80)),
+        toBn(PRICE(80)),
+        toBn(PRICE(8)),
+      )
+      .accountsPartial({
+        config: configPda(program.programId),
+        market,
+        authority: authority.publicKey,
+        systemProgram: SystemProgram.programId,
+      })
+      .signers([authority])
+      .rpc();
+
+    const liquidatorBalanceBefore = await provider.connection.getBalance(
+      liquidator.publicKey,
+    );
+
+    await program.methods
+      .liquidatePosition(marketIdBn(marketId))
+      .accountsPartial({
+        config: configPda(program.programId),
+        market,
+        position,
+        owner: trader.publicKey,
+        liquidator: liquidator.publicKey,
+      })
+      .signers([liquidator])
+      .rpc();
+
+    const liquidatorBalanceAfter = await provider.connection.getBalance(
+      liquidator.publicKey,
+    );
+    const positionState =
+      await program.account.positionState.fetchNullable(position);
+    const marketState = await program.account.marketState.fetch(market);
+
+    // Position still exists with reduced size (partial liquidation)
+    assert.ok(positionState !== null, "position should survive partial liquidation");
+    assert.ok(num(positionState!.size) > 0, "position size should be positive");
+    assert.ok(num(positionState!.size) < SOL(4), "position size should be reduced");
+    assert.strictEqual(num(marketState.openPositions), 1);
+    assert.ok(liquidatorBalanceAfter > liquidatorBalanceBefore, "liquidator should be rewarded");
+  });
+
+  it("fully liquidates a deeply underwater position and tracks insurance drawdown", async () => {
+    const trader = Keypair.generate();
+    await airdrop(provider.connection, trader.publicKey, 10);
+
+    const marketId = uniqueMarketId(2_081);
+    const market = await seedMarket(
+      program,
+      authority,
+      marketId,
+      PRICE(120),
+      DEFAULT_MIN_MARKET_INSURANCE,
+    );
+    const position = positionPda(program.programId, trader.publicKey, marketId);
+
+    const insuranceBefore = num(
+      (await program.account.marketState.fetch(market)).insuranceFund,
+    );
+
+    // Open 4x leveraged long at ~PRICE(120), crash to PRICE(80) → equity deeply negative
+    await program.methods
+      .modifyPosition(marketIdBn(marketId), toBn(SOL(1)), toBn(SOL(4)), toBn(0))
+      .accountsPartial({
+        config: configPda(program.programId),
+        market,
+        position,
+        trader: trader.publicKey,
+        systemProgram: SystemProgram.programId,
+      })
+      .signers([trader])
+      .rpc();
+
+    // Crash oracle in steps to avoid max_oracle_price_delta_bps limit
+    await crashOracle(program, authority, marketId, PRICE(80));
+
+    const liquidatorBalanceBefore = await provider.connection.getBalance(
+      liquidator.publicKey,
+    );
+
+    await program.methods
+      .liquidatePosition(marketIdBn(marketId))
+      .accountsPartial({
+        config: configPda(program.programId),
+        market,
+        position,
+        owner: trader.publicKey,
+        liquidator: liquidator.publicKey,
+      })
+      .signers([liquidator])
+      .rpc();
+
+    const closedPosition =
+      await program.account.positionState.fetchNullable(position);
+    const marketState = await program.account.marketState.fetch(market);
+    const liquidatorBalanceAfter = await provider.connection.getBalance(
+      liquidator.publicKey,
+    );
+
+    assert.strictEqual(closedPosition, null, "position should be fully closed");
+    assert.strictEqual(num(marketState.totalLongOi), 0);
+    assert.strictEqual(num(marketState.openPositions), 0);
+    assert.ok(liquidatorBalanceAfter > liquidatorBalanceBefore, "liquidator should be rewarded");
+    // Insurance was drawn to cover the deficit
+    assert.ok(
+      num(marketState.insuranceFund) < insuranceBefore,
+      "insurance fund should decrease from waterfall",
+    );
+  });
+
+  it("accumulates bad debt when insurance fund is insufficient to cover deficit", async () => {
+    const trader = Keypair.generate();
+    await airdrop(provider.connection, trader.publicKey, 10);
+
+    // Create market with minimal insurance
+    const marketId = uniqueMarketId(2_083);
+    const market = await seedMarket(
+      program,
+      authority,
+      marketId,
+      PRICE(120),
+      DEFAULT_MIN_MARKET_INSURANCE,
+    );
+    const position = positionPda(program.programId, trader.publicKey, marketId);
+
+    // Open 4x leveraged long at ~PRICE(120), crash to PRICE(80) → deeply negative equity
+    await program.methods
+      .modifyPosition(
+        marketIdBn(marketId),
+        toBn(SOL(1)),
+        toBn(SOL(4)),
+        toBn(0),
+      )
+      .accountsPartial({
+        config: configPda(program.programId),
+        market,
+        position,
+        trader: trader.publicKey,
+        systemProgram: SystemProgram.programId,
+      })
+      .signers([trader])
+      .rpc();
+
+    // Crash oracle in steps to trigger full liquidation with deficit
+    await crashOracle(program, authority, marketId, PRICE(80));
+
+    await program.methods
+      .liquidatePosition(marketIdBn(marketId))
+      .accountsPartial({
+        config: configPda(program.programId),
+        market,
+        position,
+        owner: trader.publicKey,
+        liquidator: liquidator.publicKey,
+      })
+      .signers([liquidator])
+      .rpc();
+
+    const marketState = await program.account.marketState.fetch(market);
+    // Either bad debt was created or insurance was fully drained
+    // The socialized loss cap may limit the deficit, but with small insurance
+    // at least some insurance draw should happen
+    const totalDeficitHandled =
+      num(marketState.badDebt) > 0 ||
+      num(marketState.insuranceFund) < DEFAULT_MIN_MARKET_INSURANCE;
+    assert.ok(totalDeficitHandled, "deficit should be handled via insurance or bad debt");
+  });
+
+  it("blocks position increase when effective equity fails maintenance margin", async () => {
+    const trader = Keypair.generate();
+    await airdrop(provider.connection, trader.publicKey, 10);
+
+    const marketId = uniqueMarketId(2_084);
+    const market = await seedMarket(
+      program,
+      authority,
+      marketId,
+      PRICE(100),
+      DEFAULT_MIN_MARKET_INSURANCE,
+    );
+    const position = positionPda(program.programId, trader.publicKey, marketId);
+
+    // Open 4x leveraged long: margin=1 SOL, size=4 SOL
+    await program.methods
+      .modifyPosition(marketIdBn(marketId), toBn(SOL(1)), toBn(SOL(4)), toBn(0))
+      .accountsPartial({
+        config: configPda(program.programId),
+        market,
+        position,
+        trader: trader.publicKey,
+        systemProgram: SystemProgram.programId,
+      })
+      .signers([trader])
+      .rpc();
+
+    // Drop price to 81 — large unrealized loss
+    await program.methods
+      .updateMarketOracle(
+        marketIdBn(marketId),
+        toBn(PRICE(81)),
+        toBn(PRICE(81)),
+        toBn(PRICE(8)),
+      )
+      .accountsPartial({
+        config: configPda(program.programId),
+        market,
+        authority: authority.publicKey,
+        systemProgram: SystemProgram.programId,
+      })
+      .signers([authority])
+      .rpc();
+
+    // Try to increase position — raw leverage passes (margin*5 >= new_size)
+    // but PnL-aware effective equity < maintenance margin → rejected
+    try {
+      await program.methods
+        .modifyPosition(
+          marketIdBn(marketId),
+          toBn(SOL(0.05)),
+          toBn(SOL(1)),
+          toBn(0),
+        )
+        .accountsPartial({
+          config: configPda(program.programId),
+          market,
+          position,
+          trader: trader.publicKey,
+          systemProgram: SystemProgram.programId,
+        })
+        .signers([trader])
+        .rpc();
+      assert.fail("position increase should have been rejected");
+    } catch (error: unknown) {
+      assert.ok(
+        hasProgramError(error, "MaintenanceMarginViolation"),
+        `expected MaintenanceMarginViolation, got ${String(error)}`,
+      );
+    }
+  });
+
+  it("allows position reduction despite unrealized losses", async () => {
+    const trader = Keypair.generate();
+    await airdrop(provider.connection, trader.publicKey, 10);
+
+    const marketId = uniqueMarketId(2_085);
+    const market = await seedMarket(
+      program,
+      authority,
+      marketId,
+      PRICE(100),
+      DEFAULT_MIN_MARKET_INSURANCE,
+    );
+    const position = positionPda(program.programId, trader.publicKey, marketId);
+
+    // Open 4x leveraged long — same setup as maintenance margin test
+    await program.methods
+      .modifyPosition(marketIdBn(marketId), toBn(SOL(1)), toBn(SOL(4)), toBn(0))
+      .accountsPartial({
+        config: configPda(program.programId),
+        market,
+        position,
+        trader: trader.publicKey,
+        systemProgram: SystemProgram.programId,
+      })
+      .signers([trader])
+      .rpc();
+
+    // Drop price — large unrealized loss
+    await program.methods
+      .updateMarketOracle(
+        marketIdBn(marketId),
+        toBn(PRICE(81)),
+        toBn(PRICE(81)),
+        toBn(PRICE(8)),
+      )
+      .accountsPartial({
+        config: configPda(program.programId),
+        market,
+        authority: authority.publicKey,
+        systemProgram: SystemProgram.programId,
+      })
+      .signers([authority])
+      .rpc();
+
+    // Reduce position — should succeed despite unrealized losses
+    // (maintenance margin check skipped for reduce-only changes)
+    await program.methods
+      .modifyPosition(marketIdBn(marketId), toBn(0), toBn(-SOL(1)), toBn(0))
+      .accountsPartial({
+        config: configPda(program.programId),
+        market,
+        position,
+        trader: trader.publicKey,
+        systemProgram: SystemProgram.programId,
+      })
+      .signers([trader])
+      .rpc();
+
+    const positionState = await program.account.positionState.fetch(position);
+    assert.ok(num(positionState.size) < SOL(4), "position should be reduced");
+    assert.ok(num(positionState.size) > 0, "position should still exist");
+  });
+
+  it("repays bad debt via repay_bad_debt instruction", async () => {
+    const trader = Keypair.generate();
+    await airdrop(provider.connection, trader.publicKey, 10);
+
+    // Create market with minimal insurance
+    const marketId = uniqueMarketId(2_086);
+    const market = await seedMarket(
+      program,
+      authority,
+      marketId,
+      PRICE(120),
+      DEFAULT_MIN_MARKET_INSURANCE,
+    );
+    const position = positionPda(program.programId, trader.publicKey, marketId);
+
+    // Open 4x leveraged long at ~PRICE(120) and crash to PRICE(80)
+    await program.methods
+      .modifyPosition(
+        marketIdBn(marketId),
+        toBn(SOL(1)),
+        toBn(SOL(4)),
+        toBn(0),
+      )
+      .accountsPartial({
+        config: configPda(program.programId),
+        market,
+        position,
+        trader: trader.publicKey,
+        systemProgram: SystemProgram.programId,
+      })
+      .signers([trader])
+      .rpc();
+
+    await crashOracle(program, authority, marketId, PRICE(80));
+
+    await program.methods
+      .liquidatePosition(marketIdBn(marketId))
+      .accountsPartial({
+        config: configPda(program.programId),
+        market,
+        position,
+        owner: trader.publicKey,
+        liquidator: liquidator.publicKey,
+      })
+      .signers([liquidator])
+      .rpc();
+
+    const marketAfterLiq = await program.account.marketState.fetch(market);
+    const badDebt = num(marketAfterLiq.badDebt);
+
+    if (badDebt > 0) {
+      // Repay the bad debt
+      await program.methods
+        .repayBadDebt(marketIdBn(marketId), toBn(badDebt))
+        .accountsPartial({
+          market,
+          payer: authority.publicKey,
+          systemProgram: SystemProgram.programId,
+        })
+        .signers([authority])
+        .rpc();
+
+      const marketAfterRepay = await program.account.marketState.fetch(market);
+      assert.strictEqual(num(marketAfterRepay.badDebt), 0, "bad debt should be zero after repay");
+      assert.ok(
+        num(marketAfterRepay.insuranceFund) > num(marketAfterLiq.insuranceFund),
+        "insurance fund should increase after repay",
+      );
+    } else {
+      // If no bad debt, the deficit was fully covered by insurance
+      assert.ok(
+        num(marketAfterLiq.insuranceFund) < DEFAULT_MIN_MARKET_INSURANCE,
+        "insurance should have been drawn if no bad debt",
+      );
+    }
+  });
+
+  it("rejects repay_bad_debt when amount exceeds outstanding bad debt", async () => {
+    const marketId = uniqueMarketId(2_087);
+    const market = await seedMarket(
+      program,
+      authority,
+      marketId,
+      PRICE(100),
+      DEFAULT_MIN_MARKET_INSURANCE,
+    );
+
+    // Market has zero bad debt — any repayment should fail
+    try {
+      await program.methods
+        .repayBadDebt(marketIdBn(marketId), toBn(SOL(1)))
+        .accountsPartial({
+          market,
+          payer: authority.publicKey,
+          systemProgram: SystemProgram.programId,
+        })
+        .signers([authority])
+        .rpc();
+      assert.fail("repay_bad_debt should have been rejected");
+    } catch (error: unknown) {
+      assert.ok(
+        hasProgramError(error, "InvalidBadDebtRepayment"),
+        `expected InvalidBadDebtRepayment, got ${String(error)}`,
+      );
+    }
+  });
+
+  it("insurance waterfall draws from fund before creating bad debt", async () => {
+    const trader = Keypair.generate();
+    await airdrop(provider.connection, trader.publicKey, 10);
+
+    const marketId = uniqueMarketId(2_088);
+    const market = await seedMarket(
+      program,
+      authority,
+      marketId,
+      PRICE(120),
+      DEFAULT_MIN_MARKET_INSURANCE,
+    );
+    const position = positionPda(program.programId, trader.publicKey, marketId);
+
+    const insuranceBefore = num(
+      (await program.account.marketState.fetch(market)).insuranceFund,
+    );
+
+    // Open 4x leveraged long at ~PRICE(120), crash to PRICE(80) → equity deeply negative
+    await program.methods
+      .modifyPosition(
+        marketIdBn(marketId),
+        toBn(SOL(1)),
+        toBn(SOL(4)),
+        toBn(0),
+      )
+      .accountsPartial({
+        config: configPda(program.programId),
+        market,
+        position,
+        trader: trader.publicKey,
+        systemProgram: SystemProgram.programId,
+      })
+      .signers([trader])
+      .rpc();
+
+    // Crash oracle in steps to avoid max_oracle_price_delta_bps limit
+    await crashOracle(program, authority, marketId, PRICE(80));
+
+    await program.methods
+      .liquidatePosition(marketIdBn(marketId))
+      .accountsPartial({
+        config: configPda(program.programId),
+        market,
+        position,
+        owner: trader.publicKey,
+        liquidator: liquidator.publicKey,
+      })
+      .signers([liquidator])
+      .rpc();
+
+    const marketState = await program.account.marketState.fetch(market);
+    const closedPosition =
+      await program.account.positionState.fetchNullable(position);
+
+    assert.strictEqual(closedPosition, null, "position should be fully closed");
+    // Insurance was used before bad debt was created
+    const insuranceAfter = num(marketState.insuranceFund);
+    const badDebtAfter = num(marketState.badDebt);
+    assert.ok(
+      insuranceAfter < insuranceBefore || badDebtAfter > 0,
+      "insurance should be drawn or bad debt created",
+    );
+    // If bad debt exists, insurance should be at zero (fully drained first)
+    if (badDebtAfter > 0) {
+      assert.strictEqual(
+        insuranceAfter,
+        0,
+        "insurance should be fully drained before bad debt",
+      );
+    }
+  });
+
+  it("keeps emergency pause available after config freeze", async () => {
+    const config = configPda(program.programId);
+
+    await program.methods
+      .freezeConfig()
+      .accountsPartial({
+        config,
+        authority: authority.publicKey,
+      })
+      .signers([authority])
+      .rpc();
+
+    let configState = await program.account.configState.fetch(config);
+    assert.strictEqual(configState.configFrozen, true);
+
+    await program.methods
+      .setPaused(true)
+      .accountsPartial({
+        config,
+        authority: authority.publicKey,
+      })
+      .signers([authority])
+      .rpc();
+
+    configState = await program.account.configState.fetch(config);
+    assert.strictEqual(configState.paused, true);
+
+    await program.methods
+      .setPaused(false)
+      .accountsPartial({
+        config,
+        authority: authority.publicKey,
+      })
+      .signers([authority])
+      .rpc();
+
+    configState = await program.account.configState.fetch(config);
+    assert.strictEqual(configState.paused, false);
+
+    try {
+      await program.methods
+        .updateConfig(
+          authority.publicKey,
+          authority.publicKey,
+          authority.publicKey,
+          toBn(DEFAULT_SKEW_SCALE),
+          new anchor.BN(DEFAULT_FUNDING_VELOCITY),
+          new anchor.BN(DEFAULT_MAX_ORACLE_STALENESS_SECONDS),
+          toBn(DEFAULT_MIN_ORACLE_SPOT_INDEX),
+          toBn(DEFAULT_MAX_ORACLE_SPOT_INDEX),
+          DEFAULT_MAX_ORACLE_PRICE_DELTA_BPS,
+          toBn(DEFAULT_MAX_LEVERAGE),
+          toBn(DEFAULT_MIN_MARGIN),
+          toBn(DEFAULT_MAX_MARKET_OPEN_INTEREST),
+          toBn(DEFAULT_MIN_MARKET_INSURANCE),
+          DEFAULT_MAINTENANCE_MARGIN_BPS,
+          DEFAULT_LIQUIDATION_FEE_BPS,
+          DEFAULT_TRADE_TREASURY_FEE_BPS,
+          DEFAULT_TRADE_MARKET_MAKER_FEE_BPS,
+        )
+        .accountsPartial({
+          config,
+          authority: authority.publicKey,
+        })
+        .signers([authority])
+        .rpc();
+      assert.fail("update_config should remain frozen after freeze_config");
+    } catch (error: unknown) {
+      assert.ok(
+        hasProgramError(error, "ConfigFrozen"),
+        `expected ConfigFrozen, got ${String(error)}`,
       );
     }
   });

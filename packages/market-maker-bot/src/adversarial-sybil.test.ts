@@ -43,6 +43,22 @@ describe("adversarial sybil/collusion gates", () => {
     ).toBe(true);
   });
 
+  it("flags identity churn regression", () => {
+    const report = runAdversarialSuite(20260311);
+    const candidate = structuredClone(report);
+    const scenario = candidate.chains[2]?.scenarios.find(
+      (entry) => entry.scenario === "sybil_identity_churn",
+    );
+    expect(scenario).toBeDefined();
+    scenario!.mitigated.toxicFillRate += 0.52;
+    scenario!.mitigated.exploitEvents += 18;
+
+    const breaches = evaluateSybilBreaches(candidate);
+    expect(
+      breaches.some((entry) => entry.control === "sybil.max_identity_churn_rate"),
+    ).toBe(true);
+  });
+
   it("flags coordinated resolution push regression", () => {
     const report = runAdversarialSuite(20260311);
     const candidate = structuredClone(report);

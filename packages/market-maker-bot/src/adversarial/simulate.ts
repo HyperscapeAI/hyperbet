@@ -50,6 +50,8 @@ function defenseStrength(input: {
     scenarioBias = chain.mempoolFriction * 0.22;
   } else if (scenario === "sybil_wash_trading") {
     scenarioBias = chain.mempoolFriction * 0.18;
+  } else if (scenario === "sybil_identity_churn") {
+    scenarioBias = (chain.mempoolFriction + chain.mevRisk) * 0.17;
   } else if (scenario === "rebate_farming_ring") {
     scenarioBias = (chain.mempoolFriction + chain.mevRisk) * 0.11;
   } else if (scenario === "layering_spoof_ladder") {
@@ -60,6 +62,18 @@ function defenseStrength(input: {
     scenarioBias = (chain.mempoolFriction + chain.mevRisk) * 0.18;
   } else if (scenario === "coordinated_resolution_push") {
     scenarioBias = (chain.oracleLagAmplifier + chain.mevRisk) * 0.14;
+  } else if (scenario === "amm_sandwich_attack") {
+    scenarioBias = chain.mevRisk * 0.22;
+  } else if (scenario === "amm_reserve_manipulation") {
+    scenarioBias = (chain.mempoolFriction + chain.mevRisk) * 0.1;
+  } else if (scenario === "amm_stale_price_arb") {
+    scenarioBias = chain.oracleLagAmplifier * 0.18;
+  } else if (scenario === "amm_slippage_griefing") {
+    scenarioBias = (chain.mevRisk + chain.mempoolFriction) * 0.12;
+  } else if (scenario === "amm_token_drain") {
+    scenarioBias = chain.mempoolFriction * 0.1;
+  } else if (scenario === "amm_expiry_race") {
+    scenarioBias = (chain.mevRisk + chain.oracleLagAmplifier) * 0.12;
   }
 
   return clamp(0.18 + guardQuality * 0.72 - chainHeadwind * 0.22 - stress * 0.08 - scenarioBias, 0.02, 0.96);
@@ -141,6 +155,96 @@ function tryExploitFill(input: {
   return true;
 }
 
+function scenarioOperationalStress(input: {
+  scenario: ScenarioId;
+  chain: ChainProfile;
+  guards: GuardProfile;
+  vuln: VulnerabilityVector;
+  staleQuoteRatio: number;
+  inventoryPeak: number;
+}): {
+  staleMultiplier: number;
+  orphanBase: number;
+  lagBaseMs: number;
+  backlogBase: number;
+} {
+  const { scenario, chain, guards, vuln, staleQuoteRatio, inventoryPeak } = input;
+  const baseLag =
+    240 +
+    chain.settlementLagTicks * 120 +
+    guards.repriceDelayTicks * 90 +
+    chain.oracleLagAmplifier * 160;
+  const generic = {
+    staleMultiplier: 0.4 + vuln.stale * 0.45 + staleQuoteRatio,
+    orphanBase:
+      Math.max(0, inventoryPeak - guards.inventoryCap * 0.35) / Math.max(1, guards.inventoryCap) +
+      vuln.cancel * 0.5,
+    lagBaseMs: baseLag,
+    backlogBase: vuln.inventory * 0.4 + vuln.cancel * 0.25,
+  };
+
+  switch (scenario) {
+    case "restart_mid_fill":
+      return {
+        staleMultiplier: generic.staleMultiplier + 0.08,
+        orphanBase: generic.orphanBase + 0.55,
+        lagBaseMs: generic.lagBaseMs + 220,
+        backlogBase: generic.backlogBase + 0.45,
+      };
+    case "orphan_sweep_failure":
+      return {
+        staleMultiplier: generic.staleMultiplier + 0.04,
+        orphanBase: generic.orphanBase + 0.8,
+        lagBaseMs: generic.lagBaseMs + 180,
+        backlogBase: generic.backlogBase + 0.3,
+      };
+    case "rpc_split_brain":
+      return {
+        staleMultiplier: generic.staleMultiplier + 0.12,
+        orphanBase: generic.orphanBase + 0.25,
+        lagBaseMs: generic.lagBaseMs + 260,
+        backlogBase: generic.backlogBase + 0.35,
+      };
+    case "nonce_collision_replay":
+      return {
+        staleMultiplier: generic.staleMultiplier,
+        orphanBase: generic.orphanBase + 0.4,
+        lagBaseMs: generic.lagBaseMs + 160,
+        backlogBase: generic.backlogBase + 0.12,
+      };
+    case "reorg_finality_lag":
+      return {
+        staleMultiplier: generic.staleMultiplier + 0.1,
+        orphanBase: generic.orphanBase + 0.22,
+        lagBaseMs: generic.lagBaseMs + 300,
+        backlogBase: generic.backlogBase + 0.38,
+      };
+    case "rounding_abuse":
+      return {
+        staleMultiplier: generic.staleMultiplier - 0.08,
+        orphanBase: generic.orphanBase + 0.08,
+        lagBaseMs: generic.lagBaseMs + 90,
+        backlogBase: generic.backlogBase + 0.1,
+      };
+    case "fee_token_depletion":
+      return {
+        staleMultiplier: generic.staleMultiplier + 0.05,
+        orphanBase: generic.orphanBase + 0.12,
+        lagBaseMs: generic.lagBaseMs + 140,
+        backlogBase: generic.backlogBase + 0.65,
+      };
+    case "cross_market_inventory_bleed":
+      return {
+        staleMultiplier: generic.staleMultiplier + 0.02,
+        orphanBase: generic.orphanBase + 0.2,
+        lagBaseMs: generic.lagBaseMs + 150,
+        backlogBase: generic.backlogBase + 0.18,
+      };
+    default:
+      return generic;
+  }
+}
+
 export function simulateScenario(input: {
   scenario: ScenarioId;
   chain: ChainProfile;
@@ -157,6 +261,7 @@ export function simulateScenario(input: {
   let quotePrice = truePrice;
   let staleTicks = 0;
   let previousPrice = truePrice;
+  let staleQuoteTicks = 0;
 
   const state = createInitialState(truePrice);
   const signalUpdateInterval =
@@ -532,6 +637,46 @@ export function simulateScenario(input: {
       }
     }
 
+    if (scenario === "sybil_identity_churn") {
+      const churnSusceptibility = clamp(
+        (vuln.cancel * 0.45 + vuln.toxic * 0.35 + vuln.latency * 0.2) * (1 + chain.mevRisk * 0.12),
+        0.08,
+        1,
+      );
+      const churnWaveChance = clamp(
+        intensity * churnSusceptibility * (0.11 + chain.mempoolFriction * 0.12),
+        0,
+        0.58,
+      );
+      if (rng.next() < churnWaveChance) {
+        const walletsPerWave = 1 + Math.round(intensity * 1.4 + churnSusceptibility * 0.8);
+        for (let wallet = 0; wallet < walletsPerWave; wallet += 1) {
+          const side: "buy" | "sell" = rng.next() > 0.5 ? "buy" : "sell";
+          const qty = Math.max(
+            1,
+            Math.round(1 + intensity * 0.8 + churnSusceptibility * 0.5 + chain.mempoolFriction * 0.3),
+          );
+          tryExploitFill({
+            rng,
+            guards,
+            chain,
+            vuln,
+            scenario,
+            state,
+            divergence,
+            staleTicks,
+            quotePrice: side === "buy" ? bid : ask,
+            truePrice,
+            side,
+            qty,
+            feeBps: chain.feeBps,
+            bid,
+            ask,
+          });
+        }
+      }
+    }
+
     if (scenario === "rebate_farming_ring") {
       const rebatePressure = clamp(
         intensity *
@@ -599,7 +744,143 @@ export function simulateScenario(input: {
       }
     }
 
+    // --- AMM scenarios ---
+
+    if (scenario === "amm_sandwich_attack") {
+      // Front-run + back-run: adversary trades before and after MM's intended trade
+      const sandwichChance = clamp(
+        intensity * (0.3 + chain.mevRisk * 0.25 + vuln.latency * 0.15),
+        0,
+        0.7,
+      );
+      if (rng.next() < sandwichChance) {
+        const frontSide: "buy" | "sell" = truePrice > quotePrice ? "sell" : "buy";
+        const frontQty = Math.round(1 + 3 * intensity + chain.mevRisk * 1.5);
+        tryExploitFill({
+          rng, guards, chain, vuln, scenario, state, divergence, staleTicks,
+          quotePrice: frontSide === "buy" ? bid : ask,
+          truePrice, side: frontSide, qty: frontQty,
+          feeBps: chain.feeBps, bid, ask,
+        });
+        if (rng.next() < 0.5) {
+          const backSide: "buy" | "sell" = frontSide === "buy" ? "sell" : "buy";
+          const backQty = Math.round(1 + 2 * intensity);
+          tryExploitFill({
+            rng, guards, chain, vuln, scenario, state, divergence, staleTicks,
+            quotePrice: backSide === "buy" ? bid : ask,
+            truePrice, side: backSide, qty: backQty,
+            feeBps: chain.feeBps, bid, ask,
+          });
+        }
+      }
+    }
+
+    if (scenario === "amm_reserve_manipulation") {
+      // Adversary trades to skew reserves before MM acts
+      const manipChance = clamp(
+        intensity * (0.35 + vuln.inventory * 0.35 + vuln.toxic * 0.2),
+        0,
+        0.85,
+      );
+      if (rng.next() < manipChance) {
+        const skewSide: "buy" | "sell" = rng.next() > 0.5 ? "buy" : "sell";
+        const qty = Math.round(3 + 6 * intensity + vuln.inventory * 3);
+        tryExploitFill({
+          rng, guards, chain, vuln, scenario, state, divergence, staleTicks,
+          quotePrice: skewSide === "buy" ? bid : ask,
+          truePrice, side: skewSide, qty,
+          feeBps: chain.feeBps, bid, ask,
+        });
+      }
+    }
+
+    if (scenario === "amm_stale_price_arb") {
+      // Exploit stale AMM price vs true fair value (similar to stale_signal but AMM-specific)
+      const staleFactor = clamp((staleTicks - guards.staleSignalMaxTicks) / 3, 0, 1);
+      const arbChance = clamp(
+        intensity * (0.3 + staleFactor * 0.8 + chain.oracleLagAmplifier * 0.2),
+        0,
+        0.92,
+      );
+      if (rng.next() < arbChance) {
+        const buySide = truePrice > signalPrice;
+        const qty = Math.round(2 + 4 * intensity + staleFactor * 5);
+        tryExploitFill({
+          rng, guards, chain, vuln, scenario, state, divergence, staleTicks,
+          quotePrice: buySide ? ask : bid,
+          truePrice, side: buySide ? "sell" : "buy", qty,
+          feeBps: chain.feeBps, bid, ask,
+        });
+      }
+    }
+
+    if (scenario === "amm_slippage_griefing") {
+      const griefChance = clamp(
+        intensity * (0.25 + vuln.toxic * 0.2 + chain.mevRisk * 0.15),
+        0,
+        0.65,
+      );
+      if (rng.next() < griefChance) {
+        const pushSide: "buy" | "sell" = rng.next() > 0.5 ? "buy" : "sell";
+        const largeQty = Math.round(2 + 4 * intensity + vuln.inventory * 2);
+        tryExploitFill({
+          rng, guards, chain, vuln, scenario, state, divergence, staleTicks,
+          quotePrice: pushSide === "buy" ? bid : ask,
+          truePrice, side: pushSide, qty: largeQty,
+          feeBps: chain.feeBps, bid, ask,
+        });
+      }
+    }
+
+    if (scenario === "amm_token_drain") {
+      const drainSide: "buy" | "sell" = state.inventory >= 0 ? "buy" : "sell";
+      const drainChance = clamp(
+        intensity * (0.12 + vuln.inventory * 0.15),
+        0,
+        0.35,
+      );
+      if (rng.next() < drainChance) {
+        const qty = Math.max(1, Math.round(1 + intensity + vuln.inventory * 0.5));
+        tryExploitFill({
+          rng, guards, chain, vuln, scenario, state, divergence, staleTicks,
+          quotePrice: drainSide === "buy" ? bid : ask,
+          truePrice, side: drainSide, qty,
+          feeBps: chain.feeBps, bid, ask,
+        });
+      }
+    }
+
+    if (scenario === "amm_expiry_race") {
+      const expiryWindow = tick > ticks - 30;
+      const timeRemaining = Math.max(0, ticks - tick);
+      const liquidityDecay = 1 - timeRemaining / ticks;
+      if (expiryWindow) {
+        const raceChance = clamp(
+          intensity * (0.3 + liquidityDecay * 0.35 + chain.mevRisk * 0.15),
+          0,
+          0.75,
+        );
+        if (rng.next() < raceChance) {
+          const raceSide: "buy" | "sell" = truePrice > signalPrice ? "sell" : "buy";
+          const qty = Math.round(2 + 3 * intensity + liquidityDecay * 3);
+          tryExploitFill({
+            rng, guards, chain, vuln, scenario, state, divergence, staleTicks,
+            quotePrice: raceSide === "buy" ? bid : ask,
+            truePrice, side: raceSide, qty,
+            feeBps: chain.feeBps, bid, ask,
+          });
+        }
+      }
+    }
+
     const emergencyStop = staleTicks > guards.staleQuoteHardStopTicks;
+    if (
+      emergencyStop ||
+      scenario === "rpc_split_brain" ||
+      scenario === "reorg_finality_lag"
+    ) {
+      staleQuoteTicks += 1;
+    }
     if (emergencyStop || Math.abs(state.inventory) > guards.inventoryCap) {
       const unwindSide: "buy" | "sell" = state.inventory > 0 ? "sell" : "buy";
       const unwindQty = Math.min(
@@ -633,6 +914,41 @@ export function simulateScenario(input: {
     state.toxicFills *
     (0.2 + 0.2 * vuln.toxic + 0.2 * vuln.spoof + 0.2 * vuln.cancel + 0.2 * vuln.latency);
   const finalEquity = rawEquity - exploitPenalty - inventoryPenalty - adversePenalty;
+  const operational = scenarioOperationalStress({
+    scenario,
+    chain,
+    guards,
+    vuln,
+    staleQuoteRatio: staleQuoteTicks / ticks,
+    inventoryPeak: state.inventoryPeak,
+  });
+  const staleQuoteUptimeRatio = Number(
+    clamp(
+      (staleQuoteTicks / ticks) * operational.staleMultiplier,
+      0,
+      1,
+    ).toFixed(4),
+  );
+  const orphanOrderCount = Math.max(
+    0,
+    Math.round(
+      operational.orphanBase * 2 +
+        vuln.cancel * 0.9 +
+        (guards.cancelCooldownTicks - 1) * 0.15,
+    ),
+  );
+  const reconciliationLagMs = Math.round(
+    operational.lagBaseMs + staleQuoteTicks * (20 + chain.mempoolFriction * 12),
+  );
+  const unresolvedClaimBacklog = Math.max(
+    0,
+    Math.round(
+      operational.backlogBase * 1.5 +
+        staleQuoteUptimeRatio * 2 +
+        Math.max(0, state.inventoryPeak - guards.inventoryCap * 0.5) /
+          Math.max(1, guards.inventoryCap),
+    ),
+  );
 
   return {
     mmPnl: Number(finalEquity.toFixed(6)),
@@ -646,5 +962,9 @@ export function simulateScenario(input: {
       state.toxicFills > 0
         ? Number((state.adverseSlippageBpsTotal / state.toxicFills).toFixed(2))
         : 0,
+    staleQuoteUptimeRatio,
+    orphanOrderCount,
+    reconciliationLagMs,
+    unresolvedClaimBacklog,
   };
 }

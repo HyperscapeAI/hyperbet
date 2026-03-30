@@ -2,16 +2,21 @@ import {
   createPublicClient,
   createWalletClient,
   custom,
+  encodeAbiParameters,
   encodeFunctionData,
+  fallback,
   http,
+  keccak256,
   parseAbiItem,
   toHex,
+  webSocket,
   type Address,
   type Hash,
   type Hex,
   type PublicClient,
   type WalletClient,
 } from "viem";
+import type { Account, LocalAccount } from "viem/accounts";
 
 import type { EvmChainConfig } from "./chainConfig";
 import { GOLD_CLOB_ABI } from "./goldClobAbi";
@@ -50,6 +55,8 @@ export type Position = {
   bStake: bigint;
 };
 
+export type TimeInForce = "gtc" | "ioc";
+
 export type OrderInfo = {
   id: bigint;
   side: number;
@@ -67,6 +74,13 @@ export type ContractWriteClient = {
   writeContract: WalletClient["writeContract"];
 };
 
+export type ContractWriteAccount = Address | Account;
+
+type JsonRpcPayload<T> = {
+  result?: T;
+  error?: { message?: string };
+};
+
 export const SIDE_ENUM = {
   NONE: 0,
   A: 1,
@@ -74,6 +88,23 @@ export const SIDE_ENUM = {
   BUY: 1,
   SELL: 2,
 } as const;
+
+export const ORDER_FLAG_GTC = 0x01;
+export const ORDER_FLAG_IOC = 0x02;
+export const ORDER_FLAG_POST_ONLY = 0x04;
+
+export function encodeOrderFlags(
+  timeInForce: TimeInForce,
+  postOnly: boolean,
+): number {
+  if (timeInForce === "ioc") {
+    if (postOnly) {
+      throw new Error("postOnly orders must use timeInForce='gtc'");
+    }
+    return ORDER_FLAG_IOC;
+  }
+  return postOnly ? ORDER_FLAG_GTC | ORDER_FLAG_POST_ONLY : ORDER_FLAG_GTC;
+}
 
 const MARKET_STATUS_MAP: Record<number, MarketStatus> = {
   0: "NULL",
@@ -90,11 +121,38 @@ const SIDE_MAP: Record<number, Side> = {
 };
 
 export function toDuelKeyHex(duelKeyHex: string): Hex {
-  const normalized = duelKeyHex.trim().toLowerCase();
+  const trimmed = duelKeyHex.trim().toLowerCase();
+  const normalized = trimmed.startsWith("0x") ? trimmed.slice(2) : trimmed;
   if (!/^[0-9a-f]{64}$/.test(normalized)) {
     throw new Error("duelKeyHex must be a 32-byte hex string");
   }
   return `0x${normalized}`;
+}
+
+function deriveAlchemyWsUrl(rpcUrl: string): string | null {
+  try {
+    const parsed = new URL(rpcUrl);
+    if (!/\.alchemy\.com$/i.test(parsed.hostname)) {
+      return null;
+    }
+    parsed.protocol = parsed.protocol === "https:" ? "wss:" : "ws:";
+    return parsed.toString();
+  } catch {
+    return null;
+  }
+}
+
+function createEvmTransport(rpcUrl: string) {
+  const httpTransport = http(rpcUrl, {
+    retryCount: 5,
+    retryDelay: 250,
+    timeout: 20_000,
+  });
+  const wsUrl = deriveAlchemyWsUrl(rpcUrl);
+  if (!wsUrl) {
+    return httpTransport;
+  }
+  return fallback([webSocket(wsUrl), httpTransport], { rank: false });
 }
 
 export function createEvmPublicClient(
@@ -102,7 +160,8 @@ export function createEvmPublicClient(
 ): PublicClient {
   return createPublicClient({
     chain: chainConfig.wagmiChain,
-    transport: http(chainConfig.rpcUrl),
+    ccipRead: false,
+    transport: createEvmTransport(chainConfig.rpcUrl),
   });
 }
 
@@ -132,10 +191,16 @@ export function createUnlockedRpcWalletClient(
     chain: chainConfig.wagmiChain,
     async writeContract(parameters) {
       const { address, abi, functionName, args, value } = parameters;
-      const data = (encodeFunctionData as (parameters: unknown) => Hex)({
+      // viem's encodeFunctionData generics lose type info when parameters are
+      // destructured from writeContract; inputs are already caller-validated.
+      const data = (encodeFunctionData as (params: {
+        abi: typeof abi;
+        functionName: string;
+        args: readonly unknown[];
+      }) => Hex)({
         abi,
         functionName,
-        args: args ?? [],
+        args: (args ?? []) as readonly unknown[],
       });
       const response = await fetch(chainConfig.rpcUrl, {
         method: "POST",
@@ -166,18 +231,118 @@ export function createUnlockedRpcWalletClient(
   };
 }
 
+async function callEvmRpc<T>(
+  rpcUrl: string,
+  method: string,
+  params: readonly unknown[],
+): Promise<T> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 15_000);
+  try {
+    const response = await fetch(rpcUrl, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: Date.now(),
+        method,
+        params,
+      }),
+      signal: controller.signal,
+    });
+    const payload = (await response.json()) as JsonRpcPayload<T>;
+    if (!response.ok || payload.result === undefined) {
+      throw new Error(payload.error?.message || `${method} failed`);
+    }
+    return payload.result;
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      throw new Error(`${method} timed out after 15000ms`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+export function createSignedRpcWalletClient(
+  chainConfig: EvmChainConfig,
+  account: LocalAccount,
+): ContractWriteClient {
+  return {
+    chain: chainConfig.wagmiChain,
+    async writeContract(parameters) {
+      const { address, abi, functionName, args, value, account: requestAccount } =
+        parameters;
+      if (
+        requestAccount &&
+        typeof requestAccount !== "string" &&
+        requestAccount.address.toLowerCase() !== account.address.toLowerCase()
+      ) {
+        throw new Error("headless signer account mismatch");
+      }
+      if (
+        typeof requestAccount === "string" &&
+        requestAccount.toLowerCase() !== account.address.toLowerCase()
+      ) {
+        throw new Error("headless signer address mismatch");
+      }
+
+      const castArgs = (Array.isArray(args) ? args : []) as readonly unknown[];
+      const data = encodeFunctionData(
+        {
+          abi,
+          functionName,
+          args: castArgs,
+        } as unknown as Parameters<typeof encodeFunctionData>[0],
+      );
+      const from = account.address;
+      const txRequest = {
+        from,
+        to: address,
+        data,
+        ...(value !== undefined ? { value: toHex(value) } : {}),
+      };
+      const [nonceHex, gasPriceHex, gasEstimateHex] = await Promise.all([
+        callEvmRpc<Hex>(chainConfig.rpcUrl, "eth_getTransactionCount", [
+          from,
+          "pending",
+        ]),
+        callEvmRpc<Hex>(chainConfig.rpcUrl, "eth_gasPrice", []),
+        callEvmRpc<Hex>(chainConfig.rpcUrl, "eth_estimateGas", [txRequest]),
+      ]);
+      const serialized = await account.signTransaction({
+        chainId: chainConfig.evmChainId,
+        data,
+        gas: (BigInt(gasEstimateHex) * 12n) / 10n,
+        gasPrice: BigInt(gasPriceHex),
+        nonce: Number(BigInt(nonceHex)),
+        to: address,
+        type: "legacy",
+        value: value ?? 0n,
+      });
+      return callEvmRpc<Hash>(chainConfig.rpcUrl, "eth_sendRawTransaction", [
+        serialized,
+      ]);
+    },
+  };
+}
+
 export async function marketKeyForDuel(
-  client: PublicClient,
-  contractAddress: Address,
+  _client: PublicClient,
+  _contractAddress: Address,
   duelKey: Hex,
   marketKind: number,
 ): Promise<Hex> {
-  return client.readContract({
-    address: contractAddress,
-    abi: GOLD_CLOB_ABI,
-    functionName: "marketKey",
-    args: [duelKey, marketKind],
-  }) as Promise<Hex>;
+  return keccak256(
+    encodeAbiParameters(
+      [
+        { name: "duelKey", type: "bytes32" },
+        { name: "marketKind", type: "uint8" },
+      ],
+      [duelKey, marketKind],
+    ),
+  );
 }
 
 export async function getMarketMeta(
@@ -199,7 +364,6 @@ export async function getMarketMeta(
   const result = rawResult as {
     exists: boolean;
     duelKey: Hex;
-    marketKind: number;
     status: number;
     winner: number;
     nextOrderId: bigint;
@@ -212,7 +376,7 @@ export async function getMarketMeta(
   return {
     exists: result.exists,
     duelKey: result.duelKey,
-    marketKind: Number(result.marketKind),
+    marketKind,
     status: MARKET_STATUS_MAP[Number(result.status)] ?? "NULL",
     winner: SIDE_MAP[Number(result.winner)] ?? "NONE",
     nextOrderId: result.nextOrderId,
@@ -443,14 +607,15 @@ export async function placeOrder(
   side: number,
   price: number,
   amount: bigint,
-  account: Address,
+  orderFlags: number,
+  account: ContractWriteAccount,
   value: bigint,
 ): Promise<Hash> {
   return walletClient.writeContract({
     address: contractAddress,
     abi: GOLD_CLOB_ABI,
     functionName: "placeOrder",
-    args: [duelKey, marketKind, side, price, amount],
+    args: [duelKey, marketKind, side, price, amount, orderFlags],
     account,
     chain: walletClient.chain,
     value,
@@ -463,7 +628,7 @@ export async function cancelOrder(
   duelKey: Hex,
   marketKind: number,
   orderId: bigint,
-  account: Address,
+  account: ContractWriteAccount,
 ): Promise<Hash> {
   return walletClient.writeContract({
     address: contractAddress,
@@ -480,7 +645,7 @@ export async function claimWinnings(
   contractAddress: Address,
   duelKey: Hex,
   marketKind: number,
-  account: Address,
+  account: ContractWriteAccount,
 ): Promise<Hash> {
   return walletClient.writeContract({
     address: contractAddress,
@@ -497,7 +662,7 @@ export async function syncMarketFromOracle(
   contractAddress: Address,
   duelKey: Hex,
   marketKind: number,
-  account: Address,
+  account: ContractWriteAccount,
 ): Promise<Hash> {
   return walletClient.writeContract({
     address: contractAddress,

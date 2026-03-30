@@ -18,11 +18,15 @@ describe("adversarial market-maker suite", () => {
     expect(report.summary.totalScenarios).toBe(3 * SCENARIOS.length);
   });
 
-  it("fully mitigates modeled scam vectors", () => {
+  it("passes explicit hard-budget gates across all modeled vectors", () => {
     const report = runAdversarialSuite(20260311);
 
-    expect(report.summary.improvedScenarios).toBe(3 * SCENARIOS.length);
     expect(report.summary.mitigationPasses).toBe(3 * SCENARIOS.length);
+    expect(
+      report.chains.every((chain) =>
+        chain.scenarios.every((scenario) => scenario.budgetPass),
+      ),
+    ).toBe(true);
   });
 
   it("passes strict gate threshold", () => {

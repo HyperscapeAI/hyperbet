@@ -13,10 +13,11 @@ import {
   airdrop,
   claimClobWinnings,
   createOpenMarketFixture,
+  finalizeDuelResult,
   hasProgramError,
   marketSideA,
   placeClobOrder,
-  reportDuelResult,
+  proposeDuelResult,
   syncMarketFromDuel,
   writableAccount,
 } from "../tests/clob-test-helpers";
@@ -352,12 +353,13 @@ async function runArbitrageScenario(
   );
 
   const now = Math.floor(Date.now() / 1000);
-  await reportDuelResult(fightProgram, authority, market.duelKey, {
+  await proposeDuelResult(fightProgram, authority, market.duelKey, {
     winner: marketSideA(),
     duelEndTs: now + 7200,
     seed: 77,
     metadataUri: "https://hyperbet.local/arbitrage",
   });
+  await finalizeDuelResult(fightProgram, authority, market.duelKey);
   await syncMarketFromDuel(clobProgram, market.marketState, market.duelState);
   await claimClobWinnings(clobProgram, {
     marketState: market.marketState,
@@ -410,16 +412,16 @@ async function runAttackScenario(
 
   const now = Math.floor(Date.now() / 1000);
   try {
-    await reportDuelResult(fightProgram, roles.attacker, market.duelKey, {
+    await proposeDuelResult(fightProgram, roles.attacker, market.duelKey, {
       winner: marketSideA(),
       duelEndTs: now + 3600,
       metadataUri: "https://hyperbet.local/unauthorized",
     });
-    throw new Error("unauthorized oracle report unexpectedly succeeded");
+    throw new Error("unauthorized oracle proposal unexpectedly succeeded");
   } catch (error) {
     assert.ok(
       hasProgramError(error, "Unauthorized"),
-      `expected unauthorized oracle report rejection, got ${String(error)}`,
+      `expected unauthorized oracle proposal rejection, got ${String(error)}`,
     );
   }
 

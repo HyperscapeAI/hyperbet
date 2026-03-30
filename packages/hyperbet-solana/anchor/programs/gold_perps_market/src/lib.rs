@@ -4,26 +4,18 @@
 use anchor_lang::prelude::*;
 use anchor_lang::system_program;
 use std::cmp;
-use std::str::FromStr;
-
-declare_id!("HbXhqEFevpkfYdZCN6YmJGRmQmj9vsBun2ZHjeeaLRik");
+declare_id!("BFbmQbSbf3R6fMDdXKMKQZCTyMhMs9MCcjAhGDBLETXS");
 
 const FUNDING_RATE_PRECISION: i128 = 1_000_000_000;
 const BPS_DENOMINATOR: u64 = 10_000;
-const DEFAULT_BOOTSTRAP_AUTHORITY: &str = "DfEnrzh4cgnHxfuZRxLGX69fnLd9DP41XxGuE4gtyJpn";
 const MARKET_STATUS_ACTIVE: u8 = 0;
 const MARKET_STATUS_CLOSE_ONLY: u8 = 1;
 const MARKET_STATUS_ARCHIVED: u8 = 2;
 const FEE_BUCKET_TREASURY: u8 = 0;
 const FEE_BUCKET_MARKET_MAKER: u8 = 1;
-
-fn bootstrap_authority() -> Pubkey {
-    if let Some(value) = option_env!("HYPERSCAPE_BOOTSTRAP_AUTHORITY") {
-        Pubkey::from_str(value).expect("invalid HYPERSCAPE_BOOTSTRAP_AUTHORITY")
-    } else {
-        Pubkey::from_str(DEFAULT_BOOTSTRAP_AUTHORITY).expect("invalid default bootstrap authority")
-    }
-}
+const MAX_SOCIALIZED_LOSS_BPS: u64 = 50; // 0.5% of notional per position
+const MIN_LIQUIDATION_CLOSE_BPS: u64 = 1_000; // 10% minimum close
+const MAX_FEE_BPS: u64 = 500; // 5% individual fee cap
 
 /// Native-SOL isolated perpetual markets for model ranking derivatives.
 ///
@@ -77,6 +69,11 @@ pub mod gold_perps_market {
         )?;
 
         let config = &mut ctx.accounts.config;
+        // One-time initialization only. No bootstrap fallback pattern.
+        require!(
+            config.authority == Pubkey::default(),
+            PerpsError::AlreadyInitialized
+        );
         config.authority = ctx.accounts.authority.key();
         config.keeper_authority = keeper_authority;
         config.treasury_authority = treasury_authority;
@@ -95,6 +92,28 @@ pub mod gold_perps_market {
         config.liquidation_fee_bps = liquidation_fee_bps;
         config.trade_treasury_fee_bps = trade_treasury_fee_bps;
         config.trade_market_maker_fee_bps = trade_market_maker_fee_bps;
+        Ok(())
+    }
+
+    pub fn freeze_config(ctx: Context<UpdateConfig>) -> Result<()> {
+        require!(
+            ctx.accounts.authority.key() == ctx.accounts.config.authority,
+            PerpsError::InvalidAuthority
+        );
+        require!(
+            !ctx.accounts.config.config_frozen,
+            PerpsError::ConfigFrozen
+        );
+        ctx.accounts.config.config_frozen = true;
+        Ok(())
+    }
+
+    pub fn set_paused(ctx: Context<UpdateConfig>, paused: bool) -> Result<()> {
+        require!(
+            ctx.accounts.authority.key() == ctx.accounts.config.authority,
+            PerpsError::InvalidAuthority
+        );
+        ctx.accounts.config.paused = paused;
         Ok(())
     }
 
@@ -121,6 +140,10 @@ pub mod gold_perps_market {
         require!(
             ctx.accounts.authority.key() == ctx.accounts.config.authority,
             PerpsError::InvalidAuthority
+        );
+        require!(
+            !ctx.accounts.config.config_frozen,
+            PerpsError::ConfigFrozen
         );
         validate_config_inputs(
             default_skew_scale,
@@ -203,6 +226,12 @@ pub mod gold_perps_market {
         market.mu = mu;
         market.sigma = sigma;
         market.oracle_last_updated = now;
+
+        emit!(OracleSynced {
+            market_id,
+            spot_index,
+            timestamp: now,
+        });
         Ok(())
     }
 
@@ -238,6 +267,7 @@ pub mod gold_perps_market {
         size_delta: i64,
         acceptable_price: u64,
     ) -> Result<()> {
+        require!(!ctx.accounts.config.paused, PerpsError::TradingPaused);
         require!(
             margin_delta != 0 || size_delta != 0,
             PerpsError::NoopPositionUpdate
@@ -307,17 +337,17 @@ pub mod gold_perps_market {
             .ok_or(PerpsError::Overflow)?;
         let funding_pnl = calculate_funding_pnl(old_size, funding_delta)?;
 
-        let execution_price = if size_delta != 0 {
+        let exec_price = if size_delta != 0 {
             execution_price(&ctx.accounts.market, size_delta as i128)?
         } else {
             market_index_price(&ctx.accounts.market)?
         };
-        require_acceptable_price(execution_price, size_delta as i128, acceptable_price)?;
+        require_acceptable_price(exec_price, size_delta as i128, acceptable_price)?;
 
         let realized_trade_pnl = calculate_realized_trade_pnl(
             old_size,
             old_entry_price,
-            execution_price,
+            exec_price,
             size_delta as i128,
         )?;
 
@@ -341,7 +371,7 @@ pub mod gold_perps_market {
             old_entry_price,
             size_delta as i128,
             new_size,
-            execution_price,
+            exec_price,
         )?;
         let (next_long_oi, next_short_oi) =
             projected_open_interest(&ctx.accounts.market, old_size, new_size)?;
@@ -406,6 +436,30 @@ pub mod gold_perps_market {
         );
         require_leverage(next_margin_u64, new_size, config.max_leverage)?;
 
+        // PnL-aware maintenance margin check for position increases
+        if !is_reduce_only_change(old_size, new_size) && new_size != 0 {
+            let check_exit_price = execution_price(&ctx.accounts.market, -new_size)?;
+            let check_funding_delta = (ctx.accounts.market.current_funding_rate as i128)
+                .checked_sub(current_funding_rate as i128)
+                .ok_or(PerpsError::Overflow)?;
+            // For freshly written position, funding delta is zero (same rate).
+            // We use next_margin (already accounts for realized PnL and funding) as the
+            // position margin and compute unrealized PnL at the current exit price.
+            let effective_equity = calculate_position_equity(
+                next_margin,
+                new_size,
+                next_entry_price,
+                check_exit_price,
+                check_funding_delta,
+            )?;
+            let maint_margin =
+                calculate_maintenance_margin(new_size, config.maintenance_margin_bps)?;
+            require!(
+                effective_equity >= maint_margin,
+                PerpsError::MaintenanceMarginViolation
+            );
+        }
+
         if margin_delta < 0 {
             transfer_from_market(
                 &mut ctx.accounts.market,
@@ -423,6 +477,16 @@ pub mod gold_perps_market {
         position.size = i64::try_from(new_size).map_err(|_| PerpsError::Overflow)?;
         position.entry_price = next_entry_price;
         position.last_funding_rate = current_funding_rate;
+
+        emit!(PositionModified {
+            market_id,
+            trader: trader_key,
+            size_delta: i64::try_from(size_delta).unwrap_or(0),
+            margin_delta: i64::try_from(margin_delta).unwrap_or(0),
+            new_size: position.size,
+            new_margin: position.margin,
+            execution_price: exec_price,
+        });
         Ok(())
     }
 
@@ -452,50 +516,264 @@ pub mod gold_perps_market {
         let old_size = position.size as i128;
         require!(old_size != 0, PerpsError::NoOpenPosition);
 
-        let close_size_delta = -old_size;
-        let exit_price = execution_price(market, close_size_delta)?;
+        let funding_delta = (market.current_funding_rate as i128)
+            .checked_sub(position.last_funding_rate as i128)
+            .ok_or(PerpsError::Overflow)?;
+
+        // Calculate equity at full close to determine if liquidatable
+        let full_close_delta = -old_size;
+        let full_exit_price = execution_price(market, full_close_delta)?;
         let equity = calculate_position_equity(
             position.margin as i128,
             old_size,
             position.entry_price,
-            exit_price,
-            (market.current_funding_rate as i128)
-                .checked_sub(position.last_funding_rate as i128)
-                .ok_or(PerpsError::Overflow)?,
+            full_exit_price,
+            funding_delta,
         )?;
         let maintenance_margin =
             calculate_maintenance_margin(old_size, config.maintenance_margin_bps)?;
         require!(equity < maintenance_margin, PerpsError::NotLiquidatable);
 
-        update_market_open_interest(market, old_size, 0)?;
-        market.open_positions = market
-            .open_positions
-            .checked_sub(1)
+        // --- Partial liquidation: determine close size ---
+        // Target: restore to 2x maintenance margin after partial close
+        // Minimum: 10% of position size
+        // Cap: full close if too far underwater
+        let target_margin_after = maintenance_margin
+            .checked_mul(2)
+            .ok_or(PerpsError::Overflow)?;
+        let min_close = old_size
+            .abs()
+            .checked_mul(MIN_LIQUIDATION_CLOSE_BPS as i128)
+            .ok_or(PerpsError::Overflow)?
+            .checked_div(BPS_DENOMINATOR as i128)
             .ok_or(PerpsError::Overflow)?;
 
-        let positive_equity = cmp::max(0, equity);
-        let positive_equity_u64 =
-            u64::try_from(positive_equity).map_err(|_| PerpsError::Overflow)?;
-        let target_liquidation_fee =
-            calculate_liquidation_fee(old_size, config.liquidation_fee_bps)?;
-        let available_payout = available_liquidity_including_insurance(market)?;
-        let liquidation_fee = cmp::min(target_liquidation_fee, available_payout);
-        let owner_remainder = positive_equity_u64
-            .saturating_sub(target_liquidation_fee)
-            .min(available_payout.saturating_sub(liquidation_fee));
+        // Calculate the close size that would restore the position to target margin.
+        // If equity is already negative or position needs full close, close everything.
+        let close_abs = if equity <= 0 {
+            old_size.abs()
+        } else {
+            // We need: remaining equity after partial close >= target maintenance for remaining size
+            // Approximate: close enough so remaining_size's maintenance = equity
+            // close_ratio = 1 - (equity / target_margin_after)  (clamped)
+            let numerator = target_margin_after
+                .checked_sub(equity)
+                .unwrap_or(0);
+            if numerator <= 0 || target_margin_after <= 0 {
+                min_close
+            } else {
+                let calculated = old_size
+                    .abs()
+                    .checked_mul(numerator)
+                    .ok_or(PerpsError::Overflow)?
+                    .checked_div(target_margin_after)
+                    .ok_or(PerpsError::Overflow)?;
+                cmp::max(calculated, min_close)
+            }
+        };
+        let close_abs = cmp::min(close_abs, old_size.abs()); // cap at full close
+        let is_full_close = close_abs >= old_size.abs();
+        let close_size_delta = if old_size > 0 { -close_abs } else { close_abs };
+        let new_size = old_size
+            .checked_add(close_size_delta)
+            .ok_or(PerpsError::Overflow)?;
 
-        transfer_from_market(
-            &mut ctx.accounts.market,
-            &ctx.accounts.liquidator.to_account_info(),
-            liquidation_fee,
-            true,
+        // --- Execute the close at execution price ---
+        let exit_price = execution_price(market, close_size_delta)?;
+        let realized_pnl = calculate_realized_trade_pnl(
+            old_size,
+            position.entry_price,
+            exit_price,
+            close_size_delta,
         )?;
-        transfer_from_market(
-            &mut ctx.accounts.market,
-            &ctx.accounts.owner.to_account_info(),
-            owner_remainder,
-            true,
-        )?;
+        // Use close_size_delta so partial liquidations only realize funding
+        // proportional to the closed portion, not the entire position.
+        let funding_pnl = calculate_funding_pnl(close_size_delta.into(), funding_delta)?;
+        let next_margin = (position.margin as i128)
+            .checked_add(funding_pnl)
+            .and_then(|v| v.checked_add(realized_pnl))
+            .ok_or(PerpsError::Overflow)?;
+
+        // Update open interest
+        update_market_open_interest(market, old_size, new_size)?;
+
+        // --- Liquidation fee to liquidator ---
+        let target_liquidation_fee =
+            calculate_liquidation_fee(close_size_delta, config.liquidation_fee_bps)?;
+
+        // --- Insurance waterfall ---
+        if is_full_close || next_margin <= 0 {
+            // Full close (or position too underwater for partial)
+            if is_full_close {
+                market.open_positions = market
+                    .open_positions
+                    .checked_sub(1)
+                    .ok_or(PerpsError::Overflow)?;
+            }
+
+            if next_margin > 0 {
+                // Position has remaining equity — pay liquidator, remainder to insurance
+                let remaining_equity =
+                    u64::try_from(next_margin).map_err(|_| PerpsError::Overflow)?;
+                let liquidation_fee = cmp::min(target_liquidation_fee, remaining_equity);
+                let to_insurance = remaining_equity.saturating_sub(liquidation_fee);
+
+                let available_payout = available_liquidity_including_insurance(market)?;
+                let actual_liq_fee = cmp::min(liquidation_fee, available_payout);
+                transfer_from_market(
+                    market,
+                    &ctx.accounts.liquidator.to_account_info(),
+                    actual_liq_fee,
+                    true,
+                )?;
+
+                // Remaining equity goes to insurance fund
+                market.insurance_fund = market
+                    .insurance_fund
+                    .checked_add(to_insurance)
+                    .ok_or(PerpsError::Overflow)?;
+            } else {
+                // Position is underwater — insurance waterfall
+                let deficit =
+                    u64::try_from(next_margin.abs()).map_err(|_| PerpsError::Overflow)?;
+
+                // Cap socialized loss at MAX_SOCIALIZED_LOSS_BPS of notional
+                let notional = close_abs
+                    .checked_mul(exit_price as i128)
+                    .ok_or(PerpsError::Overflow)?
+                    .checked_div(1_000_000_000) // price precision
+                    .ok_or(PerpsError::Overflow)?;
+                let max_socialized = u64::try_from(
+                    notional
+                        .checked_mul(MAX_SOCIALIZED_LOSS_BPS as i128)
+                        .ok_or(PerpsError::Overflow)?
+                        .checked_div(BPS_DENOMINATOR as i128)
+                        .ok_or(PerpsError::Overflow)?,
+                )
+                .unwrap_or(u64::MAX);
+                let capped_deficit = cmp::min(deficit, max_socialized);
+
+                // Draw from insurance first
+                let insurance_draw = cmp::min(capped_deficit, market.insurance_fund);
+                market.insurance_fund = market
+                    .insurance_fund
+                    .checked_sub(insurance_draw)
+                    .ok_or(PerpsError::Overflow)?;
+
+                // Remaining becomes bad debt
+                let remaining_bad_debt = capped_deficit.saturating_sub(insurance_draw);
+                if remaining_bad_debt > 0 {
+                    market.bad_debt = market
+                        .bad_debt
+                        .checked_add(remaining_bad_debt)
+                        .ok_or(PerpsError::Overflow)?;
+                }
+
+                // Still pay liquidator from available market liquidity
+                let available_payout = available_liquidity_including_insurance(market)?;
+                let actual_liq_fee = cmp::min(target_liquidation_fee, available_payout);
+                transfer_from_market(
+                    market,
+                    &ctx.accounts.liquidator.to_account_info(),
+                    actual_liq_fee,
+                    true,
+                )?;
+            }
+
+            if is_full_close {
+                // Manually close position account (return rent to owner)
+                ctx.accounts
+                    .position
+                    .close(ctx.accounts.owner.to_account_info())?;
+            } else {
+                // Partial close but margin went to zero — force full close
+                market.open_positions = market
+                    .open_positions
+                    .checked_sub(1)
+                    .ok_or(PerpsError::Overflow)?;
+                // Need to correct OI since we calculated for partial but now closing full
+                update_market_open_interest(market, new_size, 0)?;
+                ctx.accounts
+                    .position
+                    .close(ctx.accounts.owner.to_account_info())?;
+            }
+        } else {
+            // Partial close — position survives with reduced size
+            let next_margin_u64 =
+                u64::try_from(next_margin).map_err(|_| PerpsError::Overflow)?;
+
+            // Deduct liquidation fee from position margin
+            let liq_fee_from_margin = cmp::min(target_liquidation_fee, next_margin_u64);
+            let margin_after_fee = next_margin_u64.saturating_sub(liq_fee_from_margin);
+
+            // Pay liquidator
+            let available_payout = available_liquidity_including_insurance(market)?;
+            let actual_liq_fee = cmp::min(liq_fee_from_margin, available_payout);
+            transfer_from_market(
+                market,
+                &ctx.accounts.liquidator.to_account_info(),
+                actual_liq_fee,
+                true,
+            )?;
+
+            // Update position state
+            let next_entry_price = calculate_next_entry_price(
+                old_size,
+                position.entry_price,
+                close_size_delta,
+                new_size,
+                exit_price,
+            )?;
+            let position = &mut ctx.accounts.position;
+            position.margin = margin_after_fee;
+            position.size = i64::try_from(new_size).map_err(|_| PerpsError::Overflow)?;
+            position.entry_price = next_entry_price;
+            position.last_funding_rate = market.current_funding_rate;
+        }
+
+        emit!(PositionLiquidated {
+            market_id,
+            trader: ctx.accounts.owner.key(),
+            liquidator: ctx.accounts.liquidator.key(),
+            closed_size: close_size_delta as i64,
+            remaining_size: new_size as i64,
+            liquidation_fee: target_liquidation_fee,
+            exit_price,
+        });
+        Ok(())
+    }
+
+    pub fn repay_bad_debt(
+        ctx: Context<DepositInsurance>,
+        market_id: u64,
+        amount: u64,
+    ) -> Result<()> {
+        require!(amount > 0, PerpsError::InvalidBadDebtRepayment);
+        let market = &ctx.accounts.market;
+        require_market(market, market_id)?;
+        require!(
+            market.bad_debt >= amount,
+            PerpsError::InvalidBadDebtRepayment
+        );
+
+        let transfer_ctx = CpiContext::new(
+            ctx.accounts.system_program.to_account_info(),
+            system_program::Transfer {
+                from: ctx.accounts.payer.to_account_info(),
+                to: ctx.accounts.market.to_account_info(),
+            },
+        );
+        system_program::transfer(transfer_ctx, amount)?;
+
+        let market = &mut ctx.accounts.market;
+        market.bad_debt = market
+            .bad_debt
+            .checked_sub(amount)
+            .ok_or(PerpsError::Overflow)?;
+        market.insurance_fund = market
+            .insurance_fund
+            .checked_add(amount)
+            .ok_or(PerpsError::Overflow)?;
         Ok(())
     }
 
@@ -518,6 +796,11 @@ pub mod gold_perps_market {
                 market.last_funding_time = now;
             }
             MARKET_STATUS_CLOSE_ONLY => {
+                // Reject if already CLOSE_ONLY — settlement price must not be overwritten
+                require!(
+                    market.status != MARKET_STATUS_CLOSE_ONLY,
+                    PerpsError::InvalidMarketStatus
+                );
                 let frozen_price = if settlement_spot_index > 0 {
                     settlement_spot_index
                 } else {
@@ -663,6 +946,11 @@ fn validate_config_inputs(
     );
     require!(
         u64::from(liquidation_fee_bps) < BPS_DENOMINATOR,
+        PerpsError::InvalidRiskConfig
+    );
+    require!(
+        u64::from(trade_treasury_fee_bps) <= MAX_FEE_BPS
+            && u64::from(trade_market_maker_fee_bps) <= MAX_FEE_BPS,
         PerpsError::InvalidRiskConfig
     );
     require!(
@@ -1121,6 +1409,37 @@ fn to_u64(value: i128) -> Result<u64> {
     u64::try_from(value).map_err(|_| PerpsError::Overflow.into())
 }
 
+// ── Events for off-chain monitoring ──
+
+#[event]
+pub struct PositionModified {
+    pub market_id: u64,
+    pub trader: Pubkey,
+    pub size_delta: i64,
+    pub margin_delta: i64,
+    pub new_size: i64,
+    pub new_margin: u64,
+    pub execution_price: u64,
+}
+
+#[event]
+pub struct PositionLiquidated {
+    pub market_id: u64,
+    pub trader: Pubkey,
+    pub liquidator: Pubkey,
+    pub closed_size: i64,
+    pub remaining_size: i64,
+    pub liquidation_fee: u64,
+    pub exit_price: u64,
+}
+
+#[event]
+pub struct OracleSynced {
+    pub market_id: u64,
+    pub spot_index: u64,
+    pub timestamp: i64,
+}
+
 #[derive(Accounts)]
 pub struct InitializeConfig<'info> {
     #[account(
@@ -1138,10 +1457,7 @@ pub struct InitializeConfig<'info> {
     )]
     pub program: Program<'info, crate::program::GoldPerpsMarket>,
     #[account(
-        constraint = program_data.upgrade_authority_address == Some(authority.key())
-            || ((program_data.upgrade_authority_address.is_none()
-                || program_data.upgrade_authority_address == Some(Pubkey::default()))
-                && authority.key() == bootstrap_authority()) @ PerpsError::UnauthorizedInitializer
+        constraint = program_data.upgrade_authority_address == Some(authority.key()) @ PerpsError::UnauthorizedInitializer
     )]
     pub program_data: Account<'info, ProgramData>,
     pub system_program: Program<'info, System>,
@@ -1227,12 +1543,12 @@ pub struct LiquidatePosition<'info> {
     pub market: Account<'info, MarketState>,
     #[account(
         mut,
-        close = owner,
+        seeds = [b"position", owner.key().as_ref(), market_id.to_le_bytes().as_ref()],
+        bump,
         constraint = position.initialized @ PerpsError::NoOpenPosition,
-        constraint = position.market_id == market_id @ PerpsError::InvalidMarket,
-        constraint = position.owner == owner.key() @ PerpsError::InvalidPositionOwner
     )]
     pub position: Account<'info, PositionState>,
+    /// CHECK: Position owner derived from PDA seeds; receives lamports on full liquidation.
     #[account(mut)]
     pub owner: SystemAccount<'info>,
     #[account(mut)]
@@ -1304,6 +1620,8 @@ pub struct ConfigState {
     pub liquidation_fee_bps: u16,
     pub trade_treasury_fee_bps: u16,
     pub trade_market_maker_fee_bps: u16,
+    pub config_frozen: bool,
+    pub paused: bool,
 }
 
 impl ConfigState {
@@ -1331,6 +1649,7 @@ pub struct MarketState {
     pub current_funding_rate: i64,
     pub total_long_oi: u64,
     pub total_short_oi: u64,
+    pub bad_debt: u64,
 }
 
 impl MarketState {
@@ -1357,8 +1676,10 @@ impl PositionState {
 pub enum PerpsError {
     #[msg("Operator is not authorized to manage perps markets")]
     InvalidAuthority,
-    #[msg("Only the configured bootstrap authority can initialize the config")]
+    #[msg("Only the program upgrade authority can initialize the config")]
     UnauthorizedInitializer,
+    #[msg("Config has already been initialized")]
+    AlreadyInitialized,
     #[msg("Risk configuration is invalid")]
     InvalidRiskConfig,
     #[msg("Market does not exist or does not match the requested id")]
@@ -1413,6 +1734,14 @@ pub enum PerpsError {
     InvalidPositionState,
     #[msg("Numeric overflow in perps calculation")]
     Overflow,
+    #[msg("Config is frozen and cannot be modified")]
+    ConfigFrozen,
+    #[msg("Trading is paused")]
+    TradingPaused,
+    #[msg("Position fails maintenance margin check after accounting for unrealized PnL")]
+    MaintenanceMarginViolation,
+    #[msg("Bad debt repayment amount is invalid")]
+    InvalidBadDebtRepayment,
 }
 
 #[cfg(test)]

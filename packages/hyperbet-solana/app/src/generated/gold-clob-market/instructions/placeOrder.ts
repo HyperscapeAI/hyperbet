@@ -17,16 +17,16 @@ export function getPlaceOrderDiscriminatorBytes(): ReadonlyUint8Array { return f
 export type PlaceOrderInstruction<TProgram extends string = typeof GOLD_CLOB_MARKET_PROGRAM_ADDRESS, TAccountMarketState extends string | AccountMeta<string> = string, TAccountDuelState extends string | AccountMeta<string> = string, TAccountUserBalance extends string | AccountMeta<string> = string, TAccountNewOrder extends string | AccountMeta<string> = string, TAccountRestingLevel extends string | AccountMeta<string> = string, TAccountConfig extends string | AccountMeta<string> = string, TAccountTreasury extends string | AccountMeta<string> = string, TAccountMarketMaker extends string | AccountMeta<string> = string, TAccountVault extends string | AccountMeta<string> = string, TAccountUser extends string | AccountMeta<string> = string, TAccountSystemProgram extends string | AccountMeta<string> = "11111111111111111111111111111111", TRemainingAccounts extends readonly AccountMeta<string>[] = []> =
 Instruction<TProgram> & InstructionWithData<ReadonlyUint8Array> & InstructionWithAccounts<[TAccountMarketState extends string ? WritableAccount<TAccountMarketState> : TAccountMarketState, TAccountDuelState extends string ? ReadonlyAccount<TAccountDuelState> : TAccountDuelState, TAccountUserBalance extends string ? WritableAccount<TAccountUserBalance> : TAccountUserBalance, TAccountNewOrder extends string ? WritableAccount<TAccountNewOrder> : TAccountNewOrder, TAccountRestingLevel extends string ? WritableAccount<TAccountRestingLevel> : TAccountRestingLevel, TAccountConfig extends string ? ReadonlyAccount<TAccountConfig> : TAccountConfig, TAccountTreasury extends string ? WritableAccount<TAccountTreasury> : TAccountTreasury, TAccountMarketMaker extends string ? WritableAccount<TAccountMarketMaker> : TAccountMarketMaker, TAccountVault extends string ? WritableAccount<TAccountVault> : TAccountVault, TAccountUser extends string ? WritableSignerAccount<TAccountUser> & AccountSignerMeta<TAccountUser> : TAccountUser, TAccountSystemProgram extends string ? ReadonlyAccount<TAccountSystemProgram> : TAccountSystemProgram, ...TRemainingAccounts]>;
 
-export type PlaceOrderInstructionData = { discriminator: ReadonlyUint8Array; orderId: bigint; side: number; price: number; amount: bigint;  };
+export type PlaceOrderInstructionData = { discriminator: ReadonlyUint8Array; orderId: bigint; side: number; price: number; amount: bigint; orderBehavior: number;  };
 
-export type PlaceOrderInstructionDataArgs = { orderId: number | bigint; side: number; price: number; amount: number | bigint;  };
+export type PlaceOrderInstructionDataArgs = { orderId: number | bigint; side: number; price: number; amount: number | bigint; orderBehavior: number;  };
 
 export function getPlaceOrderInstructionDataEncoder(): FixedSizeEncoder<PlaceOrderInstructionDataArgs> {
-    return transformEncoder(getStructEncoder([['discriminator', fixEncoderSize(getBytesEncoder(), 8)], ['orderId', getU64Encoder()], ['side', getU8Encoder()], ['price', getU16Encoder()], ['amount', getU64Encoder()]]), (value) => ({ ...value, discriminator: PLACE_ORDER_DISCRIMINATOR }));
+    return transformEncoder(getStructEncoder([['discriminator', fixEncoderSize(getBytesEncoder(), 8)], ['orderId', getU64Encoder()], ['side', getU8Encoder()], ['price', getU16Encoder()], ['amount', getU64Encoder()], ['orderBehavior', getU8Encoder()]]), (value) => ({ ...value, discriminator: PLACE_ORDER_DISCRIMINATOR }));
 }
 
 export function getPlaceOrderInstructionDataDecoder(): FixedSizeDecoder<PlaceOrderInstructionData> {
-    return getStructDecoder([['discriminator', fixDecoderSize(getBytesDecoder(), 8)], ['orderId', getU64Decoder()], ['side', getU8Decoder()], ['price', getU16Decoder()], ['amount', getU64Decoder()]]);
+    return getStructDecoder([['discriminator', fixDecoderSize(getBytesDecoder(), 8)], ['orderId', getU64Decoder()], ['side', getU8Decoder()], ['price', getU16Decoder()], ['amount', getU64Decoder()], ['orderBehavior', getU8Decoder()]]);
 }
 
 export function getPlaceOrderInstructionDataCodec(): FixedSizeCodec<PlaceOrderInstructionDataArgs, PlaceOrderInstructionData> {
@@ -49,6 +49,7 @@ orderId: PlaceOrderInstructionDataArgs["orderId"];
 side: PlaceOrderInstructionDataArgs["side"];
 price: PlaceOrderInstructionDataArgs["price"];
 amount: PlaceOrderInstructionDataArgs["amount"];
+orderBehavior: PlaceOrderInstructionDataArgs["orderBehavior"];
 }
 
 export async function getPlaceOrderInstructionAsync<TAccountMarketState extends string, TAccountDuelState extends string, TAccountUserBalance extends string, TAccountNewOrder extends string, TAccountRestingLevel extends string, TAccountConfig extends string, TAccountTreasury extends string, TAccountMarketMaker extends string, TAccountVault extends string, TAccountUser extends string, TAccountSystemProgram extends string, TProgramAddress extends Address = typeof GOLD_CLOB_MARKET_PROGRAM_ADDRESS>(input: PlaceOrderAsyncInput<TAccountMarketState, TAccountDuelState, TAccountUserBalance, TAccountNewOrder, TAccountRestingLevel, TAccountConfig, TAccountTreasury, TAccountMarketMaker, TAccountVault, TAccountUser, TAccountSystemProgram>, config?: { programAddress?: TProgramAddress } ): Promise<PlaceOrderInstruction<TProgramAddress, TAccountMarketState, TAccountDuelState, TAccountUserBalance, TAccountNewOrder, TAccountRestingLevel, TAccountConfig, TAccountTreasury, TAccountMarketMaker, TAccountVault, TAccountUser, TAccountSystemProgram>> {
@@ -101,6 +102,7 @@ orderId: PlaceOrderInstructionDataArgs["orderId"];
 side: PlaceOrderInstructionDataArgs["side"];
 price: PlaceOrderInstructionDataArgs["price"];
 amount: PlaceOrderInstructionDataArgs["amount"];
+orderBehavior: PlaceOrderInstructionDataArgs["orderBehavior"];
 }
 
 export function getPlaceOrderInstruction<TAccountMarketState extends string, TAccountDuelState extends string, TAccountUserBalance extends string, TAccountNewOrder extends string, TAccountRestingLevel extends string, TAccountConfig extends string, TAccountTreasury extends string, TAccountMarketMaker extends string, TAccountVault extends string, TAccountUser extends string, TAccountSystemProgram extends string, TProgramAddress extends Address = typeof GOLD_CLOB_MARKET_PROGRAM_ADDRESS>(input: PlaceOrderInput<TAccountMarketState, TAccountDuelState, TAccountUserBalance, TAccountNewOrder, TAccountRestingLevel, TAccountConfig, TAccountTreasury, TAccountMarketMaker, TAccountVault, TAccountUser, TAccountSystemProgram>, config?: { programAddress?: TProgramAddress } ): PlaceOrderInstruction<TProgramAddress, TAccountMarketState, TAccountDuelState, TAccountUserBalance, TAccountNewOrder, TAccountRestingLevel, TAccountConfig, TAccountTreasury, TAccountMarketMaker, TAccountVault, TAccountUser, TAccountSystemProgram> {

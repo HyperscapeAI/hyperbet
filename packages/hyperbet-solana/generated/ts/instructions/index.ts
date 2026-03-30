@@ -7,9 +7,11 @@
  */
 
 export * from './cancelDuel.js';
+export * from './challengeResult.js';
 export * from './cancelOrder.js';
 export * from './claim.js';
 export * from './depositInsurance.js';
+export * from './finalizeResult.js';
 export * from './initializeConfig.js';
 export * from './initializeConfig.js';
 export * from './initializeMarket.js';
@@ -17,8 +19,8 @@ export * from './initializeOracle.js';
 export * from './liquidatePosition.js';
 export * from './modifyPosition.js';
 export * from './placeOrder.js';
+export * from './proposeResult.js';
 export * from './recycleMarketMakerFees.js';
-export * from './reportResult.js';
 export * from './setMarketStatus.js';
 export * from './syncMarketFromDuel.js';
 export * from './updateConfig.js';

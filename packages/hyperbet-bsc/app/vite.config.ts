@@ -379,6 +379,8 @@ export default defineConfig(async ({ mode }) => {
       include: [
         "buffer",
         "process",
+        "viem",
+        "viem/utils",
         "vite-plugin-node-polyfills/shims/buffer",
         "vite-plugin-node-polyfills/shims/global",
         "vite-plugin-node-polyfills/shims/process",

@@ -1066,6 +1066,18 @@
             }
           },
           {
+            "name": "trade_treasury_fee_bps_snapshot",
+            "type": "u16"
+          },
+          {
+            "name": "trade_market_maker_fee_bps_snapshot",
+            "type": "u16"
+          },
+          {
+            "name": "winnings_market_maker_fee_bps_snapshot",
+            "type": "u16"
+          },
+          {
             "name": "next_order_id",
             "type": "u64"
           },

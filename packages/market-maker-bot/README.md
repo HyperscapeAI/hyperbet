@@ -1,12 +1,30 @@
 # Hyperbet Market Maker Bot
 
+> **TL;DR:** This is the internal MM and adversarial-simulation package for the phase-1 launch product. The launch-critical chains are `Solana`, `BSC`, and `AVAX`; `Base` remains an optional add-chain lane. The bot is part of the internal AMM and liquidity stack, not a retail UI surface.
+
+Real quote-lifecycle bot for Solana, BSC, and AVAX, with optional Base
+add-chain support. The bot discovers active markets from the lifecycle API and
+feeds both EVM and Solana execution through the shared `@hyperbet/mm-core`
+quote planner.
+
 ## Single instance
 
 ```bash
 bun run start
 ```
 
-Uses `.env` values in this package. You can provide one shared EVM key via `EVM_PRIVATE_KEY`, or chain-specific keys via `EVM_PRIVATE_KEY_BSC` and `EVM_PRIVATE_KEY_BASE`.
+Uses `.env` values in this package. You can provide one shared EVM key via `EVM_PRIVATE_KEY`, or chain-specific keys via `EVM_PRIVATE_KEY_BSC`, `EVM_PRIVATE_KEY_BASE`, and `EVM_PRIVATE_KEY_AVAX`.
+
+Solana execution now requires all of the following:
+
+- `SOLANA_PRIVATE_KEY` for a real funded signer
+- `SOLANA_RPC_URL`
+- `FIGHT_ORACLE_PROGRAM_ID`
+- `GOLD_CLOB_MARKET_PROGRAM_ID`
+
+`SOLANA_ARENA_MARKET_PROGRAM_ID` is still accepted as a deprecated alias for `GOLD_CLOB_MARKET_PROGRAM_ID`.
+
+If the Solana signer, program, or config PDA is unavailable, the bot disables only Solana execution and continues quoting on the enabled EVM chains.
 
 ## Generate multiple wallet configs
 
@@ -22,13 +40,15 @@ This writes wallet key material to `wallets.generated.json`. Keep that file priv
 bun run start:multi -- --config wallets.generated.json --stagger-ms 1200
 ```
 
+Any wallet with `MM_ENABLE_SOLANA=true` needs a funded `solanaPrivateKey`. Shared Solana env such as `SOLANA_RPC_URL`, `FIGHT_ORACLE_PROGRAM_ID`, and `GOLD_CLOB_MARKET_PROGRAM_ID` can live under `defaults`.
+
 Optional:
 
 ```bash
 bun run start:multi -- --config wallets.generated.json --dry-run
 ```
 
-Use `/Users/shawwalters/eliza-workspace/hyperbet/packages/market-maker-bot/wallets.example.json` as the schema reference.
+Use [wallets.example.json](wallets.example.json) as the schema reference.
 
 ## Export generated Solana wallets to UI env
 
@@ -56,6 +76,7 @@ Scenarios covered per chain (Solana, BSC, AVAX):
 - `quote_stuffing_burst`
 - `cancel_storm_griefing`
 - `sybil_wash_trading`
+- `sybil_identity_churn`
 - `rebate_farming_ring`
 - `coordinated_resolution_push`
 
@@ -77,12 +98,13 @@ Gate env controls:
 
 - `MM_ADVERSARIAL_SEED` (default `20260311`)
 - `MM_ADVERSARIAL_CHAIN` (`solana` | `bsc` | `avax`, optional; unset means all chains)
-- `MM_ADVERSARIAL_MIN_PASSES` (default is all scenarios in scope: `36` for all chains, `12` for one chain)
+- `MM_ADVERSARIAL_MIN_PASSES` (default is all scenarios in scope: `39` for all chains, `13` for one chain)
 - `MM_ADVERSARIAL_OUTPUT_DIR` (default `simulations`)
 - `MM_ADVERSARIAL_ENFORCE_BASELINE` (`1` by default, set `0` to skip baseline regression checks)
 - `MM_ADVERSARIAL_SEED_CORPUS` (optional path override for regression-seed corpus used by `--seed-corpus`)
+- `MM_ADVERSARIAL_REPLAY_CORPUS` (optional path override for historical replay corpus used by `--replay-corpus` and gate checks)
 
-Gate behavior now enforces ten layers:
+Gate behavior now enforces twelve layers:
 
 - mitigation pass threshold
 - hard invariants (`max mitigated attacker pnl`, `max exploit events`, `max inventory peak`, `max toxic fill rate`, `max adverse slippage`, `min loss reduction`)
@@ -90,15 +112,23 @@ Gate behavior now enforces ten layers:
 - oracle/finality/dispute policy controls (max stale oracle age, confidence bounds, same-slot round-trip pressure, finalized-only settlement reads, minimum dispute liveness window)
 - bounded-loss budgets (scenario-level and chain-aggregate mitigated attacker PnL caps)
 - settlement state-machine checks (`open -> resolve_proposed -> dispute_window -> finalized`) including minimum dispute-window time before finalization
-- sybil/collusion controls (cluster concentration ceiling, circular-flow ratio ceiling, coordinated-resolution push score cap, minimum independent participant floor)
+- sybil/collusion controls (cluster concentration ceiling, identity-churn rate ceiling, circular-flow ratio ceiling, coordinated-resolution push score cap, minimum independent participant floor)
+- adaptive attacker-policy controls (max escalation score, max tactic-switch burden, minimum defense-recovery ratio, max terminal pressure)
 - chaos-resilience controls (oracle outage damage cap, finality jitter damage cap, liquidity-cliff inventory stress cap)
 - deterministic abuse-matrix budgets (chain aggregate and scenario-specific attacker-pnl/exploit/toxicity/slippage envelopes)
 - regression seed corpus replay checks (known-bad seeds must remain mitigated across all enabled gates)
+- historical replay corpus checks (captured trace replays from prior duel/orderflow windows must stay within replay safety budgets)
 
 Run the seed corpus gate:
 
 ```bash
 bun run simulate:adversarial:seed-corpus
+```
+
+Run the historical replay corpus gate:
+
+```bash
+bun run simulate:adversarial:replay-corpus
 ```
 
 Run chain-specific seed corpus replay:
@@ -125,6 +155,7 @@ bun run verify:forks
   - `quote_stuffing_burst`
   - `cancel_storm_griefing`
   - `sybil_wash_trading`
+  - `sybil_identity_churn`
 
 Additional fork harness env controls:
 
@@ -140,3 +171,13 @@ Refresh baseline snapshot after intentional model changes:
 ```bash
 bun run simulate:adversarial:baseline:update
 ```
+
+## Verification
+
+```bash
+bun test
+bunx tsc --noEmit -p tsconfig.json
+bun run smoke:runtime:solana
+```
+
+`SOLANA_HEALTHCHECK_INTERVAL_MS` controls readiness checks only. Normal Solana quote reconciliation runs on the main market-maker loop.

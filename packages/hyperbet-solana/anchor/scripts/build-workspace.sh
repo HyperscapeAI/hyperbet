@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TOOLS_VERSION="${ANCHOR_SBF_TOOLS_VERSION:-v1.52}"
+BINARIES_ONLY="${HYPERBET_SOLANA_BUILD_BINARIES_ONLY:-0}"
 BASE_RUST_LOG="${RUST_LOG:-}"
 ANCHOR_RUST_LOG="${BASE_RUST_LOG:+${BASE_RUST_LOG},}cargo_build_sbf=error"
 export RUST_LOG="${ANCHOR_RUST_LOG}"
@@ -10,6 +11,7 @@ PROGRAMS=(
   "fight_oracle"
   "gold_clob_market"
   "gold_perps_market"
+  "lvr_amm"
 )
 
 extract_marker_json() {
@@ -78,7 +80,7 @@ generate_idl() {
 
 mkdir -p "${ROOT_DIR}/target/idl"
 
-if command -v anchor >/dev/null 2>&1; then
+if command -v anchor >/dev/null 2>&1 && [[ "$BINARIES_ONLY" != "1" ]]; then
   echo "[anchor-build] anchor build"
   anchor build
   node "${ROOT_DIR}/../scripts/sync-anchor-artifacts.mjs"
@@ -93,6 +95,12 @@ else
     echo "[anchor-build] sbf ${program} (tools=${TOOLS_VERSION})"
     cargo build-sbf --tools-version "${TOOLS_VERSION}" --manifest-path "${ROOT_DIR}/programs/${program}/Cargo.toml"
   done
+fi
+
+if [[ "$BINARIES_ONLY" == "1" ]]; then
+  echo "[anchor-build] skipped idl generation (binaries only)"
+  echo "[anchor-build] complete"
+  exit 0
 fi
 
 for program in "${PROGRAMS[@]}"; do

@@ -1,0 +1,77 @@
+name: Fund Multisig Signers
+
+on:
+  push:
+    branches:
+      - enoomian/pm16-17-20-21
+    paths:
+      - .github/workflows/fund-multisig-signers.yml
+
+permissions:
+  contents: read
+
+jobs:
+  fund-signers:
+    name: Send testnet gas to multisig signers
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+
+      - name: Fund BSC Testnet signers
+        env:
+          DEPLOYER_KEY: ${{ secrets.TESTNET_DEPLOYER_PRIVATE_KEY }}
+          RPC: https://data-seed-prebsc-1-s1.bnbchain.org:8545
+        run: |
+          SIGNERS=(
+            "0xFC951Ead43344CaBF775E077dcf3334BAe228730"
+            "0x785fceED2d6ab37e5a22329E2ED496427A58CbE2"
+            "0x62e7028DEe826a2a6F811021a5eAA379713A36C6"
+          )
+          NONCE=$(cast nonce 0x25DFe05ea0d5bb2F96b9D351765CC5E2DB86dCC0 --rpc-url "$RPC")
+          for i in "${!SIGNERS[@]}"; do
+            addr="${SIGNERS[$i]}"
+            echo "Sending 0.005 tBNB to $addr (nonce $((NONCE + i)))..."
+            cast send "$addr" --value 0.005ether --rpc-url "$RPC" --private-key "$DEPLOYER_KEY" --nonce "$((NONCE + i))"
+            echo "Done: $addr"
+          done
+
+      - name: Fund AVAX Fuji signers
+        env:
+          DEPLOYER_KEY: ${{ secrets.TESTNET_DEPLOYER_PRIVATE_KEY }}
+          RPC: https://api.avax-test.network/ext/bc/C/rpc
+        run: |
+          SIGNERS=(
+            "0xFC951Ead43344CaBF775E077dcf3334BAe228730"
+            "0x785fceED2d6ab37e5a22329E2ED496427A58CbE2"
+            "0x62e7028DEe826a2a6F811021a5eAA379713A36C6"
+          )
+          NONCE=$(cast nonce 0x25DFe05ea0d5bb2F96b9D351765CC5E2DB86dCC0 --rpc-url "$RPC")
+          for i in "${!SIGNERS[@]}"; do
+            addr="${SIGNERS[$i]}"
+            echo "Sending 0.02 AVAX to $addr (nonce $((NONCE + i)))..."
+            cast send "$addr" --value 0.02ether --rpc-url "$RPC" --private-key "$DEPLOYER_KEY" --nonce "$((NONCE + i))"
+            echo "Done: $addr"
+          done
+
+      - name: Verify balances
+        env:
+          RPC_BSC: https://data-seed-prebsc-1-s1.bnbchain.org:8545
+          RPC_AVAX: https://api.avax-test.network/ext/bc/C/rpc
+        run: |
+          SIGNERS=(
+            "0xFC951Ead43344CaBF775E077dcf3334BAe228730"
+            "0x785fceED2d6ab37e5a22329E2ED496427A58CbE2"
+            "0x62e7028DEe826a2a6F811021a5eAA379713A36C6"
+          )
+          echo "=== BSC Testnet ==="
+          for addr in "${SIGNERS[@]}"; do
+            bal=$(cast balance "$addr" --rpc-url "$RPC_BSC" --ether)
+            echo "  $addr: $bal tBNB"
+          done
+          echo ""
+          echo "=== AVAX Fuji ==="
+          for addr in "${SIGNERS[@]}"; do
+            bal=$(cast balance "$addr" --rpc-url "$RPC_AVAX" --ether)
+            echo "  $addr: $bal AVAX"
+          done

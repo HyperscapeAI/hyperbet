@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { evaluateBoundedLossBreaches } from "./bounded-loss.js";
 import { CHAIN_PROFILES, SCENARIOS } from "./config.js";
 import { evaluateChaosBreaches } from "./chaos.js";
+import { evaluateAdaptiveBreaches } from "./adaptive.js";
 import { DEFAULT_INVARIANT_LIMITS, evaluateInvariantBreaches } from "./invariants.js";
 import { evaluateMatrixBreaches } from "./matrix.js";
 import { evaluatePolicyBreaches } from "./policy.js";
@@ -134,6 +135,17 @@ export function evaluateRegressionSeeds(
         seed,
         chainScope,
         message: `chaos breach ${first.chain} ${first.control}`,
+      });
+      continue;
+    }
+
+    const adaptiveBreaches = evaluateAdaptiveBreaches(report);
+    if (adaptiveBreaches.length > 0) {
+      const first = adaptiveBreaches[0]!;
+      failures.push({
+        seed,
+        chainScope,
+        message: `adaptive breach ${first.chain} ${first.control}`,
       });
       continue;
     }

@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -19,6 +18,9 @@ import { resolveBettingSolanaDeployment } from "../../deployments";
 import fightOracleIdl from "./idl/fight_oracle.json";
 import goldClobMarketIdl from "./idl/gold_clob_market.json";
 import goldPerpsMarketIdl from "./idl/gold_perps_market.json";
+import { type FightOracle } from "../../../hyperbet-solana/anchor/target/types/fight_oracle";
+import { type GoldClobMarket } from "../../../hyperbet-solana/anchor/target/types/gold_clob_market";
+import { type GoldPerpsMarket } from "../../../hyperbet-solana/anchor/target/types/gold_perps_market";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const keeperRoot = path.resolve(__dirname, "..");
@@ -194,9 +196,9 @@ const GOLD_PERPS_MARKET_IDL = ensureIdlAddress(
 export function createPrograms(signer: Keypair): {
   connection: Connection;
   provider: AnchorProvider;
-  fightOracle: Program<any>;
-  goldClobMarket: Program<any>;
-  goldPerpsMarket: Program<any>;
+  fightOracle: Program<FightOracle>;
+  goldClobMarket: Program<GoldClobMarket>;
+  goldPerpsMarket: Program<GoldPerpsMarket>;
   /** @deprecated Binary market removed. Returns null. */
   goldBinaryMarket: null;
 } {
@@ -209,9 +211,18 @@ export function createPrograms(signer: Keypair): {
     preflightCommitment: "confirmed",
   });
 
-  const fightOracle = new Program(FIGHT_ORACLE_IDL, provider);
-  const goldClobMarket = new Program(GOLD_CLOB_MARKET_IDL, provider);
-  const goldPerpsMarket = new Program(GOLD_PERPS_MARKET_IDL, provider);
+  const fightOracle: Program<FightOracle> = new Program(
+    FIGHT_ORACLE_IDL,
+    provider,
+  );
+  const goldClobMarket: Program<GoldClobMarket> = new Program(
+    GOLD_CLOB_MARKET_IDL,
+    provider,
+  );
+  const goldPerpsMarket: Program<GoldPerpsMarket> = new Program(
+    GOLD_PERPS_MARKET_IDL,
+    provider,
+  );
 
   return {
     connection,

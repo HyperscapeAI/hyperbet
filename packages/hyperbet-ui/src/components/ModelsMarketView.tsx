@@ -2,7 +2,14 @@ import React from "react";
 import * as anchor from "@coral-xyz/anchor";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import { useWalletModal } from "@solana/wallet-adapter-react-ui";
-import { LAMPORTS_PER_SOL, PublicKey, SystemProgram } from "@solana/web3.js";
+import {
+  LAMPORTS_PER_SOL,
+  PublicKey,
+  SystemProgram,
+  type Connection,
+  type Transaction,
+  type VersionedTransaction,
+} from "@solana/web3.js";
 import {
   Line,
   LineChart,
@@ -47,9 +54,11 @@ const CHAIN_POLL_INTERVAL_MS = 6_000;
 const DEFAULT_SKEW_SCALE_SOL = 100;
 const DEFAULT_MAX_MODEL_LEVERAGE = 5;
 const DEFAULT_MAX_ORACLE_STALENESS_MS = 120_000;
+const DEFAULT_MIN_MODEL_MARGIN_LAMPORTS = 100_000_000;
 const MAX_BATCH_SIZE = 99;
 const ORACLE_HISTORY_POLL_INTERVAL_MS = 15_000;
 const ORACLE_HISTORY_LIMIT = 120;
+const TOTAL_TRADE_FEE_RATE = 50 / 10_000;
 const IS_E2E_MODE = import.meta.env.MODE === "e2e";
 
 function readE2eString(value: unknown): string {
@@ -67,7 +76,25 @@ type TradeDirection = "LONG" | "SHORT";
 
 interface ModelsMarketViewProps {
   activeMatchup: string;
+  connectionOverride?: Connection;
+  walletOverride?: ModelsWalletLike;
+  walletModalOverride?: ModelsWalletModalLike;
 }
+
+type ModelsWalletLike = {
+  connected: boolean;
+  publicKey: PublicKey | null;
+  signAllTransactions?: <T extends Array<Transaction | VersionedTransaction>>(
+    txs: T,
+  ) => Promise<T>;
+  signTransaction?: <T extends Transaction | VersionedTransaction>(
+    tx: T,
+  ) => Promise<T>;
+};
+
+type ModelsWalletModalLike = {
+  setVisible: (visible: boolean) => void;
+};
 
 interface ConfigAccountState {
   authority: PublicKey;
@@ -266,6 +293,8 @@ function getModelsMarketCopy(locale: UiLocale) {
       switchDemoToSolana: "请切换到 Solana 以交易模型永续。",
       connectWalletToTrade: "连接 Solana 钱包后即可交易模型永续。",
       walletCannotSign: "钱包无法签名交易。",
+      minimumOpenCollateral: (value: string) =>
+        `提高抵押至至少 ${value} 以覆盖费用后的最低保证金。`,
       marketNotAccepting: "该模型市场当前不接受新仓位。",
       waitingOnOracle: "该模型市场正在等待新的预言机更新。",
       marketArchived: "该模型市场已归档。",
@@ -352,6 +381,8 @@ function getModelsMarketCopy(locale: UiLocale) {
     switchDemoToSolana: "Switch the demo to Solana to trade model perps.",
     connectWalletToTrade: "Connect a Solana wallet to trade model perps.",
     walletCannotSign: "Wallet cannot sign transactions.",
+    minimumOpenCollateral: (value: string) =>
+      `Increase collateral to at least ${value} to satisfy min margin after fees.`,
     marketNotAccepting: "This model market is not accepting new positions.",
     waitingOnOracle: "This model market is waiting on a fresh oracle update.",
     marketArchived: "This model market has been archived.",
@@ -504,12 +535,18 @@ async function fetchMultipleAccounts(
 const E2E_MODEL_CHARACTER_ID = readE2eString(
   import.meta.env.VITE_E2E_MODEL_CHARACTER_ID,
 );
+const E2E_MODEL_MARKET_ID = E2E_MODEL_CHARACTER_ID
+  ? readE2eNumber(
+      import.meta.env.VITE_E2E_MODEL_MARKET_ID,
+      modelMarketIdFromCharacterId(E2E_MODEL_CHARACTER_ID),
+    )
+  : 0;
 const E2E_MODEL_ENTRY: PerpsMarketDirectoryEntry | null =
   IS_E2E_MODE && E2E_MODEL_CHARACTER_ID
     ? {
       rank: 1,
       characterId: E2E_MODEL_CHARACTER_ID,
-      marketId: modelMarketIdFromCharacterId(E2E_MODEL_CHARACTER_ID),
+      marketId: E2E_MODEL_MARKET_ID,
       name: readE2eString(import.meta.env.VITE_E2E_MODEL_NAME) || "E2E Model",
       provider:
         readE2eString(import.meta.env.VITE_E2E_MODEL_PROVIDER) ||
@@ -549,7 +586,7 @@ function getE2eOracleHistory(locale: UiLocale): OracleHistoryPoint[] {
   return [
     {
       agentId: E2E_MODEL_ENTRY.characterId,
-      marketId: modelMarketIdFromCharacterId(E2E_MODEL_ENTRY.characterId),
+      marketId: E2E_MODEL_MARKET_ID,
       spotIndex: readE2eNumber(import.meta.env.VITE_E2E_MODEL_SPOT_INDEX, 0),
       conservativeSkill:
         readE2eNumber(import.meta.env.VITE_E2E_MODEL_MU, 0) -
@@ -573,7 +610,7 @@ function buildE2eMarketSnapshot(): MarketSnapshot | null {
     return null;
   }
   return {
-    marketId: modelMarketIdFromCharacterId(E2E_MODEL_ENTRY.characterId),
+    marketId: E2E_MODEL_MARKET_ID,
     spotIndex:
       readE2eNumber(import.meta.env.VITE_E2E_MODEL_SPOT_INDEX, 0) || null,
     longOi: 0,
@@ -620,12 +657,21 @@ function applySignedOi(
   };
 }
 
-export function ModelsMarketView({ activeMatchup }: ModelsMarketViewProps) {
+export function ModelsMarketView({
+  activeMatchup,
+  connectionOverride,
+  walletOverride,
+  walletModalOverride,
+}: ModelsMarketViewProps) {
   const locale = resolveUiLocale();
   const copy = getModelsMarketCopy(locale);
-  const { connection } = useConnection();
-  const wallet = useWallet();
-  const { setVisible: setWalletModalVisible } = useWalletModal();
+  const adapterConnection = useConnection();
+  const adapterWallet = useWallet();
+  const adapterWalletModal = useWalletModal();
+  const connection = connectionOverride ?? adapterConnection.connection;
+  const wallet = walletOverride ?? adapterWallet;
+  const setWalletModalVisible =
+    walletModalOverride?.setVisible ?? adapterWalletModal.setVisible;
   const { activeChain, setActiveChain } = useChain();
 
   const [data, setData] = React.useState<PerpsMarketsResponse | null>(null);
@@ -648,6 +694,7 @@ export function ModelsMarketView({ activeMatchup }: ModelsMarketViewProps) {
   );
   const [lastTradeStatus, setLastTradeStatus] = React.useState("-");
   const [lastTradeTx, setLastTradeTx] = React.useState("-");
+  const [lastTradeRequest, setLastTradeRequest] = React.useState("-");
   const [skewScaleSol, setSkewScaleSol] = React.useState(
     DEFAULT_SKEW_SCALE_SOL,
   );
@@ -660,6 +707,8 @@ export function ModelsMarketView({ activeMatchup }: ModelsMarketViewProps) {
   const [configuredMaxLeverage, setConfiguredMaxLeverage] = React.useState(
     DEFAULT_MAX_MODEL_LEVERAGE,
   );
+  const [configuredMinMarginLamports, setConfiguredMinMarginLamports] =
+    React.useState(DEFAULT_MIN_MODEL_MARGIN_LAMPORTS);
   const [maintenanceMarginBps, setMaintenanceMarginBps] = React.useState(1_000);
   const [oracleStalenessMs, setOracleStalenessMs] = React.useState(
     DEFAULT_MAX_ORACLE_STALENESS_MS,
@@ -675,6 +724,18 @@ export function ModelsMarketView({ activeMatchup }: ModelsMarketViewProps) {
     configuredMaxLeverage,
     Math.max(1, Math.round(leverage)),
   );
+  const collateralLamports = toLamports(collateralSol);
+  const estimatedOpenTradeFeeLamports = Math.round(
+    Math.abs(collateralLamports * effectiveLeverage) * TOTAL_TRADE_FEE_RATE,
+  );
+  const estimatedOpenPostFeeMarginLamports =
+    collateralLamports - estimatedOpenTradeFeeLamports;
+  const minimumOpenCollateralLamports = Math.ceil(
+    configuredMinMarginLamports /
+      Math.max(1e-9, 1 - effectiveLeverage * TOTAL_TRADE_FEE_RATE),
+  );
+  const openCollateralSatisfiesMinMargin =
+    estimatedOpenPostFeeMarginLamports >= configuredMinMarginLamports;
 
   React.useEffect(() => {
     if (E2E_MODEL_ENTRY) {
@@ -872,6 +933,7 @@ export function ModelsMarketView({ activeMatchup }: ModelsMarketViewProps) {
           setConfigLoaded(false);
           setSkewScaleSol(DEFAULT_SKEW_SCALE_SOL);
           setConfiguredMaxLeverage(DEFAULT_MAX_MODEL_LEVERAGE);
+          setConfiguredMinMarginLamports(DEFAULT_MIN_MODEL_MARGIN_LAMPORTS);
           setMaintenanceMarginBps(1_000);
           setOracleStalenessMs(DEFAULT_MAX_ORACLE_STALENESS_MS);
         }
@@ -1014,6 +1076,11 @@ export function ModelsMarketView({ activeMatchup }: ModelsMarketViewProps) {
             ? Math.max(1, bnToNumber(decodedConfig.maxLeverage))
             : DEFAULT_MAX_MODEL_LEVERAGE,
         );
+        setConfiguredMinMarginLamports(
+          decodedConfig?.minMarginLamports
+            ? Math.max(1, bnToNumber(decodedConfig.minMarginLamports))
+            : DEFAULT_MIN_MODEL_MARGIN_LAMPORTS,
+        );
         setMaintenanceMarginBps(decodedConfig?.maintenanceMarginBps ?? 1_000);
         setOracleStalenessMs(
           decodedConfig?.maxOracleStalenessSeconds
@@ -1037,6 +1104,7 @@ export function ModelsMarketView({ activeMatchup }: ModelsMarketViewProps) {
           setConfigLoaded(true);
           setSkewScaleSol(e2eSnapshot.skewScaleSol);
           setConfiguredMaxLeverage(DEFAULT_MAX_MODEL_LEVERAGE);
+          setConfiguredMinMarginLamports(DEFAULT_MIN_MODEL_MARGIN_LAMPORTS);
           setMaintenanceMarginBps(1_000);
           setOracleStalenessMs(DEFAULT_MAX_ORACLE_STALENESS_MS);
         } else {
@@ -1155,6 +1223,16 @@ export function ModelsMarketView({ activeMatchup }: ModelsMarketViewProps) {
       return false;
     }
 
+    if (intent === "open" && !openCollateralSatisfiesMinMargin) {
+      const minimumCollateral = formatSolAmount(
+        fromLamports(minimumOpenCollateralLamports),
+        locale,
+      );
+      setLastTradeStatus(copy.minimumOpenCollateral(minimumCollateral));
+      toast.error(copy.minimumOpenCollateral(minimumCollateral));
+      return false;
+    }
+
     if (intent === "close" && selectedEntry?.status === "ARCHIVED") {
       setLastTradeStatus(copy.marketArchived);
       toast.error(copy.marketArchived);
@@ -1184,6 +1262,43 @@ export function ModelsMarketView({ activeMatchup }: ModelsMarketViewProps) {
     return new anchor.Program(goldPerpsIdl as anchor.Idl, provider);
   }, [connection, wallet]);
 
+  const fetchLiveMarketSnapshot = React.useCallback(
+    async (marketId: number): Promise<MarketSnapshot | null> => {
+      const coder = new anchor.BorshAccountsCoder(
+        goldPerpsIdl as unknown as anchor.Idl,
+      );
+      const marketInfo = await connection.getAccountInfo(
+        deriveMarketPda(marketId),
+        "confirmed",
+      );
+      if (!marketInfo?.data) {
+        return null;
+      }
+      const decoded = decodeAccount<MarketAccountState>(
+        coder,
+        "MarketState",
+        marketInfo.data,
+      );
+      if (!decoded) {
+        return null;
+      }
+      return {
+        marketId,
+        spotIndex: fromLamports(bnToNumber(decoded.spotIndex)),
+        longOi: fromLamports(bnToNumber(decoded.totalLongOi)),
+        shortOi: fromLamports(bnToNumber(decoded.totalShortOi)),
+        fundingRate: fromLamports(bnToNumber(decoded.currentFundingRate)),
+        conservativeSkill: null,
+        uncertainty: null,
+        lastUpdated: bnToNumber(decoded.oracleLastUpdated) * 1_000,
+        insuranceFund: fromLamports(bnToNumber(decoded.insuranceFund)),
+        skewScale: bnToNumber(decoded.skewScale),
+        skewScaleSol: fromLamports(bnToNumber(decoded.skewScale)),
+      };
+    },
+    [connection],
+  );
+
   const handleOpenPosition = async (direction: TradeDirection) => {
     if (!selectedEntry || !selectedMarket) return;
     if (!ensureTradable("open")) return;
@@ -1195,6 +1310,7 @@ export function ModelsMarketView({ activeMatchup }: ModelsMarketViewProps) {
     setSubmittingTrade(txId);
     setLastTradeStatus(copy.submitting(directionLabel, selectedEntry.name));
     setLastTradeTx("-");
+    setLastTradeRequest("-");
     toast.loading(copy.opening(effectiveLeverage, directionLabel, selectedEntry.name), {
       id: txId,
     });
@@ -1206,12 +1322,19 @@ export function ModelsMarketView({ activeMatchup }: ModelsMarketViewProps) {
         wallet.publicKey as PublicKey,
         marketId,
       );
+      const liveSelectedMarket =
+        (await fetchLiveMarketSnapshot(marketId)) ?? selectedMarket;
       const marginDeltaLamports = toLamports(collateralSol);
       const signedSizeLamports =
         toLamports(collateralSol * effectiveLeverage) *
         (direction === "LONG" ? 1 : -1);
       const quotedEntryPrice =
-        (direction === "LONG" ? estLongPrice : estShortPrice) ??
+        estimateExecutionPrice(
+          liveSelectedMarket,
+          collateralSol * effectiveLeverage * (direction === "LONG" ? 1 : -1),
+          liveSelectedMarket?.skewScaleSol ?? skewScaleSol,
+        ) ??
+        liveSelectedMarket?.spotIndex ??
         selectedMarket.spotIndex ??
         0;
       const acceptablePriceLamports =
@@ -1222,6 +1345,28 @@ export function ModelsMarketView({ activeMatchup }: ModelsMarketViewProps) {
               ? quotedEntryPrice * 1.02
               : quotedEntryPrice * 0.98,
           );
+      const estimatedTradeFeeLamports = Math.round(
+        Math.abs(signedSizeLamports) * TOTAL_TRADE_FEE_RATE,
+      );
+      setLastTradeRequest(
+        JSON.stringify({
+          action: `open-${direction.toLowerCase()}`,
+          marketId,
+          collateralSol,
+          effectiveLeverage,
+          configuredMaxLeverage,
+          configuredMinMarginLamports,
+          marginDeltaLamports,
+          signedSizeLamports,
+          estimatedTradeFeeLamports,
+          estimatedPostFeeMarginLamports:
+            marginDeltaLamports - estimatedTradeFeeLamports,
+          selectedSpotIndex: selectedMarket?.spotIndex ?? null,
+          liveSpotIndex: liveSelectedMarket?.spotIndex ?? null,
+          quotedEntryPrice,
+          acceptablePriceLamports,
+        }),
+      );
       const marketIdArg = new anchor.BN(String(marketId));
 
       const transaction = await program.methods
@@ -1306,19 +1451,23 @@ export function ModelsMarketView({ activeMatchup }: ModelsMarketViewProps) {
     setSubmittingTrade(txId);
     setLastTradeStatus(copy.closingPosition(selectedEntry.name));
     setLastTradeTx("-");
+    setLastTradeRequest("-");
     toast.loading(copy.closingPosition(selectedEntry.name), { id: txId });
 
     let tradeStage = copy.stageBuilding;
     try {
       const program = getProgram();
       const marketId = selectedEntry.marketId;
+      const liveSelectedMarket =
+        (await fetchLiveMarketSnapshot(marketId)) ?? selectedMarket;
       const closeSizeLamports = -toLamports(selectedPosition.signedSize);
       const quotedClosePrice =
         estimateExecutionPrice(
-          selectedMarket,
+          liveSelectedMarket,
           -selectedPosition.signedSize,
-          selectedMarket?.skewScaleSol ?? skewScaleSol,
+          liveSelectedMarket?.skewScaleSol ?? skewScaleSol,
         ) ??
+        liveSelectedMarket?.spotIndex ??
         selectedMarket?.spotIndex ??
         selectedPosition.entryPrice;
       const acceptablePriceLamports =
@@ -1329,6 +1478,23 @@ export function ModelsMarketView({ activeMatchup }: ModelsMarketViewProps) {
               ? quotedClosePrice * 0.98
               : quotedClosePrice * 1.02,
           );
+      const estimatedTradeFeeLamports = Math.round(
+        Math.abs(closeSizeLamports) * TOTAL_TRADE_FEE_RATE,
+      );
+      setLastTradeRequest(
+        JSON.stringify({
+          action: "close-position",
+          marketId,
+          positionDirection: selectedPosition.direction,
+          positionSignedSize: selectedPosition.signedSize,
+          closeSizeLamports,
+          estimatedTradeFeeLamports,
+          selectedSpotIndex: selectedMarket?.spotIndex ?? null,
+          liveSpotIndex: liveSelectedMarket?.spotIndex ?? null,
+          quotedClosePrice,
+          acceptablePriceLamports,
+        }),
+      );
       const marketIdArg = new anchor.BN(String(marketId));
 
       const transaction = await program.methods
@@ -1843,6 +2009,9 @@ export function ModelsMarketView({ activeMatchup }: ModelsMarketViewProps) {
                       <div data-testid="models-market-last-trade-tx">
                         {lastTradeTx}
                       </div>
+                      <div data-testid="models-market-last-trade-request">
+                        {lastTradeRequest}
+                      </div>
                     </div>
                   )}
                   <button
@@ -1852,7 +2021,8 @@ export function ModelsMarketView({ activeMatchup }: ModelsMarketViewProps) {
                     disabled={
                       Boolean(submittingTrade) ||
                       collateralSol <= 0 ||
-                      !selectedCanOpen
+                      !selectedCanOpen ||
+                      !openCollateralSatisfiesMinMargin
                     }
                     onClick={() => void handleOpenPosition("LONG")}
                   >
@@ -1865,7 +2035,8 @@ export function ModelsMarketView({ activeMatchup }: ModelsMarketViewProps) {
                     disabled={
                       Boolean(submittingTrade) ||
                       collateralSol <= 0 ||
-                      !selectedCanOpen
+                      !selectedCanOpen ||
+                      !openCollateralSatisfiesMinMargin
                     }
                     onClick={() => void handleOpenPosition("SHORT")}
                   >
@@ -1879,6 +2050,16 @@ export function ModelsMarketView({ activeMatchup }: ModelsMarketViewProps) {
                       : selectedEntry.status === "CLOSE_ONLY"
                         ? copy.closeOnlyMarket
                         : copy.archivedMarket}
+                  </div>
+                )}
+                {selectedCanOpen && !openCollateralSatisfiesMinMargin && (
+                  <div className="models-market-empty">
+                    {copy.minimumOpenCollateral(
+                      formatSolAmount(
+                        fromLamports(minimumOpenCollateralLamports),
+                        locale,
+                      ),
+                    )}
                   </div>
                 )}
               </div>

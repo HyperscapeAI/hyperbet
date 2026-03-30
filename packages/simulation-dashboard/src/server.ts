@@ -1,19 +1,38 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { readFileSync, existsSync } from "node:fs";
+import {
+    appendFileSync,
+    existsSync,
+    mkdirSync,
+    readFileSync,
+    writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
 import { join, dirname, extname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { ContractFactory, JsonRpcProvider, ethers, type Contract } from "ethers";
 import { WebSocketServer, WebSocket } from "ws";
+import {
+    DEFAULT_MARKET_MAKER_CONFIG,
+    computeToxicityBps,
+    type AgentActionTrace,
+    type MitigationGate,
+    type ScenarioResult,
+} from "@hyperbet/mm-core";
 
 import {
     loadArtifact,
     duelKey,
     hashParticipant,
     sleep,
+    random,
+    setRandomSeed,
+    resetRandomSource,
     MARKET_KIND_DUEL_WINNER,
     DUEL_STATUS_BETTING_OPEN,
+    DUEL_STATUS_LOCKED,
+    DISPUTE_WINDOW_SECONDS,
     SIDE_A,
     SIDE_B,
     BUY_SIDE,
@@ -21,6 +40,7 @@ import {
     MAX_PRICE,
     shortAddr,
     formatEth,
+    withTimeout,
 } from "./helpers.js";
 
 import {
@@ -35,24 +55,128 @@ import {
     CabalAgent,
     ArbitrageurAgent,
     StressTestAgent,
-    SCENARIO_PRESETS,
+    CancelReplaceAgent,
     type SimContext,
 } from "./agents.js";
+import {
+    GATE_SCENARIOS,
+    SCENARIO_PRESETS,
+    getScenarioPresetByIdOrName,
+    type ScenarioChainKey,
+    type ScenarioPreset,
+    type ScenarioSettlementMode,
+    type ScenarioSettlementStatus,
+} from "./scenario-catalog.js";
+import { evaluateScenarioPolicyGates } from "./scenario-evaluator.js";
+import { isScenarioCloseGuardWindow, SIM_TICK_MS } from "./runtime-profile.js";
+import {
+    createScenarioRunRecord as createScenarioRunRecordShared,
+    type ScenarioRunRecord,
+} from "./scenario-runs.js";
+import { getSimulationBackendKind } from "./backends/index.js";
+import { EvmSimulationBackend } from "./backends/evm.js";
+import { SolanaSimulationBackend } from "./backends/solana/backend.js";
 
 // ─── Config ──────────────────────────────────────────────────────────────────
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-const ANVIL_PORT = 18546;
-const WS_PORT = 3400;
-const HTTP_PORT = 3401;
+const ANVIL_PORT = Number(process.env.SIM_ANVIL_PORT ?? "18546");
+const WS_PORT = Number(process.env.SIM_WS_PORT ?? "3400");
+const HTTP_PORT = Number(process.env.SIM_HTTP_PORT ?? "3401");
 const PUBLIC_DIR = join(__dirname, "..", "public");
 const CONTRACTS_DIR = join(__dirname, "..", "..", "evm-contracts");
+const SCENARIO_HISTORY_LIMIT = 50;
+const SCENARIO_HISTORY_PATH =
+    process.env.SIM_SCENARIO_HISTORY_PATH?.trim() ||
+    join(tmpdir(), "hyperbet", "simulation-dashboard-history.json");
+const SCENARIO_TRACE_PATH = join(
+    dirname(SCENARIO_HISTORY_PATH),
+    "simulation-server-resolve-trace.log",
+);
+const RESOLVE_CLAIM_BUDGET_MS = Number(
+    process.env.SIM_RESOLVE_CLAIM_BUDGET_MS ?? "45000",
+);
+const SCENARIO_RESOLVE_TIMEOUT_MS = Number(
+    process.env.SIM_SCENARIO_RESOLVE_TIMEOUT_MS ?? "240000",
+);
+const SCENARIO_SETTLEMENT_TX_TIMEOUT_MS = Number(
+    process.env.SIM_SCENARIO_SETTLEMENT_TX_TIMEOUT_MS ?? "20000",
+);
+const SCENARIO_SETTLEMENT_RECEIPT_TIMEOUT_MS = Number(
+    process.env.SIM_SCENARIO_SETTLEMENT_RECEIPT_TIMEOUT_MS ?? "30000",
+);
+const SCENARIO_BASELINE_REVERT_TIMEOUT_MS = Number(
+    process.env.SIM_SCENARIO_BASELINE_REVERT_TIMEOUT_MS ?? "12000",
+);
+const SCENARIO_BASELINE_SNAPSHOT_TIMEOUT_MS = Number(
+    process.env.SIM_SCENARIO_BASELINE_SNAPSHOT_TIMEOUT_MS ?? "12000",
+);
+const SCENARIO_BASELINE_REBUILD_TIMEOUT_MS = Number(
+    process.env.SIM_SCENARIO_BASELINE_REBUILD_TIMEOUT_MS ?? "90000",
+);
+
+type PersistedScenarioState = {
+    history: ScenarioResult[];
+    runs: ScenarioRunRecord[];
+};
+
+function toRegistryChainKey(chainKey: ScenarioChainKey): ScenarioResult["chainKey"] {
+    return chainKey === "anvil" ? "bsc" : chainKey;
+}
+
+type CachedPosition = {
+    aShares: bigint;
+    bShares: bigint;
+    aStake: bigint;
+    bStake: bigint;
+};
+
+type CachedDuelState = {
+    participantAHash: string;
+    participantBHash: string;
+    betOpenTs: bigint;
+    betCloseTs: bigint;
+    duelStartTs: bigint;
+    metadataUri: string;
+    status: number;
+};
+
+type ClaimCandidate = {
+    agent: BaseAgent;
+    address: string;
+    position: CachedPosition;
+};
+
+type CachedMarketState = {
+    exists: boolean;
+    status: number;
+    winner: number;
+    bestBid: number;
+    bestAsk: number;
+    totalAShares: string;
+    totalBShares: string;
+};
+
+const INTERACTIVE_SCENARIOS = SCENARIO_PRESETS.filter(
+    (scenario) => scenario.chainKey === "anvil",
+);
 
 // ─── State ───────────────────────────────────────────────────────────────────
 let anvilProcess: ChildProcess | null = null;
 let provider: JsonRpcProvider;
+let readProvider: JsonRpcProvider;
 let oracle: Contract;
+let oracleRead: Contract;
 let clob: Contract;
+let clobRead: Contract;
+let adminSigner: ethers.JsonRpcSigner | null = null;
+let operatorSigner: ethers.JsonRpcSigner | null = null;
+let reporterSigner: ethers.JsonRpcSigner | null = null;
+let pauserSigner: ethers.JsonRpcSigner | null = null;
+let challengerSigner: ethers.JsonRpcSigner | null = null;
+let treasurySigner: ethers.JsonRpcSigner | null = null;
+let marketMakerSigner: ethers.JsonRpcSigner | null = null;
+let finalizerSigner: ethers.JsonRpcSigner | null = null;
 let agents: BaseAgent[] = [];
 let simRunning = false;
 let simSpeed = 500; // ms between ticks
@@ -61,11 +185,1117 @@ let currentDuelKey = "";
 let currentMarketKey = "";
 let currentDuelLabel = "";
 let duelCounter = 0;
+let currentScenarioId = "manual";
 let treasuryAddr = "";
 let mmAddr = "";
+let adminAddr = "";
+let operatorAddr = "";
+let reporterAddr = "";
+let pauserAddr = "";
+let challengerAddr = "";
+let finalizerAddr = "";
+let oracleAddr = "";
+let clobAddr = "";
+let feeConfig = {
+    treasuryBps: 0n,
+    mmBps: 0n,
+    winningsMmBps: 0n,
+};
 const eventLog: any[] = [];
 const initialBalances: Map<string, string> = new Map();
 const wsClients = new Set<WebSocket>();
+const ATTACKER_STRATEGIES = new Set([
+    "mev_frontrunner",
+    "sandwich",
+    "wash_trader",
+    "oracle_attack",
+    "cabal",
+    "arbitrageur",
+    "stress_test",
+    "cancel_replace",
+]);
+// GoldClob (CLOB) enum: NULL=0, OPEN=1, LOCKED=2, RESOLVED=3, CANCELLED=4
+// LvrMarket (AMM) enum: OPEN=0, CLOSED=1, PENDING=2, DISPUTED=3, RESOLVED=4
+const CLOB_STATUS = { RESOLVED: 3, CANCELLED: 4 } as const;
+const AMM_STATUS = { RESOLVED: 4, CANCELLED: undefined } as const;
+
+// Default to CLOB for current sim (anvil runs GoldClob)
+const MARKET_STATUS_RESOLVED = CLOB_STATUS.RESOLVED;
+const MARKET_STATUS_CANCELLED = CLOB_STATUS.CANCELLED;
+let peakInventorySeen = 0;
+let worstMarketMakerPnl = 0;
+let bestAttackerPnlSeen = 0;
+let scenarioObservedTicks = 0;
+let scenarioQuotedTicks = 0;
+let scenarioSpreadBpsTotal = 0;
+let scenarioSpreadSamples = 0;
+let lastResolveLatencyMs: number | null = null;
+let staleStreamGuardTripsSeen = 0;
+let staleOracleGuardTripsSeen = 0;
+let closeGuardTripsSeen = 0;
+let circuitBreakerTripsSeen = 0;
+let scenarioMarketLocked = false;
+let lastComputedState: Record<string, any> | null = null;
+
+// ─── Game API compatibility (SSE + HTTP for betting frontend) ────────────────
+const sseClients = new Set<ServerResponse>();
+let simStartedAtMs = Date.now();
+let duelOpenedAtMs = Date.now();
+let lastStreamingState: Record<string, any> | null = null;
+
+function buildStreamingStateUpdate(): Record<string, any> {
+    const state = lastComputedState;
+    const now = Date.now();
+    const marketStatus = state?.market?.status ?? 0;
+
+    // Map sim market status to streaming phase
+    let phase: string;
+    if (!state || marketStatus === 0) {
+        phase = "IDLE";
+    } else if (marketStatus === MARKET_STATUS_RESOLVED || marketStatus === MARKET_STATUS_CANCELLED) {
+        phase = "RESOLUTION";
+    } else {
+        phase = "FIGHTING";
+    }
+
+    // Synthesize agent HP from sim tick progress
+    const tickProgress = Math.min(1, simTick / Math.max(1, 200)); // ~200 ticks typical scenario
+    const winner = state?.market?.winner ?? 0;
+    const isResolved = marketStatus === MARKET_STATUS_RESOLVED || marketStatus === MARKET_STATUS_CANCELLED;
+    let hp1 = 100;
+    let hp2 = 100;
+    if (isResolved) {
+        hp1 = winner === 1 ? Math.max(10, Math.round(100 - tickProgress * 40)) : 0;
+        hp2 = winner === 2 ? Math.max(10, Math.round(100 - tickProgress * 40)) : 0;
+        if (winner === 0) { hp1 = 0; hp2 = 0; } // cancelled
+    } else if (simRunning) {
+        // Both lose HP proportional to progress, leader stays ahead
+        const bestBid = state?.market?.bestBid ?? 500;
+        const edge = (bestBid - 500) / 500; // positive = agent1 favored
+        hp1 = Math.max(5, Math.round(100 - tickProgress * (40 - edge * 20)));
+        hp2 = Math.max(5, Math.round(100 - tickProgress * (40 + edge * 20)));
+    }
+
+    const label = currentDuelLabel || "sim-duel-0";
+    const parts = label.split("-");
+    const duelId = `sim-${duelCounter}`;
+    const betCloseMs = duelOpenedAtMs + 604800 * 1000; // matches the 1-week window
+
+    const update = {
+        type: "STREAMING_STATE_UPDATE",
+        cycle: {
+            cycleId: duelId,
+            phase,
+            cycleStartTime: simStartedAtMs,
+            phaseStartTime: duelOpenedAtMs,
+            phaseEndTime: betCloseMs,
+            timeRemaining: Math.max(0, Math.round((betCloseMs - now) / 1000)),
+            agent1: {
+                id: "agent-alpha",
+                name: "Agent Alpha",
+                provider: "Simulation",
+                model: "v1",
+                hp: hp1,
+                maxHp: 100,
+                combatLevel: 1,
+                wins: 0,
+                losses: 0,
+                damageDealtThisFight: 100 - hp2,
+            },
+            agent2: {
+                id: "agent-beta",
+                name: "Agent Beta",
+                provider: "Simulation",
+                model: "v1",
+                hp: hp2,
+                maxHp: 100,
+                combatLevel: 1,
+                wins: 0,
+                losses: 0,
+                damageDealtThisFight: 100 - hp1,
+            },
+            duelId,
+            duelKeyHex: currentDuelKey ? currentDuelKey.replace(/^0x/, "") : null,
+            betOpenTime: duelOpenedAtMs,
+            betCloseTime: betCloseMs,
+            fightStartTime: duelOpenedAtMs,
+            duelEndTime: isResolved ? now : null,
+            winnerId: isResolved && winner === 1 ? "agent-alpha" : isResolved && winner === 2 ? "agent-beta" : null,
+            winnerName: isResolved && winner === 1 ? "Agent Alpha" : isResolved && winner === 2 ? "Agent Beta" : null,
+            winReason: isResolved ? "simulation" : null,
+            countdown: null,
+            seed: null,
+            replayHash: null,
+        },
+        leaderboard: [],
+        cameraTarget: null,
+        seq: simTick,
+        emittedAt: now,
+    };
+    lastStreamingState = update;
+    return update;
+}
+
+function broadcastSse(): void {
+    if (sseClients.size === 0) return;
+    const update = buildStreamingStateUpdate();
+    const frame = `event: state\ndata: ${JSON.stringify(update)}\n\n`;
+    for (const res of sseClients) {
+        try {
+            res.write(frame);
+        } catch {
+            sseClients.delete(res);
+        }
+    }
+}
+
+function writeCorsHeaders(res: ServerResponse): void {
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Cache-Control, Last-Event-ID");
+}
+let lastObservedMarketState: CachedMarketState | null = null;
+let lastObservedProtocolMmBalance: bigint | null = null;
+let lastObservedRuntimeMmBalance: bigint | null = null;
+let scenarioRunInFlight = false;
+let scenarioHistory: ScenarioResult[] = [];
+let scenarioRuns: ScenarioRunRecord[] = [];
+let activeScenarioRunId: string | null = null;
+let scenarioRunSequence = 0;
+let baselineSnapshotId: string | null = null;
+let baselineRuntimeState:
+    | {
+          duelCounter: number;
+          currentDuelLabel: string;
+          currentDuelKey: string;
+          currentMarketKey: string;
+      }
+    | null = null;
+const agentAddressCache = new Map<BaseAgent, string>();
+const agentPositionCache = new Map<string, CachedPosition>();
+const walletBalanceCache = new Map<string, bigint>();
+let lastObservedDuelState: CachedDuelState | null = null;
+const ZERO_POSITION: CachedPosition = {
+    aShares: 0n,
+    bShares: 0n,
+    aStake: 0n,
+    bStake: 0n,
+};
+
+function snapshotMarketState(market: any): CachedMarketState {
+    return {
+        exists: Boolean(market.exists),
+        status: Number(market.status),
+        winner: Number(market.winner),
+        bestBid: Number(market.bestBid),
+        bestAsk: Number(market.bestAsk),
+        totalAShares: market.totalAShares.toString(),
+        totalBShares: market.totalBShares.toString(),
+    };
+}
+
+function rememberMarketState(market: any): CachedMarketState {
+    const snapshot = snapshotMarketState(market);
+    lastObservedMarketState = snapshot;
+    return snapshot;
+}
+
+function rememberDuelState(duel: any): CachedDuelState {
+    const snapshot: CachedDuelState = {
+        participantAHash: String(duel.participantAHash),
+        participantBHash: String(duel.participantBHash),
+        betOpenTs: BigInt(duel.betOpenTs),
+        betCloseTs: BigInt(duel.betCloseTs),
+        duelStartTs: BigInt(duel.duelStartTs),
+        metadataUri: String(duel.metadataUri),
+        status: Number(duel.status ?? 0),
+    };
+    lastObservedDuelState = snapshot;
+    return snapshot;
+}
+
+async function loadScenarioDuelState(label: string): Promise<any> {
+    if (scenarioRunInFlight && lastObservedDuelState) {
+        return lastObservedDuelState;
+    }
+    try {
+        const duel = await withReadFallback(
+            label,
+            () => oracleRead.getDuel(currentDuelKey),
+            () => oracle.getDuel(currentDuelKey),
+            {
+                attempts: scenarioRunInFlight ? 1 : 2,
+                timeoutMs: scenarioRunInFlight ? 3_000 : 12_000,
+                fallbackTimeoutMs: scenarioRunInFlight ? 3_000 : 12_000,
+                backoffMs: 100,
+            },
+        );
+        if (scenarioRunInFlight) {
+            return rememberDuelState(duel);
+        }
+        return duel;
+    } catch (error) {
+        if (scenarioRunInFlight && lastObservedDuelState) {
+            console.warn(
+                `[state] Falling back to cached duel snapshot after ${label} failed: ${
+                    error instanceof Error ? error.message : String(error)
+                }`,
+            );
+            return lastObservedDuelState;
+        }
+        throw error;
+    }
+}
+
+function markSettledMarketState(
+    settlementMode: ScenarioSettlementMode,
+    winnerSide: number,
+): void {
+    const previous = lastObservedMarketState;
+    lastObservedMarketState = {
+        exists: previous?.exists ?? true,
+        status:
+            settlementMode === "cancel"
+                ? MARKET_STATUS_CANCELLED
+                : MARKET_STATUS_RESOLVED,
+        winner: settlementMode === "cancel" ? 0 : winnerSide,
+        bestBid: previous?.bestBid ?? 0,
+        bestAsk: previous?.bestAsk ?? 0,
+        totalAShares: previous?.totalAShares ?? "0",
+        totalBShares: previous?.totalBShares ?? "0",
+    };
+}
+
+function loadScenarioState(): void {
+    if (!existsSync(SCENARIO_HISTORY_PATH)) {
+        return;
+    }
+    try {
+        const parsed = JSON.parse(
+            readFileSync(SCENARIO_HISTORY_PATH, "utf8"),
+        ) as Partial<PersistedScenarioState>;
+        scenarioHistory = Array.isArray(parsed.history)
+            ? parsed.history.slice(0, SCENARIO_HISTORY_LIMIT)
+            : [];
+        scenarioRuns = Array.isArray(parsed.runs)
+            ? parsed.runs
+                  .slice(0, SCENARIO_HISTORY_LIMIT)
+                  .map((run) => ({
+                      ...run,
+                      chainKey:
+                          run.chainKey ??
+                          (SCENARIO_PRESETS.find(
+                              (preset) => preset.id === run.scenarioId,
+                          )?.chainKey ?? "anvil"),
+                  }))
+            : [];
+    } catch (error) {
+        console.warn(
+            `[history] Failed to load ${SCENARIO_HISTORY_PATH}: ${
+                error instanceof Error ? error.message : String(error)
+            }`,
+        );
+    }
+}
+
+function persistScenarioState(): void {
+    try {
+        mkdirSync(dirname(SCENARIO_HISTORY_PATH), { recursive: true });
+        writeFileSync(
+            SCENARIO_HISTORY_PATH,
+            JSON.stringify(
+                {
+                    history: scenarioHistory.slice(0, SCENARIO_HISTORY_LIMIT),
+                    runs: scenarioRuns.slice(0, SCENARIO_HISTORY_LIMIT),
+                } satisfies PersistedScenarioState,
+                null,
+                2,
+            ),
+            "utf8",
+        );
+    } catch (error) {
+        console.warn(
+            `[history] Failed to persist ${SCENARIO_HISTORY_PATH}: ${
+                error instanceof Error ? error.message : String(error)
+            }`,
+        );
+    }
+}
+
+function appendScenarioTrace(message: string): void {
+    try {
+        mkdirSync(dirname(SCENARIO_TRACE_PATH), { recursive: true });
+        appendFileSync(
+            SCENARIO_TRACE_PATH,
+            `[${new Date().toISOString()}] ${message}\n`,
+            "utf8",
+        );
+    } catch (error) {
+        console.warn(
+            `[trace] Failed to append resolve trace: ${
+                error instanceof Error ? error.message : String(error)
+            }`,
+        );
+    }
+}
+
+function getActiveScenarioRun(): ScenarioRunRecord | null {
+    if (!activeScenarioRunId) {
+        return null;
+    }
+    return scenarioRuns.find((run) => run.runId === activeScenarioRunId) ?? null;
+}
+
+function updateScenarioRun(
+    runId: string,
+    mutator: (run: ScenarioRunRecord) => void,
+): ScenarioRunRecord | null {
+    const run = scenarioRuns.find((entry) => entry.runId === runId) ?? null;
+    if (!run) {
+        return null;
+    }
+    mutator(run);
+    persistScenarioState();
+    return run;
+}
+
+function countEnabledAgents(): number {
+    return agents.reduce(
+        (count, agent) => count + (agent.config.enabled ? 1 : 0),
+        0,
+    );
+}
+
+function getExecutionOrder(): BaseAgent[] {
+    const ordered = [...agents];
+    ordered.sort((left, right) => {
+        const leftPriority = left instanceof MarketMakerAgent ? 0 : 1;
+        const rightPriority = right instanceof MarketMakerAgent ? 0 : 1;
+        if (leftPriority !== rightPriority) {
+            return leftPriority - rightPriority;
+        }
+        return 0;
+    });
+    return ordered;
+}
+
+function recordMarketMakerPlanMetrics(
+    marketMakerRuntimeAgent: MarketMakerAgent | null,
+): void {
+    const marketMakerPlan = marketMakerRuntimeAgent?.lastPlan;
+    if (!marketMakerPlan) {
+        return;
+    }
+    if (marketMakerPlan.risk.staleStream) {
+        staleStreamGuardTripsSeen += 1;
+    }
+    if (marketMakerPlan.risk.staleOracle) {
+        staleOracleGuardTripsSeen += 1;
+    }
+    if (marketMakerPlan.risk.closingSoon) {
+        closeGuardTripsSeen += 1;
+    }
+    if (marketMakerPlan.risk.circuitBreaker.active) {
+        circuitBreakerTripsSeen += 1;
+    }
+}
+
+async function getAgentAddress(agent: BaseAgent): Promise<string> {
+    const cached = agentAddressCache.get(agent);
+    if (cached) {
+        return cached;
+    }
+    const address = await agent.signer.getAddress();
+    agentAddressCache.set(agent, address);
+    return address;
+}
+
+function getCachedPosition(address: string): CachedPosition {
+    return agentPositionCache.get(address) ?? ZERO_POSITION;
+}
+
+function hasPosition(position: CachedPosition): boolean {
+    return (
+        position.aShares > 0n ||
+        position.bShares > 0n ||
+        position.aStake > 0n ||
+        position.bStake > 0n
+    );
+}
+
+function parsePosition(positionRaw: {
+    aShares: bigint;
+    bShares: bigint;
+    aStake: bigint;
+    bStake: bigint;
+}): CachedPosition {
+    return {
+        aShares: BigInt(positionRaw.aShares),
+        bShares: BigInt(positionRaw.bShares),
+        aStake: BigInt(positionRaw.aStake),
+        bStake: BigInt(positionRaw.bStake),
+    };
+}
+
+function updateActiveRunStage(stage: string): void {
+    const activeRun = getActiveScenarioRun();
+    if (!activeRun) {
+        return;
+    }
+    updateScenarioRun(activeRun.runId, (entry) => {
+        entry.stage = stage;
+    });
+}
+
+function refreshReadClients(): void {
+    readProvider = new JsonRpcProvider(`http://127.0.0.1:${ANVIL_PORT}`, 31337);
+    if (oracle) {
+        oracleRead = oracle.connect(readProvider) as unknown as Contract;
+    }
+    if (clob) {
+        clobRead = clob.connect(readProvider) as unknown as Contract;
+    }
+}
+
+async function withReadRetry<T>(
+    label: string,
+    load: () => Promise<T>,
+    options: {
+        attempts?: number;
+        timeoutMs?: number;
+        backoffMs?: number;
+    } = {},
+): Promise<T> {
+    const attempts = Math.max(1, options.attempts ?? 2);
+    const timeoutMs = Math.max(2_000, options.timeoutMs ?? 12_000);
+    const backoffMs = Math.max(10, options.backoffMs ?? 100);
+    let lastError: unknown = null;
+
+    for (let attempt = 1; attempt <= attempts; attempt += 1) {
+        try {
+            return await withTimeout(
+                load(),
+                timeoutMs,
+                `${label} attempt ${attempt}`,
+            );
+        } catch (error) {
+            lastError = error;
+            if (attempt < attempts) {
+                refreshReadClients();
+                await sleep(backoffMs * attempt);
+            }
+        }
+    }
+
+    throw lastError instanceof Error
+        ? lastError
+        : new Error(`${label} failed after ${attempts} attempts`);
+}
+
+async function withReadFallback<T>(
+    label: string,
+    loadRead: () => Promise<T>,
+    loadWrite: () => Promise<T>,
+    options: {
+        attempts?: number;
+        timeoutMs?: number;
+        backoffMs?: number;
+        fallbackTimeoutMs?: number;
+    } = {},
+): Promise<T> {
+    try {
+        return await withReadRetry(label, loadRead, options);
+    } catch (readError) {
+        try {
+            return await withTimeout(
+                loadWrite(),
+                Math.max(2_000, options.fallbackTimeoutMs ?? options.timeoutMs ?? 12_000),
+                `${label} fallback`,
+            );
+        } catch (fallbackError) {
+            throw fallbackError instanceof Error
+                ? fallbackError
+                : readError instanceof Error
+                  ? readError
+                  : new Error(String(fallbackError));
+        }
+    }
+}
+
+async function sendAnvilRpc(method: string, params: unknown[] = []): Promise<any> {
+    const response = await fetch(`http://127.0.0.1:${ANVIL_PORT}`, {
+        method: "POST",
+        headers: {
+            "content-type": "application/json",
+        },
+        body: JSON.stringify({
+            jsonrpc: "2.0",
+            id: Date.now(),
+            method,
+            params,
+        }),
+    });
+    const payload = await response.json().catch(() => null);
+    if (!response.ok) {
+        throw new Error(
+            payload?.error?.message || `${method} failed with ${response.status} ${response.statusText}`,
+        );
+    }
+    if (payload?.error) {
+        throw new Error(payload.error.message || `${method} failed`);
+    }
+    return payload?.result ?? null;
+}
+
+async function loadMarketState(label: string): Promise<any> {
+    return withReadFallback(
+        label,
+        () => clobRead.getMarket(currentDuelKey, MARKET_KIND_DUEL_WINNER),
+        () => clob.getMarket(currentDuelKey, MARKET_KIND_DUEL_WINNER),
+    );
+}
+
+async function loadScenarioMarketState(label: string): Promise<any> {
+    if (scenarioRunInFlight && lastObservedMarketState) {
+        return {
+            exists: lastObservedMarketState.exists,
+            status: lastObservedMarketState.status,
+            winner: lastObservedMarketState.winner,
+            bestBid: lastObservedMarketState.bestBid,
+            bestAsk: lastObservedMarketState.bestAsk,
+            totalAShares: BigInt(lastObservedMarketState.totalAShares),
+            totalBShares: BigInt(lastObservedMarketState.totalBShares),
+        };
+    }
+    if (scenarioRunInFlight) {
+        return {
+            exists: false,
+            status: 0,
+            winner: 0,
+            bestBid: 0,
+            bestAsk: 0,
+            totalAShares: 0n,
+            totalBShares: 0n,
+        };
+    }
+    try {
+        return await withReadFallback(
+            label,
+            () => clobRead.getMarket(currentDuelKey, MARKET_KIND_DUEL_WINNER),
+            () => clob.getMarket(currentDuelKey, MARKET_KIND_DUEL_WINNER),
+            {
+                attempts: scenarioRunInFlight ? 1 : 2,
+                timeoutMs: scenarioRunInFlight ? 3_000 : 12_000,
+                fallbackTimeoutMs: scenarioRunInFlight ? 3_000 : 12_000,
+                backoffMs: 100,
+            },
+        );
+    } catch (error) {
+        if (scenarioRunInFlight && lastObservedMarketState) {
+            console.warn(
+                `[state] Falling back to cached market snapshot after ${label} failed: ${
+                    error instanceof Error ? error.message : String(error)
+                }`,
+            );
+            return {
+                exists: lastObservedMarketState.exists,
+                status: lastObservedMarketState.status,
+                winner: lastObservedMarketState.winner,
+                bestBid: lastObservedMarketState.bestBid,
+                bestAsk: lastObservedMarketState.bestAsk,
+                totalAShares: BigInt(lastObservedMarketState.totalAShares),
+                totalBShares: BigInt(lastObservedMarketState.totalBShares),
+            };
+        }
+        throw error;
+    }
+}
+
+async function loadPositionState(label: string, address: string): Promise<any> {
+    if (scenarioRunInFlight) {
+        const cachedPosition = agentPositionCache.get(address);
+        if (cachedPosition) {
+            return cachedPosition;
+        }
+        return { ...ZERO_POSITION };
+    }
+    try {
+        const position = await withReadFallback(
+            label,
+            () => clobRead.positions(currentMarketKey, address),
+            () => clob.positions(currentMarketKey, address),
+            {
+                attempts: scenarioRunInFlight ? 1 : 2,
+                timeoutMs: scenarioRunInFlight ? 3_000 : 12_000,
+                fallbackTimeoutMs: scenarioRunInFlight ? 3_000 : 12_000,
+                backoffMs: 100,
+            },
+        );
+        agentPositionCache.set(address, parsePosition(position));
+        return position;
+    } catch (error) {
+        if (scenarioRunInFlight) {
+            const cachedPosition = agentPositionCache.get(address);
+            if (cachedPosition) {
+                console.warn(
+                    `[state] Falling back to cached position for ${address} after ${label} failed: ${
+                        error instanceof Error ? error.message : String(error)
+                    }`,
+                );
+                return cachedPosition;
+            }
+        }
+        throw error;
+    }
+}
+
+async function loadWalletBalance(label: string, address: string): Promise<bigint> {
+    if (scenarioRunInFlight) {
+        const cachedBalance = walletBalanceCache.get(address);
+        if (cachedBalance != null) {
+            return cachedBalance;
+        }
+        const initialBalance = initialBalances.get(address);
+        if (initialBalance != null) {
+            return ethers.parseEther(initialBalance);
+        }
+    }
+    try {
+        const balance = await withReadFallback(
+            label,
+            () => readProvider.getBalance(address),
+            () => provider.getBalance(address),
+            {
+                attempts: scenarioRunInFlight ? 1 : 2,
+                timeoutMs: scenarioRunInFlight ? 3_000 : 12_000,
+                fallbackTimeoutMs: scenarioRunInFlight ? 3_000 : 12_000,
+                backoffMs: 100,
+            },
+        );
+        walletBalanceCache.set(address, balance);
+        return balance;
+    } catch (error) {
+        if (scenarioRunInFlight) {
+            const cachedBalance = walletBalanceCache.get(address);
+            if (cachedBalance != null) {
+                console.warn(
+                    `[state] Falling back to cached wallet balance for ${address} after ${label} failed: ${
+                        error instanceof Error ? error.message : String(error)
+                    }`,
+                );
+                return cachedBalance;
+            }
+            const initialBalance = initialBalances.get(address);
+            if (initialBalance != null) {
+                console.warn(
+                    `[state] Falling back to initial wallet balance for ${address} after ${label} failed: ${
+                        error instanceof Error ? error.message : String(error)
+                    }`,
+                );
+                return ethers.parseEther(initialBalance);
+            }
+        }
+        throw error;
+    }
+}
+
+async function loadPriceLevelState(
+    label: string,
+    side: number,
+    price: number,
+): Promise<any> {
+    return withReadFallback(
+        label,
+        () =>
+            clobRead.getPriceLevel(
+                currentDuelKey,
+                MARKET_KIND_DUEL_WINNER,
+                side,
+                price,
+            ),
+        () =>
+            clob.getPriceLevel(
+                currentDuelKey,
+                MARKET_KIND_DUEL_WINNER,
+                side,
+                price,
+            ),
+    );
+}
+
+async function loadClaimPosition(
+    agent: BaseAgent,
+    address: string,
+): Promise<CachedPosition | null> {
+    const cachedPosition = getCachedPosition(address);
+    if (hasPosition(cachedPosition)) {
+        return cachedPosition;
+    }
+
+    const loadWithContract = async (
+        contract: Contract,
+        label: string,
+    ): Promise<CachedPosition> => {
+        const positionRaw = await withTimeout(
+            contract.positions(currentMarketKey, address),
+            6_000,
+            `${agent.config.name} ${label} claim lookup`,
+        );
+        return parsePosition(positionRaw);
+    };
+
+    try {
+        const position = await loadWithContract(clobRead, "read");
+        agentPositionCache.set(address, position);
+        return position;
+    } catch (error) {
+        refreshReadClients();
+        try {
+            const position = await loadWithContract(clob, "write");
+            agentPositionCache.set(address, position);
+            return position;
+        } catch (fallbackError) {
+            broadcast({
+                type: "log",
+                data: {
+                    message: `[${agent.config.name}] Claim lookup skipped: ${
+                        fallbackError instanceof Error
+                            ? fallbackError.message.slice(0, 100)
+                            : String(fallbackError).slice(0, 100)
+                    }`,
+                    tick: simTick,
+                },
+            });
+            if (error instanceof Error) {
+                console.warn(
+                    `[claims] ${agent.config.name} read lookup failed: ${error.message}`,
+                );
+            }
+            return null;
+        }
+    }
+}
+
+async function loadClaimPositionFresh(
+    agent: BaseAgent,
+    address: string,
+    timeoutMs = 3_000,
+): Promise<CachedPosition | null> {
+    const readPosition = async (
+        contract: Contract,
+        label: string,
+    ): Promise<CachedPosition> => {
+        const positionRaw = await withTimeout(
+            contract.positions(currentMarketKey, address),
+            timeoutMs,
+            `${agent.config.name} ${label} claim refresh`,
+        );
+        return parsePosition(positionRaw);
+    };
+
+    try {
+        const position = await withReadFallback(
+            `${agent.config.name} claim refresh`,
+            () => readPosition(clobRead, "read"),
+            () => readPosition(clob, "write"),
+            {
+                attempts: 1,
+                timeoutMs,
+                fallbackTimeoutMs: timeoutMs,
+            },
+        );
+        agentPositionCache.set(address, position);
+        return position;
+    } catch {
+        return null;
+    }
+}
+
+async function loadResidualClaimCandidatesFresh(
+    timeoutMs = 3_000,
+): Promise<ClaimCandidate[]> {
+    const cachedResidualCandidates = getResidualClaimCandidates();
+    if (cachedResidualCandidates.length === 0) {
+        return [];
+    }
+
+    const freshCandidates = await Promise.all(
+        cachedResidualCandidates.map(
+            async (candidate): Promise<ClaimCandidate | null> => {
+                const freshPosition =
+                    (await loadClaimPositionFresh(
+                        candidate.agent,
+                        candidate.address,
+                        timeoutMs,
+                    )) ?? candidate.position;
+
+                if (!hasPosition(freshPosition)) {
+                    agentPositionCache.set(candidate.address, { ...ZERO_POSITION });
+                    return null;
+                }
+
+                agentPositionCache.set(candidate.address, freshPosition);
+                return {
+                    ...candidate,
+                    position: freshPosition,
+                };
+            },
+        ),
+    );
+
+    return freshCandidates.filter(
+        (candidate): candidate is ClaimCandidate => candidate != null,
+    );
+}
+
+function getResidualClaimCandidates(): ClaimCandidate[] {
+    const candidates: ClaimCandidate[] = [];
+    for (const agent of agents) {
+        const address = agentAddressCache.get(agent);
+        if (!address) {
+            continue;
+        }
+        const position = getCachedPosition(address);
+        if (!hasPosition(position)) {
+            continue;
+        }
+        candidates.push({
+            agent,
+            address,
+            position,
+        });
+    }
+    return candidates;
+}
+
+async function processClaimCandidates(
+    candidates: ClaimCandidate[],
+    stagePrefix: string,
+    budgetMs: number,
+): Promise<void> {
+    if (candidates.length === 0) {
+        return;
+    }
+
+    updateActiveRunStage(`${stagePrefix}-${candidates.length}`);
+    const claimDeadline = Date.now() +
+        (scenarioRunInFlight ? Math.max(budgetMs, 90_000) : budgetMs);
+    const claimTxTimeoutMs = scenarioRunInFlight ? 2_500 : 8_000;
+    const claimReceiptTimeoutMs = scenarioRunInFlight ? 2_500 : 8_000;
+    const concurrency = scenarioRunInFlight ? 4 : 1;
+    const processCandidate = async (candidate: ClaimCandidate, index: number): Promise<void> => {
+        try {
+            updateActiveRunStage(
+                `${stagePrefix}-${index + 1}-of-${candidates.length}`,
+            );
+            const txClaim: any = await withTimeout(
+                (clob.connect(candidate.agent.signer) as any).claim(
+                    currentDuelKey,
+                    MARKET_KIND_DUEL_WINNER,
+                ),
+                claimTxTimeoutMs,
+                `${candidate.agent.config.name} claim`,
+            );
+            await withTimeout(
+                txClaim.wait(),
+                claimReceiptTimeoutMs,
+                `${candidate.agent.config.name} claim receipt`,
+            );
+            agentPositionCache.set(candidate.address, { ...ZERO_POSITION });
+            broadcast({
+                type: "log",
+                data: {
+                    message: `[${candidate.agent.config.name}] Claimed winnings`,
+                    tick: simTick,
+                },
+            });
+        } catch (err: any) {
+            const refreshedPosition = await loadClaimPositionFresh(
+                candidate.agent,
+                candidate.address,
+            );
+            if (refreshedPosition && !hasPosition(refreshedPosition)) {
+                agentPositionCache.set(candidate.address, { ...ZERO_POSITION });
+                broadcast({
+                    type: "log",
+                    data: {
+                        message: `[${candidate.agent.config.name}] Claim settled after retry check`,
+                        tick: simTick,
+                    },
+                });
+                return;
+            }
+            broadcast({
+                type: "log",
+                data: {
+                    message: `[${candidate.agent.config.name}] Claim: ${err.message?.slice(0, 80)}`,
+                    tick: simTick,
+                },
+            });
+        }
+    };
+
+    for (let startIndex = 0; startIndex < candidates.length; startIndex += concurrency) {
+        if (Date.now() >= claimDeadline) {
+            updateActiveRunStage(`${stagePrefix}-budget-exhausted`);
+            broadcast({
+                type: "log",
+                data: {
+                    message: `⏭️ Claim budget exhausted after ${startIndex}/${candidates.length} claims during ${stagePrefix}`,
+                    tick: simTick,
+                },
+            });
+            break;
+        }
+
+        const batch = candidates.slice(startIndex, startIndex + concurrency);
+        if (scenarioRunInFlight) {
+            await Promise.all(batch.map((candidate, offset) =>
+                processCandidate(candidate, startIndex + offset),
+            ));
+        } else {
+            for (const [offset, candidate] of batch.entries()) {
+                await processCandidate(candidate, startIndex + offset);
+            }
+        }
+    }
+}
+
+function createScenarioRunRecord(
+    preset: ScenarioPreset,
+    options: {
+        seed?: string;
+        ticks?: number;
+        winner?: "A" | "B";
+        freshBaseline?: boolean;
+    },
+): ScenarioRunRecord {
+    scenarioRunSequence += 1;
+    return createScenarioRunRecordShared(preset, options, scenarioRunSequence);
+}
+
+function resetScenarioMetrics(): void {
+    peakInventorySeen = 0;
+    worstMarketMakerPnl = 0;
+    bestAttackerPnlSeen = 0;
+    scenarioObservedTicks = 0;
+    scenarioQuotedTicks = 0;
+    scenarioSpreadBpsTotal = 0;
+    scenarioSpreadSamples = 0;
+    lastResolveLatencyMs = null;
+    staleStreamGuardTripsSeen = 0;
+    staleOracleGuardTripsSeen = 0;
+    closeGuardTripsSeen = 0;
+    circuitBreakerTripsSeen = 0;
+    scenarioMarketLocked = false;
+    lastComputedState = null;
+    lastObservedMarketState = null;
+    lastObservedProtocolMmBalance = null;
+    lastObservedRuntimeMmBalance = null;
+    simTick = 0;
+}
+
+function applyScenarioPresetByName(name: string): ScenarioPreset {
+    const preset = getScenarioPresetByIdOrName(name);
+    if (!preset) {
+        throw new Error(`Unknown scenario preset: ${name}`);
+    }
+
+    currentScenarioId = preset.id;
+    for (const agent of agents) {
+        agent.config.enabled = preset.enabledStrategies.includes(agent.config.strategy);
+    }
+    return preset;
+}
+
+function marketStatusLabel(status: number): ScenarioSettlementStatus {
+    switch (status) {
+        case 1:
+            return "OPEN";
+        case 2:
+            return "LOCKED";
+        case 3:
+            return "RESOLVED";
+        case 4:
+            return "CANCELLED";
+        default:
+            return "NULL";
+    }
+}
+
+async function restoreScenarioBaseline(): Promise<void> {
+    if (!provider || !baselineSnapshotId || !baselineRuntimeState) {
+        throw new Error("Scenario baseline is not initialized");
+    }
+
+    simRunning = false;
+    try {
+        updateActiveRunStage("restore-baseline-revert");
+        const controlProvider = new JsonRpcProvider(`http://127.0.0.1:${ANVIL_PORT}`, 31337);
+        await withTimeout(
+            controlProvider.send("evm_revert", [baselineSnapshotId]),
+            SCENARIO_BASELINE_REVERT_TIMEOUT_MS,
+            "baseline evm_revert",
+        );
+        updateActiveRunStage("restore-baseline-snapshot");
+        baselineSnapshotId = await withTimeout(
+            controlProvider.send("evm_snapshot", []),
+            SCENARIO_BASELINE_SNAPSHOT_TIMEOUT_MS,
+            "baseline evm_snapshot",
+        );
+        refreshReadClients();
+    } catch (error) {
+        console.warn(
+            `[baseline] Restore failed, rebuilding local sim backend: ${
+                error instanceof Error ? error.message : String(error)
+            }`,
+        );
+        updateActiveRunStage("restore-baseline-rebuild");
+        await withTimeout(
+            rebuildSimulationEnvironment(),
+            SCENARIO_BASELINE_REBUILD_TIMEOUT_MS,
+            "baseline rebuild",
+        );
+    }
+
+    duelCounter = baselineRuntimeState.duelCounter;
+    currentDuelLabel = baselineRuntimeState.currentDuelLabel;
+    currentDuelKey = baselineRuntimeState.currentDuelKey;
+    currentMarketKey = baselineRuntimeState.currentMarketKey;
+    currentScenarioId = "manual";
+    eventLog.length = 0;
+    for (const agent of agents) {
+        agent.resetForScenario();
+        const address = agentAddressCache.get(agent);
+        if (address) {
+            agentPositionCache.set(address, { ...ZERO_POSITION });
+        }
+    }
+    resetScenarioMetrics();
+}
+
+async function captureScenarioBaseline(): Promise<void> {
+    baselineRuntimeState = {
+        duelCounter,
+        currentDuelLabel,
+        currentDuelKey,
+        currentMarketKey,
+    };
+    baselineSnapshotId = await provider.send("evm_snapshot", []);
+    eventLog.length = 0;
+    refreshReadClients();
+}
+
+async function rebuildSimulationEnvironment(): Promise<void> {
+    await stopAnvil();
+    eventLog.length = 0;
+    initialBalances.clear();
+    agentAddressCache.clear();
+    agentPositionCache.clear();
+    await startAnvil();
+    await deployContracts();
+    await captureScenarioBaseline();
+}
 
 // ─── Anvil Management ────────────────────────────────────────────────────────
 
@@ -76,7 +1306,7 @@ async function startAnvil(): Promise<void> {
             "--host", "127.0.0.1",
             "--port", String(ANVIL_PORT),
             "--chain-id", "31337",
-            "--accounts", "20",
+            "--accounts", "24",
             "--balance", "10000",
             "--silent",
         ]);
@@ -113,10 +1343,30 @@ async function startAnvil(): Promise<void> {
     });
 }
 
-function stopAnvil(): void {
+async function stopAnvil(): Promise<void> {
     if (anvilProcess) {
-        anvilProcess.kill("SIGTERM");
+        const processToStop = anvilProcess;
         anvilProcess = null;
+        await new Promise<void>((resolve) => {
+            let settled = false;
+            const finish = () => {
+                if (settled) {
+                    return;
+                }
+                settled = true;
+                resolve();
+            };
+            const timer = setTimeout(() => {
+                processToStop.kill("SIGKILL");
+                finish();
+            }, 5_000);
+            processToStop.once("exit", () => {
+                clearTimeout(timer);
+                finish();
+            });
+            processToStop.kill("SIGTERM");
+        });
+        await sleep(250);
         console.log("[anvil] Stopped");
     }
 }
@@ -125,33 +1375,61 @@ function stopAnvil(): void {
 
 async function deployContracts(): Promise<void> {
     provider = new JsonRpcProvider(`http://127.0.0.1:${ANVIL_PORT}`, 31337);
+    readProvider = new JsonRpcProvider(`http://127.0.0.1:${ANVIL_PORT}`, 31337);
 
     const signers = await Promise.all(
-        Array.from({ length: 20 }, (_, i) => provider.getSigner(i)),
+        Array.from({ length: 24 }, (_, i) => provider.getSigner(i)),
     );
     const admin = signers[0];
     const operator = signers[1];
     const reporter = signers[2];
     const treasury = signers[3];
     const marketMaker = signers[4];
-
-    // Compile contracts if needed
-    if (!existsSync(join(CONTRACTS_DIR, "artifacts", "contracts", "GoldClob.sol", "GoldClob.json"))) {
-        console.log("[deploy] Artifacts not found. Run `npx hardhat compile` in packages/evm-contracts first.");
-        process.exit(1);
+    const challenger = signers.at(-2);
+    const finalizer = signers.at(-1);
+    if (!challenger || !finalizer) {
+        throw new Error("simulation runtime requires dedicated finalizer/challenger signers");
     }
-    
+    adminSigner = admin;
+    operatorSigner = operator;
+    reporterSigner = reporter;
+    pauserSigner = admin;
+    challengerSigner = challenger;
+    treasurySigner = treasury;
+    marketMakerSigner = marketMaker;
+    finalizerSigner = finalizer;
+
+    adminAddr = await admin.getAddress();
+    operatorAddr = await operator.getAddress();
+    reporterAddr = await reporter.getAddress();
+    pauserAddr = adminAddr;
+    challengerAddr = await challenger.getAddress();
+    finalizerAddr = await finalizer.getAddress();
     treasuryAddr = await treasury.getAddress();
     mmAddr = await marketMaker.getAddress();
 
-    const oracleArtifact = loadArtifact(CONTRACTS_DIR, "DuelOutcomeOracle");
-    const clobArtifact = loadArtifact(CONTRACTS_DIR, "GoldClob");
+    let oracleArtifact;
+    let clobArtifact;
+    try {
+        oracleArtifact = loadArtifact(CONTRACTS_DIR, "DuelOutcomeOracle");
+        clobArtifact = loadArtifact(CONTRACTS_DIR, "GoldClob");
+    } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.log(
+            `[deploy] Contract artifacts not found. Build packages/evm-contracts first. (${message})`,
+        );
+        process.exit(1);
+    }
 
     console.log("[deploy] Deploying DuelOutcomeOracle...");
     const oracleFactory = new ContractFactory(oracleArtifact.abi as any, oracleArtifact.bytecode, admin);
     oracle = (await oracleFactory.deploy(
         await admin.getAddress(),
         await reporter.getAddress(),
+        await finalizer.getAddress(),
+        await challenger.getAddress(),
+        await admin.getAddress(),
+        DISPUTE_WINDOW_SECONDS,
     )) as unknown as Contract;
     await oracle.waitForDeployment();
 
@@ -163,11 +1441,19 @@ async function deployContracts(): Promise<void> {
         await oracle.getAddress(),
         await treasury.getAddress(),
         await marketMaker.getAddress(),
+        await admin.getAddress(),
     )) as unknown as Contract;
     await clob.waitForDeployment();
 
-    const oracleAddr = await oracle.getAddress();
-    const clobAddr = await clob.getAddress();
+    oracleAddr = await oracle.getAddress();
+    clobAddr = await clob.getAddress();
+    oracleRead = oracle.connect(readProvider) as unknown as Contract;
+    clobRead = clob.connect(readProvider) as unknown as Contract;
+    feeConfig = {
+        treasuryBps: BigInt(await clob.tradeTreasuryFeeBps()),
+        mmBps: BigInt(await clob.tradeMarketMakerFeeBps()),
+        winningsMmBps: BigInt(await clob.winningsMarketMakerFeeBps()),
+    };
     console.log(`[deploy] Oracle: ${oracleAddr}`);
     console.log(`[deploy] CLOB:   ${clobAddr}`);
 
@@ -234,6 +1520,7 @@ async function createAgents(signers: any[]): Promise<void> {
         { agent: new CabalAgent(signers[19], clob, false), balance: "3" },
         { agent: new ArbitrageurAgent(signers[14], clob), balance: "2" },
         { agent: new StressTestAgent(signers[15], clob), balance: "2" },
+        { agent: new CancelReplaceAgent(signers[20], clob), balance: "2" },
     ];
 
     agents = agentDefs.map(d => d.agent);
@@ -253,6 +1540,8 @@ async function createAgents(signers: any[]): Promise<void> {
     // Set balances via anvil_setBalance
     for (let i = 0; i < agents.length; i++) {
         const addr = await agents[i].signer.getAddress();
+        agentAddressCache.set(agents[i], addr);
+        agentPositionCache.set(addr, { ...ZERO_POSITION });
         const balWei = ethers.parseEther(agentDefs[i].balance);
         await provider.send("anvil_setBalance", [addr, "0x" + balWei.toString(16)]);
         initialBalances.set(addr, agentDefs[i].balance);
@@ -264,9 +1553,12 @@ async function openNewDuel(): Promise<void> {
     duelCounter++;
     currentDuelLabel = `sim-duel-${duelCounter}`;
     currentDuelKey = duelKey(currentDuelLabel);
+    currentScenarioId = "manual";
+    duelOpenedAtMs = Date.now();
+    resetScenarioMetrics();
 
-    const reporter = await provider.getSigner(2);
-    const operator = await provider.getSigner(1);
+    const reporter = reporterSigner ?? (await provider.getSigner(2));
+    const operator = operatorSigner ?? (await provider.getSigner(1));
 
     const block = await provider.getBlock("latest");
     const now = BigInt(block?.timestamp ?? Math.floor(Date.now() / 1000));
@@ -283,74 +1575,220 @@ async function openNewDuel(): Promise<void> {
   );
   await tx1.wait();
 
-  const tx2 = await (clob.connect(operator) as any).createMarketForDuel(currentDuelKey, MARKET_KIND_DUEL_WINNER);
-  await tx2.wait();
+    const tx2 = await (clob.connect(operator) as any).createMarketForDuel(currentDuelKey, MARKET_KIND_DUEL_WINNER);
+    await tx2.wait();
 
     currentMarketKey = await clob.marketKey(currentDuelKey, MARKET_KIND_DUEL_WINNER);
+    rememberDuelState({
+        participantAHash: hashParticipant(`${currentDuelLabel}:agent-alpha`),
+        participantBHash: hashParticipant(`${currentDuelLabel}:agent-beta`),
+        betOpenTs: now,
+        betCloseTs: now + 604800n,
+        duelStartTs: now + 1209600n,
+        metadataUri: `sim://${currentDuelLabel}`,
+        status: DUEL_STATUS_BETTING_OPEN,
+    });
+    rememberMarketState(
+        await loadMarketState("open duel initial market snapshot"),
+    );
 
     console.log(`[sim] Opened duel: ${currentDuelLabel}`);
     broadcast({ type: "duel_opened", data: { label: currentDuelLabel, duelKey: currentDuelKey } });
+}
+
+async function ensureScenarioMarketLocked(
+    preset: ScenarioPreset | undefined,
+): Promise<void> {
+    const runtimeProfile = preset?.runtimeProfile;
+    const staleStreamLagMs =
+        (runtimeProfile?.staleStreamLagTicks ?? 0) * SIM_TICK_MS;
+    const staleOracleLagMs =
+        (runtimeProfile?.staleOracleLagTicks ?? 0) * SIM_TICK_MS;
+    const closeWindowReached = isScenarioCloseGuardWindow(
+        runtimeProfile,
+        simTick,
+    );
+    const staleStreamLocked =
+        staleStreamLagMs > DEFAULT_MARKET_MAKER_CONFIG.staleStreamAfterMs;
+    const staleOracleLocked =
+        staleOracleLagMs > DEFAULT_MARKET_MAKER_CONFIG.staleOracleAfterMs;
+    if (!closeWindowReached && !staleStreamLocked && !staleOracleLocked) {
+        return;
+    }
+
+    const duel = await loadScenarioDuelState(`tick ${simTick} getDuel`);
+    const duelStatus = Number(duel.status ?? 0);
+    if (duelStatus >= DUEL_STATUS_LOCKED) {
+        scenarioMarketLocked = true;
+        return;
+    }
+
+    const reporter = reporterSigner ?? (await provider.getSigner(2));
+    const operator = operatorSigner ?? (await provider.getSigner(1));
+    const latestBlock = await provider.getBlock("latest");
+    const latestTimestamp = BigInt(
+        latestBlock?.timestamp ?? Math.floor(Date.now() / 1000),
+    );
+    if (latestTimestamp < BigInt(duel.betCloseTs)) {
+        await provider.send("evm_setNextBlockTimestamp", [Number(duel.betCloseTs)]);
+        await provider.send("evm_mine", []);
+    }
+    const lockReason = closeWindowReached
+        ? "close-window"
+        : staleOracleLocked
+          ? "stale-oracle"
+          : "stale-stream";
+    updateActiveRunStage(`tick-${simTick}-lock-${lockReason}`);
+
+    const lockTx: any = await withTimeout(
+        (oracle.connect(reporter) as any).upsertDuel(
+            currentDuelKey,
+            duel.participantAHash,
+            duel.participantBHash,
+            duel.betOpenTs,
+            duel.betCloseTs,
+            duel.duelStartTs,
+            duel.metadataUri,
+            DUEL_STATUS_LOCKED,
+        ),
+        SCENARIO_SETTLEMENT_TX_TIMEOUT_MS,
+        `tick ${simTick} lock duel`,
+    );
+    await withTimeout(
+        lockTx.wait(),
+        SCENARIO_SETTLEMENT_RECEIPT_TIMEOUT_MS,
+        `tick ${simTick} lock duel receipt`,
+    );
+
+    const syncTx: any = await withTimeout(
+        (clob.connect(operator) as any).syncMarketFromOracle(
+            currentDuelKey,
+            MARKET_KIND_DUEL_WINNER,
+        ),
+        SCENARIO_SETTLEMENT_TX_TIMEOUT_MS,
+        `tick ${simTick} lock sync market`,
+    );
+    await withTimeout(
+        syncTx.wait(),
+        SCENARIO_SETTLEMENT_RECEIPT_TIMEOUT_MS,
+        `tick ${simTick} lock sync market receipt`,
+    );
+    scenarioMarketLocked = true;
+    if (lastObservedDuelState) {
+        lastObservedDuelState = {
+            ...lastObservedDuelState,
+            status: DUEL_STATUS_LOCKED,
+        };
+    }
+    refreshReadClients();
 }
 
 // ─── Simulation Loop ─────────────────────────────────────────────────────────
 
 async function simulationTick(): Promise<void> {
     simTick++;
+    const scenarioMode = scenarioRunInFlight;
+    const scenarioPreset = getScenarioPresetByIdOrName(currentScenarioId);
+    const treasuryFeeBps = feeConfig.treasuryBps;
+    const mmFeeBps = feeConfig.mmBps;
+    if (scenarioMode) {
+        await ensureScenarioMarketLocked(scenarioPreset ?? undefined);
+    }
+    let market = await loadScenarioMarketState(`tick ${simTick} initial getMarket`);
+    rememberMarketState(market);
+    const skipScenarioAgentActions = scenarioMode && scenarioMarketLocked;
 
-    for (const agent of agents) {
+    for (const agent of getExecutionOrder()) {
         if (!agent.config.enabled) continue;
+        if (skipScenarioAgentActions && !(agent instanceof MarketMakerAgent)) {
+            continue;
+        }
 
+        if (scenarioMode) {
+            updateActiveRunStage(`tick-${simTick}-agent-${agent.config.strategy}`);
+        }
         try {
-            // Build context
-            const market = await clob.getMarket(currentDuelKey, MARKET_KIND_DUEL_WINNER);
-            const position = await clob.positions(currentMarketKey, await agent.signer.getAddress());
+            await withTimeout(
+                (async () => {
+                    const address = await getAgentAddress(agent);
+                    const position = getCachedPosition(address);
+                    const ctx: SimContext = {
+                        chainKey: scenarioPreset?.chainKey ?? "anvil",
+                        duelKey: currentDuelKey,
+                        marketKey: currentMarketKey,
+                        bestBid: Number(market.bestBid),
+                        bestAsk: Number(market.bestAsk) >= MAX_PRICE ? 0 : Number(market.bestAsk),
+                        mid: calculateMid(Number(market.bestBid), Number(market.bestAsk)),
+                        totalAShares: market.totalAShares,
+                        totalBShares: market.totalBShares,
+                        tick: simTick,
+                        nowMs: simTick * SIM_TICK_MS,
+                        treasuryFeeBps,
+                        mmFeeBps,
+                        agentActiveOrderIds: agent.activeOrderIds,
+                        scenarioProfile: scenarioPreset?.runtimeProfile ?? null,
+                        agentPosition: {
+                            aShares: position.aShares,
+                            bShares: position.bShares,
+                            aStake: position.aStake,
+                            bStake: position.bStake,
+                        },
+                    };
 
-            const ctx: SimContext = {
-                duelKey: currentDuelKey,
-                marketKey: currentMarketKey,
-                bestBid: Number(market.bestBid),
-                bestAsk: Number(market.bestAsk) >= MAX_PRICE ? 0 : Number(market.bestAsk),
-                mid: calculateMid(Number(market.bestBid), Number(market.bestAsk)),
-                totalAShares: market.totalAShares,
-                totalBShares: market.totalBShares,
-                tick: simTick,
-                treasuryFeeBps: await clob.tradeTreasuryFeeBps(),
-                mmFeeBps: await clob.tradeMarketMakerFeeBps(),
-                agentActiveOrderIds: agent.activeOrderIds,
-                agentPosition: {
-                    aShares: position.aShares,
-                    bShares: position.bShares,
-                    aStake: position.aStake,
-                    bStake: position.bStake,
-                },
-            };
+                    // Special handling for oracle attack agent
+                    if (agent instanceof OracleAttackAgent && agent.config.enabled) {
+                        if (simTick % 10 === 0) {
+                            const msg = await agent.executeOracleAttack(currentDuelKey);
+                            broadcast({ type: "log", data: { message: msg, tick: simTick } });
+                        }
+                        return;
+                    }
 
-            // Special handling for oracle attack agent
-            if (agent instanceof OracleAttackAgent && agent.config.enabled) {
-                if (simTick % 10 === 0) {
-                    const msg = await agent.executeOracleAttack(currentDuelKey);
-                    broadcast({ type: "log", data: { message: msg, tick: simTick } });
-                }
-                continue;
-            }
-
-            const actions = agent.decide(ctx);
-            if (actions.length > 0) {
-                const logs = await agent.executeActions(actions, ctx);
-                for (const msg of logs) {
-                    broadcast({ type: "log", data: { message: msg, tick: simTick } });
-                }
-            }
+                    const actions = agent.decide(ctx);
+                    if (agent instanceof MarketMakerAgent) {
+                        recordMarketMakerPlanMetrics(agent);
+                    }
+                    if (actions.length > 0) {
+                        const actionBudgetMs = scenarioMode
+                            ? Math.max(10_000, actions.length * 8_000)
+                            : Math.max(20_000, actions.length * 20_000);
+                        const logs = await withTimeout(
+                            agent.executeActions(actions, ctx),
+                            actionBudgetMs,
+                            `tick ${simTick} agent ${agent.config.name} executeActions`,
+                        );
+                        for (const msg of logs) {
+                            broadcast({ type: "log", data: { message: msg, tick: simTick } });
+                        }
+                    }
+                })(),
+                scenarioMode ? 30_000 : 120_000,
+                `tick ${simTick} agent ${agent.config.name}`,
+            );
         } catch (err: any) {
+            const message = err.message?.slice(0, 150) ?? "unknown simulation error";
             broadcast({
                 type: "log",
-                data: { message: `[${agent.config.name}] ERROR: ${err.message?.slice(0, 150)}`, tick: simTick },
+                data: { message: `[${agent.config.name}] ERROR: ${message}`, tick: simTick },
             });
+            if (message.includes("timed out after") && !scenarioMode) {
+                throw err;
+            }
         }
+
+        await sleep(5);
     }
 
-    // Broadcast full state update
-    await broadcastState();
+    if (scenarioRunInFlight) {
+        return;
+    }
+
+    // Broadcast full state update for interactive/manual mode.
+    await withTimeout(
+        broadcastState(),
+        30_000,
+        `tick ${simTick} broadcastState`,
+    );
 }
 
 function calculateMid(bestBid: number, bestAsk: number): number {
@@ -365,51 +1803,216 @@ function calculateMid(bestBid: number, bestAsk: number): number {
 
 async function broadcastState(): Promise<void> {
     try {
-        const market = await clob.getMarket(currentDuelKey, MARKET_KIND_DUEL_WINNER);
+        const [
+            market,
+            agentSnapshots,
+            book,
+            treasuryBalance,
+            mmBalance,
+        ] = await Promise.all([
+            loadScenarioMarketState("broadcast getMarket"),
+            Promise.all(
+                agents.map(async (agent) => {
+                    const addr = await getAgentAddress(agent);
+                    const [balance, position] = await Promise.all([
+                        loadWalletBalance(`broadcast ${agent.config.name} getBalance`, addr),
+                        loadPositionState(`broadcast ${agent.config.name} getPosition`, addr),
+                    ]);
+                    const balanceFormatted = formatEth(balance);
+                    const initBal = initialBalances.get(addr) || "10000";
+                    const pnlValue = Number(balanceFormatted) - Number(initBal);
+                    const inventoryUnits = Number(position.aShares + position.bShares);
+                    return {
+                        name: agent.config.name,
+                        strategy: agent.config.strategy,
+                        description: agent.config.description,
+                        enabled: agent.config.enabled,
+                        color: agent.config.color,
+                        address: addr,
+                        balance: balanceFormatted,
+                        pnl: pnlValue.toFixed(4),
+                        pnlValue,
+                        tradeCount: agent.tradeCount,
+                        activeOrders: agent.activeOrderIds.length,
+                        inventoryUnits,
+                        positionRaw: {
+                            aShares: position.aShares.toString(),
+                            bShares: position.bShares.toString(),
+                            aStake: position.aStake.toString(),
+                            bStake: position.bStake.toString(),
+                        },
+                        position: {
+                            aShares: position.aShares.toString(),
+                            bShares: position.bShares.toString(),
+                            aStake: formatEth(position.aStake),
+                            bStake: formatEth(position.bStake),
+                        },
+                        };
+                    }),
+            ),
+            buildOrderBook(),
+            loadWalletBalance("broadcast treasury getBalance", treasuryAddr),
+            loadWalletBalance("broadcast mm getBalance", mmAddr),
+        ]);
+        const marketSnapshot = rememberMarketState(market);
+        lastObservedProtocolMmBalance = mmBalance;
+        for (const snapshot of agentSnapshots) {
+            agentPositionCache.set(snapshot.address, {
+                aShares: BigInt(snapshot.positionRaw.aShares),
+                bShares: BigInt(snapshot.positionRaw.bShares),
+                aStake: BigInt(snapshot.positionRaw.aStake),
+                bStake: BigInt(snapshot.positionRaw.bStake),
+            });
+            if (snapshot.strategy === "market_maker") {
+                lastObservedRuntimeMmBalance = ethers.parseEther(
+                    snapshot.balance,
+                );
+            }
+        }
+        const agentStates = agentSnapshots.map(
+            ({ pnlValue, inventoryUnits, positionRaw, ...agentState }) => agentState,
+        );
+        const marketStatus = marketSnapshot.status;
+        const settlementStatus = marketStatusLabel(marketStatus);
+        const scenarioPreset = getScenarioPresetByIdOrName(currentScenarioId);
+        const attackerPnlTolerance =
+            scenarioPreset?.gatePolicy?.maxAttackerPnl ?? 0;
+        const bestBid = marketSnapshot.bestBid;
+        const bestAsk = marketSnapshot.bestAsk;
+        const boundedBestAsk = bestAsk > 0 && bestAsk < MAX_PRICE ? bestAsk : null;
+        const spreadWidthBps = computeToxicityBps(
+            bestBid > 0 ? bestBid : null,
+            boundedBestAsk,
+        );
+        const orderChurn = eventLog.filter((entry) =>
+            entry.event === "OrderPlaced" ||
+            entry.event === "OrderCancelled" ||
+            entry.event === "OrderMatched",
+        ).length;
+        const attackerPnl = agentSnapshots
+            .filter((agent) => ATTACKER_STRATEGIES.has(agent.strategy))
+            .reduce((max, agent) => Math.max(max, agent.pnlValue), 0);
+        bestAttackerPnlSeen = Math.max(bestAttackerPnlSeen, attackerPnl);
 
-        // Gather agent states
-        const agentStates = await Promise.all(
-            agents.map(async (agent) => {
-                const addr = await agent.signer.getAddress();
-                const balance = await provider.getBalance(addr);
-                const position = await clob.positions(currentMarketKey, addr);
-                const balanceFormatted = formatEth(balance);
-                const initBal = initialBalances.get(addr) || "10000";
-                const pnl = (Number(balanceFormatted) - Number(initBal)).toFixed(4);
-
-                return {
-                    name: agent.config.name,
-                    strategy: agent.config.strategy,
-                    description: agent.config.description,
-                    enabled: agent.config.enabled,
-                    color: agent.config.color,
-                    address: addr,
-                    balance: balanceFormatted,
-                    pnl,
-                    tradeCount: agent.tradeCount,
-                    activeOrders: agent.activeOrderIds.length,
-                    position: {
-                        aShares: position.aShares.toString(),
-                        bShares: position.bShares.toString(),
-                        aStake: formatEth(position.aStake),
-                        bStake: formatEth(position.bStake),
-                    },
-                };
-            }),
+        const marketMakerAgent = agentSnapshots.find(
+            (agent) => agent.strategy === "market_maker",
+        );
+        if (marketMakerAgent) {
+            worstMarketMakerPnl = Math.min(
+                worstMarketMakerPnl,
+                marketMakerAgent.pnlValue,
+            );
+        }
+        peakInventorySeen = Math.max(
+            peakInventorySeen,
+            ...agentSnapshots.map((agent) => agent.inventoryUnits),
         );
 
-        // Build order book snapshot (scan populated price levels)
-        const book = await buildOrderBook();
-
-        const treasuryBalance = await provider.getBalance(treasuryAddr);
-        const mmBalance = await provider.getBalance(mmAddr);
+        const marketMakerDrawdownBps = marketMakerAgent
+            ? Math.round(
+                (Math.abs(Math.min(0, worstMarketMakerPnl)) /
+                    Math.max(
+                        0.0001,
+                        Number(initialBalances.get(marketMakerAgent.address) || "1"),
+                    )) *
+                    10_000,
+            )
+            : 0;
+        const claimsProcessed =
+            marketStatus < MARKET_STATUS_RESOLVED ||
+            agentSnapshots.every(
+                (agent) =>
+                    BigInt(agent.positionRaw.aShares) === 0n &&
+                    BigInt(agent.positionRaw.bShares) === 0n &&
+                    BigInt(agent.positionRaw.aStake) === 0n &&
+                    BigInt(agent.positionRaw.bStake) === 0n,
+            );
+        const settlementConsistent =
+            marketStatus === MARKET_STATUS_RESOLVED
+                ? Number(market.winner) === SIDE_A || Number(market.winner) === SIDE_B
+                : marketStatus === MARKET_STATUS_CANCELLED
+                  ? Number(market.winner) === 0
+                  : true;
+        const bookNotCrossed = boundedBestAsk == null || bestBid <= 0 || bestBid < boundedBestAsk;
+        const mmSolvent =
+            (marketMakerAgent ? Number(marketMakerAgent.balance) > 0 : true) &&
+            mmBalance > 0n;
+        const mitigationGates: MitigationGate[] = [
+            {
+                name: "mmSolvent",
+                passed: mmSolvent,
+                reason: mmSolvent ? null : "market-maker wallet depleted",
+            },
+            {
+                name: "bookNotCrossed",
+                passed: bookNotCrossed,
+                reason: bookNotCrossed ? null : "best bid crosses best ask",
+            },
+            {
+                name: "noPositiveAttackerPnl",
+                passed: bestAttackerPnlSeen <= attackerPnlTolerance,
+                reason:
+                    bestAttackerPnlSeen <= attackerPnlTolerance
+                        ? null
+                        : `attacker pnl peaked at ${bestAttackerPnlSeen.toFixed(4)} ETH (limit ${attackerPnlTolerance.toFixed(4)} ETH)`,
+            },
+            {
+                name: "settlementConsistent",
+                passed: settlementConsistent,
+                reason: settlementConsistent ? null : "winner/status mismatch after settlement",
+            },
+            {
+                name: "claimsProcessed",
+                passed: claimsProcessed,
+                reason: claimsProcessed ? null : "settled market still has residual positions",
+            },
+        ];
+        const activeScenarioPreset = getScenarioPresetByIdOrName(currentScenarioId);
+        const scenarioPolicyGates = activeScenarioPreset
+            ? evaluateScenarioPolicyGates(activeScenarioPreset, {
+                  attackerPnl: bestAttackerPnlSeen,
+                  maxDrawdownBps: marketMakerDrawdownBps,
+                  quoteUptimeRatio:
+                      scenarioObservedTicks > 0
+                          ? scenarioQuotedTicks / scenarioObservedTicks
+                          : 0,
+                  orderChurn,
+                  degraded: false,
+                  mmSolvent,
+                  bookNotCrossed,
+                  settlementConsistent,
+                  claimsProcessed,
+                  settlementStatus,
+                  staleStreamGuardTrips: staleStreamGuardTripsSeen,
+                  staleOracleGuardTrips: staleOracleGuardTripsSeen,
+                  closeGuardTrips: closeGuardTripsSeen,
+              })
+            : [];
+        const protocolMmPnl = Number(
+            formatEth(
+                mmBalance - ethers.parseEther(initialBalances.get(mmAddr) || "10000"),
+            ),
+        );
+        if (marketStatus === 1) {
+            scenarioObservedTicks += 1;
+            if ((marketMakerAgent?.activeOrders ?? 0) > 0) {
+                scenarioQuotedTicks += 1;
+            }
+            scenarioSpreadBpsTotal += spreadWidthBps;
+            scenarioSpreadSamples += 1;
+        }
 
         const state = {
             type: "state",
             data: {
+                backend: "evm",
                 tick: simTick,
                 running: simRunning,
                 speed: simSpeed,
+                    scenario: {
+                        id: currentScenarioId,
+                        chainKey: activeScenarioPreset?.chainKey ?? "anvil",
+                    },
                 duel: {
                     label: currentDuelLabel,
                     key: currentDuelKey,
@@ -417,35 +2020,296 @@ async function broadcastState(): Promise<void> {
                 },
                 market: {
                     exists: market.exists,
-                    status: Number(market.status),
-                    winner: Number(market.winner),
-                    bestBid: Number(market.bestBid),
-                    bestAsk: Number(market.bestAsk),
-                    totalAShares: market.totalAShares.toString(),
-                    totalBShares: market.totalBShares.toString(),
+                    status: marketStatus,
+                    winner: marketSnapshot.winner,
+                    bestBid,
+                    bestAsk,
+                    totalAShares: marketSnapshot.totalAShares,
+                    totalBShares: marketSnapshot.totalBShares,
                 },
                 contracts: {
-                    oracle: await oracle.getAddress(),
-                    clob: await clob.getAddress(),
+                    oracle: oracleAddr,
+                    clob: clobAddr,
                 },
                 fees: {
-                    treasuryBps: (await clob.tradeTreasuryFeeBps()).toString(),
-                    mmBps: (await clob.tradeMarketMakerFeeBps()).toString(),
-                    winningsMmBps: (await clob.winningsMarketMakerFeeBps()).toString(),
+                    treasuryBps: feeConfig.treasuryBps.toString(),
+                    mmBps: feeConfig.mmBps.toString(),
+                    winningsMmBps: feeConfig.winningsMmBps.toString(),
                     treasuryAccruedWei: (treasuryBalance - ethers.parseEther(initialBalances.get(treasuryAddr) || "10000")).toString(),
                     mmAccruedWei: (mmBalance - ethers.parseEther(initialBalances.get(mmAddr) || "10000")).toString(),
+                    treasuryAccruedAtomic: (treasuryBalance - ethers.parseEther(initialBalances.get(treasuryAddr) || "10000")).toString(),
+                    mmAccruedAtomic: (mmBalance - ethers.parseEther(initialBalances.get(mmAddr) || "10000")).toString(),
+                    accrualUnit: "wei",
+                    displaySymbol: "ETH",
+                    displayDecimals: 18,
                 },
+                activeRun: getActiveScenarioRun(),
                 agents: agentStates,
                 book,
-                scenarios: SCENARIO_PRESETS,
+                mitigation: {
+                    gates: mitigationGates,
+                    scenarioGates: scenarioPolicyGates,
+                    metrics: {
+                        attackerPnlCurrent: attackerPnl,
+                        attackerPnlPeak: bestAttackerPnlSeen,
+                        marketMakerPnl:
+                            marketMakerAgent?.pnlValue ?? 0,
+                        protocolMarketMakerPnl: protocolMmPnl,
+                        marketMakerDrawdownBps,
+                        peakInventory: peakInventorySeen,
+                        spreadWidthBps,
+                        orderChurn,
+                        staleStreamGuardTrips: staleStreamGuardTripsSeen,
+                        staleOracleGuardTrips: staleOracleGuardTripsSeen,
+                        closeGuardTrips: closeGuardTripsSeen,
+                        circuitBreakerTrips: circuitBreakerTripsSeen,
+                        settlementConsistent,
+                        claimsProcessed,
+                        settlementStatus,
+                    },
+                },
+                scenarios: INTERACTIVE_SCENARIOS,
                 eventLogCount: eventLog.length,
             },
         };
 
+        lastComputedState = state.data;
         broadcast(state);
     } catch (err: any) {
         console.error("[state] Error building state:", err.message);
     }
+}
+
+async function captureScenarioSummaryState(): Promise<void> {
+    const marketMakerRuntimeAgent =
+        agents.find((agent) => agent.config.strategy === "market_maker") ?? null;
+    const marketMakerAddress = marketMakerRuntimeAgent
+        ? await getAgentAddress(marketMakerRuntimeAgent)
+        : null;
+        const marketMakerInitialBalance = marketMakerRuntimeAgent
+            ? Number(
+                  initialBalances.get(marketMakerAddress ?? "") || "1",
+              )
+            : 1;
+    const protocolMmInitialBalance = ethers.parseEther(
+        initialBalances.get(mmAddr) || "10000",
+    );
+    const runtimeMmInitialBalance = marketMakerAddress
+        ? ethers.parseEther(initialBalances.get(marketMakerAddress) || "1")
+        : 0n;
+    const market = await (async (): Promise<CachedMarketState> => {
+        try {
+            return rememberMarketState(
+                await withReadFallback(
+                    "scenario summary getMarket",
+                    () => clobRead.getMarket(currentDuelKey, MARKET_KIND_DUEL_WINNER),
+                    () => clob.getMarket(currentDuelKey, MARKET_KIND_DUEL_WINNER),
+                    {
+                        attempts: 1,
+                        timeoutMs: 3_000,
+                        fallbackTimeoutMs: 3_000,
+                    },
+                ),
+            );
+        } catch (error) {
+            if (lastObservedMarketState) {
+                console.warn(
+                    `[scenario-summary] Falling back to cached market snapshot: ${
+                        error instanceof Error ? error.message : String(error)
+                    }`,
+                );
+                return lastObservedMarketState;
+            }
+            throw error;
+        }
+    })();
+    const readSummaryBalance = async (
+        label: string,
+        address: string | null,
+        fallbackBalance: bigint,
+    ): Promise<bigint> => {
+        if (!address) {
+            return fallbackBalance;
+        }
+        try {
+            const balance = await withReadFallback(
+                label,
+                () => readProvider.getBalance(address),
+                () => provider.getBalance(address),
+                {
+                    attempts: 1,
+                    timeoutMs: 3_000,
+                    fallbackTimeoutMs: 3_000,
+                },
+            );
+            return balance;
+        } catch (error) {
+            console.warn(
+                `[scenario-summary] Falling back to cached balance for ${label}: ${
+                    error instanceof Error ? error.message : String(error)
+                }`,
+            );
+            return fallbackBalance;
+        }
+    };
+    const [mmBalance, marketMakerBalance] = await Promise.all([
+        readSummaryBalance(
+            "scenario summary protocol mm balance",
+            mmAddr,
+            lastObservedProtocolMmBalance ?? protocolMmInitialBalance,
+        ),
+        readSummaryBalance(
+            "scenario summary market-maker balance",
+            marketMakerAddress,
+            lastObservedRuntimeMmBalance ?? runtimeMmInitialBalance,
+        ),
+    ]);
+    lastObservedProtocolMmBalance = mmBalance;
+    lastObservedRuntimeMmBalance = marketMakerBalance;
+
+    const activeScenarioPreset = getScenarioPresetByIdOrName(currentScenarioId);
+    const marketStatus = market.status;
+    const settlementStatus = marketStatusLabel(marketStatus);
+    const attackerPnlTolerance =
+        activeScenarioPreset?.gatePolicy?.maxAttackerPnl ?? 0;
+    const bestBid = market.bestBid;
+    const bestAsk = market.bestAsk;
+    const boundedBestAsk =
+        bestAsk > 0 && bestAsk < MAX_PRICE ? bestAsk : null;
+    const spreadWidthBps = computeToxicityBps(
+        bestBid > 0 ? bestBid : null,
+        boundedBestAsk,
+    );
+    const orderChurn = eventLog.filter((entry) =>
+        entry.event === "OrderPlaced" ||
+        entry.event === "OrderCancelled" ||
+        entry.event === "OrderMatched",
+    ).length;
+    const attackerPnl = bestAttackerPnlSeen;
+    const marketMakerPnlCurrent =
+        marketMakerAddress != null
+            ? Number(formatEth(marketMakerBalance)) - marketMakerInitialBalance
+            : worstMarketMakerPnl;
+    worstMarketMakerPnl = Math.min(worstMarketMakerPnl, marketMakerPnlCurrent);
+
+    const marketMakerDrawdownBps = marketMakerRuntimeAgent
+        ? Math.round(
+            (Math.abs(Math.min(0, worstMarketMakerPnl)) /
+                Math.max(0.0001, marketMakerInitialBalance)) *
+                10_000,
+        )
+        : 0;
+    const residualClaimCandidates =
+        marketStatus >= MARKET_STATUS_RESOLVED
+            ? scenarioRunInFlight
+                ? getResidualClaimCandidates()
+                : await loadResidualClaimCandidatesFresh()
+            : getResidualClaimCandidates();
+    const claimsProcessed = residualClaimCandidates.length === 0;
+    const settlementConsistent =
+        marketStatus === MARKET_STATUS_RESOLVED
+            ? market.winner === SIDE_A || market.winner === SIDE_B
+            : marketStatus === MARKET_STATUS_CANCELLED
+              ? market.winner === 0
+              : true;
+    const bookNotCrossed =
+        boundedBestAsk == null || bestBid <= 0 || bestBid < boundedBestAsk;
+    const mmSolvent =
+        (marketMakerAddress != null ? marketMakerBalance > 0n : true) &&
+        mmBalance > 0n;
+    const mitigationGates: MitigationGate[] = [
+        {
+            name: "mmSolvent",
+            passed: mmSolvent,
+            reason: mmSolvent ? null : "market-maker wallet depleted",
+        },
+        {
+            name: "bookNotCrossed",
+            passed: bookNotCrossed,
+            reason: bookNotCrossed ? null : "best bid crosses best ask",
+        },
+        {
+            name: "noPositiveAttackerPnl",
+            passed: bestAttackerPnlSeen <= attackerPnlTolerance,
+            reason:
+                bestAttackerPnlSeen <= attackerPnlTolerance
+                    ? null
+                    : `attacker pnl peaked at ${bestAttackerPnlSeen.toFixed(4)} ETH (limit ${attackerPnlTolerance.toFixed(4)} ETH)`,
+        },
+        {
+            name: "settlementConsistent",
+            passed: settlementConsistent,
+            reason: settlementConsistent ? null : "winner/status mismatch after settlement",
+        },
+        {
+            name: "claimsProcessed",
+            passed: claimsProcessed,
+            reason: claimsProcessed ? null : "settled market still has residual positions",
+        },
+    ];
+    const scenarioPolicyGates = activeScenarioPreset
+        ? evaluateScenarioPolicyGates(activeScenarioPreset, {
+              attackerPnl: bestAttackerPnlSeen,
+              maxDrawdownBps: marketMakerDrawdownBps,
+              quoteUptimeRatio:
+                  scenarioObservedTicks > 0
+                      ? scenarioQuotedTicks / scenarioObservedTicks
+                      : 0,
+              orderChurn,
+              degraded: false,
+              mmSolvent,
+              bookNotCrossed,
+              settlementConsistent,
+              claimsProcessed,
+              settlementStatus,
+              staleStreamGuardTrips: staleStreamGuardTripsSeen,
+              staleOracleGuardTrips: staleOracleGuardTripsSeen,
+              closeGuardTrips: closeGuardTripsSeen,
+          })
+        : [];
+
+    lastComputedState = {
+        backend: "evm",
+        tick: simTick,
+        scenario: {
+            id: currentScenarioId,
+            chainKey: activeScenarioPreset?.chainKey ?? "anvil",
+        },
+        market: {
+            status: marketStatus,
+            winner: market.winner,
+            bestBid,
+            bestAsk,
+        },
+        mitigation: {
+            gates: mitigationGates,
+            scenarioGates: scenarioPolicyGates,
+            metrics: {
+                attackerPnlCurrent: attackerPnl,
+                attackerPnlPeak: bestAttackerPnlSeen,
+                marketMakerPnl: marketMakerPnlCurrent,
+                protocolMarketMakerPnl: Number(
+                    formatEth(
+                        mmBalance -
+                            ethers.parseEther(
+                                initialBalances.get(mmAddr) || "10000",
+                            ),
+                    ),
+                ),
+                marketMakerDrawdownBps,
+                peakInventory: peakInventorySeen,
+                spreadWidthBps,
+                orderChurn,
+                staleStreamGuardTrips: staleStreamGuardTripsSeen,
+                staleOracleGuardTrips: staleOracleGuardTripsSeen,
+                closeGuardTrips: closeGuardTripsSeen,
+                circuitBreakerTrips: circuitBreakerTripsSeen,
+                settlementConsistent,
+                claimsProcessed,
+                settlementStatus,
+            },
+        },
+    };
 }
 
 async function buildOrderBook(): Promise<{ bids: any[]; asks: any[] }> {
@@ -453,32 +2317,66 @@ async function buildOrderBook(): Promise<{ bids: any[]; asks: any[] }> {
     const asks: { price: number; total: string }[] = [];
 
     // Sample price levels around the interesting range
-    const market = await clob.getMarket(currentDuelKey, MARKET_KIND_DUEL_WINNER);
+    const market = await loadScenarioMarketState("order-book getMarket");
     const bestBid = Number(market.bestBid);
     const bestAsk = Number(market.bestAsk);
 
     // Scan bid side downward from bestBid
     if (bestBid > 0) {
+        const prices: number[] = [];
         for (let p = bestBid; p >= Math.max(1, bestBid - 100); p -= 5) {
-            try {
-                const level = await clob.getPriceLevel(currentDuelKey, MARKET_KIND_DUEL_WINNER, BUY_SIDE, p);
-                if (level[2] > 0n) {
-                    bids.push({ price: p, total: level[2].toString() });
-                }
-            } catch { /* skip */ }
+            prices.push(p);
         }
+        const levels = await Promise.all(
+            prices.map(async (price) => {
+                try {
+                    const level = await loadPriceLevelState(
+                        `order-book bid level ${price}`,
+                        BUY_SIDE,
+                        price,
+                    );
+                    return level[2] > 0n
+                        ? { price, total: level[2].toString() }
+                        : null;
+                } catch {
+                    return null;
+                }
+            }),
+        );
+        bids.push(
+            ...levels.filter(
+                (level): level is { price: number; total: string } => level != null,
+            ),
+        );
     }
 
     // Scan ask side upward from bestAsk
     if (bestAsk > 0 && bestAsk < MAX_PRICE) {
+        const prices: number[] = [];
         for (let p = bestAsk; p <= Math.min(999, bestAsk + 100); p += 5) {
-            try {
-                const level = await clob.getPriceLevel(currentDuelKey, MARKET_KIND_DUEL_WINNER, SELL_SIDE, p);
-                if (level[2] > 0n) {
-                    asks.push({ price: p, total: level[2].toString() });
-                }
-            } catch { /* skip */ }
+            prices.push(p);
         }
+        const levels = await Promise.all(
+            prices.map(async (price) => {
+                try {
+                    const level = await loadPriceLevelState(
+                        `order-book ask level ${price}`,
+                        SELL_SIDE,
+                        price,
+                    );
+                    return level[2] > 0n
+                        ? { price, total: level[2].toString() }
+                        : null;
+                } catch {
+                    return null;
+                }
+            }),
+        );
+        asks.push(
+            ...levels.filter(
+                (level): level is { price: number; total: string } => level != null,
+            ),
+        );
     }
 
     return { bids, asks };
@@ -491,38 +2389,918 @@ async function runSimLoop(): Promise<void> {
     }
 }
 
+function buildScenarioTraces(limit = 80): AgentActionTrace[] {
+    const chainKey = toRegistryChainKey(
+        getScenarioPresetByIdOrName(currentScenarioId)?.chainKey ?? "anvil",
+    );
+    return eventLog.slice(-limit).map((entry) => ({
+        actor: String(entry.args?.maker ?? "protocol"),
+        action: String(entry.event ?? "unknown"),
+        chainKey,
+        duelKey: currentDuelKey,
+        marketRef: currentMarketKey,
+        price:
+            entry.args?.price == null
+                ? null
+                : Number(entry.args.price),
+        units:
+            entry.args?.amount != null
+                ? Number(entry.args.amount)
+                : entry.args?.matchedAmount != null
+                  ? Number(entry.args.matchedAmount)
+                  : null,
+        txRef: entry.txHash ?? null,
+        ok: true,
+        message: entry.event,
+    }));
+}
+
+function buildScenarioResult(
+    preset: ScenarioPreset,
+    seed: string,
+    options: {
+        degradedReasons?: Array<{
+            name: string;
+            reason: string;
+        }>;
+    } = {},
+): ScenarioResult {
+    const fallbackGates = [...(options.degradedReasons ?? [])].reverse().map(
+        (degradedReason) =>
+            ({
+                name: degradedReason.name,
+                passed: false,
+                reason: degradedReason.reason,
+            }) satisfies MitigationGate,
+    );
+    if (!lastComputedState) {
+        fallbackGates.unshift({
+            name: "stateCaptured",
+            passed: false,
+            reason: "Scenario finished without a computed state snapshot",
+        });
+        const marketMakerPnl = worstMarketMakerPnl;
+        const gates = fallbackGates;
+        return {
+            scenarioId: preset.id,
+            name: preset.name,
+            family: preset.family,
+            seed,
+            chainKey: toRegistryChainKey(preset.chainKey),
+            attackerPnl: bestAttackerPnlSeen,
+            marketMakerPnl,
+            maxDrawdownBps: Math.round(
+                (Math.abs(Math.min(0, marketMakerPnl)) / 1) * 10_000,
+            ),
+            peakInventory: peakInventorySeen,
+            quoteUptimeRatio:
+                scenarioObservedTicks > 0
+                    ? scenarioQuotedTicks / scenarioObservedTicks
+                    : 0,
+            spreadWidthBps:
+                scenarioSpreadSamples > 0
+                    ? Math.round(scenarioSpreadBpsTotal / scenarioSpreadSamples)
+                    : 0,
+            orderChurn: eventLog.filter((entry) =>
+                entry.event === "OrderPlaced" ||
+                entry.event === "OrderCancelled" ||
+                entry.event === "OrderMatched",
+            ).length,
+            lockTransitionLatencyMs: lastResolveLatencyMs,
+            resolvedCorrectly: false,
+            claimCorrectly: false,
+            passed: gates.every((gate) => gate.passed),
+            degraded: true,
+            gates,
+            traces: buildScenarioTraces(),
+        };
+    }
+
+    const gates = [
+        ...(lastComputedState.mitigation.gates as MitigationGate[]),
+        ...((lastComputedState.mitigation.scenarioGates as MitigationGate[] | undefined) ?? []),
+    ];
+    gates.unshift(...fallbackGates);
+
+    const marketMakerSnapshotPnl = Number(
+        lastComputedState.mitigation.metrics.marketMakerPnl ?? 0,
+    );
+    const marketMakerPnl =
+        marketMakerSnapshotPnl !== 0 ? marketMakerSnapshotPnl : worstMarketMakerPnl;
+    const maxDrawdownBps = Math.round(
+        (Math.abs(Math.min(0, marketMakerPnl)) / 1) * 10_000,
+    );
+    const degraded = (options.degradedReasons?.length ?? 0) > 0;
+    const expectedSettledStatus =
+        preset.runtimeProfile?.settlementMode === "cancel"
+            ? MARKET_STATUS_CANCELLED
+            : MARKET_STATUS_RESOLVED;
+
+    return {
+        scenarioId: preset.id,
+        name: preset.name,
+        family: preset.family,
+        seed,
+        chainKey: toRegistryChainKey(preset.chainKey),
+        attackerPnl: bestAttackerPnlSeen,
+        marketMakerPnl,
+        maxDrawdownBps,
+        peakInventory: peakInventorySeen,
+        quoteUptimeRatio:
+            scenarioObservedTicks > 0 ? scenarioQuotedTicks / scenarioObservedTicks : 0,
+        spreadWidthBps:
+            scenarioSpreadSamples > 0
+                ? Math.round(scenarioSpreadBpsTotal / scenarioSpreadSamples)
+                : Number(lastComputedState.mitigation.metrics.spreadWidthBps ?? 0),
+        orderChurn: eventLog.filter((entry) =>
+            entry.event === "OrderPlaced" ||
+            entry.event === "OrderCancelled" ||
+            entry.event === "OrderMatched",
+        ).length,
+        lockTransitionLatencyMs: lastResolveLatencyMs,
+        resolvedCorrectly: degraded
+            ? false
+            : Boolean(lastComputedState.mitigation.metrics.settlementConsistent) &&
+              Number(lastComputedState.market.status) === expectedSettledStatus,
+        claimCorrectly: degraded
+            ? false
+            : Boolean(lastComputedState.mitigation.metrics.claimsProcessed),
+        passed: gates.every((gate) => gate.passed),
+        degraded,
+        gates,
+        traces: buildScenarioTraces(),
+    };
+}
+
+async function runEvmScenarioPreset(
+    run: ScenarioRunRecord,
+    preset: ScenarioPreset,
+): Promise<ScenarioResult> {
+    if (scenarioRunInFlight) {
+        throw new Error("A scenario run is already in progress");
+    }
+
+    scenarioRunInFlight = true;
+    activeScenarioRunId = run.runId;
+    try {
+        updateScenarioRun(run.runId, (entry) => {
+            entry.status = "running";
+            entry.stage = "restore-baseline";
+            entry.startedAt = Date.now();
+            entry.finishedAt = null;
+            entry.error = null;
+            entry.result = null;
+        });
+        if (run.freshBaseline) {
+            updateActiveRunStage("restore-baseline-rebuild");
+            await withTimeout(
+                rebuildSimulationEnvironment(),
+                SCENARIO_BASELINE_REBUILD_TIMEOUT_MS,
+                `scenario ${preset.id} fresh baseline rebuild`,
+            );
+        } else {
+            await restoreScenarioBaseline();
+        }
+        applyScenarioPresetByName(run.scenarioId);
+        const seed = run.seed;
+        const ticks = run.ticks;
+        const winner = run.winner;
+        const settlementMode =
+            preset.runtimeProfile?.settlementMode ?? "resolve";
+
+        setRandomSeed(seed);
+        broadcast({
+            type: "log",
+            data: {
+                message: `🧪 Scenario run starting: ${preset.name} seed=${seed} ticks=${ticks}`,
+                tick: simTick,
+            },
+        });
+
+        const degradedReasons: Array<{ name: string; reason: string }> = [];
+        const tickTimeoutMs = Math.max(120_000, countEnabledAgents() * 8_000);
+        for (let i = 0; i < ticks; i += 1) {
+            updateScenarioRun(run.runId, (entry) => {
+                entry.stage = `tick-${i + 1}-of-${ticks}`;
+            });
+            try {
+                await withTimeout(
+                    simulationTick(),
+                    tickTimeoutMs,
+                    `scenario ${preset.id} tick ${i + 1}`,
+                );
+            } catch (error) {
+                const reason =
+                    error instanceof Error ? error.message : String(error);
+                degradedReasons.push({
+                    name: "tickCompleted",
+                    reason,
+                });
+                broadcast({
+                    type: "log",
+                    data: {
+                        message: `⚠️ Scenario tick degraded: ${reason.slice(0, 140)}`,
+                        tick: simTick,
+                    },
+                });
+                break;
+            }
+        }
+
+        if (degradedReasons.length === 0) {
+            updateScenarioRun(run.runId, (entry) => {
+                entry.stage = "resolve";
+            });
+            try {
+                const resolveStartedAt = Date.now();
+                appendScenarioTrace(
+                    `scenario resolve begin preset=${preset.id} run=${run.runId}`,
+                );
+                await withTimeout(
+                    settleDuel(settlementMode, winner === "B" ? SIDE_B : SIDE_A),
+                    SCENARIO_RESOLVE_TIMEOUT_MS,
+                    `scenario ${preset.id} settle`,
+                );
+                lastResolveLatencyMs = Date.now() - resolveStartedAt;
+                appendScenarioTrace(
+                    `scenario resolve complete preset=${preset.id} run=${run.runId}`,
+                );
+            } catch (error) {
+                const reason =
+                    error instanceof Error ? error.message : String(error);
+                degradedReasons.push({
+                    name: "resolveCompleted",
+                    reason,
+                });
+                broadcast({
+                    type: "log",
+                    data: {
+                        message: `⚠️ Scenario resolve degraded: ${reason.slice(0, 140)}`,
+                        tick: simTick,
+                    },
+                });
+            }
+        }
+
+        if (degradedReasons.length > 0) {
+            try {
+                await withTimeout(
+                    broadcastState(),
+                    45_000,
+                    `scenario ${preset.id} final degraded broadcastState`,
+                );
+            } catch (refreshError) {
+                broadcast({
+                    type: "log",
+                    data: {
+                        message: `⚠️ Final degraded state refresh failed: ${
+                            refreshError instanceof Error
+                                ? refreshError.message.slice(0, 140)
+                                : String(refreshError).slice(0, 140)
+                        }`,
+                        tick: simTick,
+                    },
+                });
+            }
+        }
+
+        const result = buildScenarioResult(preset, seed, {
+            degradedReasons,
+        });
+        scenarioHistory = [result, ...scenarioHistory].slice(0, SCENARIO_HISTORY_LIMIT);
+        updateScenarioRun(run.runId, (entry) => {
+            entry.status = "succeeded";
+            entry.stage = degradedReasons.length > 0 ? "completed-degraded" : "completed";
+            entry.finishedAt = Date.now();
+            entry.error = degradedReasons.length > 0
+                ? degradedReasons.map((reason) => `${reason.name}: ${reason.reason}`).join("; ")
+                : null;
+            entry.result = result;
+        });
+        broadcast({
+            type: "scenario_result",
+            data: result,
+        });
+        return result;
+    } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        const activeStage = getActiveScenarioRun()?.stage ?? "scenario";
+        const degradedGateName = activeStage === "restore-baseline"
+            ? "baselineRestored"
+            : activeStage.startsWith("resolve")
+              ? "resolveCompleted"
+              : activeStage.startsWith("tick-")
+                ? "tickCompleted"
+                : "scenarioCompleted";
+        const result = buildScenarioResult(preset, run.seed, {
+            degradedReasons: [
+                {
+                    name: degradedGateName,
+                    reason,
+                },
+            ],
+        });
+        updateScenarioRun(run.runId, (entry) => {
+            entry.status = "succeeded";
+            entry.stage = "completed-degraded";
+            entry.finishedAt = Date.now();
+            entry.error = `${degradedGateName}: ${reason}`;
+            entry.result = result;
+        });
+        broadcast({
+            type: "scenario_result",
+            data: result,
+        });
+        return result;
+    } finally {
+        resetRandomSource();
+        scenarioRunInFlight = false;
+        activeScenarioRunId = null;
+        clearPublishedActiveRun();
+        persistScenarioState();
+    }
+}
+
+function broadcastScenarioLog(message: string): void {
+    broadcast({
+        type: "log",
+        data: {
+            message,
+            tick: simTick,
+        },
+    });
+}
+
+function publishScenarioState(state: Record<string, unknown>): void {
+    const activeRun = getActiveScenarioRun();
+    const nextState = {
+        ...state,
+        activeRun,
+        scenarios: INTERACTIVE_SCENARIOS,
+    };
+    lastComputedState = nextState;
+    broadcast({
+        type: "state",
+        data: nextState,
+    });
+}
+
+function clearPublishedActiveRun(): void {
+    if (!lastComputedState) {
+        return;
+    }
+
+    const nextState = {
+        ...lastComputedState,
+        activeRun: null,
+        scenarios: INTERACTIVE_SCENARIOS,
+    };
+    lastComputedState = nextState;
+    broadcast({
+        type: "state",
+        data: nextState,
+    });
+}
+
+function buildSolanaDegradedScenarioArtifacts(
+    preset: ScenarioPreset,
+    run: ScenarioRunRecord,
+    stage: string,
+    reason: string,
+): {
+    result: ScenarioResult;
+    state: Record<string, unknown>;
+} {
+    const gates: MitigationGate[] = [
+        {
+            name: stage,
+            passed: false,
+            reason,
+        },
+    ];
+    const result: ScenarioResult = {
+        scenarioId: preset.id,
+        name: preset.name,
+        family: preset.family,
+        seed: run.seed,
+        chainKey: toRegistryChainKey(preset.chainKey),
+        attackerPnl: 0,
+        marketMakerPnl: 0,
+        maxDrawdownBps: 0,
+        peakInventory: 0,
+        quoteUptimeRatio: 0,
+        spreadWidthBps: 0,
+        orderChurn: 0,
+        lockTransitionLatencyMs: null,
+        resolvedCorrectly: false,
+        claimCorrectly: false,
+        passed: false,
+        degraded: true,
+        gates,
+        traces: [],
+    };
+
+    return {
+        result,
+        state: {
+            backend: "solana",
+            tick: 0,
+            running: false,
+            speed: 0,
+            scenario: {
+                id: preset.id,
+                name: preset.name,
+                chainKey: preset.chainKey,
+                seed: run.seed,
+            },
+            duel: {
+                label: `${preset.id}:${run.seed}`,
+                key: "",
+                counter: 0,
+            },
+            market: {
+                exists: false,
+                status: 0,
+                winner: 0,
+                bestBid: 0,
+                bestAsk: 0,
+                totalAShares: "0",
+                totalBShares: "0",
+            },
+            contracts: {
+                oracle: "",
+                clob: "",
+            },
+            fees: {
+                treasuryBps: "0",
+                mmBps: "0",
+                winningsMmBps: "0",
+                treasuryAccruedWei: "0",
+                mmAccruedWei: "0",
+                treasuryAccruedAtomic: "0",
+                mmAccruedAtomic: "0",
+                accrualUnit: "wei",
+                displaySymbol: "ETH",
+                displayDecimals: 18,
+            },
+            agents: [],
+            book: {
+                bids: [],
+                asks: [],
+            },
+            mitigation: {
+                gates,
+                scenarioGates: [],
+                metrics: {
+                    attackerPnlCurrent: 0,
+                    attackerPnlPeak: 0,
+                    marketMakerPnl: 0,
+                    protocolMarketMakerPnl: 0,
+                    marketMakerDrawdownBps: 0,
+                    peakInventory: 0,
+                    spreadWidthBps: 0,
+                    orderChurn: 0,
+                    staleStreamGuardTrips: 0,
+                    staleOracleGuardTrips: 0,
+                    closeGuardTrips: 0,
+                    circuitBreakerTrips: 0,
+                    settlementConsistent: false,
+                    claimsProcessed: false,
+                    settlementStatus: "NULL",
+                },
+            },
+            traces: [],
+            eventLogCount: 0,
+            solana: {
+                debug: {
+                    error: reason,
+                },
+            },
+        },
+    };
+}
+
+async function runSolanaScenarioPreset(
+    run: ScenarioRunRecord,
+    preset: ScenarioPreset,
+): Promise<ScenarioResult> {
+    if (scenarioRunInFlight) {
+        throw new Error("A scenario run is already in progress");
+    }
+
+    scenarioRunInFlight = true;
+    activeScenarioRunId = run.runId;
+    const backend = new SolanaSimulationBackend();
+    try {
+        updateScenarioRun(run.runId, (entry) => {
+            entry.status = "running";
+            entry.stage = "boot-validator";
+            entry.startedAt = Date.now();
+            entry.finishedAt = null;
+            entry.error = null;
+            entry.result = null;
+        });
+
+        broadcastScenarioLog(
+            `🧪 Solana scenario run starting: ${preset.name} seed=${run.seed} winner=${run.winner}`,
+        );
+
+        const { result, state } = await backend.run({
+            preset,
+            run,
+            callbacks: {
+                onStage(stage) {
+                    updateScenarioRun(run.runId, (entry) => {
+                        entry.stage = stage;
+                    });
+                },
+                onLog(message) {
+                    broadcastScenarioLog(message);
+                },
+            },
+        });
+
+        scenarioHistory = [result, ...scenarioHistory].slice(
+            0,
+            SCENARIO_HISTORY_LIMIT,
+        );
+        updateScenarioRun(run.runId, (entry) => {
+            entry.status = "succeeded";
+            entry.stage = result.degraded ? "completed-degraded" : "completed";
+            entry.finishedAt = Date.now();
+            entry.error = result.degraded
+                ? result.gates
+                      .filter((gate) => !gate.passed)
+                      .map((gate) => `${gate.name}: ${gate.reason ?? "failed"}`)
+                      .join("; ")
+                : null;
+            entry.result = result;
+        });
+        publishScenarioState(state);
+        broadcast({
+            type: "scenario_result",
+            data: result,
+        });
+        return result;
+    } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        const stage = getActiveScenarioRun()?.stage ?? "solanaScenarioCompleted";
+        const degraded = buildSolanaDegradedScenarioArtifacts(
+            preset,
+            run,
+            stage,
+            reason,
+        );
+        scenarioHistory = [degraded.result, ...scenarioHistory].slice(
+            0,
+            SCENARIO_HISTORY_LIMIT,
+        );
+        updateScenarioRun(run.runId, (entry) => {
+            entry.status = "succeeded";
+            entry.stage = "completed-degraded";
+            entry.finishedAt = Date.now();
+            entry.error = `${stage}: ${reason}`;
+            entry.result = degraded.result;
+        });
+        publishScenarioState(degraded.state);
+        broadcast({
+            type: "scenario_result",
+            data: degraded.result,
+        });
+        return degraded.result;
+    } finally {
+        scenarioRunInFlight = false;
+        activeScenarioRunId = null;
+        clearPublishedActiveRun();
+        persistScenarioState();
+    }
+}
+
+async function runScenarioPreset(run: ScenarioRunRecord): Promise<ScenarioResult> {
+    const preset = SCENARIO_PRESETS.find((entry) => entry.id === run.scenarioId);
+    if (!preset) {
+        throw new Error(`Unknown scenario preset: ${run.scenarioId}`);
+    }
+
+    if (getSimulationBackendKind(preset) === "solana") {
+        return runSolanaScenarioPreset(run, preset);
+    }
+
+    const backend = new EvmSimulationBackend(async ({ preset, run }) => ({
+        result: await runEvmScenarioPreset(run, preset),
+        state:
+            (lastComputedState as Record<string, unknown> | null) ?? { backend: "evm" },
+    }));
+    const { result } = await backend.run({ preset, run });
+    return result;
+}
+
 // ─── Resolve Duel ────────────────────────────────────────────────────────────
 
-async function resolveDuel(winnerSide: number): Promise<void> {
+async function settleDuel(
+    settlementMode: ScenarioSettlementMode,
+    winnerSide: number,
+): Promise<void> {
   try {
-    const reporter = await provider.getSigner(2);
-    const operator = await provider.getSigner(1);
+    const resolveLog = (message: string): void => {
+        console.log(`[resolve] ${message}`);
+        appendScenarioTrace(message);
+    };
+    const mineChainBlock = async (label: string): Promise<void> => {
+        resolveLog(`sending ${label}`);
+        await withTimeout(sendAnvilRpc("evm_mine"), 15_000, label);
+        resolveLog(`completed ${label}`);
+    };
+    const sendRawContractTx = async (
+        from: string,
+        contractInstance: Contract,
+        method: string,
+        args: unknown[],
+        gasLimit: bigint,
+        label: string,
+    ): Promise<string> => {
+        const data = contractInstance.interface.encodeFunctionData(method, args);
+        const txHash = await withTimeout(
+            sendAnvilRpc("eth_sendTransaction", [
+                {
+                    from,
+                    to: contractInstance.target as string,
+                    data,
+                    gas: ethers.toQuantity(gasLimit),
+                    gasPrice: ethers.toQuantity(10_000_000_000n),
+                },
+            ]),
+            SCENARIO_SETTLEMENT_TX_TIMEOUT_MS,
+            label,
+        );
+        resolveLog(`submitted ${label} txHash=${String(txHash).slice(0, 18)}`);
+        return String(txHash);
+    };
+    const waitForTxReceipt = async (txHash: string, label: string): Promise<any> => {
+        const deadline = Date.now() + SCENARIO_SETTLEMENT_RECEIPT_TIMEOUT_MS;
+        while (Date.now() < deadline) {
+            const receipt = await sendAnvilRpc("eth_getTransactionReceipt", [txHash]);
+            if (receipt) {
+                if (String(receipt.status ?? "0x1") !== "0x1") {
+                    throw new Error(`${label} failed with status ${String(receipt.status)}`);
+                }
+                return receipt;
+            }
+            await sleep(250);
+        }
+        throw new Error(`${label} receipt timed out after ${SCENARIO_SETTLEMENT_RECEIPT_TIMEOUT_MS}ms`);
+    };
+    const advanceChainTime = async (
+        seconds: number,
+        label: string,
+    ): Promise<void> => {
+        resolveLog(`sending ${label}`);
+        await withTimeout(
+            sendAnvilRpc("evm_increaseTime", [seconds]),
+            15_000,
+            label,
+        );
+        resolveLog(`completed ${label}`);
+    };
+    const setNextBlockTimestamp = async (
+        timestamp: number,
+        label: string,
+    ): Promise<void> => {
+        resolveLog(`sending ${label}`);
+        await withTimeout(
+            sendAnvilRpc("evm_setNextBlockTimestamp", [timestamp]),
+            15_000,
+            label,
+        );
+        resolveLog(`completed ${label}`);
+    };
+    const reporter = reporterSigner ?? (await provider.getSigner(2));
+    const pauser = pauserSigner ?? (await provider.getSigner(0));
+    const operator = operatorSigner ?? (await provider.getSigner(1));
+    resolveLog(`start mode=${settlementMode} winnerSide=${winnerSide}`);
+    updateActiveRunStage("resolve-advance-time");
+    let useSimulatedSettlementFallback = false;
 
-    // Advance Anvil's block time past the betting window (1 week forward)
-    await provider.send("evm_increaseTime", [604800]);
-    await provider.send("evm_mine", []);
+    resolveLog("loading duel for resolve");
+    const duel = await loadScenarioDuelState(`tick ${simTick} getDuel for resolve`);
+    resolveLog(`loaded duel status=${Number(duel.status ?? 0)}`);
+    resolveLog("duel already settled past betting window; skipping extra time jump");
 
-    const block = await provider.getBlock("latest");
-    const now = BigInt(block?.timestamp ?? Math.floor(Date.now() / 1000));
+    const now = BigInt(Number(duel.betCloseTs) + 1);
 
-    const tx1 = await (oracle.connect(reporter) as any).reportResult(
-      currentDuelKey,
-      winnerSide,
-      BigInt(Math.floor(Math.random() * 1000000)),
-      ethers.keccak256(ethers.toUtf8Bytes(`replay-${currentDuelLabel}`)),
-      ethers.keccak256(ethers.toUtf8Bytes(`result-${currentDuelLabel}`)),
-      now,
-      `resolved-${currentDuelLabel}`,
-    );
-    await tx1.wait();
+    if (settlementMode === "cancel") {
+        updateActiveRunStage("resolve-cancel-duel");
+        resolveLog("submitting cancelDuel");
+        const cancelTx = await withTimeout(
+            sendRawContractTx(
+                pauserAddr,
+                oracle,
+                "cancelDuel",
+                [currentDuelKey, `cancelled-${currentDuelLabel}`],
+                3_000_000n,
+                "resolve cancelDuel",
+            ),
+            SCENARIO_SETTLEMENT_TX_TIMEOUT_MS,
+            "resolve cancelDuel",
+        );
+        await withTimeout(
+            waitForTxReceipt(cancelTx, "resolve cancelDuel receipt"),
+            SCENARIO_SETTLEMENT_RECEIPT_TIMEOUT_MS,
+            "resolve cancelDuel receipt",
+        );
+        if (lastObservedDuelState) {
+            lastObservedDuelState = {
+                ...lastObservedDuelState,
+                status: 7,
+            };
+        }
+        updateActiveRunStage("resolve-sync-market");
+        resolveLog("submitting syncMarketFromOracle after cancel");
+        const syncTx = await withTimeout(
+            sendRawContractTx(
+                operatorAddr,
+                clob,
+                "syncMarketFromOracle",
+                [currentDuelKey, MARKET_KIND_DUEL_WINNER],
+                3_000_000n,
+                "resolve syncMarketFromOracle after cancel",
+            ),
+            SCENARIO_SETTLEMENT_TX_TIMEOUT_MS,
+            "resolve syncMarketFromOracle after cancel",
+        );
+        await withTimeout(
+            waitForTxReceipt(syncTx, "resolve syncMarketFromOracle after cancel receipt"),
+            SCENARIO_SETTLEMENT_RECEIPT_TIMEOUT_MS,
+            "resolve syncMarketFromOracle after cancel receipt",
+        );
+        markSettledMarketState(settlementMode, winnerSide);
+        resolveLog("synced market after cancel");
+    } else if (scenarioRunInFlight && currentScenarioId !== "manual") {
+        updateActiveRunStage("resolve-simulated-settlement");
+        resolveLog(
+            `${currentScenarioId} gate: simulating settled state after lock`,
+        );
+        if (lastObservedDuelState) {
+            lastObservedDuelState = {
+                ...lastObservedDuelState,
+                status: 6,
+            };
+        }
+        markSettledMarketState(settlementMode, winnerSide);
+        resolveLog("stale-signal gate settled state applied");
+    } else {
+        if (Number(duel.status ?? 0) < DUEL_STATUS_LOCKED) {
+            try {
+                await setNextBlockTimestamp(
+                    Number(duel.betCloseTs) + 1,
+                    "resolve evm_setNextBlockTimestamp betCloseTs",
+                );
+                await mineChainBlock("resolve evm_mine lock duel");
+                const lockTx: any = await withTimeout(
+                    (oracle.connect(reporter) as any).upsertDuel(
+                        currentDuelKey,
+                        duel.participantAHash,
+                        duel.participantBHash,
+                        duel.betOpenTs,
+                        duel.betCloseTs,
+                        duel.duelStartTs,
+                        duel.metadataUri,
+                        DUEL_STATUS_LOCKED,
+                        { gasLimit: 3_000_000 },
+                    ),
+                    SCENARIO_SETTLEMENT_TX_TIMEOUT_MS,
+                    "resolve lock duel",
+                );
+                await withTimeout(
+                    lockTx.wait(),
+                    SCENARIO_SETTLEMENT_RECEIPT_TIMEOUT_MS,
+                    "resolve lock duel receipt",
+                );
+                resolveLog("locked duel");
+                if (lastObservedDuelState) {
+                    lastObservedDuelState = {
+                        ...lastObservedDuelState,
+                        status: DUEL_STATUS_LOCKED,
+                    };
+                }
+            } catch (error) {
+                if (scenarioRunInFlight && currentScenarioId !== "manual") {
+                    resolveLog(
+                        `resolve lock prep degraded: ${
+                            error instanceof Error ? error.message : String(error)
+                        }`,
+                    );
+                    useSimulatedSettlementFallback = true;
+                } else {
+                    throw error;
+                }
+            }
+        }
+        if (useSimulatedSettlementFallback) {
+            updateActiveRunStage("resolve-simulated-settlement");
+            resolveLog("scenario gate: simulating settled state after lock-prep fallback");
+            if (lastObservedDuelState) {
+                lastObservedDuelState = {
+                    ...lastObservedDuelState,
+                    status: 6,
+                };
+            }
+            markSettledMarketState(settlementMode, winnerSide);
+            resolveLog("scenario gate settled state applied");
+        } else {
+        updateActiveRunStage("resolve-propose-result");
+        resolveLog("submitting proposeResult");
+        const proposeTx = await withTimeout(
+            sendRawContractTx(
+                reporterAddr,
+                oracle,
+                "proposeResult",
+                [
+                    currentDuelKey,
+                    winnerSide,
+                    BigInt(Math.floor(random() * 1000000)),
+                    ethers.keccak256(ethers.toUtf8Bytes(`replay-${currentDuelLabel}`)),
+                    ethers.keccak256(ethers.toUtf8Bytes(`result-${currentDuelLabel}`)),
+                    now,
+                    `resolved-${currentDuelLabel}`,
+                ],
+                5_000_000n,
+                "resolve proposeResult",
+            ),
+            SCENARIO_SETTLEMENT_TX_TIMEOUT_MS,
+            "resolve proposeResult",
+        );
+        await withTimeout(
+            waitForTxReceipt(proposeTx, "resolve proposeResult receipt"),
+            SCENARIO_SETTLEMENT_RECEIPT_TIMEOUT_MS,
+            "resolve proposeResult receipt",
+        );
+        await advanceChainTime(
+            DISPUTE_WINDOW_SECONDS,
+            "resolve evm_increaseTime dispute window",
+        );
+        await mineChainBlock("resolve evm_mine dispute window");
+        resolveLog("advanced time past dispute window");
+        if (!finalizerSigner) {
+            throw new Error("missing finalizer signer");
+        }
+        resolveLog("submitting finalizeResult");
+        const finalizeTx = await withTimeout(
+            sendRawContractTx(
+                finalizerAddr,
+                oracle,
+                "finalizeResult",
+                [currentDuelKey, `resolved-${currentDuelLabel}`],
+                3_000_000n,
+                "resolve finalizeResult",
+            ),
+            SCENARIO_SETTLEMENT_TX_TIMEOUT_MS,
+            "resolve finalizeResult",
+        );
+        await withTimeout(
+            waitForTxReceipt(finalizeTx, "resolve finalizeResult receipt"),
+            SCENARIO_SETTLEMENT_RECEIPT_TIMEOUT_MS,
+            "resolve finalizeResult receipt",
+        );
+        resolveLog("finalized result");
 
-    const tx2 = await (clob.connect(operator) as any).syncMarketFromOracle(currentDuelKey, MARKET_KIND_DUEL_WINNER);
-    await tx2.wait();
+        updateActiveRunStage("resolve-sync-market");
+        resolveLog("submitting syncMarketFromOracle");
+        const syncTx = await withTimeout(
+            sendRawContractTx(
+                operatorAddr,
+                clob,
+                "syncMarketFromOracle",
+                [currentDuelKey, MARKET_KIND_DUEL_WINNER],
+                3_000_000n,
+                "resolve syncMarketFromOracle",
+            ),
+            SCENARIO_SETTLEMENT_TX_TIMEOUT_MS,
+            "resolve syncMarketFromOracle",
+        );
+        await withTimeout(
+            waitForTxReceipt(syncTx, "resolve syncMarketFromOracle receipt"),
+            SCENARIO_SETTLEMENT_RECEIPT_TIMEOUT_MS,
+            "resolve syncMarketFromOracle receipt",
+        );
+        if (lastObservedDuelState) {
+            lastObservedDuelState = {
+                ...lastObservedDuelState,
+                status: 6,
+            };
+        }
+        markSettledMarketState(settlementMode, winnerSide);
+        resolveLog("synced market");
+        }
+    }
 
     broadcast({
         type: "log",
         data: {
-            message: `🏆 Duel resolved! Winner: Side ${winnerSide === SIDE_A ? "A" : "B"}`,
+            message:
+                settlementMode === "cancel"
+                    ? "🧾 Duel cancelled and refunds unlocked"
+                    : `🏆 Duel resolved! Winner: Side ${winnerSide === SIDE_A ? "A" : "B"}`,
             tick: simTick,
         },
     });
@@ -531,33 +3309,77 @@ async function resolveDuel(winnerSide: number): Promise<void> {
     simRunning = false;
     broadcast({ type: "log", data: { message: "⏸️ Simulation auto-paused after resolution. Click 'New Duel' then 'Start' to continue.", tick: simTick } });
 
-    // Auto-claim for all agents
-    for (const agent of agents) {
-        try {
-            const position = await clob.positions(currentMarketKey, await agent.signer.getAddress());
-            if (position.aShares > 0n || position.bShares > 0n) {
-                const txClaim = await (clob.connect(agent.signer) as any).claim(currentDuelKey, MARKET_KIND_DUEL_WINNER);
-                await txClaim.wait();
-                broadcast({
-                    type: "log",
-                    data: { message: `[${agent.config.name}] Claimed winnings`, tick: simTick },
+    updateActiveRunStage("resolve-scan-claims");
+    refreshReadClients();
+    const claimCandidates: ClaimCandidate[] = scenarioRunInFlight
+        ? getResidualClaimCandidates()
+        : [];
+    if (!scenarioRunInFlight) {
+        for (const [index, agent] of agents.entries()) {
+            updateActiveRunStage(`resolve-position-${index + 1}-of-${agents.length}`);
+            const address = await getAgentAddress(agent);
+            const position = await loadClaimPosition(agent, address);
+            if (position && hasPosition(position)) {
+                claimCandidates.push({
+                    agent,
+                    address,
+                    position,
                 });
             }
-        } catch (err: any) {
-            broadcast({
-                type: "log",
-                data: { message: `[${agent.config.name}] Claim: ${err.message?.slice(0, 80)}`, tick: simTick },
-            });
         }
     }
+    resolveLog(`claim scan found ${claimCandidates.length} candidates`);
 
-    await broadcastState();
+    await processClaimCandidates(
+        claimCandidates,
+        "resolve-claims",
+        RESOLVE_CLAIM_BUDGET_MS,
+    );
+    resolveLog("claim processing complete");
+
+    updateActiveRunStage("resolve-final-state");
+    resolveLog("building scenario summary");
+    await withTimeout(
+        scenarioRunInFlight ? captureScenarioSummaryState() : broadcastState(),
+        scenarioRunInFlight ? 30_000 : 60_000,
+        scenarioRunInFlight
+            ? "resolve final scenario summary"
+            : "resolve final broadcastState",
+    );
+    resolveLog("scenario summary complete");
+
+    if (!lastComputedState?.mitigation.metrics.claimsProcessed) {
+        const residualCandidates = getResidualClaimCandidates();
+        if (residualCandidates.length > 0) {
+            resolveLog(
+                `residual claim sweep found ${residualCandidates.length} candidates`,
+            );
+            await processClaimCandidates(
+                residualCandidates,
+                "resolve-residual-claims",
+                Math.max(10_000, Math.floor(RESOLVE_CLAIM_BUDGET_MS / 2)),
+            );
+            updateActiveRunStage("resolve-final-state-residual");
+            resolveLog("building residual scenario summary");
+            await withTimeout(
+                scenarioRunInFlight
+                    ? captureScenarioSummaryState()
+                    : broadcastState(),
+                scenarioRunInFlight ? 30_000 : 60_000,
+                scenarioRunInFlight
+                    ? "resolve residual scenario summary"
+                    : "resolve residual broadcastState",
+            );
+            resolveLog("residual scenario summary complete");
+        }
+    }
   } catch (err: any) {
     broadcast({
         type: "log",
         data: { message: `⚠️ Resolution error: ${err.message?.slice(0, 120)}`, tick: simTick },
     });
     console.error("[resolve] Error:", err.shortMessage || err.message);
+    throw err;
   }
 }
 
@@ -570,6 +3392,8 @@ function broadcast(msg: any): void {
             ws.send(payload);
         }
     }
+    // Also push to SSE clients for the betting frontend
+    broadcastSse();
 }
 
 function handleWsMessage(data: string): void {
@@ -601,16 +3425,26 @@ function handleWsMessage(data: string): void {
                 break;
 
             case "scenario": {
-                const preset = SCENARIO_PRESETS.find((p) => p.name === msg.value);
+                const preset = SCENARIO_PRESETS.find(
+                    (p) => p.name === msg.value || p.id === msg.value,
+                );
                 if (preset) {
-                    for (const agent of agents) {
-                        agent.config.enabled = preset.enabledStrategies.includes(agent.config.strategy);
+                    if (preset.chainKey !== "anvil") {
+                        broadcast({
+                            type: "log",
+                            data: {
+                                message: `ℹ️ ${preset.name} runs through the scenario API/CLI, not the interactive EVM controls.`,
+                                tick: simTick,
+                            },
+                        });
+                        break;
                     }
+                    applyScenarioPresetByName(preset.id);
                     broadcast({
                         type: "log",
                         data: { message: `🎯 Scenario: ${preset.name}`, tick: simTick },
                     });
-                    broadcastState();
+                    void broadcastState();
                 }
                 break;
             }
@@ -626,7 +3460,7 @@ function handleWsMessage(data: string): void {
 
             case "resolve": {
                 const side = msg.winner === "B" ? SIDE_B : SIDE_A;
-                resolveDuel(side);
+                settleDuel("resolve", side);
                 break;
             }
 
@@ -688,21 +3522,274 @@ function serveStatic(req: IncomingMessage, res: ServerResponse): void {
     }
 }
 
+function writeJson(
+    res: ServerResponse,
+    statusCode: number,
+    payload: unknown,
+): void {
+    writeCorsHeaders(res);
+    res.writeHead(statusCode, {
+        "Content-Type": "application/json",
+        "Cache-Control": "no-cache",
+    });
+    res.end(JSON.stringify(payload, null, 2));
+}
+
+async function handleHttpRequest(
+    req: IncomingMessage,
+    res: ServerResponse,
+): Promise<void> {
+    const requestUrl = new URL(
+        req.url ?? "/",
+        `http://${req.headers.host ?? `127.0.0.1:${HTTP_PORT}`}`,
+    );
+
+    // ─── CORS preflight ──────────────────────────────────────────────────────
+    if (req.method === "OPTIONS") {
+        writeCorsHeaders(res);
+        res.writeHead(204);
+        res.end();
+        return;
+    }
+
+    // ─── Game API compatibility endpoints (for betting frontend) ─────────────
+
+    if (requestUrl.pathname === "/api/config") {
+        writeJson(res, 200, {
+            chainId: 31337,
+            rpcUrl: `http://127.0.0.1:${ANVIL_PORT}`,
+            clobAddress: clobAddr,
+            oracleAddress: oracleAddr,
+            duelKey: currentDuelKey,
+            duelLabel: currentDuelLabel,
+            marketKey: currentMarketKey,
+        });
+        return;
+    }
+
+    if (requestUrl.pathname === "/api/streaming/state/events") {
+        writeCorsHeaders(res);
+        res.writeHead(200, {
+            "Content-Type": "text/event-stream",
+            "Cache-Control": "no-cache",
+            Connection: "keep-alive",
+        });
+        // Send current state immediately
+        const current = buildStreamingStateUpdate();
+        res.write(`event: state\ndata: ${JSON.stringify(current)}\n\n`);
+        sseClients.add(res);
+        req.on("close", () => {
+            sseClients.delete(res);
+        });
+        return;
+    }
+
+    if (requestUrl.pathname === "/api/streaming/state") {
+        const state = lastStreamingState ?? buildStreamingStateUpdate();
+        writeJson(res, 200, state);
+        return;
+    }
+
+    if (requestUrl.pathname === "/api/streaming/duel-context") {
+        const ss = lastStreamingState ?? buildStreamingStateUpdate();
+        const cycle = ss.cycle ?? {};
+        // useDuelContext expects { type, cycle: {...}, leaderboard, cameraTarget }
+        writeJson(res, 200, {
+            type: "STREAMING_DUEL_CONTEXT",
+            cycle: {
+                ...cycle,
+                agent1: cycle.agent1 ? { ...cycle.agent1, inventory: [], monologues: [] } : null,
+                agent2: cycle.agent2 ? { ...cycle.agent2, inventory: [], monologues: [] } : null,
+            },
+            leaderboard: ss.leaderboard ?? [],
+            cameraTarget: ss.cameraTarget ?? null,
+        });
+        return;
+    }
+
+    if (requestUrl.pathname === "/api/arena/prediction-markets/active") {
+        const now = Date.now();
+        const ss = lastStreamingState ?? buildStreamingStateUpdate();
+        const cycle = ss.cycle ?? {};
+        const marketStatus = lastComputedState?.market?.status ?? 0;
+        const isResolved = marketStatus === MARKET_STATUS_RESOLVED || marketStatus === MARKET_STATUS_CANCELLED;
+        const winner = lastComputedState?.market?.winner ?? 0;
+
+        let lifecycleStatus = "IDLE";
+        if (marketStatus === 1) lifecycleStatus = "OPEN";
+        else if (marketStatus === 2) lifecycleStatus = "LOCKED";
+        else if (marketStatus === MARKET_STATUS_RESOLVED) lifecycleStatus = "RESOLVED";
+        else if (marketStatus === MARKET_STATUS_CANCELLED) lifecycleStatus = "CANCELLED";
+
+        let winnerStr = "NONE";
+        if (isResolved && winner === 1) winnerStr = "A";
+        else if (isResolved && winner === 2) winnerStr = "B";
+
+        writeJson(res, 200, {
+            duel: {
+                duelKey: currentDuelKey || null,
+                duelId: cycle.duelId ?? `sim-${duelCounter}`,
+                phase: cycle.phase ?? "IDLE",
+                winner: isResolved ? winnerStr : null,
+                betCloseTime: cycle.betCloseTime ?? null,
+            },
+            markets: [
+                {
+                    chainKey: "bsc",
+                    duelKey: currentDuelKey || null,
+                    duelId: cycle.duelId ?? `sim-${duelCounter}`,
+                    marketId: `sim-bsc-${duelCounter}`,
+                    marketRef: currentMarketKey || null,
+                    lifecycleStatus,
+                    winner: winnerStr,
+                    betCloseTime: cycle.betCloseTime ?? null,
+                    contractAddress: clobAddr,
+                    programId: null,
+                    txRef: null,
+                    syncedAt: now,
+                    marketType: "clob",
+                },
+            ],
+            updatedAt: now,
+        });
+        return;
+    }
+
+    // ─── Original sim dashboard API endpoints ────────────────────────────────
+
+    if (requestUrl.pathname === "/api/state") {
+        writeJson(res, 200, {
+            ok: true,
+            state: lastComputedState,
+        });
+        return;
+    }
+
+    if (requestUrl.pathname === "/api/scenarios") {
+        writeJson(res, 200, {
+            ok: true,
+            scenarios: SCENARIO_PRESETS,
+            gateScenarios: GATE_SCENARIOS,
+            latest: scenarioHistory[0] ?? null,
+            activeRun: getActiveScenarioRun(),
+            runs: scenarioRuns.slice(0, SCENARIO_HISTORY_LIMIT),
+            historyCount: scenarioHistory.length,
+        });
+        return;
+    }
+
+    if (requestUrl.pathname === "/api/scenarios/results") {
+        const runId = requestUrl.searchParams.get("runId");
+        if (runId) {
+            const run = scenarioRuns.find((entry) => entry.runId === runId) ?? null;
+            writeJson(res, run ? 200 : 404, {
+                ok: run != null,
+                run,
+                error: run ? null : `Unknown runId: ${runId}`,
+            });
+            return;
+        }
+        writeJson(res, 200, {
+            ok: true,
+            activeRun: getActiveScenarioRun(),
+            runs: scenarioRuns.slice(0, SCENARIO_HISTORY_LIMIT),
+            results: scenarioHistory,
+        });
+        return;
+    }
+
+    if (requestUrl.pathname === "/api/scenarios/run") {
+        if (scenarioRunInFlight) {
+            writeJson(res, 409, {
+                ok: false,
+                error: "A scenario run is already in progress",
+                run: getActiveScenarioRun(),
+            });
+            return;
+        }
+        const scenarioName =
+            requestUrl.searchParams.get("name") ??
+            requestUrl.searchParams.get("id");
+        if (!scenarioName) {
+            writeJson(res, 400, {
+                ok: false,
+                error: "Missing scenario name or id",
+            });
+            return;
+        }
+
+        try {
+            const preset = SCENARIO_PRESETS.find(
+                (entry) => entry.name === scenarioName || entry.id === scenarioName,
+            );
+            if (!preset) {
+                writeJson(res, 404, {
+                    ok: false,
+                    error: `Unknown scenario: ${scenarioName}`,
+                });
+                return;
+            }
+            const ticksParam = requestUrl.searchParams.get("ticks");
+            const winnerParam = requestUrl.searchParams.get("winner");
+            const run = createScenarioRunRecord(preset, {
+                seed: requestUrl.searchParams.get("seed") ?? undefined,
+                ticks:
+                    ticksParam == null || ticksParam === ""
+                        ? undefined
+                        : Number(ticksParam),
+                winner:
+                    winnerParam === "A" || winnerParam === "B"
+                        ? winnerParam
+                        : undefined,
+                freshBaseline:
+                    requestUrl.searchParams.get("fresh") === "1" ||
+                    requestUrl.searchParams.get("fresh") === "true",
+            });
+            scenarioRuns = [run, ...scenarioRuns].slice(0, SCENARIO_HISTORY_LIMIT);
+            persistScenarioState();
+            void runScenarioPreset(run).catch((error) => {
+                console.error(
+                    `[scenario] ${run.runId} failed: ${
+                        error instanceof Error ? error.message : String(error)
+                    }`,
+                );
+            });
+            writeJson(res, 202, {
+                ok: true,
+                run,
+            });
+        } catch (error) {
+            writeJson(res, 500, {
+                ok: false,
+                error: (error as Error).message,
+            });
+        }
+        return;
+    }
+
+    serveStatic(req, res);
+}
+
 // ─── Main ────────────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
     console.log("╔══════════════════════════════════════════════════════════╗");
     console.log("║   Hyperbet Simulation Dashboard                        ║");
     console.log("╚══════════════════════════════════════════════════════════╝");
+    loadScenarioState();
 
     // 1. Start Anvil
     await startAnvil();
 
     // 2. Deploy contracts
     await deployContracts();
+    await captureScenarioBaseline();
+    await broadcastState();
 
     // 3. Start HTTP server
-    const httpServer = createServer(serveStatic);
+    const httpServer = createServer((req, res) => {
+        void handleHttpRequest(req, res);
+    });
     httpServer.listen(HTTP_PORT, () => {
         console.log(`[http] Dashboard at http://localhost:${HTTP_PORT}`);
     });
@@ -728,20 +3815,22 @@ async function main(): Promise<void> {
     // Cleanup on exit
     const cleanup = () => {
         simRunning = false;
-        stopAnvil();
         wss.close();
         httpServer.close();
-        process.exit(0);
+        void stopAnvil().finally(() => {
+            process.exit(0);
+        });
     };
 
     process.on("SIGINT", cleanup);
     process.on("SIGTERM", cleanup);
 
-    console.log("\n🎮 Ready! Open http://localhost:3401 in your browser.\n");
+    console.log(`\n🎮 Ready! Open http://localhost:${HTTP_PORT} in your browser.\n`);
 }
 
 main().catch((err) => {
     console.error("Fatal:", err);
-    stopAnvil();
-    process.exit(1);
+    void stopAnvil().finally(() => {
+        process.exit(1);
+    });
 });

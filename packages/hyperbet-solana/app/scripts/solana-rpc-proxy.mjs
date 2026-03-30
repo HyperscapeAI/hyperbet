@@ -1,10 +1,7 @@
 import { createServer } from "node:http";
 import { URL } from "node:url";
 
-import WebSocketPkg from "ws";
-
-const WebSocket = WebSocketPkg;
-const WebSocketServer = WebSocketPkg.WebSocketServer ?? WebSocketPkg.Server;
+import { WebSocket, WebSocketServer } from "ws";
 
 const rpcTarget = process.env.SOLANA_RPC_TARGET?.trim();
 if (!rpcTarget) {

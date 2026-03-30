@@ -6,7 +6,7 @@
  * @see https://github.com/codama-idl/codama
  */
 
-import { combineCodec, fixDecoderSize, fixEncoderSize, getAddressDecoder, getAddressEncoder, getBytesDecoder, getBytesEncoder, getProgramDerivedAddress, getStructDecoder, getStructEncoder, transformEncoder, type AccountMeta, type AccountSignerMeta, type Address, type FixedSizeCodec, type FixedSizeDecoder, type FixedSizeEncoder, type Instruction, type InstructionWithAccounts, type InstructionWithData, type ReadonlySignerAccount, type ReadonlyUint8Array, type TransactionSigner, type WritableAccount } from '@solana/kit';
+import { combineCodec, fixDecoderSize, fixEncoderSize, getAddressDecoder, getAddressEncoder, getBytesDecoder, getBytesEncoder, getI64Decoder, getI64Encoder, getProgramDerivedAddress, getStructDecoder, getStructEncoder, transformEncoder, type AccountMeta, type AccountSignerMeta, type Address, type FixedSizeCodec, type FixedSizeDecoder, type FixedSizeEncoder, type Instruction, type InstructionWithAccounts, type InstructionWithData, type ReadonlySignerAccount, type ReadonlyUint8Array, type TransactionSigner, type WritableAccount } from '@solana/kit';
 import { FIGHT_ORACLE_PROGRAM_ADDRESS } from '../programs/index.js';
 import { getAccountMetaFactory, type ResolvedAccount } from '../shared/index.js';
 
@@ -17,16 +17,16 @@ export function getUpdateOracleConfigDiscriminatorBytes(): ReadonlyUint8Array { 
 export type UpdateOracleConfigInstruction<TProgram extends string = typeof FIGHT_ORACLE_PROGRAM_ADDRESS, TAccountAuthority extends string | AccountMeta<string> = string, TAccountOracleConfig extends string | AccountMeta<string> = string, TRemainingAccounts extends readonly AccountMeta<string>[] = []> =
 Instruction<TProgram> & InstructionWithData<ReadonlyUint8Array> & InstructionWithAccounts<[TAccountAuthority extends string ? ReadonlySignerAccount<TAccountAuthority> & AccountSignerMeta<TAccountAuthority> : TAccountAuthority, TAccountOracleConfig extends string ? WritableAccount<TAccountOracleConfig> : TAccountOracleConfig, ...TRemainingAccounts]>;
 
-export type UpdateOracleConfigInstructionData = { discriminator: ReadonlyUint8Array; authority: Address; reporter: Address;  };
+export type UpdateOracleConfigInstructionData = { discriminator: ReadonlyUint8Array; authority: Address; reporter: Address; finalizer: Address; challenger: Address; disputeWindowSecs: bigint;  };
 
-export type UpdateOracleConfigInstructionDataArgs = { authority: Address; reporter: Address;  };
+export type UpdateOracleConfigInstructionDataArgs = { authority: Address; reporter: Address; finalizer: Address; challenger: Address; disputeWindowSecs: number | bigint;  };
 
 export function getUpdateOracleConfigInstructionDataEncoder(): FixedSizeEncoder<UpdateOracleConfigInstructionDataArgs> {
-    return transformEncoder(getStructEncoder([['discriminator', fixEncoderSize(getBytesEncoder(), 8)], ['authority', getAddressEncoder()], ['reporter', getAddressEncoder()]]), (value) => ({ ...value, discriminator: UPDATE_ORACLE_CONFIG_DISCRIMINATOR }));
+    return transformEncoder(getStructEncoder([['discriminator', fixEncoderSize(getBytesEncoder(), 8)], ['authority', getAddressEncoder()], ['reporter', getAddressEncoder()], ['finalizer', getAddressEncoder()], ['challenger', getAddressEncoder()], ['disputeWindowSecs', getI64Encoder()]]), (value) => ({ ...value, discriminator: UPDATE_ORACLE_CONFIG_DISCRIMINATOR }));
 }
 
 export function getUpdateOracleConfigInstructionDataDecoder(): FixedSizeDecoder<UpdateOracleConfigInstructionData> {
-    return getStructDecoder([['discriminator', fixDecoderSize(getBytesDecoder(), 8)], ['authority', getAddressDecoder()], ['reporter', getAddressDecoder()]]);
+    return getStructDecoder([['discriminator', fixDecoderSize(getBytesDecoder(), 8)], ['authority', getAddressDecoder()], ['reporter', getAddressDecoder()], ['finalizer', getAddressDecoder()], ['challenger', getAddressDecoder()], ['disputeWindowSecs', getI64Decoder()]]);
 }
 
 export function getUpdateOracleConfigInstructionDataCodec(): FixedSizeCodec<UpdateOracleConfigInstructionDataArgs, UpdateOracleConfigInstructionData> {
@@ -38,6 +38,9 @@ export type UpdateOracleConfigAsyncInput<TAccountAuthority extends string = stri
 oracleConfig?: Address<TAccountOracleConfig>;
 authorityArg: UpdateOracleConfigInstructionDataArgs["authority"];
 reporter: UpdateOracleConfigInstructionDataArgs["reporter"];
+finalizer: UpdateOracleConfigInstructionDataArgs["finalizer"];
+challenger: UpdateOracleConfigInstructionDataArgs["challenger"];
+disputeWindowSecs: UpdateOracleConfigInstructionDataArgs["disputeWindowSecs"];
 }
 
 export async function getUpdateOracleConfigInstructionAsync<TAccountAuthority extends string, TAccountOracleConfig extends string, TProgramAddress extends Address = typeof FIGHT_ORACLE_PROGRAM_ADDRESS>(input: UpdateOracleConfigAsyncInput<TAccountAuthority, TAccountOracleConfig>, config?: { programAddress?: TProgramAddress } ): Promise<UpdateOracleConfigInstruction<TProgramAddress, TAccountAuthority, TAccountOracleConfig>> {
@@ -67,6 +70,9 @@ export type UpdateOracleConfigInput<TAccountAuthority extends string = string, T
 oracleConfig: Address<TAccountOracleConfig>;
 authorityArg: UpdateOracleConfigInstructionDataArgs["authority"];
 reporter: UpdateOracleConfigInstructionDataArgs["reporter"];
+finalizer: UpdateOracleConfigInstructionDataArgs["finalizer"];
+challenger: UpdateOracleConfigInstructionDataArgs["challenger"];
+disputeWindowSecs: UpdateOracleConfigInstructionDataArgs["disputeWindowSecs"];
 }
 
 export function getUpdateOracleConfigInstruction<TAccountAuthority extends string, TAccountOracleConfig extends string, TProgramAddress extends Address = typeof FIGHT_ORACLE_PROGRAM_ADDRESS>(input: UpdateOracleConfigInput<TAccountAuthority, TAccountOracleConfig>, config?: { programAddress?: TProgramAddress } ): UpdateOracleConfigInstruction<TProgramAddress, TAccountAuthority, TAccountOracleConfig> {

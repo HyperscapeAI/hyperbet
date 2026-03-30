@@ -3,9 +3,12 @@ import { PublicKey } from "@solana/web3.js";
 export const DUEL_WINNER_MARKET_KIND = 1;
 export const SIDE_BID = 1;
 export const SIDE_ASK = 2;
+export const ORDER_BEHAVIOR_GTC = 0;
+export const ORDER_BEHAVIOR_IOC = 1;
+export const ORDER_BEHAVIOR_POST_ONLY = 2;
 
 export function duelKeyHexToBytes(duelKeyHex: string): Uint8Array {
-  const normalized = duelKeyHex.trim().toLowerCase();
+  const normalized = duelKeyHex.trim().toLowerCase().replace(/^0x/, "");
   if (!/^[0-9a-f]{64}$/.test(normalized)) {
     throw new Error("duelKeyHex must be a 32-byte hex string");
   }
@@ -90,5 +93,60 @@ export function findPriceLevelPda(
       priceBytes,
     ],
     marketProgramId,
+  )[0];
+}
+
+// --- AMM (lvr_amm) PDA helpers ---
+
+function betIdToBytes(betId: bigint): Buffer {
+  const buf = Buffer.alloc(8);
+  buf.writeBigUInt64LE(betId);
+  return buf;
+}
+
+export function findAmmConfigPda(ammProgramId: PublicKey): PublicKey {
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from("amm_config")],
+    ammProgramId,
+  )[0];
+}
+
+export function findAmmAdminStatePda(ammProgramId: PublicKey): PublicKey {
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from("admin_state")],
+    ammProgramId,
+  )[0];
+}
+
+export function findAmmBetPda(
+  ammProgramId: PublicKey,
+  betId: bigint,
+  creator: PublicKey,
+): PublicKey {
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from("bet"), betIdToBytes(betId), creator.toBuffer()],
+    ammProgramId,
+  )[0];
+}
+
+export function findAmmMintYesPda(
+  ammProgramId: PublicKey,
+  betId: bigint,
+  creator: PublicKey,
+): PublicKey {
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from("mint_yes"), betIdToBytes(betId), creator.toBuffer()],
+    ammProgramId,
+  )[0];
+}
+
+export function findAmmMintNoPda(
+  ammProgramId: PublicKey,
+  betId: bigint,
+  creator: PublicKey,
+): PublicKey {
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from("mint_no"), betIdToBytes(betId), creator.toBuffer()],
+    ammProgramId,
   )[0];
 }

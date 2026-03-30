@@ -15,7 +15,12 @@ import { evaluatePolicyBreaches } from "./policy.js";
 import { evaluateSettlementBreaches } from "./settlement.js";
 import { evaluateSybilBreaches } from "./sybil.js";
 import { evaluateChaosBreaches } from "./chaos.js";
+import { evaluateAdaptiveBreaches } from "./adaptive.js";
 import { evaluateMatrixBreaches } from "./matrix.js";
+import {
+  DEFAULT_REPLAY_CORPUS_PATH,
+  evaluateHistoricalReplayCorpus,
+} from "./replay.js";
 import {
   DEFAULT_REGRESSION_SEEDS_PATH,
   evaluateRegressionSeeds,
@@ -58,6 +63,20 @@ export function assertMitigationThreshold(
   report: SuiteReport,
   threshold: number,
 ): GateVerdict {
+  const firstFailure = report.chains
+    .flatMap((chain) =>
+      chain.scenarios.map((scenario) => ({
+        chain: chain.chain,
+        scenario,
+      })),
+    )
+    .find((entry) => !entry.scenario.budgetPass);
+  if (firstFailure) {
+    return {
+      ok: false,
+      message: `scenario budget failed ${firstFailure.chain}/${firstFailure.scenario.scenario}: ${firstFailure.scenario.budgetBreaches.map((breach) => breach.control).join(",")}`,
+    };
+  }
   if (report.summary.mitigationPasses >= threshold) {
     return {
       ok: true,
@@ -101,7 +120,10 @@ export function runGate(
   const reportPath = join(outputDir, `market-maker-adversarial-report${suffix}.json`);
   const report = JSON.parse(readFileSync(reportPath, "utf8")) as SuiteReport;
 
-  const thresholdVerdict = assertMitigationThreshold(report, threshold);
+  const thresholdVerdict = assertMitigationThreshold(
+    report,
+    report.summary.totalScenarios,
+  );
   if (!thresholdVerdict.ok) {
     return thresholdVerdict;
   }
@@ -176,12 +198,35 @@ export function runGate(
     };
   }
 
+  const adaptiveBreaches = evaluateAdaptiveBreaches(report);
+  if (adaptiveBreaches.length > 0) {
+    const first = adaptiveBreaches[0]!;
+    return {
+      ok: false,
+      message: `adaptive breach ${first.chain} ${first.control}: expected ${first.expected}, actual=${first.actual}`,
+    };
+  }
+
   const matrixBreaches = evaluateMatrixBreaches(report);
   if (matrixBreaches.length > 0) {
     const first = matrixBreaches[0]!;
     return {
       ok: false,
       message: `matrix breach ${first.chain}/${first.scenario} ${first.control}: expected ${first.expected}, actual=${first.actual}`,
+    };
+  }
+
+  const replayCorpusPath =
+    process.env.MM_ADVERSARIAL_REPLAY_CORPUS || DEFAULT_REPLAY_CORPUS_PATH;
+  const replayBreaches = evaluateHistoricalReplayCorpus(
+    replayCorpusPath,
+    chainFilter,
+  );
+  if (replayBreaches.length > 0) {
+    const first = replayBreaches[0]!;
+    return {
+      ok: false,
+      message: `replay breach ${first.chain}/${first.traceId} ${first.control}: expected ${first.expected}, actual=${first.actual}`,
     };
   }
 
@@ -229,6 +274,25 @@ export function runCli() {
     }
     console.log(
       `[simulate-adversarial-mm:seed-corpus] seeds=${seeds.length} chain=${chainFilter ?? "all"} passed`,
+    );
+    return;
+  }
+
+  if (process.argv.includes("--replay-corpus")) {
+    const replayCorpusPath =
+      process.env.MM_ADVERSARIAL_REPLAY_CORPUS || DEFAULT_REPLAY_CORPUS_PATH;
+    const replayBreaches = evaluateHistoricalReplayCorpus(
+      replayCorpusPath,
+      chainFilter,
+    );
+    if (replayBreaches.length > 0) {
+      const first = replayBreaches[0]!;
+      throw new Error(
+        `[simulate-adversarial-mm:replay-corpus] chain=${first.chain} trace=${first.traceId} ${first.control} expected ${first.expected} actual ${first.actual}`,
+      );
+    }
+    console.log(
+      `[simulate-adversarial-mm:replay-corpus] chain=${chainFilter ?? "all"} passed`,
     );
     return;
   }

@@ -77,12 +77,28 @@ runStep("market-maker regression seed corpus", [
   "packages/market-maker-bot",
   "simulate:adversarial:seed-corpus",
 ]);
+runStep("market-maker historical replay corpus", [
+  "run",
+  "--cwd",
+  "packages/market-maker-bot",
+  "simulate:adversarial:replay-corpus",
+]);
 for (const chain of mmChains) {
   runStep(`market-maker regression seed corpus (${chain})`, [
     "run",
     "--cwd",
     "packages/market-maker-bot",
     "simulate:adversarial:seed-corpus",
+  ], {
+    env: {
+      MM_ADVERSARIAL_CHAIN: chain,
+    },
+  });
+  runStep(`market-maker historical replay corpus (${chain})`, [
+    "run",
+    "--cwd",
+    "packages/market-maker-bot",
+    "simulate:adversarial:replay-corpus",
   ], {
     env: {
       MM_ADVERSARIAL_CHAIN: chain,
@@ -105,7 +121,7 @@ for (const chain of mmChains) {
   ], {
     env: {
       MM_ADVERSARIAL_CHAIN: chain,
-      MM_ADVERSARIAL_MIN_PASSES: "12",
+      MM_ADVERSARIAL_MIN_PASSES: "13",
       MM_ADVERSARIAL_OUTPUT_DIR: `simulations/ci-${chain}`,
     },
   });

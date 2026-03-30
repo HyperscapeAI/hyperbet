@@ -153,19 +153,27 @@
         if (state.fees) {
             feeTreasury.textContent = `${state.fees.treasuryBps} bps`;
             feeMm.textContent = `${state.fees.mmBps} bps`;
-            
-            function formatFee(weiStr) {
-                if (!weiStr) return "0.0000 ETH";
-                const numEth = Number(weiStr) / 1e18;
-                if (numEth === 0) return "0.0000 ETH";
-                if (Math.abs(numEth) < 0.0001) {
-                    return `${weiStr} WEI`;
-                }
-                return `${numEth.toFixed(4)} ETH`;
-            }
 
-            if (profitTreasury) profitTreasury.textContent = formatFee(state.fees.treasuryAccruedWei);
-            if (profitMm) profitMm.textContent = formatFee(state.fees.mmAccruedWei);
+            const displaySymbol = state.fees.displaySymbol || "ETH";
+            const displayDecimals = Number(state.fees.displayDecimals ?? 18);
+            const accrualUnit = state.fees.accrualUnit || "wei";
+
+            if (profitTreasury) {
+                profitTreasury.textContent = formatAtomicAmount(
+                    state.fees.treasuryAccruedAtomic || state.fees.treasuryAccruedWei,
+                    displayDecimals,
+                    displaySymbol,
+                    accrualUnit,
+                );
+            }
+            if (profitMm) {
+                profitMm.textContent = formatAtomicAmount(
+                    state.fees.mmAccruedAtomic || state.fees.mmAccruedWei,
+                    displayDecimals,
+                    displaySymbol,
+                    accrualUnit,
+                );
+            }
         }
 
         // Order book
@@ -337,6 +345,8 @@
         if (!agents) return;
 
         agentsGrid.innerHTML = "";
+        const currencySymbol =
+            state?.fees?.displaySymbol || (state?.backend === "solana" ? "SOL" : "ETH");
         for (const agent of agents) {
             const card = document.createElement("div");
             card.className = `agent-card ${agent.enabled ? "" : "disabled"}`;
@@ -350,13 +360,13 @@
         </div>
         <div class="agent-desc">${agent.description}</div>
         <div class="agent-stats">
-          <div class="agent-stat"><span class="agent-stat-label">Balance</span><span class="agent-stat-value">${Number(agent.balance).toFixed(2)} ETH</span></div>
-          <div class="agent-stat"><span class="agent-stat-label">PnL</span><span class="agent-stat-value ${Number(agent.pnl) >= 0 ? 'bid-color' : 'ask-color'}">${Number(agent.pnl) > 0 ? '+' : ''}${Number(agent.pnl).toFixed(4)} ETH</span></div>
+          <div class="agent-stat"><span class="agent-stat-label">Balance</span><span class="agent-stat-value">${Number(agent.balance).toFixed(2)} ${currencySymbol}</span></div>
+          <div class="agent-stat"><span class="agent-stat-label">PnL</span><span class="agent-stat-value ${Number(agent.pnl) >= 0 ? 'bid-color' : 'ask-color'}">${Number(agent.pnl) > 0 ? '+' : ''}${Number(agent.pnl).toFixed(4)} ${currencySymbol}</span></div>
           <div class="agent-stat"><span class="agent-stat-label">Trades</span><span class="agent-stat-value">${agent.tradeCount}</span></div>
           <div class="agent-stat"><span class="agent-stat-label">A Shares</span><span class="agent-stat-value bid-color">${formatBigNumber(agent.position.aShares)}</span></div>
           <div class="agent-stat"><span class="agent-stat-label">B Shares</span><span class="agent-stat-value ask-color">${formatBigNumber(agent.position.bShares)}</span></div>
-          <div class="agent-stat"><span class="agent-stat-label">A Stake</span><span class="agent-stat-value">${Number(agent.position.aStake).toFixed(4)}</span></div>
-          <div class="agent-stat"><span class="agent-stat-label">B Stake</span><span class="agent-stat-value">${Number(agent.position.bStake).toFixed(4)}</span></div>
+          <div class="agent-stat"><span class="agent-stat-label">A Stake</span><span class="agent-stat-value">${Number(agent.position.aStake).toFixed(4)} ${currencySymbol}</span></div>
+          <div class="agent-stat"><span class="agent-stat-label">B Stake</span><span class="agent-stat-value">${Number(agent.position.bStake).toFixed(4)} ${currencySymbol}</span></div>
           <div class="agent-stat" style="grid-column: 1 / -1"><span class="agent-stat-label">Active Orders</span><span class="agent-stat-value">${agent.activeOrders}</span></div>
           <div class="agent-stat" style="grid-column: 1 / -1"><span class="agent-stat-label">Address</span><span class="agent-stat-value" style="font-size: 0.65rem" title="${agent.address}">${shortAddr(agent.address)}</span></div>
         </div>
@@ -451,6 +461,26 @@
         if (n >= 1) return n.toFixed(1);
         if (n > 0) return "<1";
         return String(n);
+    }
+
+    function formatAtomicAmount(value, decimals, symbol, unit) {
+        const raw = `${value ?? "0"}`;
+        const negative = raw.startsWith("-");
+        const digits = negative ? raw.slice(1) : raw;
+        if (!/^\d+$/.test(digits)) return `${raw} ${symbol}`;
+        if (/^0+$/.test(digits)) return `0.0000 ${symbol}`;
+
+        const padded = digits.padStart(decimals + 1, "0");
+        const whole = padded.slice(0, -decimals) || "0";
+        const leadingFraction = decimals > 0
+            ? padded.slice(-decimals, -decimals + 4).padEnd(4, "0")
+            : "0000";
+
+        if (whole === "0" && /^0+$/.test(leadingFraction)) {
+            return `${negative ? "-" : ""}${digits} ${String(unit || symbol).toUpperCase()}`;
+        }
+
+        return `${negative ? "-" : ""}${whole}.${leadingFraction} ${symbol}`;
     }
 
     // ─── Event Bindings ─────────────────────────────────────────────────────

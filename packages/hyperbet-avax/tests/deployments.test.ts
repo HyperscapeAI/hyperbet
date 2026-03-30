@@ -35,4 +35,14 @@ describe("betting deployment manifest", () => {
     const mainnetDefaults = resolveBettingEvmDefaults("mainnet-beta");
     expect(mainnetDefaults.avax.networkKey).toBe("avax");
   });
+
+  test("tracks governance metadata keys in the chain registry", () => {
+    const avax = BETTING_DEPLOYMENTS.evm.avax;
+    expect(avax).toHaveProperty("reporterAddress");
+    expect(avax).toHaveProperty("finalizerAddress");
+    expect(avax).toHaveProperty("challengerAddress");
+    expect(avax).toHaveProperty("timelockAddress");
+    expect(avax).toHaveProperty("multisigAddress");
+    expect(avax).toHaveProperty("emergencyCouncilAddress");
+  });
 });

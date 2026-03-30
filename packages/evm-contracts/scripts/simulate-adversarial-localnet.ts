@@ -3,15 +3,20 @@ import { join } from "node:path";
 
 import {
   ContractFactory,
+  type InterfaceAbi,
   JsonRpcProvider,
   ethers,
-  type Contract,
   type JsonRpcSigner,
 } from "ethers";
 
+import type {
+  DuelOutcomeOracleContract,
+  GoldClobContract,
+} from "../typed-contracts";
+
 type Artifact = {
-  abi: readonly unknown[];
-  bytecode: string;
+  abi: InterfaceAbi;
+  bytecode: string | { object: string };
 };
 
 type ScenarioResult = {
@@ -24,6 +29,7 @@ type Fixture = {
   admin: JsonRpcSigner;
   operator: JsonRpcSigner;
   reporter: JsonRpcSigner;
+  finalizer: JsonRpcSigner;
   treasury: JsonRpcSigner;
   marketMaker: JsonRpcSigner;
   makerOne: JsonRpcSigner;
@@ -33,21 +39,23 @@ type Fixture = {
   retailBot: JsonRpcSigner;
   arbBot: JsonRpcSigner;
   attacker: JsonRpcSigner;
-  oracle: Contract;
-  clob: Contract;
+  oracle: DuelOutcomeOracleContract;
+  clob: GoldClobContract;
 };
 
 const MARKET_KIND_DUEL_WINNER = 0;
 const DUEL_STATUS_BETTING_OPEN = 2;
+const DUEL_STATUS_LOCKED = 3;
 const SIDE_A = 1;
 const BUY_SIDE = 1;
 const SELL_SIDE = 2;
 const ORDER_AMOUNT = 1_000n;
+const ORDER_FLAG_GTC = 0x01;
 
 function loadArtifact(projectDir: string, name: string): Artifact {
   return JSON.parse(
     readFileSync(
-      join(projectDir, "artifacts", "contracts", `${name}.sol`, `${name}.json`),
+      join(projectDir, "out", `${name}.sol`, `${name}.json`),
       "utf8",
     ),
   ) as Artifact;
@@ -66,17 +74,25 @@ function quoteCost(side: number, price: number, amount: bigint): bigint {
   return (amount * component) / 1000n;
 }
 
+function normalizeBytecode(bytecode: Artifact["bytecode"]): string {
+  const resolved = typeof bytecode === "string" ? bytecode : bytecode.object;
+  return resolved.startsWith("0x") ? resolved : `0x${resolved}`;
+}
+
 async function deployFixture(
   provider: JsonRpcProvider,
   projectDir: string,
 ): Promise<Fixture> {
   const signers = await Promise.all(
-    Array.from({ length: 10 }, (_, index) => provider.getSigner(index)),
+    Array.from({ length: 13 }, (_, index) => provider.getSigner(index)),
   );
   const [
     admin,
     operator,
     reporter,
+    finalizer,
+    challenger,
+    pauser,
     treasury,
     marketMaker,
     makerOne,
@@ -93,27 +109,33 @@ async function deployFixture(
 
   const oracleFactory = new ContractFactory(
     oracleArtifact.abi,
-    oracleArtifact.bytecode,
+    normalizeBytecode(oracleArtifact.bytecode),
     admin,
   );
-  const oracle = await oracleFactory.deploy(
+  const reporterAddress = await reporter.getAddress();
+  const oracle = (await oracleFactory.deploy(
     await admin.getAddress(),
-    await reporter.getAddress(),
-  );
+    reporterAddress,
+    await finalizer.getAddress(),
+    await challenger.getAddress(),
+    await pauser.getAddress(),
+    3_600,
+  )) as DuelOutcomeOracleContract;
   await oracle.waitForDeployment();
 
   const clobFactory = new ContractFactory(
     clobArtifact.abi,
-    clobArtifact.bytecode,
+    normalizeBytecode(clobArtifact.bytecode),
     admin,
   );
-  const clob = await clobFactory.deploy(
+  const clob = (await clobFactory.deploy(
     await admin.getAddress(),
     await operator.getAddress(),
     await oracle.getAddress(),
     await treasury.getAddress(),
     await marketMaker.getAddress(),
-  );
+    await pauser.getAddress(),
+  )) as GoldClobContract;
   await clob.waitForDeployment();
 
   return {
@@ -121,6 +143,7 @@ async function deployFixture(
     admin,
     operator,
     reporter,
+    finalizer,
     treasury,
     marketMaker,
     makerOne,
@@ -161,6 +184,33 @@ async function openMarket(fixture: Fixture, label: string): Promise<string> {
   return duel;
 }
 
+async function lockMarket(
+  fixture: Fixture,
+  duel: string,
+  label: string,
+): Promise<void> {
+  // Read stored duel to preserve immutable participant hashes and timing (FIX-4)
+  const storedDuel = await fixture.oracle.getDuel(duel);
+
+  // Advance past betCloseTs so the lock transition is valid
+  const betClose = Number(storedDuel.betCloseTs);
+  await fixture.provider.send("evm_setNextBlockTimestamp", [betClose + 1]);
+  await fixture.provider.send("evm_mine", []);
+
+  await (
+    await fixture.oracle.connect(fixture.reporter).upsertDuel(
+      duel,
+      storedDuel.participantAHash,
+      storedDuel.participantBHash,
+      storedDuel.betOpenTs,
+      storedDuel.betCloseTs,
+      storedDuel.duelStartTs,
+      `locked://${label}`,
+      DUEL_STATUS_LOCKED,
+    )
+  ).wait();
+}
+
 async function runLowLiquidityScenario(
   fixture: Fixture,
 ): Promise<ScenarioResult> {
@@ -173,6 +223,7 @@ async function runLowLiquidityScenario(
       SELL_SIDE,
       650,
       ORDER_AMOUNT,
+      ORDER_FLAG_GTC,
       { value: quoteCost(SELL_SIDE, 650, ORDER_AMOUNT) + 20n },
     )
   ).wait();
@@ -183,6 +234,7 @@ async function runLowLiquidityScenario(
       SELL_SIDE,
       650,
       ORDER_AMOUNT,
+      ORDER_FLAG_GTC,
       { value: quoteCost(SELL_SIDE, 650, ORDER_AMOUNT) + 20n },
     )
   ).wait();
@@ -193,12 +245,13 @@ async function runLowLiquidityScenario(
       BUY_SIDE,
       650,
       ORDER_AMOUNT,
+      ORDER_FLAG_GTC,
       { value: quoteCost(BUY_SIDE, 650, ORDER_AMOUNT) + 20n },
     )
   ).wait();
 
   const market = await fixture.clob.getMarket(duel, MARKET_KIND_DUEL_WINNER);
-  const queue = await fixture.clob.orderQueues(
+  const queue = await fixture.clob.getPriceLevel(
     duel,
     MARKET_KIND_DUEL_WINNER,
     SELL_SIDE,
@@ -235,6 +288,7 @@ async function runMevScenario(fixture: Fixture): Promise<ScenarioResult> {
       SELL_SIDE,
       450,
       ORDER_AMOUNT,
+      ORDER_FLAG_GTC,
       { value: quoteCost(SELL_SIDE, 450, ORDER_AMOUNT) + 20n },
     )
   ).wait();
@@ -247,6 +301,7 @@ async function runMevScenario(fixture: Fixture): Promise<ScenarioResult> {
       BUY_SIDE,
       450,
       ORDER_AMOUNT,
+      ORDER_FLAG_GTC,
       { value: quoteCost(BUY_SIDE, 450, ORDER_AMOUNT) + 20n },
     );
     const retailTx = await fixture.clob.connect(fixture.retailBot).placeOrder(
@@ -255,6 +310,7 @@ async function runMevScenario(fixture: Fixture): Promise<ScenarioResult> {
       BUY_SIDE,
       450,
       ORDER_AMOUNT,
+      ORDER_FLAG_GTC,
       { value: quoteCost(BUY_SIDE, 450, ORDER_AMOUNT) + 20n },
     );
     await fixture.provider.send("evm_mine", []);
@@ -264,7 +320,7 @@ async function runMevScenario(fixture: Fixture): Promise<ScenarioResult> {
   }
 
   const market = await fixture.clob.getMarket(duel, MARKET_KIND_DUEL_WINNER);
-  const queue = await fixture.clob.orderQueues(
+  const queue = await fixture.clob.getPriceLevel(
     duel,
     MARKET_KIND_DUEL_WINNER,
     BUY_SIDE,
@@ -309,6 +365,7 @@ async function runArbitrageScenario(
       BUY_SIDE,
       700,
       ORDER_AMOUNT,
+      ORDER_FLAG_GTC,
       { value: quoteCost(BUY_SIDE, 700, ORDER_AMOUNT) + 20n },
     )
   ).wait();
@@ -319,6 +376,7 @@ async function runArbitrageScenario(
       SELL_SIDE,
       700,
       ORDER_AMOUNT,
+      ORDER_FLAG_GTC,
       { value: quoteCost(SELL_SIDE, 700, ORDER_AMOUNT) + 20n },
     )
   ).wait();
@@ -329,6 +387,7 @@ async function runArbitrageScenario(
       SELL_SIDE,
       300,
       ORDER_AMOUNT,
+      ORDER_FLAG_GTC,
       { value: quoteCost(SELL_SIDE, 300, ORDER_AMOUNT) + 20n },
     )
   ).wait();
@@ -339,6 +398,7 @@ async function runArbitrageScenario(
       BUY_SIDE,
       300,
       ORDER_AMOUNT,
+      ORDER_FLAG_GTC,
       { value: quoteCost(BUY_SIDE, 300, ORDER_AMOUNT) + 20n },
     )
   ).wait();
@@ -357,8 +417,9 @@ async function runArbitrageScenario(
 
   const latestBlock = await fixture.provider.getBlock("latest");
   const now = BigInt(latestBlock?.timestamp ?? Math.floor(Date.now() / 1000));
+  await lockMarket(fixture, duel, "arbitrage");
   await (
-    await fixture.oracle.connect(fixture.reporter).reportResult(
+    await fixture.oracle.connect(fixture.reporter).proposeResult(
       duel,
       SIDE_A,
       77,
@@ -368,6 +429,9 @@ async function runArbitrageScenario(
       "arb-resolved",
     )
   ).wait();
+  await fixture.provider.send("evm_increaseTime", [3_600]);
+  await fixture.provider.send("evm_mine", []);
+  await (await fixture.oracle.connect(fixture.finalizer).finalizeResult(duel, "finalized")).wait();
   await (
     await fixture.clob
       .connect(fixture.operator)
@@ -403,7 +467,7 @@ async function runAttackScenario(fixture: Fixture): Promise<ScenarioResult> {
   let rejected = false;
   try {
     await (
-      await fixture.oracle.connect(fixture.attacker).reportResult(
+      await fixture.oracle.connect(fixture.attacker).proposeResult(
         duel,
         SIDE_A,
         13,

@@ -36,10 +36,10 @@ if [ "${ENABLE_MARKET_MAKER:-false}" = "true" ]; then
   export SOLANA_RPC_URL="${SOLANA_RPC_URL:-}"
 
   echo "[start] launching market maker bot"
-  cd /app/market-maker-bot
+  cd /app/packages/market-maker-bot
   bun --bun src/index.ts &
   MM_PID=$!
-  cd /app/keeper
+  cd /app/packages/hyperbet-solana/keeper
 else
   echo "[start] market maker disabled (set ENABLE_MARKET_MAKER=true to enable)"
 fi

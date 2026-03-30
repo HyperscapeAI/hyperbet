@@ -8,7 +8,7 @@ import {
   saveWalletDisplay,
   saveWalletGoldState,
 } from "../../../keeper/src/db";
-import { modelMarketIdFromCharacterId } from "../../src/lib/modelMarkets";
+import { modelMarketIdFromCharacterId } from "../../../../hyperbet-ui/src/lib/modelMarkets";
 
 type E2eState = {
   solanaTraderPublicKey?: string;

@@ -58,7 +58,7 @@ describe("fork harness deterministic attack suite", () => {
     for (const chain of chains) {
       const result = runForkAttackSuite(chain, [20260311]);
       expect(result.breaches).toEqual([]);
-      expect(result.scenariosChecked).toBe(6);
+      expect(result.scenariosChecked).toBe(7);
     }
   });
 });

@@ -5,37 +5,71 @@ on:
     branches: [main]
     paths:
       - "packages/hyperbet-solana/keeper/**"
-      - "packages/market-maker-bot/src/**"
-      - "packages/market-maker-bot/package.json"
+      - "packages/hyperbet-chain-registry/**"
+      - "packages/hyperbet-mm-core/**"
+      - "packages/market-maker-bot/**"
+      - "scripts/**"
+      - ".github/actions/setup-hyperbet/**"
       - ".github/workflows/deploy-solana-keeper.yml"
       - "docs/hyperbet-production-deploy.md"
       - "package.json"
       - "bun.lock"
   workflow_dispatch:
+    inputs:
+      environment:
+        description: "Deployment target"
+        required: true
+        default: production
+        type: choice
+        options:
+          - production
+          - staging
+
+permissions:
+  contents: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-env:
-  HYPERBET_KEEPER_URL: ${{ vars.HYPERBET_SOLANA_KEEPER_URL != '' && vars.HYPERBET_SOLANA_KEEPER_URL || 'https://api.hyperbet.win' }}
-  RAILWAY_PROJECT_ID: ${{ vars.HYPERBET_SOLANA_RAILWAY_PROJECT_ID != '' && vars.HYPERBET_SOLANA_RAILWAY_PROJECT_ID || 'e5f5ba11-0380-4d71-aa0b-343d89a58c0d' }}
-  RAILWAY_PRODUCTION_ENVIRONMENT_ID: ${{ vars.HYPERBET_SOLANA_RAILWAY_PRODUCTION_ENVIRONMENT_ID != '' && vars.HYPERBET_SOLANA_RAILWAY_PRODUCTION_ENVIRONMENT_ID || '194f3565-ba2f-4c98-87d2-85dfc3a5110b' }}
-  RAILWAY_KEEPER_SERVICE_ID: ${{ vars.HYPERBET_SOLANA_RAILWAY_KEEPER_SERVICE_ID != '' && vars.HYPERBET_SOLANA_RAILWAY_KEEPER_SERVICE_ID || '330ea18e-b215-4cf9-9fe2-4bb09fc2ec63' }}
-
 jobs:
   deploy:
     name: Deploy hyperbet-solana keeper
     runs-on: ubuntu-latest
-    environment: production
+    environment: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'staging' && 'staging' || 'production' }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: 1.1.38
+      - name: Resolve deployment target
+        run: |
+          deploy_target="production"
+          keeper_url="${{ vars.HYPERBET_SOLANA_KEEPER_URL != '' && vars.HYPERBET_SOLANA_KEEPER_URL || 'https://api.hyperbet.win' }}"
+          railway_project_id="${{ vars.HYPERBET_SOLANA_RAILWAY_PROJECT_ID != '' && vars.HYPERBET_SOLANA_RAILWAY_PROJECT_ID || 'e5f5ba11-0380-4d71-aa0b-343d89a58c0d' }}"
+          railway_environment_id="${{ vars.HYPERBET_SOLANA_RAILWAY_PRODUCTION_ENVIRONMENT_ID != '' && vars.HYPERBET_SOLANA_RAILWAY_PRODUCTION_ENVIRONMENT_ID || '194f3565-ba2f-4c98-87d2-85dfc3a5110b' }}"
+          railway_service_id="${{ vars.HYPERBET_SOLANA_RAILWAY_KEEPER_SERVICE_ID != '' && vars.HYPERBET_SOLANA_RAILWAY_KEEPER_SERVICE_ID || '330ea18e-b215-4cf9-9fe2-4bb09fc2ec63' }}"
+
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.environment }}" = "staging" ]; then
+            deploy_target="staging"
+            keeper_url="${{ vars.HYPERBET_SOLANA_KEEPER_STAGING_URL }}"
+            railway_project_id="${{ vars.HYPERBET_SOLANA_RAILWAY_STAGING_PROJECT_ID != '' && vars.HYPERBET_SOLANA_RAILWAY_STAGING_PROJECT_ID || vars.HYPERBET_SOLANA_RAILWAY_PROJECT_ID }}"
+            railway_environment_id="${{ vars.HYPERBET_SOLANA_RAILWAY_STAGING_ENVIRONMENT_ID }}"
+            railway_service_id="${{ vars.HYPERBET_SOLANA_RAILWAY_STAGING_KEEPER_SERVICE_ID }}"
+          fi
+
+          if [ -z "${keeper_url}" ] || [ -z "${railway_project_id}" ] || [ -z "${railway_environment_id}" ] || [ -z "${railway_service_id}" ]; then
+            echo "Missing Solana keeper staging/prod configuration for ${deploy_target}" >&2
+            exit 1
+          fi
+
+          echo "DEPLOY_TARGET=${deploy_target}" >> "${GITHUB_ENV}"
+          echo "HYPERBET_KEEPER_URL=${keeper_url}" >> "${GITHUB_ENV}"
+          echo "RAILWAY_PROJECT_ID=${railway_project_id}" >> "${GITHUB_ENV}"
+          echo "RAILWAY_ENVIRONMENT_ID=${railway_environment_id}" >> "${GITHUB_ENV}"
+          echo "RAILWAY_KEEPER_SERVICE_ID=${railway_service_id}" >> "${GITHUB_ENV}"
+
+      - name: Setup Hyperbet toolchain
+        uses: ./.github/actions/setup-hyperbet
 
       - name: Detect keeper source changes
         id: keeper_changes
@@ -49,7 +83,7 @@ jobs:
           printf '%s\n' "$changed_files"
 
           keeper_source_changed=false
-          if printf '%s\n' "$changed_files" | grep -Eq '^packages/hyperbet-solana/keeper/|^packages/market-maker-bot/'; then
+          if printf '%s\n' "$changed_files" | grep -Eq '^packages/hyperbet-solana/keeper/|^packages/hyperbet-chain-registry/|^packages/hyperbet-mm-core/|^packages/market-maker-bot/'; then
             keeper_source_changed=true
           fi
 
@@ -57,8 +91,14 @@ jobs:
 
       - name: Install dependencies
         run: |
-          bun install --frozen-lockfile
-          bun install --cwd packages/hyperbet-solana/keeper --frozen-lockfile
+          bash scripts/ci-install-verified.sh root hyperbet-solana-keeper
+
+      - name: Audit deploy env
+        run: node --import tsx scripts/ci-env-audit.ts --target=keeper:solana --deployment=${DEPLOY_TARGET}
+        env:
+          CI_AUDIT_REQUIRE_RUNTIME: "true"
+          RAILWAY_ENVIRONMENT_ID: ${{ env.RAILWAY_ENVIRONMENT_ID }}
+          SOLANA_RPC_URL: https://api.mainnet-beta.solana.com
 
       - name: Run keeper tests
         run: |
@@ -104,8 +144,8 @@ jobs:
                 "projectPath": "${keeper_path}",
                 "name": "hyperbet",
                 "project": "${RAILWAY_PROJECT_ID}",
-                "environment": "${RAILWAY_PRODUCTION_ENVIRONMENT_ID}",
-                "environmentName": "production",
+                "environment": "${RAILWAY_ENVIRONMENT_ID}",
+                "environmentName": "${DEPLOY_TARGET}",
                 "service": "${RAILWAY_KEEPER_SERVICE_ID}"
               }
             },
@@ -117,12 +157,9 @@ jobs:
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
 
-      - name: Stage market-maker-bot into build context
+      - name: Stage keeper workspace context
         if: steps.keeper_changes.outputs.keeper_source_changed == 'true'
-        run: |
-          mkdir -p packages/hyperbet-solana/market-maker-bot/src
-          cp packages/market-maker-bot/package.json packages/hyperbet-solana/market-maker-bot/
-          cp -r packages/market-maker-bot/src/ packages/hyperbet-solana/market-maker-bot/src/
+        run: node --import tsx scripts/stage-deploy-workspace.ts --target=keeper:solana
 
       - name: Deploy keeper
         if: steps.keeper_changes.outputs.keeper_source_changed == 'true'
@@ -132,7 +169,7 @@ jobs:
             --path-as-root \
             --detach \
             --service "${RAILWAY_KEEPER_SERVICE_ID}" \
-            --environment "${RAILWAY_PRODUCTION_ENVIRONMENT_ID}"
+            --environment "${RAILWAY_ENVIRONMENT_ID}"
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
           CI: "true"
@@ -148,6 +185,8 @@ jobs:
           done
 
           curl -fsSL "${HYPERBET_KEEPER_URL}/status" | jq -e '.ok == true'
+          curl -fsSL "${HYPERBET_KEEPER_URL}/api/arena/prediction-markets/active" | jq -e '.duel != null and .markets != null'
+          curl -fsSL "${HYPERBET_KEEPER_URL}/api/keeper/bot-health" | jq -e '.ok == true and .markets != null'
           curl -fsSL "${HYPERBET_KEEPER_URL}/api/streaming/duel-context" | jq -e '.type == "STREAMING_DUEL_CONTEXT"'
           curl -fsSL "${HYPERBET_KEEPER_URL}/api/streaming/leaderboard/details" | jq -e '.leaderboard != null and .cycle != null'
           curl -fsSL "${HYPERBET_KEEPER_URL}/api/perps/markets" | jq -e '.markets != null'

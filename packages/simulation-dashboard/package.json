@@ -5,13 +5,20 @@
     "type": "module",
     "scripts": {
         "dev": "tsx src/server.ts",
-        "build": "tsc --noEmit"
+        "build": "tsc --noEmit",
+        "scenario": "tsx src/cli.ts",
+        "test": "bun test"
     },
     "dependencies": {
+        "@coral-xyz/anchor": "^0.32.1",
+        "@hyperbet/mm-core": "workspace:*",
+        "@solana/web3.js": "^1.98.4",
+        "bn.js": "^5.2.3",
         "ethers": "^6.11.1",
         "ws": "^8.18.0"
     },
     "devDependencies": {
+        "@types/bn.js": "^5.2.0",
         "@types/node": "^25.3.0",
         "@types/ws": "^8.5.10",
         "tsx": "^4.19.0",

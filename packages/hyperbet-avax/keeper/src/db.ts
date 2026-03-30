@@ -9,6 +9,7 @@
 import { Database } from "bun:sqlite";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import type { RecordedBetChain } from "@hyperbet/chain-registry";
 import type { AgentRating } from "./trueskill";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -19,13 +20,15 @@ const DB_PATH = process.env.KEEPER_DB_PATH?.trim()
 export type DbBetRecord = {
   id: string;
   bettorWallet: string;
-  chain: "SOLANA" | "BSC" | "BASE";
+  chain: RecordedBetChain;
   sourceAsset: string;
   sourceAmount: number;
   goldAmount: number;
   feeBps: number;
   txSignature: string;
   marketPda: string | null;
+  duelKey: string | null;
+  duelId: string | null;
   inviteCode: string | null;
   externalBetRef: string | null;
   recordedAt: number;
@@ -110,10 +113,162 @@ db.run(`CREATE TABLE IF NOT EXISTS bets (
   fee_bps INTEGER NOT NULL DEFAULT 0,
   tx_signature TEXT NOT NULL DEFAULT '',
   market_pda TEXT,
+  duel_key TEXT,
+  duel_id TEXT,
   invite_code TEXT,
   external_bet_ref TEXT,
   recorded_at INTEGER NOT NULL
 )`);
+try {
+  db.run("ALTER TABLE bets ADD COLUMN duel_key TEXT");
+} catch {
+  // Column already exists.
+}
+try {
+  db.run("ALTER TABLE bets ADD COLUMN duel_id TEXT");
+} catch {
+  // Column already exists.
+}
+db.run(`CREATE TABLE IF NOT EXISTS bets_duplicate_conflicts (
+  original_id TEXT PRIMARY KEY,
+  chain TEXT NOT NULL,
+  tx_signature TEXT NOT NULL DEFAULT '',
+  external_bet_ref TEXT,
+  recorded_at INTEGER NOT NULL,
+  reason TEXT NOT NULL,
+  archived_at INTEGER NOT NULL
+)`);
+
+type DuplicateBetKeyRow = {
+  value: string;
+};
+
+type DuplicateChainTxKeyRow = {
+  chain: string;
+  txSignature: string;
+};
+
+type DuplicateBetCandidate = {
+  rowid: number;
+  id: string;
+  chain: string;
+  txSignature: string;
+  externalBetRef: string | null;
+  recordedAt: number;
+};
+
+function resolveDuplicateRecordedBets(): void {
+  const quarantinedCount = db.transaction(() => {
+    const archivedAt = Date.now();
+    let quarantined = 0;
+    const archiveConflict = db.prepare(
+      `INSERT OR REPLACE INTO bets_duplicate_conflicts (
+        original_id,
+        chain,
+        tx_signature,
+        external_bet_ref,
+        recorded_at,
+        reason,
+        archived_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    );
+    const deleteBet = db.prepare(`DELETE FROM bets WHERE rowid = ?`);
+    const loadRowsByChainTx = db.prepare(
+      `SELECT
+         rowid,
+         id,
+         chain,
+         tx_signature AS txSignature,
+         external_bet_ref AS externalBetRef,
+         recorded_at AS recordedAt
+       FROM bets
+      WHERE chain = ? AND tx_signature = ?
+      ORDER BY recorded_at ASC, rowid ASC`,
+    );
+    const loadRowsByExternalRef = db.prepare(
+      `SELECT
+         rowid,
+         id,
+         chain,
+         tx_signature AS txSignature,
+         external_bet_ref AS externalBetRef,
+         recorded_at AS recordedAt
+       FROM bets
+      WHERE external_bet_ref = ?
+      ORDER BY recorded_at ASC, rowid ASC`,
+    );
+    const quarantineRows = (
+      rows: DuplicateBetCandidate[],
+      reasonPrefix: string,
+    ) => {
+      if (rows.length <= 1) return;
+      const [canonical, ...duplicates] = rows;
+      for (const duplicate of duplicates) {
+        archiveConflict.run(
+          duplicate.id,
+          duplicate.chain,
+          duplicate.txSignature,
+          duplicate.externalBetRef,
+          duplicate.recordedAt,
+          `${reasonPrefix}; canonical_id=${canonical.id}`,
+          archivedAt,
+        );
+        deleteBet.run(duplicate.rowid);
+        quarantined += 1;
+      }
+    };
+
+    const duplicateChainTxSignatures = db
+      .prepare(
+        `SELECT chain, tx_signature AS txSignature
+           FROM bets
+          WHERE tx_signature <> ''
+          GROUP BY chain, tx_signature
+         HAVING COUNT(*) > 1`,
+      )
+      .all() as DuplicateChainTxKeyRow[];
+    for (const row of duplicateChainTxSignatures) {
+      quarantineRows(
+        loadRowsByChainTx.all(row.chain, row.txSignature) as DuplicateBetCandidate[],
+        `duplicate chain+tx_signature (${row.chain}:${row.txSignature})`,
+      );
+    }
+
+    const duplicateExternalRefs = db
+      .prepare(
+        `SELECT external_bet_ref AS value
+           FROM bets
+          WHERE external_bet_ref IS NOT NULL
+          GROUP BY external_bet_ref
+         HAVING COUNT(*) > 1`,
+      )
+      .all() as DuplicateBetKeyRow[];
+    for (const row of duplicateExternalRefs) {
+      quarantineRows(
+        loadRowsByExternalRef.all(row.value) as DuplicateBetCandidate[],
+        `duplicate external_bet_ref (${row.value})`,
+      );
+    }
+
+    return quarantined;
+  })();
+
+  if (quarantinedCount > 0) {
+    console.warn(
+      `[keeper-db] Quarantined ${quarantinedCount} duplicate recorded bet row(s) into bets_duplicate_conflicts before enforcing uniqueness.`,
+    );
+  }
+}
+
+resolveDuplicateRecordedBets();
+
+db.run(`CREATE UNIQUE INDEX IF NOT EXISTS idx_bets_external_bet_ref_unique
+  ON bets (external_bet_ref)
+  WHERE external_bet_ref IS NOT NULL`);
+
+db.run(`CREATE UNIQUE INDEX IF NOT EXISTS idx_bets_chain_tx_signature_unique
+  ON bets (chain, tx_signature)
+  WHERE tx_signature <> ''`);
 
 db.run(`CREATE TABLE IF NOT EXISTS wallet_display (
   normalized_wallet TEXT PRIMARY KEY,
@@ -237,9 +392,9 @@ db.run(`CREATE INDEX IF NOT EXISTS idx_perps_markets_status_seen
 
 const insertBet = db.prepare(`INSERT OR IGNORE INTO bets
   (id, bettor_wallet, chain, source_asset, source_amount, gold_amount,
-   fee_bps, tx_signature, market_pda, invite_code, external_bet_ref, recorded_at)
+   fee_bps, tx_signature, market_pda, duel_key, duel_id, invite_code, external_bet_ref, recorded_at)
   VALUES ($id, $bettorWallet, $chain, $sourceAsset, $sourceAmount, $goldAmount,
-          $feeBps, $txSignature, $marketPda, $inviteCode, $externalBetRef, $recordedAt)`);
+          $feeBps, $txSignature, $marketPda, $duelKey, $duelId, $inviteCode, $externalBetRef, $recordedAt)`);
 
 const upsertWalletDisplay =
   db.prepare(`INSERT INTO wallet_display (normalized_wallet, display_name)
@@ -359,7 +514,7 @@ export function loadAll(betLimit = 5000): HydratedState {
     db
       .prepare(
         `SELECT id, bettor_wallet, chain, source_asset, source_amount, gold_amount,
-          fee_bps, tx_signature, market_pda, invite_code, external_bet_ref, recorded_at
+          fee_bps, tx_signature, market_pda, duel_key, duel_id, invite_code, external_bet_ref, recorded_at
          FROM bets ORDER BY recorded_at DESC LIMIT ?`,
       )
       .all(betLimit) as Array<Record<string, unknown>>
@@ -374,6 +529,8 @@ export function loadAll(betLimit = 5000): HydratedState {
       feeBps: Number(row.fee_bps),
       txSignature: String(row.tx_signature),
       marketPda: row.market_pda != null ? String(row.market_pda) : null,
+      duelKey: row.duel_key != null ? String(row.duel_key) : null,
+      duelId: row.duel_id != null ? String(row.duel_id) : null,
       inviteCode: row.invite_code != null ? String(row.invite_code) : null,
       externalBetRef:
         row.external_bet_ref != null ? String(row.external_bet_ref) : null,
@@ -521,8 +678,8 @@ export function loadAll(betLimit = 5000): HydratedState {
 
 // ── Save helpers (called after each mutation) ─────────────────────────────────
 
-export function saveBet(bet: DbBetRecord): void {
-  insertBet.run({
+export function saveBet(bet: DbBetRecord): boolean {
+  const result = insertBet.run({
     $id: bet.id,
     $bettorWallet: bet.bettorWallet,
     $chain: bet.chain,
@@ -532,10 +689,13 @@ export function saveBet(bet: DbBetRecord): void {
     $feeBps: bet.feeBps,
     $txSignature: bet.txSignature,
     $marketPda: bet.marketPda,
+    $duelKey: bet.duelKey,
+    $duelId: bet.duelId,
     $inviteCode: bet.inviteCode,
     $externalBetRef: bet.externalBetRef,
     $recordedAt: bet.recordedAt,
-  });
+  }) as { changes?: number };
+  return Number(result.changes ?? 0) > 0;
 }
 
 export function saveWalletDisplay(normalized: string, display: string): void {

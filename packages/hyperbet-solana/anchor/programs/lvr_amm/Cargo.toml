@@ -1,0 +1,37 @@
+[package]
+name = "lvr_amm"
+version = "0.1.0"
+description = "LvrAMM"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "lvr_amm"
+
+[features]
+default = []
+cpi = ["no-entrypoint"]
+no-entrypoint = []
+no-idl = []
+no-log-ix-name = []
+idl-build = ["anchor-lang/idl-build", "anchor-spl/idl-build"]
+anchor-debug = []
+custom-heap = []
+custom-panic = []
+
+[dependencies]
+anchor-lang = {version = "0.32.1", features = ["init-if-needed"]}
+anchor-spl = {version = "0.32.1", features = ["metadata"]}
+bytemuck = { version = "1.20.0", features = ["min_const_generics"] }
+ethnum = "1.5.0"
+
+
+
+[profile.release]
+overflow-checks = true
+
+[lints.rust.unexpected_cfgs]
+level = "warn"
+check-cfg = [
+    'cfg(target_os, values("solana"))',
+]

@@ -1,8 +1,25 @@
 import { Buffer } from "buffer";
 import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
+import fs_node from "node:fs";
 import path from "node:path";
 import { type Program } from "@coral-xyz/anchor";
+import {
+  normalizePredictionMarketLifecycleMetadata,
+  type PredictionMarketLifecycleStatus,
+  resolveLifecycleFromSolanaDuelStatus,
+  resolveLifecycleFromSolanaMarketStatus,
+  resolveLifecycleFromStreamPhase,
+  toRecordedBetChain,
+  type PredictionMarketLifecycleRecord,
+  type PredictionMarketWinner,
+  type RecordedBetChain,
+} from "@hyperbet/chain-registry";
+import {
+  mergePredictionMarketsWithHealth,
+  type KeeperBotHealthSnapshot,
+  type KeeperMarketHealthRecord,
+} from "@hyperbet/mm-core";
 import {
   type Connection,
   PublicKey,
@@ -10,10 +27,15 @@ import {
   Transaction,
   VersionedTransaction,
 } from "@solana/web3.js";
+import bs58 from "bs58";
 
 import {
   createPrograms,
+  duelKeyHexToBytes,
   FIGHT_ORACLE_PROGRAM_ID,
+  findDuelStatePda,
+  findMarketConfigPda,
+  findOracleConfigPda,
   findMarketPda,
   getSenderUrl,
   GOLD_CLOB_MARKET_PROGRAM_ID,
@@ -58,13 +80,15 @@ type StreamState = {
 type BetRecord = {
   id: string;
   bettorWallet: string;
-  chain: "SOLANA";
+  chain: RecordedBetChain;
   sourceAsset: string;
   sourceAmount: number;
   goldAmount: number;
   feeBps: number;
   txSignature: string;
   marketPda: string | null;
+  duelKey: string | null;
+  duelId: string | null;
   inviteCode: string | null;
   externalBetRef: string | null;
   recordedAt: number;
@@ -114,7 +138,55 @@ type RateBucket = {
 const encoder = new TextEncoder();
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const keeperRoot = path.resolve(__dirname, "..");
+const KEEPER_BOT_HEALTH_FILE = (
+  process.env.KEEPER_BOT_HEALTH_FILE ||
+  path.resolve(keeperRoot, ".status", "keeper-bot-health.json")
+).trim();
+const KEEPER_STREAM_STATE_FILE = (
+  process.env.KEEPER_STREAM_STATE_FILE ||
+  path.resolve(keeperRoot, ".status", "stream-state.json")
+).trim();
 const IS_PRODUCTION = process.env.NODE_ENV === "production";
+
+function loadKeeperBotHealthSnapshot(): KeeperBotHealthSnapshot | null {
+  if (!KEEPER_BOT_HEALTH_FILE || !fs_node.existsSync(KEEPER_BOT_HEALTH_FILE)) {
+    return null;
+  }
+  try {
+    return JSON.parse(fs_node.readFileSync(KEEPER_BOT_HEALTH_FILE, "utf8"));
+  } catch (error) {
+    console.warn("[service] Failed to read keeper bot health snapshot:", error);
+    return null;
+  }
+}
+
+function loadStreamStateSnapshot(): StreamState | null {
+  if (!KEEPER_STREAM_STATE_FILE || !fs_node.existsSync(KEEPER_STREAM_STATE_FILE)) {
+    return null;
+  }
+  try {
+    return JSON.parse(fs_node.readFileSync(KEEPER_STREAM_STATE_FILE, "utf8"));
+  } catch (error) {
+    console.warn("[service] Failed to read stream state snapshot:", error);
+    return null;
+  }
+}
+
+function persistStreamStateSnapshot(next: StreamState): void {
+  if (!KEEPER_STREAM_STATE_FILE) return;
+  try {
+    fs_node.mkdirSync(path.dirname(KEEPER_STREAM_STATE_FILE), {
+      recursive: true,
+    });
+    fs_node.writeFileSync(
+      KEEPER_STREAM_STATE_FILE,
+      `${JSON.stringify(next, null, 2)}\n`,
+      "utf8",
+    );
+  } catch (error) {
+    console.warn("[service] Failed to persist stream state snapshot:", error);
+  }
+}
 
 function readPositiveEnvInteger(
   name: string,
@@ -215,29 +287,48 @@ const defaultAgentB = {
   maxHp: 10,
 };
 
-let streamSeq = 1;
+const initialStreamState =
+  loadStreamStateSnapshot() ?? {
+    type: "STREAMING_STATE_UPDATE",
+    cycle: {
+      cycleId: "boot-cycle",
+      phase: "IDLE",
+      countdown: null,
+      timeRemaining: 0,
+      winnerId: null,
+      winnerName: null,
+      winReason: null,
+      agent1: defaultAgentA,
+      agent2: defaultAgentB,
+    },
+    leaderboard: [
+      { id: defaultAgentA.id, name: defaultAgentA.name, wins: 0, losses: 0 },
+      { id: defaultAgentB.id, name: defaultAgentB.name, wins: 0, losses: 0 },
+    ],
+    cameraTarget: null,
+    seq: 1,
+    emittedAt: Date.now(),
+  };
+let streamSeq =
+  typeof initialStreamState.seq === "number" &&
+    Number.isFinite(initialStreamState.seq) &&
+    initialStreamState.seq > 0
+    ? initialStreamState.seq
+    : 1;
 let streamState: StreamState = {
+  ...initialStreamState,
   type: "STREAMING_STATE_UPDATE",
-  cycle: {
-    cycleId: "boot-cycle",
-    phase: "IDLE",
-    countdown: null,
-    timeRemaining: 0,
-    winnerId: null,
-    winnerName: null,
-    winReason: null,
-    agent1: defaultAgentA,
-    agent2: defaultAgentB,
-  },
-  leaderboard: [
-    { id: defaultAgentA.id, name: defaultAgentA.name, wins: 0, losses: 0 },
-    { id: defaultAgentB.id, name: defaultAgentB.name, wins: 0, losses: 0 },
-  ],
-  cameraTarget: null,
   seq: streamSeq,
-  emittedAt: Date.now(),
+  emittedAt:
+    typeof initialStreamState.emittedAt === "number" &&
+      Number.isFinite(initialStreamState.emittedAt)
+      ? initialStreamState.emittedAt
+      : Date.now(),
 };
-let streamLastUpdatedAt = Date.now();
+let streamLastUpdatedAt =
+  typeof streamState.emittedAt === "number" && Number.isFinite(streamState.emittedAt)
+    ? streamState.emittedAt
+    : Date.now();
 let streamLastSourcePollAt: number | null = null;
 let streamLastSourceError: string | null = null;
 let streamSourcePollInFlight = false;
@@ -656,25 +747,7 @@ function applyCors(req: Request, headers: Headers): void {
     return;
   }
 
-  const isAllowedOrigin =
-    CORS_ORIGINS.length === 0 ||
-    CORS_ORIGINS.includes(origin) ||
-    origin === "https://hyperbet.win" ||
-    origin.endsWith(".hyperbet.win") ||
-    origin === "https://hyperscape.bet" ||
-    origin.endsWith(".hyperscape.bet") ||
-    origin === "https://hyperscape.gg" ||
-    origin.endsWith(".hyperscape.gg") ||
-    origin === "https://hyperbet.pages.dev" ||
-    origin.endsWith(".hyperbet.pages.dev") ||
-    origin === "https://hyperscape.club" ||
-    origin.endsWith(".hyperscape.club") ||
-    origin === "https://hyperscape.pages.dev" ||
-    origin.endsWith(".hyperscape.pages.dev") ||
-    origin.includes("localhost") ||
-    origin.includes("127.0.0.1");
-
-  if (isAllowedOrigin) {
+  if (isAllowedAppOrigin(origin)) {
     headers.set("access-control-allow-origin", origin);
     headers.set("vary", "Origin");
   } else {
@@ -692,32 +765,233 @@ function applyCors(req: Request, headers: Headers): void {
 function normalizeOriginLike(value: string | null): string | null {
   if (!value) return null;
   try {
-    return new URL(value).origin;
+    const url = new URL(value);
+    if (
+      (url.protocol !== "http:" && url.protocol !== "https:") ||
+      !url.hostname
+    ) {
+      return null;
+    }
+    return url.origin;
   } catch {
-    return value;
+    return null;
   }
 }
 
 function isAllowedAppOrigin(origin: string | null): boolean {
   const normalized = normalizeOriginLike(origin);
   if (!normalized) return false;
+  const { hostname } = new URL(normalized);
+  const lowerHostname = hostname.toLowerCase();
+  const matchesAppDomain = (domain: string) =>
+    lowerHostname === domain || lowerHostname.endsWith(`.${domain}`);
+  const isLoopbackHost =
+    lowerHostname === "localhost" ||
+    lowerHostname === "127.0.0.1" ||
+    lowerHostname === "::1" ||
+    lowerHostname === "[::1]";
   return (
     CORS_ORIGINS.includes(normalized) ||
-    normalized === "https://hyperbet.win" ||
-    normalized.endsWith(".hyperbet.win") ||
-    normalized === "https://hyperscape.bet" ||
-    normalized.endsWith(".hyperscape.bet") ||
-    normalized === "https://hyperscape.gg" ||
-    normalized.endsWith(".hyperscape.gg") ||
-    normalized === "https://hyperbet.pages.dev" ||
-    normalized.endsWith(".hyperbet.pages.dev") ||
-    normalized === "https://hyperscape.club" ||
-    normalized.endsWith(".hyperscape.club") ||
-    normalized === "https://hyperscape.pages.dev" ||
-    normalized.endsWith(".hyperscape.pages.dev") ||
-    normalized.includes("localhost") ||
-    normalized.includes("127.0.0.1")
+    matchesAppDomain("hyperbet.win") ||
+    matchesAppDomain("hyperscape.bet") ||
+    matchesAppDomain("hyperscape.gg") ||
+    matchesAppDomain("hyperbet.pages.dev") ||
+    matchesAppDomain("hyperscape.club") ||
+    matchesAppDomain("hyperscape.pages.dev") ||
+    isLoopbackHost
   );
+}
+
+type ExternalBetVerificationInput = {
+  marketRef: string | null;
+  duelKey: string | null;
+};
+
+type VerifiedExternalBetRecord = {
+  chain: RecordedBetChain;
+  txSignature: string;
+  bettorWallet: string;
+  duelKey: string | null;
+  marketRef: string;
+  sourceAsset: "SOL";
+  sourceAmount: number;
+  goldAmount: number;
+  feeBps: number;
+  feeAmount: number;
+  pointsBasisAmount: number;
+};
+
+const GOLD_CLOB_PLACE_ORDER_DISCRIMINATOR = createHash("sha256")
+  .update("global:place_order")
+  .digest()
+  .subarray(0, 8);
+const GOLD_CLOB_PLACE_ORDER_DATA_LENGTH = 28;
+const SOL_DISPLAY_DECIMALS = 9;
+
+function normalizeDuelKeyHex(value: string | null): string | null {
+  if (!value) return null;
+  const trimmed = value.trim().toLowerCase();
+  const normalized = trimmed.startsWith("0x") ? trimmed.slice(2) : trimmed;
+  return /^[0-9a-f]{64}$/.test(normalized) ? normalized : null;
+}
+
+function normalizeBase58Key(value: string | null): string | null {
+  if (!value) return null;
+  try {
+    return new PublicKey(value.trim()).toBase58();
+  } catch {
+    return null;
+  }
+}
+
+function toInstructionAccountAddress(value: unknown): string | null {
+  if (!value) return null;
+  if (typeof value === "string") return value;
+  if (
+    typeof value === "object" &&
+    value !== null &&
+    "pubkey" in value &&
+    typeof (value as { pubkey?: unknown }).pubkey === "string"
+  ) {
+    return (value as { pubkey: string }).pubkey;
+  }
+  if (
+    typeof value === "object" &&
+    value !== null &&
+    "pubkey" in value &&
+    typeof (value as { pubkey?: { toBase58?: () => string } }).pubkey?.toBase58 ===
+      "function"
+  ) {
+    return (value as { pubkey: { toBase58: () => string } }).pubkey.toBase58();
+  }
+  if (
+    typeof value === "object" &&
+    value !== null &&
+    "toBase58" in value &&
+    typeof (value as { toBase58?: () => string }).toBase58 === "function"
+  ) {
+    return (value as { toBase58: () => string }).toBase58();
+  }
+  return null;
+}
+
+function extractInstructionProgramId(instruction: unknown): string | null {
+  if (
+    typeof instruction === "object" &&
+    instruction !== null &&
+    "programId" in instruction
+  ) {
+    return toInstructionAccountAddress(
+      (instruction as { programId?: unknown }).programId,
+    );
+  }
+  return null;
+}
+
+function extractInstructionAccounts(instruction: unknown): string[] {
+  if (
+    typeof instruction !== "object" ||
+    instruction === null ||
+    !("accounts" in instruction) ||
+    !Array.isArray((instruction as { accounts?: unknown[] }).accounts)
+  ) {
+    return [];
+  }
+  return (instruction as { accounts: unknown[] }).accounts
+    .map((account) => toInstructionAccountAddress(account))
+    .filter((account): account is string => Boolean(account));
+}
+
+function isPlaceOrderInstructionData(data: unknown): boolean {
+  if (typeof data !== "string") return false;
+  try {
+    const raw = bs58.decode(data);
+    return (
+      raw.length >= GOLD_CLOB_PLACE_ORDER_DISCRIMINATOR.length &&
+      raw
+        .slice(0, GOLD_CLOB_PLACE_ORDER_DISCRIMINATOR.length)
+        .every((byte, index) => byte === GOLD_CLOB_PLACE_ORDER_DISCRIMINATOR[index])
+    );
+  } catch {
+    return false;
+  }
+}
+
+function toNumberLike(value: unknown): number {
+  if (typeof value === "number") return value;
+  if (typeof value === "bigint") return Number(value);
+  if (typeof value === "string") return Number(value);
+  if (
+    typeof value === "object" &&
+    value !== null &&
+    "toNumber" in value &&
+    typeof (value as { toNumber?: () => number }).toNumber === "function"
+  ) {
+    return (value as { toNumber: () => number }).toNumber();
+  }
+  return 0;
+}
+
+function formatAtomicAmount(value: bigint, decimals: number): number {
+  const negative = value < 0n;
+  const absolute = negative ? -value : value;
+  const base = 10n ** BigInt(decimals);
+  const whole = absolute / base;
+  const fraction = absolute % base;
+  const fractionText = fraction
+    .toString()
+    .padStart(decimals, "0")
+    .replace(/0+$/, "");
+  const rendered = fractionText
+    ? `${whole.toString()}.${fractionText}`
+    : whole.toString();
+  return Number(negative ? `-${rendered}` : rendered);
+}
+
+function calculateQuoteCostAtomic(
+  side: number,
+  price: number,
+  amount: bigint,
+): bigint | null {
+  if ((side !== 1 && side !== 2) || price < 0 || price > 1000 || amount <= 0n) {
+    return null;
+  }
+  const priceComponent = BigInt(side === 1 ? price : 1000 - price);
+  const total = amount * priceComponent;
+  if (total <= 0n || total % 1000n !== 0n) {
+    return null;
+  }
+  const cost = total / 1000n;
+  return cost > 0n ? cost : null;
+}
+
+function calculateBpsFeeAtomic(amount: bigint, feeBps: number): bigint {
+  if (amount <= 0n || feeBps <= 0) return 0n;
+  return (amount * BigInt(feeBps)) / 10_000n;
+}
+
+function decodePlaceOrderInstructionData(
+  data: unknown,
+): { side: number; price: number; amount: bigint } | null {
+  if (!isPlaceOrderInstructionData(data) || typeof data !== "string") {
+    return null;
+  }
+  try {
+    const raw = Buffer.from(bs58.decode(data));
+    if (raw.length < GOLD_CLOB_PLACE_ORDER_DATA_LENGTH) {
+      return null;
+    }
+    const side = raw.readUInt8(16);
+    const price = raw.readUInt16LE(17);
+    const amount = raw.readBigUInt64LE(19);
+    return {
+      side,
+      price,
+      amount,
+    };
+  } catch {
+    return null;
+  }
 }
 
 function decodeSenderTransaction(transaction: string): Transaction | VersionedTransaction {
@@ -880,6 +1154,309 @@ function handleDuelContext(req: Request): Response {
   );
 }
 
+function currentDuelKey(): string | null {
+  const raw = streamState.cycle?.duelKeyHex;
+  if (typeof raw !== "string") return null;
+  const normalized = raw.trim().replace(/^0x/i, "").toLowerCase();
+  return normalized.length > 0 ? normalized : null;
+}
+
+function currentDuelId(): string | null {
+  const raw = streamState.cycle?.duelId;
+  return typeof raw === "string" && raw.trim().length > 0 ? raw.trim() : null;
+}
+
+function currentBetCloseTime(): number | null {
+  const raw = streamState.cycle?.betCloseTime;
+  return typeof raw === "number" && Number.isFinite(raw) ? raw : null;
+}
+
+function currentWinnerFromCycle(): PredictionMarketWinner {
+  const cycleAgent1 = streamState.cycle?.agent1 as { id?: unknown } | null | undefined;
+  const cycleAgent2 = streamState.cycle?.agent2 as { id?: unknown } | null | undefined;
+  const winnerId =
+    typeof streamState.cycle?.winnerId === "string"
+      ? streamState.cycle.winnerId
+      : null;
+  const agent1Id =
+    typeof cycleAgent1?.id === "string"
+      ? cycleAgent1.id
+      : null;
+  const agent2Id =
+    typeof cycleAgent2?.id === "string"
+      ? cycleAgent2.id
+      : null;
+
+  if (winnerId && agent1Id && winnerId === agent1Id) return "A";
+  if (winnerId && agent2Id && winnerId === agent2Id) return "B";
+  return "NONE";
+}
+
+function enumName(value: unknown): string | null {
+  if (!value || typeof value !== "object") return null;
+  const [key] = Object.keys(value as Record<string, unknown>);
+  return typeof key === "string" && key.length > 0 ? key : null;
+}
+
+const ZERO_HEX_32 =
+  "0x0000000000000000000000000000000000000000000000000000000000000000";
+
+function toNullableTimestamp(value: unknown): number | null {
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : null;
+  }
+  if (typeof value === "bigint") {
+    return Number(value);
+  }
+  if (value && typeof (value as { toString(): string }).toString === "function") {
+    const parsed = Number((value as { toString(): string }).toString());
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+function normalizeHexProposalId(value: unknown): string | null {
+  if (typeof value === "string" && /^0x[0-9a-fA-F]{64}$/.test(value.trim())) {
+    const normalized = value.trim().toLowerCase();
+    return normalized === ZERO_HEX_32 ? null : normalized;
+  }
+  if (
+    value instanceof Uint8Array ||
+    Buffer.isBuffer(value) ||
+    Array.isArray(value)
+  ) {
+    const normalized = `0x${Buffer.from(value).toString("hex")}`;
+    return normalized === ZERO_HEX_32 ? null : normalized;
+  }
+  return null;
+}
+
+function resolveLifecycleFromSolanaSnapshot(
+  duelStatus: string | null,
+  marketStatus: string | null,
+  fallback: PredictionMarketLifecycleStatus,
+): PredictionMarketLifecycleStatus {
+  const duelLifecycle = resolveLifecycleFromSolanaDuelStatus(duelStatus);
+  if (duelLifecycle !== "UNKNOWN") return duelLifecycle;
+  const marketLifecycle = resolveLifecycleFromSolanaMarketStatus(marketStatus);
+  return marketLifecycle !== "UNKNOWN" ? marketLifecycle : fallback;
+}
+
+function resolveWinnerFromSolanaState(
+  winner: string | null,
+  fallback: PredictionMarketWinner,
+): PredictionMarketWinner {
+  switch (winner?.toLowerCase()) {
+    case "a":
+      return "A";
+    case "b":
+      return "B";
+    case "none":
+      return "NONE";
+    default:
+      return fallback;
+  }
+}
+
+function resolvePhaseFromLifecycleStatus(
+  lifecycleStatus: PredictionMarketLifecycleStatus | null | undefined,
+): string | null {
+  switch (lifecycleStatus) {
+    case "OPEN":
+      return "ANNOUNCEMENT";
+    case "LOCKED":
+      return "COUNTDOWN";
+    case "PROPOSED":
+    case "CHALLENGED":
+    case "RESOLVED":
+    case "CANCELLED":
+      return "RESOLUTION";
+    default:
+      return null;
+  }
+}
+
+function buildPredictionMarketLifecycleRecords(): PredictionMarketLifecycleRecord[] {
+  const snapshot = parsers.solana.snapshot as Record<string, unknown> | null;
+  const duelKey = currentDuelKey();
+  const duelId = currentDuelId();
+  const cycleLifecycle = resolveLifecycleFromStreamPhase(
+    typeof streamState.cycle?.phase === "string" ? streamState.cycle.phase : null,
+  );
+  const cycleWinner = currentWinnerFromCycle();
+  const derivedCurrentMarketPda =
+    duelKey != null
+      ? findMarketPda(
+        GOLD_CLOB_MARKET_PROGRAM_ID,
+        findDuelStatePda(FIGHT_ORACLE_PROGRAM_ID, duelKeyHexToBytes(duelKey)),
+      ).toBase58()
+      : null;
+  const solanaLifecycle = resolveLifecycleFromSolanaSnapshot(
+    typeof snapshot?.currentDuelStatus === "string"
+      ? snapshot.currentDuelStatus
+      : null,
+    typeof snapshot?.currentMarketStatus === "string"
+      ? snapshot.currentMarketStatus
+      : null,
+    cycleLifecycle,
+  );
+  const solanaWinner = resolveWinnerFromSolanaState(
+    typeof snapshot?.currentMarketWinner === "string"
+      ? snapshot.currentMarketWinner
+      : null,
+    cycleWinner,
+  );
+
+  if (!parsers.solana.enabled && !snapshot && !derivedCurrentMarketPda) {
+    return [];
+  }
+
+  return [
+    {
+      chainKey: "solana",
+      duelKey,
+      duelId,
+      marketId:
+        derivedCurrentMarketPda ??
+        (typeof snapshot?.derivedMarketPda === "string"
+          ? snapshot.derivedMarketPda
+          : typeof snapshot?.latestMarketAccount === "string"
+            ? snapshot.latestMarketAccount
+            : null),
+      marketRef:
+        derivedCurrentMarketPda ??
+        (typeof snapshot?.derivedMarketPda === "string"
+          ? snapshot.derivedMarketPda
+          : typeof snapshot?.latestMarketAccount === "string"
+            ? snapshot.latestMarketAccount
+            : null),
+      lifecycleStatus: solanaLifecycle,
+      winner: solanaWinner,
+      betCloseTime: currentBetCloseTime(),
+      contractAddress: null,
+      programId:
+        typeof snapshot?.marketProgram === "string" ? snapshot.marketProgram : null,
+      txRef:
+        typeof snapshot?.recentSignature === "string"
+          ? snapshot.recentSignature
+          : null,
+      syncedAt: parsers.solana.lastSuccessAt,
+      metadata: normalizePredictionMarketLifecycleMetadata({
+        proposalId: normalizeHexProposalId(snapshot?.currentProposalId),
+        challengeWindowEndsAt: (() => {
+          const proposedAt = toNullableTimestamp(snapshot?.currentProposalProposedAt);
+          const disputeWindowSeconds = toNullableTimestamp(
+            snapshot?.currentDisputeWindowSeconds,
+          );
+          return proposedAt != null && disputeWindowSeconds != null
+            ? proposedAt + disputeWindowSeconds
+            : null;
+        })(),
+        finalizedAt: null,
+        cancellationReason: null,
+        fightAccountCount:
+          typeof snapshot?.fightAccountCount === "number"
+            ? snapshot.fightAccountCount
+            : null,
+        marketAccountCount:
+          typeof snapshot?.marketAccountCount === "number"
+            ? snapshot.marketAccountCount
+            : null,
+        duelStatus: snapshot?.currentDuelStatus ?? null,
+        proposalChallenged:
+          typeof snapshot?.currentProposalChallenged === "boolean"
+            ? snapshot.currentProposalChallenged
+            : null,
+      }),
+    },
+  ];
+}
+
+function toFallbackKeeperMarketHealthRecord(
+  record: PredictionMarketLifecycleRecord,
+): KeeperMarketHealthRecord {
+  return {
+    chainKey: record.chainKey,
+    duelId: record.duelId ?? null,
+    duelKey: record.duelKey ?? null,
+    marketRef: record.marketRef ?? null,
+    lifecycleStatus: record.lifecycleStatus,
+    winner: record.winner,
+    fairValue: null,
+    bidPrice: null,
+    askPrice: null,
+    bidUnits: 0,
+    askUnits: 0,
+    openOrderCount: 0,
+    inventoryYes: 0,
+    inventoryNo: 0,
+    openYes: 0,
+    openNo: 0,
+    netExposure: 0,
+    grossExposure: 0,
+    drawdownBps: 0,
+    quoteAgeMs: null,
+    lastStreamAtMs: record.syncedAt ?? null,
+    lastOracleAtMs: record.syncedAt ?? null,
+    lastRpcAtMs: record.syncedAt ?? null,
+    circuitBreakerReason: null,
+    lastResolvedAtMs:
+      typeof record.metadata?.finalizedAt === "number"
+        ? record.metadata.finalizedAt
+        : null,
+    lastClaimAtMs: null,
+    recovery: [],
+  };
+}
+
+function resolveKeeperBotHealthSnapshot(
+  botHealthSnapshot: KeeperBotHealthSnapshot | null,
+): KeeperBotHealthSnapshot | null {
+  if (botHealthSnapshot == null || botHealthSnapshot.markets.length > 0) {
+    return botHealthSnapshot;
+  }
+  const fallbackMarkets = buildPredictionMarketLifecycleRecords().map(
+    toFallbackKeeperMarketHealthRecord,
+  );
+  if (fallbackMarkets.length === 0) {
+    return botHealthSnapshot;
+  }
+  return {
+    ...botHealthSnapshot,
+    markets: fallbackMarkets,
+  };
+}
+
+function handlePredictionMarkets(req: Request): Response {
+  const markets = buildPredictionMarketLifecycleRecords();
+  const fallbackMarket =
+    markets.find((market) => market.duelKey != null || market.duelId != null) ?? null;
+  return jsonResponse(
+    req,
+    {
+      duel: {
+        duelKey: currentDuelKey() ?? fallbackMarket?.duelKey ?? null,
+        duelId: currentDuelId() ?? fallbackMarket?.duelId ?? null,
+        phase:
+          typeof streamState.cycle?.phase === "string"
+            ? streamState.cycle.phase
+            : resolvePhaseFromLifecycleStatus(fallbackMarket?.lifecycleStatus),
+        winner:
+          currentWinnerFromCycle() !== "NONE"
+            ? currentWinnerFromCycle()
+            : (fallbackMarket?.winner ?? "NONE"),
+        betCloseTime: currentBetCloseTime() ?? fallbackMarket?.betCloseTime ?? null,
+      },
+      markets,
+      updatedAt: Date.now(),
+    },
+    200,
+    {
+      "cache-control": "no-store",
+    },
+  );
+}
+
 function handleStreamingLeaderboardDetails(req: Request, url: URL): Response {
   const historyLimit = parseBoundedInteger(
     url.searchParams.get("historyLimit"),
@@ -997,6 +1574,154 @@ function requireWriteAuth(
   return provided === fallbackKey;
 }
 
+function hasPrivilegedWriteAuth(
+  req: Request,
+  fallbackKey = ARENA_WRITE_KEY,
+): boolean {
+  return Boolean(fallbackKey) && requireWriteAuth(req, fallbackKey);
+}
+
+async function verifyRecordedBet(
+  bettorWallet: string,
+  txSignature: string,
+  expected: ExternalBetVerificationInput,
+): Promise<VerifiedExternalBetRecord | null> {
+  if (!solanaCtx) return null;
+  const normalizedWallet = normalizeBase58Key(bettorWallet);
+  const rawMarketRef = expected.marketRef?.trim() || null;
+  const rawDuelKey = expected.duelKey?.trim() || null;
+  const normalizedMarketRef = rawMarketRef
+    ? normalizeBase58Key(rawMarketRef)
+    : null;
+  const normalizedDuelKey = normalizeDuelKeyHex(rawDuelKey);
+  if (!normalizedWallet || !txSignature.trim()) {
+    return null;
+  }
+  if ((rawMarketRef && !normalizedMarketRef) || (rawDuelKey && !normalizedDuelKey)) {
+    return null;
+  }
+  if (!normalizedMarketRef && !normalizedDuelKey) {
+    return null;
+  }
+
+  const expectedDuelState = normalizedDuelKey
+    ? findDuelStatePda(
+      FIGHT_ORACLE_PROGRAM_ID,
+      duelKeyHexToBytes(normalizedDuelKey),
+    ).toBase58()
+    : null;
+  const derivedMarketRef = expectedDuelState
+    ? findMarketPda(
+      GOLD_CLOB_MARKET_PROGRAM_ID,
+      new PublicKey(expectedDuelState),
+    ).toBase58()
+    : null;
+  if (
+    normalizedMarketRef &&
+    derivedMarketRef &&
+    normalizedMarketRef !== derivedMarketRef
+  ) {
+    return null;
+  }
+  const expectedMarketRef = normalizedMarketRef ?? derivedMarketRef;
+
+  try {
+    const transaction = await solanaCtx.connection.getParsedTransaction(
+      txSignature,
+      {
+        commitment: "confirmed",
+        maxSupportedTransactionVersion: 0,
+      },
+    );
+    if (!transaction || transaction.meta?.err) {
+      return null;
+    }
+
+    const walletSigned = transaction.transaction.message.accountKeys.some(
+      (key) =>
+        key.signer &&
+        normalizeBase58Key(toInstructionAccountAddress(key.pubkey)) ===
+          normalizedWallet,
+    );
+    if (!walletSigned) {
+      return null;
+    }
+
+    for (const instruction of transaction.transaction.message.instructions) {
+      const programId = extractInstructionProgramId(instruction);
+      if (programId !== GOLD_CLOB_MARKET_PROGRAM_ID.toBase58()) {
+        continue;
+      }
+      const decodedOrder =
+        typeof instruction === "object" && instruction !== null && "data" in instruction
+          ? decodePlaceOrderInstructionData(
+            (instruction as { data?: unknown }).data,
+          )
+          : null;
+      if (!decodedOrder) {
+        continue;
+      }
+      const accounts = extractInstructionAccounts(instruction);
+      const marketState = normalizeBase58Key(accounts[0] ?? null);
+      const duelState = normalizeBase58Key(accounts[1] ?? null);
+      const user = normalizeBase58Key(accounts[9] ?? null);
+      if (user !== normalizedWallet) continue;
+      if (expectedMarketRef && marketState !== expectedMarketRef) continue;
+      if (expectedDuelState && duelState !== expectedDuelState) continue;
+      if (!marketState) continue;
+
+      const marketConfig = await solanaCtx.marketProgram.account.marketConfig.fetch(
+        findMarketConfigPda(solanaCtx.marketProgramId),
+      );
+      const totalFeeBps =
+        toNumberLike(marketConfig?.tradeTreasuryFeeBps) +
+        toNumberLike(marketConfig?.tradeMarketMakerFeeBps);
+      const quoteCostAtomic = calculateQuoteCostAtomic(
+        decodedOrder.side,
+        decodedOrder.price,
+        decodedOrder.amount,
+      );
+      if (quoteCostAtomic == null) {
+        continue;
+      }
+      const feeAmountAtomic = calculateBpsFeeAtomic(quoteCostAtomic, totalFeeBps);
+      const totalSpendAtomic = quoteCostAtomic + feeAmountAtomic;
+      const totalSpend = formatAtomicAmount(totalSpendAtomic, SOL_DISPLAY_DECIMALS);
+      const feeAmount = formatAtomicAmount(feeAmountAtomic, SOL_DISPLAY_DECIMALS);
+
+      return {
+        chain: toRecordedBetChain("solana"),
+        txSignature: txSignature.trim(),
+        bettorWallet: normalizedWallet,
+        duelKey: normalizedDuelKey,
+        marketRef: marketState,
+        sourceAsset: "SOL",
+        sourceAmount: totalSpend,
+        goldAmount: totalSpend,
+        feeBps: totalFeeBps,
+        feeAmount,
+        pointsBasisAmount: totalSpend,
+      };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+async function authorizeExternalBetRecord(
+  req: Request,
+  bettorWallet: string,
+  txSignature: string,
+  expected: ExternalBetVerificationInput,
+): Promise<VerifiedExternalBetRecord | null> {
+  if (!isAllowedAppOrigin(req.headers.get("origin")) || !txSignature.trim()) {
+    return null;
+  }
+
+  return verifyRecordedBet(bettorWallet, txSignature, expected);
+}
+
 function toStreamState(payload: unknown): StreamState | null {
   if (!payload || typeof payload !== "object") return null;
 
@@ -1058,6 +1783,7 @@ function publishStreamState(next: StreamState, sourceLabel: string): void {
   };
   streamLastUpdatedAt = Date.now();
   streamLastSourceError = null;
+  persistStreamStateSnapshot(streamState);
   broadcastStreamState(streamState, "state");
   console.log(
     `[${nowIso()}] [stream] updated from ${sourceLabel} cycle=${streamState.cycle?.cycleId ?? "unknown"} phase=${streamState.cycle?.phase ?? "unknown"}`,
@@ -1170,7 +1896,13 @@ function startKeeperBotIfEnabled(): void {
   if (!ENABLE_KEEPER_BOT) return;
   if (botSubprocess) return;
 
-  const childEnv = buildKeeperBotChildEnv(process.env, PORT);
+  const childEnv = buildKeeperBotChildEnv(
+    {
+      ...process.env,
+      KEEPER_BOT_HEALTH_FILE,
+    },
+    PORT,
+  );
 
   botSubprocess = Bun.spawn(["bun", "--bun", "src/bot.ts"], {
     cwd: keeperRoot,
@@ -1263,11 +1995,48 @@ async function pollSolanaSnapshot(): Promise<void> {
           fightAccounts[0]!.pubkey,
         ).toBase58()
         : null;
+    const currentSolanaDuelKey = currentDuelKey();
+    const oracleConfigPda = findOracleConfigPda(solanaCtx.fightProgram.programId);
+    const oracleConfig =
+      await solanaCtx.fightProgram.account.oracleConfig.fetchNullable(
+        oracleConfigPda,
+      );
+    const currentDuelPda =
+      currentSolanaDuelKey != null
+        ? findDuelStatePda(
+          solanaCtx.fightProgram.programId,
+          duelKeyHexToBytes(currentSolanaDuelKey),
+        ).toBase58()
+        : null;
+    const currentDuelAccount =
+      currentDuelPda != null
+        ? await solanaCtx.fightProgram.account.duelState.fetchNullable(
+          new PublicKey(currentDuelPda),
+        )
+        : null;
+    const currentMarketPda =
+      currentSolanaDuelKey != null
+        ? findMarketPda(
+          solanaCtx.marketProgramId,
+          findDuelStatePda(
+            solanaCtx.fightProgram.programId,
+            duelKeyHexToBytes(currentSolanaDuelKey),
+          ),
+        ).toBase58()
+        : null;
+    const currentMarketAccount =
+      currentMarketPda != null
+        ? await solanaCtx.marketProgram.account.marketState.fetchNullable(
+          new PublicKey(currentMarketPda),
+        )
+        : null;
     const recentSignature =
       (
         recentSignatures as Array<{ signature?: string } | null>
       ).find((entry) => entry?.signature)?.signature ??
       null;
+    const currentDuelData = currentDuelAccount as Record<string, unknown> | null;
+    const oracleConfigData = oracleConfig as Record<string, unknown> | null;
 
     parsers.solana.snapshot = {
       rpc: sanitizeUrlForStatus(solanaCtx.connection.rpcEndpoint),
@@ -1278,6 +2047,24 @@ async function pollSolanaSnapshot(): Promise<void> {
       latestFightAccount,
       latestMarketAccount,
       derivedMarketPda,
+      currentDuelPda,
+      currentMarketPda,
+      currentDuelStatus: enumName(currentDuelAccount?.status),
+      currentMarketStatus: enumName(currentMarketAccount?.status),
+      currentMarketWinner: enumName(currentMarketAccount?.winner),
+      currentProposalId: normalizeHexProposalId(
+        currentDuelData?.activeProposal,
+      ),
+      currentProposalProposedAt: toNullableTimestamp(
+        currentDuelData?.pendingProposedAt,
+      ),
+      currentProposalChallenged:
+        typeof currentDuelData?.pendingChallenged === "boolean"
+          ? currentDuelData.pendingChallenged
+          : null,
+      currentDisputeWindowSeconds: toNullableTimestamp(
+        oracleConfigData?.disputeWindowSecs,
+      ),
       recentSignature,
     };
     parsers.solana.lastSuccessAt = Date.now();
@@ -1437,10 +2224,6 @@ function multiplierResponse(wallet: string): Record<string, unknown> {
 }
 
 async function handleBetRecord(req: Request): Promise<Response> {
-  if (!requireWriteAuth(req)) {
-    return jsonResponse(req, { error: "Unauthorized write key" }, 401);
-  }
-
   let payload: Record<string, unknown>;
   try {
     payload = (await req.json()) as Record<string, unknown>;
@@ -1453,41 +2236,94 @@ async function handleBetRecord(req: Request): Promise<Response> {
     return jsonResponse(req, { error: "Missing bettorWallet" }, 400);
   }
 
-  const sourceAmount = parseNumberInput(payload.sourceAmount, 0);
-  const goldAmount = parseNumberInput(payload.goldAmount, sourceAmount);
-  const feeBps = Math.max(0, parseNumberInput(payload.feeBps, 0));
+  const txSignature = String(payload.txSignature || "").trim();
+  const marketRefRaw = payload.marketPda
+    ? String(payload.marketPda)
+    : payload.marketRef
+      ? String(payload.marketRef)
+      : null;
+  const duelKeyRaw = payload.duelKey ? String(payload.duelKey).trim() : null;
+  const authorizedByWriteKey = hasPrivilegedWriteAuth(req);
+  const verifiedExternalBet = authorizedByWriteKey
+    ? null
+    : await authorizeExternalBetRecord(req, walletRaw, txSignature, {
+      marketRef: marketRefRaw,
+      duelKey: duelKeyRaw,
+    });
+  if (!authorizedByWriteKey && !verifiedExternalBet) {
+    return jsonResponse(req, { error: "Unauthorized write key" }, 401);
+  }
+
+  const sourceAmount = verifiedExternalBet
+    ? verifiedExternalBet.sourceAmount
+    : parseNumberInput(payload.sourceAmount, 0);
+  const goldAmount = verifiedExternalBet
+    ? verifiedExternalBet.goldAmount
+    : parseNumberInput(payload.goldAmount, sourceAmount);
+  const feeBps = verifiedExternalBet
+    ? Math.max(0, verifiedExternalBet.feeBps)
+    : Math.max(0, parseNumberInput(payload.feeBps, 0));
   const recordedAt = Date.now();
 
   const normalizedWallet = rememberWalletCase(walletRaw);
   ensureIdentity(normalizedWallet);
-  const points = ensureWalletPoints(normalizedWallet);
+  const pointsBasisAmount = verifiedExternalBet
+    ? Math.max(verifiedExternalBet.pointsBasisAmount, 0)
+    : Math.max(goldAmount, sourceAmount);
   const pointsAwarded = Math.max(
     1,
-    Math.round(Math.max(goldAmount, sourceAmount) * 10),
+    Math.round(pointsBasisAmount * 10),
   );
+  const canonicalTxSignature = verifiedExternalBet?.txSignature ?? txSignature;
+  const canonicalMarketRef = verifiedExternalBet?.marketRef ?? marketRefRaw;
+  const canonicalDuelKey = verifiedExternalBet?.duelKey ?? duelKeyRaw;
+  const canonicalSourceAsset =
+    verifiedExternalBet?.sourceAsset ?? String(payload.sourceAsset || "GOLD");
+  const canonicalExternalBetRef = authorizedByWriteKey
+    ? payload.externalBetRef
+      ? String(payload.externalBetRef)
+      : canonicalTxSignature
+        ? `solana:${canonicalTxSignature}`
+        : null
+    : canonicalTxSignature
+      ? `solana:${canonicalTxSignature}`
+      : null;
   const record: BetRecord = {
     id: `${recordedAt}-${Math.random().toString(36).slice(2, 10)}`,
     bettorWallet: displayWallet(normalizedWallet),
-    chain: "SOLANA",
-    sourceAsset: String(payload.sourceAsset || "GOLD"),
+    chain: toRecordedBetChain("solana"),
+    sourceAsset: canonicalSourceAsset,
     sourceAmount,
     goldAmount,
     feeBps,
-    txSignature: String(payload.txSignature || ""),
-    marketPda: payload.marketPda ? String(payload.marketPda) : null,
+    txSignature: canonicalTxSignature,
+    marketPda: canonicalMarketRef,
+    duelKey: canonicalDuelKey,
+    duelId: payload.duelId ? String(payload.duelId).trim() : null,
     inviteCode: null,
-    externalBetRef: payload.externalBetRef
-      ? String(payload.externalBetRef)
-      : null,
+    externalBetRef: canonicalExternalBetRef,
     recordedAt,
   };
-  points.selfPoints += pointsAwarded;
-  saveWalletPoints(normalizedWallet, points);
 
   const inviteCodeRaw = String(payload.inviteCode || "")
     .trim()
     .toUpperCase();
   record.inviteCode = inviteCodeRaw || null;
+  const inserted = saveBet(record);
+  if (!inserted) {
+    return jsonResponse(req, {
+      ok: true,
+      duplicate: true,
+      pointsAwarded: 0,
+      wallet: record.bettorWallet,
+      totalPoints: totalPoints(aggregatePoints([normalizedWallet])),
+    });
+  }
+
+  const points = ensureWalletPoints(normalizedWallet);
+  points.selfPoints += pointsAwarded;
+  saveWalletPoints(normalizedWallet, points);
+
   if (inviteCodeRaw && !referredByWallet.has(normalizedWallet)) {
     const inviter = walletByInviteCode.get(inviteCodeRaw);
     if (inviter && inviter !== normalizedWallet) {
@@ -1521,7 +2357,9 @@ async function handleBetRecord(req: Request): Promise<Response> {
     referrerPoints.referralPoints += referralPointsAwarded;
     saveWalletPoints(referrer.wallet, referrerPoints);
 
-    const betFeeGold = (Math.max(goldAmount, 0) * Math.max(feeBps, 0)) / 10_000;
+    const betFeeGold = verifiedExternalBet
+      ? Math.max(verifiedExternalBet.feeAmount, 0)
+      : (Math.max(goldAmount, 0) * Math.max(feeBps, 0)) / 10_000;
     const referralFeeShare = betFeeGold * 0.5;
     const newFeeShare =
       (referralFeeShareGoldByWallet.get(referrer.wallet) ?? 0) +
@@ -1547,7 +2385,6 @@ async function handleBetRecord(req: Request): Promise<Response> {
   if (bets.length > BET_STORE_LIMIT) {
     bets.length = BET_STORE_LIMIT;
   }
-  saveBet(record);
 
   return jsonResponse(req, {
     ok: true,
@@ -1812,10 +2649,8 @@ async function handleSolanaSenderProxy(req: Request): Promise<Response> {
     return jsonResponse(req, { error: "transaction is required" }, 400);
   }
 
-  const authorizedByKey = requireWriteAuth(req);
-  const trustedOrigin =
-    isAllowedAppOrigin(req.headers.get("origin")) ||
-    isAllowedAppOrigin(req.headers.get("referer"));
+  const authorizedByKey = hasPrivilegedWriteAuth(req);
+  const trustedOrigin = isAllowedAppOrigin(req.headers.get("origin"));
 
   let decodedTransaction: Transaction | VersionedTransaction;
   try {
@@ -2088,6 +2923,20 @@ const server = Bun.serve({
     }
 
     if (url.pathname === "/status") {
+      const predictionMarkets = buildPredictionMarketLifecycleRecords();
+      const botHealthSnapshotRaw = resolveKeeperBotHealthSnapshot(
+        loadKeeperBotHealthSnapshot(),
+      );
+      const botHealthSnapshot = botHealthSnapshotRaw
+        ? {
+          ...botHealthSnapshotRaw,
+          running: Boolean(botSubprocess),
+        }
+        : null;
+      const marketStatuses = mergePredictionMarketsWithHealth(
+        predictionMarkets,
+        botHealthSnapshot,
+      );
       return jsonResponse(req, {
         ok: true,
         service: "hyperbet-solana-backend",
@@ -2114,11 +2963,28 @@ const server = Bun.serve({
           running: Boolean(botSubprocess),
           lastExitCode: botExitCode,
           lastExitAt: botLastExitAt,
+          health: botHealthSnapshot,
         },
         stats: {
           trackedBets: bets.length,
           linkedIdentities: identityMembers.size,
           knownWallets: walletDisplay.size,
+        },
+        predictionMarkets: {
+          activeDuelKey: currentDuelKey(),
+          marketCount: predictionMarkets.length,
+          botHealthUpdatedAt: botHealthSnapshot?.updatedAtMs ?? null,
+          chains: marketStatuses.map((market) => ({
+            chainKey: market.chainKey,
+            marketRef: market.marketRef,
+            lifecycleStatus: market.lifecycleStatus,
+            winner: market.winner,
+            betCloseTime: market.betCloseTime,
+            syncedAt: market.syncedAt,
+            txRef: market.txRef,
+            metadata: market.metadata ?? null,
+            health: market.health,
+          })),
         },
       });
     }
@@ -2141,6 +3007,29 @@ const server = Bun.serve({
       url.pathname === "/api/streaming/duel-context"
     ) {
       return handleDuelContext(req);
+    }
+
+    if (
+      req.method === "GET" &&
+      url.pathname === "/api/arena/prediction-markets/active"
+    ) {
+      return handlePredictionMarkets(req);
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/keeper/bot-health") {
+      const botHealthSnapshotRaw = resolveKeeperBotHealthSnapshot(
+        loadKeeperBotHealthSnapshot(),
+      );
+      return jsonResponse(req, {
+        ok: true,
+        running: Boolean(botSubprocess),
+        health: botHealthSnapshotRaw
+          ? {
+            ...botHealthSnapshotRaw,
+            running: Boolean(botSubprocess),
+          }
+          : null,
+      });
     }
 
     if (

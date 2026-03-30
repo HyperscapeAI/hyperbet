@@ -5,13 +5,16 @@
   "scripts": {
     "build": "bash scripts/build-workspace.sh",
     "deploy:devnet": "bash scripts/deploy-programs.sh devnet",
+    "deploy:pm:devnet": "bash scripts/deploy-programs.sh devnet --pm-only",
     "deploy:testnet": "bash scripts/deploy-programs.sh testnet",
+    "deploy:pm:testnet": "bash scripts/deploy-programs.sh testnet --pm-only",
     "deploy:mainnet": "bash scripts/deploy-programs.sh mainnet-beta",
+    "deploy:pm:mainnet": "bash scripts/deploy-programs.sh mainnet-beta --pm-only",
     "lint:rust": "cargo clippy --workspace --all-targets --all-features -- -D warnings",
     "test:rust": "cargo test --workspace",
     "audit": "bash scripts/run-cargo-audit.sh",
     "audit:strict": "ANCHOR_AUDIT_STRICT=1 bash scripts/run-cargo-audit.sh -D warnings",
-    "test": "bash scripts/run-localnet-tests.sh tests/black_hat_exploits.ts tests/hyperbet.ts tests/gold_clob_market.test.ts tests/gold_clob_security.ts tests/gold_perps_market.ts",
+    "test": "bash scripts/run-localnet-tests.sh",
     "test:anchor-cli": "if command -v anchor >/dev/null 2>&1; then HYPERSCAPE_MAX_ORACLE_STALENESS_SECONDS=1 GOLD_PERPS_TEST_STALE_WAIT_MS=2500 anchor test; else echo 'Anchor CLI not found, skipping tests'; fi",
     "simulate:localnet": "node scripts/run-hyperscape-simulation.mjs",
     "simulate:perps-risk": "bun scripts/simulate-gold-perps-risk.ts"

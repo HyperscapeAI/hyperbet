@@ -1,0 +1,59 @@
+{
+  "solana": [
+    {
+      "id": "solana_oracle_lag_2026_02_18",
+      "events": [
+        { "truePrice": 0.500, "signalPrice": 0.500, "attackerSide": null, "qty": 0 },
+        { "truePrice": 0.512, "signalPrice": 0.503, "attackerSide": "buy", "qty": 3 },
+        { "truePrice": 0.526, "signalPrice": 0.506, "attackerSide": "buy", "qty": 3 },
+        { "truePrice": 0.538, "signalPrice": 0.510, "attackerSide": "buy", "qty": 4 },
+        { "truePrice": 0.547, "signalPrice": 0.514, "attackerSide": "buy", "qty": 4 },
+        { "truePrice": 0.552, "signalPrice": 0.519, "attackerSide": "buy", "qty": 3 },
+        { "truePrice": 0.544, "signalPrice": 0.523, "attackerSide": "sell", "qty": 2 },
+        { "truePrice": 0.535, "signalPrice": 0.526, "attackerSide": "sell", "qty": 2 },
+        { "truePrice": 0.526, "signalPrice": 0.527, "attackerSide": null, "qty": 0 },
+        { "truePrice": 0.519, "signalPrice": 0.526, "attackerSide": "sell", "qty": 2 },
+        { "truePrice": 0.511, "signalPrice": 0.523, "attackerSide": "sell", "qty": 3 },
+        { "truePrice": 0.504, "signalPrice": 0.519, "attackerSide": "sell", "qty": 3 }
+      ]
+    }
+  ],
+  "bsc": [
+    {
+      "id": "bsc_cancel_storm_2026_02_22",
+      "events": [
+        { "truePrice": 0.500, "signalPrice": 0.500, "attackerSide": null, "qty": 0 },
+        { "truePrice": 0.496, "signalPrice": 0.499, "attackerSide": "sell", "qty": 2 },
+        { "truePrice": 0.503, "signalPrice": 0.498, "attackerSide": "buy", "qty": 3 },
+        { "truePrice": 0.493, "signalPrice": 0.497, "attackerSide": "sell", "qty": 3 },
+        { "truePrice": 0.507, "signalPrice": 0.496, "attackerSide": "buy", "qty": 4 },
+        { "truePrice": 0.489, "signalPrice": 0.495, "attackerSide": "sell", "qty": 4 },
+        { "truePrice": 0.514, "signalPrice": 0.495, "attackerSide": "buy", "qty": 4 },
+        { "truePrice": 0.486, "signalPrice": 0.496, "attackerSide": "sell", "qty": 5 },
+        { "truePrice": 0.519, "signalPrice": 0.498, "attackerSide": "buy", "qty": 5 },
+        { "truePrice": 0.498, "signalPrice": 0.500, "attackerSide": null, "qty": 0 },
+        { "truePrice": 0.505, "signalPrice": 0.501, "attackerSide": "buy", "qty": 3 },
+        { "truePrice": 0.497, "signalPrice": 0.500, "attackerSide": "sell", "qty": 3 }
+      ]
+    }
+  ],
+  "avax": [
+    {
+      "id": "avax_backrun_burst_2026_02_25",
+      "events": [
+        { "truePrice": 0.500, "signalPrice": 0.500, "attackerSide": null, "qty": 0 },
+        { "truePrice": 0.518, "signalPrice": 0.505, "attackerSide": "buy", "qty": 3 },
+        { "truePrice": 0.531, "signalPrice": 0.511, "attackerSide": "buy", "qty": 4 },
+        { "truePrice": 0.543, "signalPrice": 0.518, "attackerSide": "buy", "qty": 4 },
+        { "truePrice": 0.552, "signalPrice": 0.525, "attackerSide": "buy", "qty": 4 },
+        { "truePrice": 0.548, "signalPrice": 0.531, "attackerSide": "sell", "qty": 2 },
+        { "truePrice": 0.537, "signalPrice": 0.535, "attackerSide": "sell", "qty": 3 },
+        { "truePrice": 0.525, "signalPrice": 0.536, "attackerSide": "sell", "qty": 3 },
+        { "truePrice": 0.514, "signalPrice": 0.534, "attackerSide": "sell", "qty": 4 },
+        { "truePrice": 0.507, "signalPrice": 0.531, "attackerSide": "sell", "qty": 4 },
+        { "truePrice": 0.499, "signalPrice": 0.526, "attackerSide": "sell", "qty": 3 },
+        { "truePrice": 0.505, "signalPrice": 0.520, "attackerSide": "buy", "qty": 2 }
+      ]
+    }
+  ]
+}

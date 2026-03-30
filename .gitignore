@@ -1,5 +1,6 @@
 node_modules
 .turbo
+.ci-artifacts
 .DS_Store
 dist
 coverage
@@ -14,6 +15,8 @@ packages/*/app/.wrangler
 packages/*/app/test-results
 packages/*/app/.manual-keeper-*.sqlite*
 packages/*/app/tests/e2e/playwright-report/
+packages/*/app/tests/e2e/.acceptance-*.env
+packages/*/app/tests/e2e/control.json
 packages/*/app/.e2e-*
 packages/*/anchor/.anchor
 packages/*/anchor/.e2e-ledger*
@@ -22,8 +25,15 @@ packages/*/anchor/.tmp-ledger
 packages/*/anchor/test-ledger
 packages/*/anchor/target/debug
 packages/*/anchor/target/release
+packages/*/anchor/target/deploy/*.so
+packages/*/anchor/target/deploy/*-keypair.json
 packages/*/anchor/target/sbf-solana-solana
+packages/*/anchor/target/sbpf-solana-solana
 packages/*/keeper/keeper.sqlite*
+packages/*/keeper/.status/
+packages/*/keeper/workspace.package.json
+packages/*/keeper/workspace.bun.lock
+packages/*/keeper/workspace-packages/
 packages/evm-contracts/node_modules
 packages/evm-contracts/cache
 packages/evm-contracts/out
@@ -31,6 +41,7 @@ packages/evm-contracts/artifacts
 packages/evm-contracts/typechain-types
 packages/evm-contracts/deployments
 keys/
+deployer.json
 wallets.generated.json
 packages/market-maker-bot/test.out
 __pycache__/
@@ -38,3 +49,5 @@ __pycache__/
 .venv/
 poetry.lock
 packages/market-maker-bot/simulations/
+docs/plans/
+output/

@@ -1,5 +1,5 @@
 {
-  "address": "HbXhqEFevpkfYdZCN6YmJGRmQmj9vsBun2ZHjeeaLRik",
+  "address": "BFbmQbSbf3R6fMDdXKMKQZCTyMhMs9MCcjAhGDBLETXS",
   "metadata": {
     "name": "gold_perps_market",
     "version": "0.1.0",
@@ -78,6 +78,45 @@
       ]
     },
     {
+      "name": "freeze_config",
+      "discriminator": [
+        30,
+        68,
+        20,
+        154,
+        197,
+        42,
+        47,
+        122
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority",
+          "signer": true
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "initialize_config",
       "discriminator": [
         208,
@@ -116,7 +155,7 @@
         },
         {
           "name": "program",
-          "address": "HbXhqEFevpkfYdZCN6YmJGRmQmj9vsBun2ZHjeeaLRik"
+          "address": "BFbmQbSbf3R6fMDdXKMKQZCTyMhMs9MCcjAhGDBLETXS"
         },
         {
           "name": "program_data"
@@ -253,7 +292,32 @@
         },
         {
           "name": "position",
-          "writable": true
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  115,
+                  105,
+                  116,
+                  105,
+                  111,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "owner"
+              },
+              {
+                "kind": "arg",
+                "path": "market_id"
+              }
+            ]
+          }
         },
         {
           "name": "owner",
@@ -455,6 +519,63 @@
       ]
     },
     {
+      "name": "repay_bad_debt",
+      "discriminator": [
+        112,
+        144,
+        188,
+        157,
+        43,
+        106,
+        141,
+        34
+      ],
+      "accounts": [
+        {
+          "name": "market",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  97,
+                  114,
+                  107,
+                  101,
+                  116
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "market_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "payer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "market_id",
+          "type": "u64"
+        },
+        {
+          "name": "amount",
+          "type": "u64"
+        }
+      ]
+    },
+    {
       "name": "set_market_status",
       "discriminator": [
         101,
@@ -525,6 +646,50 @@
         {
           "name": "settlement_spot_index",
           "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "set_paused",
+      "discriminator": [
+        91,
+        60,
+        125,
+        192,
+        176,
+        225,
+        166,
+        218
+      ],
+      "accounts": [
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority",
+          "signer": true
+        }
+      ],
+      "args": [
+        {
+          "name": "paused",
+          "type": "bool"
         }
       ]
     },
@@ -839,6 +1004,47 @@
       ]
     }
   ],
+  "events": [
+    {
+      "name": "OracleSynced",
+      "discriminator": [
+        58,
+        165,
+        29,
+        1,
+        137,
+        95,
+        121,
+        67
+      ]
+    },
+    {
+      "name": "PositionLiquidated",
+      "discriminator": [
+        40,
+        107,
+        90,
+        214,
+        96,
+        30,
+        61,
+        128
+      ]
+    },
+    {
+      "name": "PositionModified",
+      "discriminator": [
+        2,
+        251,
+        140,
+        65,
+        176,
+        78,
+        250,
+        126
+      ]
+    }
+  ],
   "errors": [
     {
       "code": 6000,
@@ -848,142 +1054,167 @@
     {
       "code": 6001,
       "name": "UnauthorizedInitializer",
-      "msg": "Only the configured bootstrap authority can initialize the config"
+      "msg": "Only the program upgrade authority can initialize the config"
     },
     {
       "code": 6002,
+      "name": "AlreadyInitialized",
+      "msg": "Config has already been initialized"
+    },
+    {
+      "code": 6003,
       "name": "InvalidRiskConfig",
       "msg": "Risk configuration is invalid"
     },
     {
-      "code": 6003,
+      "code": 6004,
       "name": "InvalidMarket",
       "msg": "Market does not exist or does not match the requested id"
     },
     {
-      "code": 6004,
+      "code": 6005,
       "name": "StaleOracle",
       "msg": "Oracle price is stale and cannot be used for trading"
     },
     {
-      "code": 6005,
+      "code": 6006,
       "name": "InvalidSpotIndex",
       "msg": "Oracle spot index must be greater than zero"
     },
     {
-      "code": 6006,
+      "code": 6007,
       "name": "OracleSpotIndexOutOfBounds",
       "msg": "Oracle spot index is outside the configured market bounds"
     },
     {
-      "code": 6007,
+      "code": 6008,
       "name": "OraclePriceDeltaTooLarge",
       "msg": "Oracle price move exceeds the configured maximum step"
     },
     {
-      "code": 6008,
+      "code": 6009,
       "name": "NoopPositionUpdate",
       "msg": "Position update must change margin or size"
     },
     {
-      "code": 6009,
+      "code": 6010,
       "name": "NoOpenPosition",
       "msg": "No open position exists for this trader and market"
     },
     {
-      "code": 6010,
+      "code": 6011,
       "name": "InvalidPositionOwner",
       "msg": "Position owner does not match the provided signer"
     },
     {
-      "code": 6011,
+      "code": 6012,
       "name": "InvalidMargin",
       "msg": "Margin is invalid for the requested trade"
     },
     {
-      "code": 6012,
+      "code": 6013,
       "name": "InvalidLeverage",
       "msg": "Requested leverage exceeds the configured maximum"
     },
     {
-      "code": 6013,
+      "code": 6014,
       "name": "OpenInterestLimitExceeded",
       "msg": "Projected market open interest exceeds the configured cap"
     },
     {
-      "code": 6014,
+      "code": 6015,
       "name": "MarketInsufficientInsurance",
       "msg": "Market does not have enough isolated insurance to grow open interest"
     },
     {
-      "code": 6015,
+      "code": 6016,
       "name": "InsufficientLiquidity",
       "msg": "Market account has insufficient liquidity to settle this payout"
     },
     {
-      "code": 6016,
+      "code": 6017,
       "name": "NotLiquidatable",
       "msg": "Position is not undercollateralized; cannot liquidate"
     },
     {
-      "code": 6017,
+      "code": 6018,
       "name": "MarketNotActive",
       "msg": "Market is not active for new oracle updates"
     },
     {
-      "code": 6018,
+      "code": 6019,
       "name": "MarketCloseOnly",
       "msg": "Market is close-only; only reductions and closes are allowed"
     },
     {
-      "code": 6019,
+      "code": 6020,
       "name": "MarketArchived",
       "msg": "Market is archived and cannot be traded"
     },
     {
-      "code": 6020,
+      "code": 6021,
       "name": "InvalidMarketStatus",
       "msg": "Market status transition is invalid"
     },
     {
-      "code": 6021,
+      "code": 6022,
       "name": "MarketHasOpenPositions",
       "msg": "Market still has open positions or open interest"
     },
     {
-      "code": 6022,
+      "code": 6023,
       "name": "InvalidInsuranceDeposit",
       "msg": "Insurance deposit amount must be greater than zero"
     },
     {
-      "code": 6023,
+      "code": 6024,
       "name": "SlippageExceeded",
       "msg": "Trade execution exceeded the caller's acceptable price"
     },
     {
-      "code": 6024,
+      "code": 6025,
       "name": "InvalidFeeWithdrawal",
       "msg": "Fee balance or fee withdrawal is invalid"
     },
     {
-      "code": 6025,
+      "code": 6026,
       "name": "InvalidFeeRecipient",
       "msg": "Fee recipient does not match the configured authority"
     },
     {
-      "code": 6026,
+      "code": 6027,
       "name": "InvalidFeeBucket",
       "msg": "Fee bucket is invalid"
     },
     {
-      "code": 6027,
+      "code": 6028,
       "name": "InvalidPositionState",
       "msg": "Position state is invalid"
     },
     {
-      "code": 6028,
+      "code": 6029,
       "name": "Overflow",
       "msg": "Numeric overflow in perps calculation"
+    },
+    {
+      "code": 6030,
+      "name": "ConfigFrozen",
+      "msg": "Config is frozen and cannot be modified"
+    },
+    {
+      "code": 6031,
+      "name": "TradingPaused",
+      "msg": "Trading is paused"
+    },
+    {
+      "code": 6032,
+      "name": "MaintenanceMarginViolation",
+      "msg": "Position fails maintenance margin check after accounting for unrealized PnL"
+    },
+    {
+      "code": 6033,
+      "name": "InvalidBadDebtRepayment",
+      "msg": "Bad debt repayment amount is invalid"
     }
   ],
   "types": [
@@ -1063,6 +1294,14 @@
           {
             "name": "trade_market_maker_fee_bps",
             "type": "u16"
+          },
+          {
+            "name": "config_frozen",
+            "type": "bool"
+          },
+          {
+            "name": "paused",
+            "type": "bool"
           }
         ]
       }
@@ -1142,6 +1381,102 @@
           },
           {
             "name": "total_short_oi",
+            "type": "u64"
+          },
+          {
+            "name": "bad_debt",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "OracleSynced",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "market_id",
+            "type": "u64"
+          },
+          {
+            "name": "spot_index",
+            "type": "u64"
+          },
+          {
+            "name": "timestamp",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PositionLiquidated",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "market_id",
+            "type": "u64"
+          },
+          {
+            "name": "trader",
+            "type": "pubkey"
+          },
+          {
+            "name": "liquidator",
+            "type": "pubkey"
+          },
+          {
+            "name": "closed_size",
+            "type": "i64"
+          },
+          {
+            "name": "remaining_size",
+            "type": "i64"
+          },
+          {
+            "name": "liquidation_fee",
+            "type": "u64"
+          },
+          {
+            "name": "exit_price",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PositionModified",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "market_id",
+            "type": "u64"
+          },
+          {
+            "name": "trader",
+            "type": "pubkey"
+          },
+          {
+            "name": "size_delta",
+            "type": "i64"
+          },
+          {
+            "name": "margin_delta",
+            "type": "i64"
+          },
+          {
+            "name": "new_size",
+            "type": "i64"
+          },
+          {
+            "name": "new_margin",
+            "type": "u64"
+          },
+          {
+            "name": "execution_price",
             "type": "u64"
           }
         ]

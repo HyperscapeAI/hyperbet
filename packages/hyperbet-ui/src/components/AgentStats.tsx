@@ -14,7 +14,7 @@ type StreamingMonologue = {
   timestamp: number;
 };
 
-type StreamingAgentContext = {
+export type StreamingAgentContext = {
   id: string;
   name: string;
   provider: string;

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -13,12 +14,13 @@ import {
 } from "viem";
 import { mnemonicToAccount, privateKeyToAccount } from "viem/accounts";
 
-import mockErc20Artifact from "../../../../evm-contracts/artifacts/contracts/MockERC20.sol/MockERC20.json";
-import duelOutcomeOracleArtifact from "../../../../evm-contracts/artifacts/contracts/DuelOutcomeOracle.sol/DuelOutcomeOracle.json";
-import goldClobArtifact from "../../../../evm-contracts/artifacts/contracts/GoldClob.sol/GoldClob.json";
+import mockErc20Artifact from "../../../../evm-contracts/out/MockERC20.sol/MockERC20.json";
+import duelOutcomeOracleArtifact from "../../../../evm-contracts/out/DuelOutcomeOracle.sol/DuelOutcomeOracle.json";
+import goldClobArtifact from "../../../../evm-contracts/out/GoldClob.sol/GoldClob.json";
 
 type E2eState = Record<string, unknown> & {
   currentDuelKeyHex?: string;
+  evmDuelId?: string;
   evmRpcUrl?: string;
   evmChainId?: number;
   evmHeadlessAddress?: string;
@@ -28,7 +30,13 @@ type E2eState = Record<string, unknown> & {
   evmDuelKeyHex?: string;
   evmMarketKey?: string;
   evmOracleAddress?: string;
+  evmCanaryPrivateKey?: string;
+  evmMatcherPrivateKey?: string;
+  evmReporterPrivateKey?: string;
+  evmMarketOperatorPrivateKey?: string;
   evmAdminPrivateKey?: string;
+  evmPauserPrivateKey?: string;
+  evmFinalizerPrivateKey?: string;
   evmSeedNoPrice?: number;
   evmSeedYesPrice?: number;
   evmSeedOrderAmount?: string;
@@ -38,12 +46,49 @@ const DEFAULT_RPC_URL = "http://127.0.0.1:8545";
 const DEFAULT_CHAIN_ID = 97;
 const DEFAULT_ADMIN_PRIVATE_KEY =
   "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
+const DEFAULT_MAKER_PRIVATE_KEY =
+  "0x59c6995e998f97a5a0044966f0945382d7d46f71fbb8f7a1a5b2d3c6f90ad7d4";
 const DEFAULT_ANVIL_MNEMONIC =
   "test test test test test test test test test test test junk";
 const MARKET_KIND_DUEL_WINNER = 0;
 const BUY_SIDE = 1;
 const SELL_SIDE = 2;
+const DUEL_STATUS_NULL = 0;
 const DUEL_STATUS_BETTING_OPEN = 2;
+const ORDER_FLAG_GTC = 0x01;
+const DUEL_ORACLE_DISPUTE_WINDOW_SECONDS = 3_600;
+const E2E_BET_WINDOW_SECONDS = 3_600n;
+const SEED_ORDERS =
+  (process.env.E2E_EVM_SEED_ORDERS || "true") !== "false";
+
+type EvmArtifact = {
+  abi: unknown[];
+  bytecode:
+    | `0x${string}`
+    | {
+        object?: string;
+      };
+};
+
+type OracleDuelState = {
+  participantAHash: `0x${string}`;
+  participantBHash: `0x${string}`;
+  status: number | bigint;
+  betOpenTs: bigint;
+  betCloseTs: bigint;
+  duelStartTs: bigint;
+};
+
+function resolveArtifactBytecode(artifact: EvmArtifact): `0x${string}` {
+  const raw =
+    typeof artifact.bytecode === "string"
+      ? artifact.bytecode
+      : artifact.bytecode.object || "";
+  if (!raw) {
+    throw new Error("Artifact is missing deployable bytecode");
+  }
+  return (raw.startsWith("0x") ? raw : `0x${raw}`) as `0x${string}`;
+}
 
 function ensureHex32(value: string, label: string): `0x${string}` {
   const normalized = value.trim().toLowerCase().replace(/^0x/, "");
@@ -53,8 +98,16 @@ function ensureHex32(value: string, label: string): `0x${string}` {
   return `0x${normalized}`;
 }
 
-function hashLabel(label: string): `0x${string}` {
-  return keccak256(stringToHex(label));
+function hashParticipantLabel(label: string): `0x${string}` {
+  return `0x${createHash("sha256").update(label).digest("hex")}`;
+}
+
+function parseTimestampMsEnv(name: string): bigint | null {
+  const raw = process.env[name]?.trim();
+  if (!raw) return null;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0) return null;
+  return BigInt(Math.floor(parsed / 1000));
 }
 
 function quoteCost(side: number, price: number, amount: bigint): bigint {
@@ -107,11 +160,17 @@ async function main(): Promise<void> {
   const statePath = path.resolve(__dirname, "./state.json");
   const envPath = path.resolve(appDir, ".env.e2e");
 
-  const rpcUrl = process.env.E2E_EVM_RPC_URL || DEFAULT_RPC_URL;
+  const rpcUrl =
+    process.env.E2E_EVM_RPC_URL ||
+    (process.env.E2E_EVM_PORT
+      ? `http://127.0.0.1:${process.env.E2E_EVM_PORT}`
+      : DEFAULT_RPC_URL);
   const chainId = Number(process.env.E2E_EVM_CHAIN_ID || DEFAULT_CHAIN_ID);
   const adminPrivateKey =
     process.env.E2E_EVM_ADMIN_PRIVATE_KEY || DEFAULT_ADMIN_PRIVATE_KEY;
-  const makerPrivateKey = process.env.E2E_EVM_MAKER_PRIVATE_KEY || "";
+  const makerPrivateKey =
+    process.env.E2E_EVM_MAKER_PRIVATE_KEY || DEFAULT_MAKER_PRIVATE_KEY;
+  const reuseDeployment = process.env.E2E_EVM_REUSE_DEPLOYMENT === "true";
   const seedNoOrderPrice = Number(
     process.env.E2E_EVM_SEED_NO_ORDER_PRICE || 600,
   );
@@ -140,12 +199,12 @@ async function main(): Promise<void> {
   });
 
   const adminAccount = privateKeyToAccount(adminPrivateKey as `0x${string}`);
-  const makerAccount = makerPrivateKey
-    ? privateKeyToAccount(makerPrivateKey as `0x${string}`)
-    : mnemonicToAccount(DEFAULT_ANVIL_MNEMONIC, {
-        accountIndex: 0,
-        addressIndex: 1,
-      });
+  const makerAccount = privateKeyToAccount(makerPrivateKey as `0x${string}`);
+  const finalizerAccount = adminAccount;
+  const challengerAccount = mnemonicToAccount(DEFAULT_ANVIL_MNEMONIC, {
+    accountIndex: 0,
+    addressIndex: 3,
+  });
   const walletClient = createWalletClient({
     account: adminAccount,
     chain: localChain,
@@ -181,74 +240,157 @@ async function main(): Promise<void> {
     nextMakerNonce += 1;
     return nonce;
   };
+  if (makerAccount.address !== adminAccount.address) {
+    const minimumMakerBalance = parseUnits("5", 18);
+    const makerBalance = await publicClient.getBalance({
+      address: makerAccount.address,
+    });
+    if (makerBalance < minimumMakerBalance) {
+      const fundMakerTx = await walletClient.sendTransaction({
+        to: makerAccount.address,
+        value: parseUnits("10", 18),
+        nonce: consumeNonce(),
+      });
+      await publicClient.waitForTransactionReceipt({ hash: fundMakerTx });
+    }
+  }
   const existingState = (await readJson<E2eState>(statePath)) || {};
   const latestBlock = await publicClient.getBlock({ blockTag: "latest" });
   const duelKey = ensureHex32(
-    existingState.currentDuelKeyHex ||
+    process.env.E2E_EVM_DUEL_KEY ||
+      existingState.currentDuelKeyHex ||
       keccak256(stringToHex("hyperbet-e2e-evm:local")),
     "currentDuelKeyHex",
   );
-  const duelBetOpenTs = latestBlock.timestamp - 15n;
-  const duelBetCloseTs = duelBetOpenTs + 300n;
-  const duelStartTs = duelBetCloseTs + 60n;
+  const duelId =
+    process.env.E2E_EVM_DUEL_ID ||
+    existingState.evmDuelId ||
+    String(existingState.evmMatchId ?? 1);
+  const participantAId =
+    process.env.E2E_EVM_AGENT1_ID?.trim() || "e2e-evm-agent-a";
+  const participantBId =
+    process.env.E2E_EVM_AGENT2_ID?.trim() || "e2e-evm-agent-b";
+  const duelBetOpenTs =
+    parseTimestampMsEnv("E2E_EVM_BET_OPEN_TIME_MS") ??
+    latestBlock.timestamp - 15n;
+  const duelBetCloseTs =
+    parseTimestampMsEnv("E2E_EVM_BET_CLOSE_TIME_MS") ??
+    duelBetOpenTs + E2E_BET_WINDOW_SECONDS;
+  const duelStartTs = (() => {
+    const sourceFightStartTs = parseTimestampMsEnv("E2E_EVM_FIGHT_START_TIME_MS");
+    if (sourceFightStartTs == null) {
+      return duelBetCloseTs;
+    }
+    return sourceFightStartTs > duelBetCloseTs
+      ? sourceFightStartTs
+      : duelBetCloseTs;
+  })();
+  let tokenDeployTx = "";
+  let oracleDeployTx = "";
+  let clobDeployTx = "";
+  let mintTx = "";
+  let goldTokenAddress = existingState.evmGoldTokenAddress as Address | undefined;
+  let oracleAddress = existingState.evmOracleAddress as Address | undefined;
+  let goldClobAddress = existingState.evmGoldClobAddress as Address | undefined;
 
-  const tokenDeployTx = await walletClient.deployContract({
-    abi: mockErc20Artifact.abi,
-    bytecode: mockErc20Artifact.bytecode as `0x${string}`,
-    args: ["Mock Gold", "GOLD"],
-    nonce: consumeNonce(),
-  });
-  const tokenDeployReceipt = await publicClient.waitForTransactionReceipt({
-    hash: tokenDeployTx,
-  });
-  const goldTokenAddress = tokenDeployReceipt.contractAddress;
-  if (!goldTokenAddress) {
-    throw new Error("Token deployment did not return contract address");
+  if (!reuseDeployment) {
+    tokenDeployTx = await walletClient.deployContract({
+      abi: mockErc20Artifact.abi,
+      bytecode: resolveArtifactBytecode(mockErc20Artifact as EvmArtifact),
+      args: ["Mock Gold", "GOLD"],
+      nonce: consumeNonce(),
+    });
+    const tokenDeployReceipt = await publicClient.waitForTransactionReceipt({
+      hash: tokenDeployTx as `0x${string}`,
+    });
+    goldTokenAddress = tokenDeployReceipt.contractAddress ?? undefined;
+    if (!goldTokenAddress) {
+      throw new Error("Token deployment did not return contract address");
+    }
+
+    oracleDeployTx = await walletClient.deployContract({
+      abi: duelOutcomeOracleArtifact.abi,
+      bytecode: resolveArtifactBytecode(
+        duelOutcomeOracleArtifact as EvmArtifact,
+      ),
+      args: [
+        adminAccount.address,
+        adminAccount.address,
+        finalizerAccount.address,
+        challengerAccount.address,
+        adminAccount.address,
+        DUEL_ORACLE_DISPUTE_WINDOW_SECONDS,
+      ],
+      nonce: consumeNonce(),
+    });
+    const oracleDeployReceipt = await publicClient.waitForTransactionReceipt({
+      hash: oracleDeployTx as `0x${string}`,
+    });
+    oracleAddress = oracleDeployReceipt.contractAddress ?? undefined;
+    if (!oracleAddress) {
+      throw new Error("Duel oracle deployment did not return contract address");
+    }
+
+    clobDeployTx = await walletClient.deployContract({
+      abi: goldClobArtifact.abi,
+      bytecode: resolveArtifactBytecode(goldClobArtifact as EvmArtifact),
+      args: [
+        adminAccount.address,
+        adminAccount.address,
+        oracleAddress,
+        adminAccount.address,
+        adminAccount.address,
+        adminAccount.address,
+      ],
+      nonce: consumeNonce(),
+    });
+    const clobDeployReceipt = await publicClient.waitForTransactionReceipt({
+      hash: clobDeployTx as `0x${string}`,
+    });
+    goldClobAddress = clobDeployReceipt.contractAddress ?? undefined;
+    if (!goldClobAddress) {
+      throw new Error("GoldClob deployment did not return contract address");
+    }
+
+    mintTx = await walletClient.writeContract({
+      address: goldTokenAddress as Address,
+      abi: mockErc20Artifact.abi,
+      functionName: "mint",
+      args: [adminAccount.address, parseUnits("100000", 18)],
+      account: adminAccount,
+      nonce: consumeNonce(),
+    });
+    await publicClient.waitForTransactionReceipt({ hash: mintTx as `0x${string}` });
+  } else {
+    if (!goldTokenAddress || !oracleAddress || !goldClobAddress) {
+      throw new Error(
+        "Reuse deployment requested but cached EVM contract addresses are missing",
+      );
+    }
   }
 
-  const oracleDeployTx = await walletClient.deployContract({
-    abi: duelOutcomeOracleArtifact.abi,
-    bytecode: duelOutcomeOracleArtifact.bytecode as `0x${string}`,
-    args: [adminAccount.address, adminAccount.address],
-    nonce: consumeNonce(),
-  });
-  const oracleDeployReceipt = await publicClient.waitForTransactionReceipt({
-    hash: oracleDeployTx,
-  });
-  const oracleAddress = oracleDeployReceipt.contractAddress;
-  if (!oracleAddress) {
-    throw new Error("Duel oracle deployment did not return contract address");
-  }
+  let participantAHash = hashParticipantLabel(participantAId);
+  let participantBHash = hashParticipantLabel(participantBId);
+  let canonicalBetOpenTs = duelBetOpenTs;
+  let canonicalBetCloseTs = duelBetCloseTs;
+  let canonicalDuelStartTs = duelStartTs;
 
-  const clobDeployTx = await walletClient.deployContract({
-    abi: goldClobArtifact.abi,
-    bytecode: goldClobArtifact.bytecode as `0x${string}`,
-    args: [
-      adminAccount.address,
-      adminAccount.address,
-      oracleAddress,
-      adminAccount.address,
-      adminAccount.address,
-    ],
-    nonce: consumeNonce(),
-  });
-  const clobDeployReceipt = await publicClient.waitForTransactionReceipt({
-    hash: clobDeployTx,
-  });
-  const goldClobAddress = clobDeployReceipt.contractAddress;
-  if (!goldClobAddress) {
-    throw new Error("GoldClob deployment did not return contract address");
+  if (reuseDeployment) {
+    const existingDuel = (await publicClient.readContract({
+      address: oracleAddress as Address,
+      abi: duelOutcomeOracleArtifact.abi,
+      functionName: "getDuel",
+      args: [duelKey],
+    })) as OracleDuelState;
+    const existingStatus = Number(existingDuel.status ?? DUEL_STATUS_NULL);
+    if (existingStatus >= DUEL_STATUS_BETTING_OPEN) {
+      participantAHash = existingDuel.participantAHash;
+      participantBHash = existingDuel.participantBHash;
+      canonicalBetOpenTs = existingDuel.betOpenTs;
+      canonicalBetCloseTs = existingDuel.betCloseTs;
+      canonicalDuelStartTs = existingDuel.duelStartTs;
+    }
   }
-
-  const mintTx = await walletClient.writeContract({
-    address: goldTokenAddress as Address,
-    abi: mockErc20Artifact.abi,
-    functionName: "mint",
-    args: [adminAccount.address, parseUnits("100000", 18)],
-    account: adminAccount,
-    nonce: consumeNonce(),
-  });
-  await publicClient.waitForTransactionReceipt({ hash: mintTx });
 
   const upsertDuelTx = await walletClient.writeContract({
     address: oracleAddress as Address,
@@ -256,11 +398,11 @@ async function main(): Promise<void> {
     functionName: "upsertDuel",
     args: [
       duelKey,
-      hashLabel("e2e-evm-agent-a"),
-      hashLabel("e2e-evm-agent-b"),
-      duelBetOpenTs,
-      duelBetCloseTs,
-      duelStartTs,
+      participantAHash,
+      participantBHash,
+      canonicalBetOpenTs,
+      canonicalBetCloseTs,
+      canonicalDuelStartTs,
       "hyperbet-local-evm",
       DUEL_STATUS_BETTING_OPEN,
     ],
@@ -285,52 +427,63 @@ async function main(): Promise<void> {
     functionName: "marketKey",
     args: [duelKey, MARKET_KIND_DUEL_WINNER],
   })) as `0x${string}`;
+  let seedNoOrderTx: `0x${string}` | null = null;
+  let seedYesOrderTx: `0x${string}` | null = null;
+  const blockBeforeSeeding = await publicClient.getBlock({ blockTag: "latest" });
 
-  const seedNoOrderTx = await makerWalletClient.writeContract({
-    address: goldClobAddress as Address,
-    abi: goldClobArtifact.abi,
-    functionName: "placeOrder",
-    args: [
-      duelKey,
-      MARKET_KIND_DUEL_WINNER,
-      SELL_SIDE,
-      seedNoOrderPrice,
-      parseUnits(seedOrderAmountUi, 18),
-    ],
-    value: (() => {
-      const amount = parseUnits(seedOrderAmountUi, 18);
-      const cost = quoteCost(SELL_SIDE, seedNoOrderPrice, amount);
-      const tradeTreasuryFee = cost / 100n;
-      const tradeMarketMakerFee = cost / 100n;
-      return cost + tradeTreasuryFee + tradeMarketMakerFee;
-    })(),
-    account: makerAccount,
-    nonce: consumeMakerNonce(),
-  });
-  await publicClient.waitForTransactionReceipt({ hash: seedNoOrderTx });
+  if (SEED_ORDERS && blockBeforeSeeding.timestamp < canonicalBetCloseTs) {
+    seedNoOrderTx = await makerWalletClient.writeContract({
+      address: goldClobAddress as Address,
+      abi: goldClobArtifact.abi,
+      functionName: "placeOrder",
+      args: [
+        duelKey,
+        MARKET_KIND_DUEL_WINNER,
+        SELL_SIDE,
+        seedNoOrderPrice,
+        parseUnits(seedOrderAmountUi, 18),
+        ORDER_FLAG_GTC,
+      ],
+      value: (() => {
+        const amount = parseUnits(seedOrderAmountUi, 18);
+        const cost = quoteCost(SELL_SIDE, seedNoOrderPrice, amount);
+        const tradeTreasuryFee = cost / 100n;
+        const tradeMarketMakerFee = cost / 100n;
+        return cost + tradeTreasuryFee + tradeMarketMakerFee;
+      })(),
+      account: makerAccount,
+      nonce: consumeMakerNonce(),
+    });
+    await publicClient.waitForTransactionReceipt({ hash: seedNoOrderTx });
 
-  const seedYesOrderTx = await makerWalletClient.writeContract({
-    address: goldClobAddress as Address,
-    abi: goldClobArtifact.abi,
-    functionName: "placeOrder",
-    args: [
-      duelKey,
-      MARKET_KIND_DUEL_WINNER,
-      BUY_SIDE,
-      seedYesOrderPrice,
-      parseUnits(seedOrderAmountUi, 18),
-    ],
-    value: (() => {
-      const amount = parseUnits(seedOrderAmountUi, 18);
-      const cost = quoteCost(BUY_SIDE, seedYesOrderPrice, amount);
-      const tradeTreasuryFee = cost / 100n;
-      const tradeMarketMakerFee = cost / 100n;
-      return cost + tradeTreasuryFee + tradeMarketMakerFee;
-    })(),
-    account: makerAccount,
-    nonce: consumeMakerNonce(),
-  });
-  await publicClient.waitForTransactionReceipt({ hash: seedYesOrderTx });
+    seedYesOrderTx = await makerWalletClient.writeContract({
+      address: goldClobAddress as Address,
+      abi: goldClobArtifact.abi,
+      functionName: "placeOrder",
+      args: [
+        duelKey,
+        MARKET_KIND_DUEL_WINNER,
+        BUY_SIDE,
+        seedYesOrderPrice,
+        parseUnits(seedOrderAmountUi, 18),
+        ORDER_FLAG_GTC,
+      ],
+      value: (() => {
+        const amount = parseUnits(seedOrderAmountUi, 18);
+        const cost = quoteCost(BUY_SIDE, seedYesOrderPrice, amount);
+        const tradeTreasuryFee = cost / 100n;
+        const tradeMarketMakerFee = cost / 100n;
+        return cost + tradeTreasuryFee + tradeMarketMakerFee;
+      })(),
+      account: makerAccount,
+      nonce: consumeMakerNonce(),
+    });
+    await publicClient.waitForTransactionReceipt({ hash: seedYesOrderTx });
+  } else if (SEED_ORDERS) {
+    console.warn(
+      `Skipping local seed orders because betting is already closed for duel ${duelKey}`,
+    );
+  }
 
   const env = await readEnv(envPath);
   env.VITE_BSC_RPC_URL = rpcUrl;
@@ -342,10 +495,14 @@ async function main(): Promise<void> {
   env.VITE_HEADLESS_EVM_ADDRESS = adminAccount.address;
   env.VITE_E2E_EVM_PRIVATE_KEY = adminPrivateKey;
   env.VITE_E2E_EVM_ADDRESS = adminAccount.address;
+  env.VITE_E2E_EVM_DUEL_KEY = duelKey.replace(/^0x/i, "");
+  env.VITE_E2E_EVM_DUEL_ID = duelId;
   await fs.writeFile(envPath, serializeDotEnv(env), "utf8");
 
   const state: E2eState = {
     ...existingState,
+    currentDuelKeyHex: duelKey.replace(/^0x/i, ""),
+    evmDuelId: duelId,
     evmRpcUrl: rpcUrl,
     evmChainId: chainId,
     evmHeadlessAddress: adminAccount.address,
@@ -355,7 +512,13 @@ async function main(): Promise<void> {
     evmDuelKeyHex: duelKey,
     evmMarketKey: marketKey,
     evmOracleAddress: oracleAddress,
+    evmCanaryPrivateKey: adminPrivateKey,
+    evmMatcherPrivateKey: makerPrivateKey,
+    evmReporterPrivateKey: adminPrivateKey,
+    evmMarketOperatorPrivateKey: adminPrivateKey,
     evmAdminPrivateKey: adminPrivateKey,
+    evmPauserPrivateKey: adminPrivateKey,
+    evmFinalizerPrivateKey: adminPrivateKey,
     evmSeedNoPrice: seedNoOrderPrice,
     evmSeedYesPrice: seedYesOrderPrice,
     evmSeedOrderAmount: seedOrderAmountUi,
@@ -371,6 +534,7 @@ async function main(): Promise<void> {
         evmHeadlessAddress: adminAccount.address,
         evmGoldTokenAddress: goldTokenAddress,
         evmGoldClobAddress: goldClobAddress,
+        evmDuelId: duelId,
         evmDuelKeyHex: duelKey,
         evmMarketKey: marketKey,
         evmOracleAddress: oracleAddress,

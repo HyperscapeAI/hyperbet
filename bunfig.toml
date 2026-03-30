@@ -1,5 +1,13 @@
 [test]
 coverage = false
-
-[test.ignore]
-patterns = ["tests/e2e/.*"]
+ignore = [
+  "**/app/tests/e2e/*.e2e.ts",
+  "**/packages/hyperbet-solana/anchor/tests/*.test.ts",
+]
+exclude = [
+  "**/app/tests/e2e/*.spec.ts",
+  "debug-page.spec.ts",
+  "app-tabs-and-apis.spec.ts",
+  "solana-clob-ui.spec.ts",
+  "market-flows.spec.ts",
+]

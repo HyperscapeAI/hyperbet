@@ -5,11 +5,32 @@
   "type": "module",
   "scripts": {
     "anchor:build": "bun run --cwd anchor build",
+    "anchor:deploy:devnet": "bun run --cwd anchor deploy:devnet",
     "anchor:deploy:mainnet": "bun run --cwd anchor deploy:mainnet",
+    "anchor:deploy:pm:devnet": "bun run --cwd anchor deploy:pm:devnet",
+    "anchor:deploy:pm:testnet": "bun run --cwd anchor deploy:pm:testnet",
+    "anchor:deploy:pm:mainnet": "bun run --cwd anchor deploy:pm:mainnet",
     "anchor:deploy:testnet": "bun run --cwd anchor deploy:testnet",
     "anchor:test": "bun run --cwd anchor test",
+    "deploy:preflight:devnet": "bun run scripts/preflight-contract-deploy.ts --cluster devnet",
     "deploy:preflight:mainnet": "bun run scripts/preflight-contract-deploy.ts --target mainnet",
+    "deploy:preflight:mainnet:pm": "bun run scripts/preflight-contract-deploy.ts --target mainnet --pm-only",
     "deploy:preflight:testnet": "bun run scripts/preflight-contract-deploy.ts --target testnet",
+    "deploy:preflight:testnet:pm": "bun run scripts/preflight-contract-deploy.ts --target testnet --pm-only",
+    "deploy:preflight:devnet:pm": "bun run scripts/preflight-contract-deploy.ts --cluster devnet --pm-only",
+    "stage-a:sync-program-keys": "node --import tsx scripts/sync-stage-a-program-keypairs.ts",
+    "deploy:init:devnet": "node --import tsx scripts/init-pm-config.ts --cluster devnet",
+    "deploy:init:testnet": "node --import tsx scripts/init-pm-config.ts --cluster testnet",
+    "deploy:init:mainnet": "node --import tsx scripts/init-pm-config.ts --cluster mainnet-beta",
+    "deploy:pm:init:devnet": "node --import tsx scripts/init-pm-config.ts --cluster devnet --pm-only",
+    "deploy:pm:init:testnet": "node --import tsx scripts/init-pm-config.ts --cluster testnet --pm-only",
+    "deploy:pm:init:mainnet": "node --import tsx scripts/init-pm-config.ts --cluster mainnet-beta --pm-only",
+    "verify:deployment:devnet": "node --import tsx scripts/verify-deployment.ts --cluster devnet",
+    "verify:deployment:testnet": "node --import tsx scripts/verify-deployment.ts --cluster testnet",
+    "verify:deployment:mainnet": "node --import tsx scripts/verify-deployment.ts --cluster mainnet-beta",
+    "verify:deployment:devnet:pm": "node --import tsx scripts/verify-deployment.ts --cluster devnet --pm-only",
+    "verify:deployment:testnet:pm": "node --import tsx scripts/verify-deployment.ts --cluster testnet --pm-only",
+    "verify:deployment:mainnet:pm": "node --import tsx scripts/verify-deployment.ts --cluster mainnet-beta --pm-only",
     "codegen:clients": "bunx coda generate -c ./coda/fight-oracle.config.mjs && bunx coda generate -c ./coda/gold-clob-market.config.mjs && bunx coda generate -c ./coda/gold-perps-market.config.mjs",
     "sync:anchor-artifacts": "node scripts/sync-anchor-artifacts.mjs",
     "dev": "bun run --cwd app dev --mode devnet",
@@ -36,6 +57,8 @@
     "keeper:resolve": "bun run --cwd keeper resolve"
   },
   "dependencies": {
+    "@hyperbet/chain-registry": "workspace:*",
+    "@hyperbet/mm-core": "workspace:*",
     "@coral-xyz/anchor": "^0.32.1",
     "@noble/curves": "^2.0.1",
     "@solana/wallet-adapter-phantom": "^0.9.28",
@@ -43,10 +66,12 @@
     "@solana/wallet-adapter-react-ui": "^0.9.39",
     "@solana/web3.js": "^1.98.4",
     "@tanstack/react-query": "^5.90.21",
+    "bn.js": "5.2.2",
     "@vitejs/plugin-react": "^5.1.4"
   },
   "devDependencies": {
     "@macalinao/coda": "^0.4.10",
+    "@types/bn.js": "5.2.0",
     "tsx": "^4.21.0"
   }
 }

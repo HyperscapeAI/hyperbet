@@ -1,6 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { HyperbetEVMClient } from "../src/evm/client";
-import { SIDE_BID, SIDE_ASK, MARKET_KIND_DUEL_WINNER } from "../src/types";
+import {
+  MARKET_KIND_DUEL_WINNER,
+  ORDER_FLAG_GTC,
+  ORDER_FLAG_IOC,
+  SIDE_ASK,
+  SIDE_BID,
+} from "../src/types";
 
 // Mock ethers
 vi.mock("ethers", () => {
@@ -28,6 +34,9 @@ vi.mock("ethers", () => {
     Wallet: MockWallet,
     Contract: MockContract,
     ethers: {
+      JsonRpcProvider: MockJsonRpcProvider,
+      Wallet: MockWallet,
+      Contract: MockContract,
       keccak256: vi.fn((val) => "mock-hash"),
       toUtf8Bytes: vi.fn(),
     },
@@ -70,7 +79,22 @@ describe("HyperbetEVMClient", () => {
     expect(args[2]).toBe(SIDE_BID);
     expect(args[3]).toBe(600);
     expect(args[4]).toBe(1000n);
-    expect(args[5].value).toBeDefined(); // The total value to send
+    expect(args[5]).toBe(ORDER_FLAG_GTC);
+    expect(args[6].value).toBeDefined(); // The total value to send
+  });
+
+  it("should encode IOC order flags", async () => {
+    await client.placeOrder({
+      duelId: "test-duel",
+      side: "sell",
+      price: 400,
+      amount: 1000n,
+      timeInForce: "ioc",
+    });
+
+    const args = (client.clob.placeOrder as any).mock.calls[0];
+    expect(args[2]).toBe(SIDE_ASK);
+    expect(args[5]).toBe(ORDER_FLAG_IOC);
   });
 
   it("should cancel an order", async () => {

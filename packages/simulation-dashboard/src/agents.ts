@@ -1,15 +1,29 @@
 import type { Contract, JsonRpcSigner, JsonRpcProvider } from "ethers";
 import {
+    DEFAULT_MARKET_MAKER_CONFIG,
+    buildQuotePlan,
+    evaluateQuoteDecision,
+    type ManagedQuoteState,
+    type MarketSnapshot,
+    type QuotePlan,
+} from "@hyperbet/mm-core";
+import type { ScenarioChainKey, ScenarioRuntimeProfile } from "./scenario-catalog.js";
+import {
     BUY_SIDE,
     SELL_SIDE,
     MARKET_KIND_DUEL_WINNER,
     quoteCost,
     quoteWithFees,
+    ORDER_FLAG_GTC,
+    random,
     randomInt,
     clamp,
     MAX_PRICE,
     SIDE_A,
+    sleep,
+    withTimeout,
 } from "./helpers.js";
+import { isScenarioCloseGuardWindow } from "./runtime-profile.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -20,9 +34,12 @@ export type AgentAction = {
     amount?: bigint;
     orderId?: number;
     label?: string;
+    managedQuoteSide?: "BID" | "ASK";
+    managedQuoteUnits?: number;
 };
 
 export type SimContext = {
+    chainKey: ScenarioChainKey;
     duelKey: string;
     marketKey: string;
     bestBid: number;
@@ -31,10 +48,20 @@ export type SimContext = {
     totalAShares: bigint;
     totalBShares: bigint;
     tick: number;
+    nowMs: number;
     treasuryFeeBps: bigint;
     mmFeeBps: bigint;
     agentActiveOrderIds: number[];
+    scenarioProfile: ScenarioRuntimeProfile | null;
     agentPosition: { aShares: bigint; bShares: bigint; aStake: bigint; bStake: bigint };
+};
+
+function toSnapshotChainKey(chainKey: ScenarioChainKey): MarketSnapshot["chainKey"] {
+    return chainKey === "anvil" ? "bsc" : chainKey;
+}
+
+type ManagedQuoteRef = ManagedQuoteState & {
+    orderId: number;
 };
 
 export type AgentConfig = {
@@ -62,12 +89,41 @@ export abstract class BaseAgent {
 
     abstract decide(ctx: SimContext): AgentAction[];
 
+    resetForScenario(): void {
+        this.activeOrderIds = [];
+        this.tradeCount = 0;
+    }
+
+    protected onOrderPlaced(
+        action: AgentAction,
+        orderId: number,
+        _ctx: SimContext,
+    ): void {
+        if (orderId > 0) {
+            this.activeOrderIds.push(orderId);
+        }
+    }
+
+    protected onOrderCancelled(action: AgentAction): void {
+        if (action.orderId == null) {
+            return;
+        }
+        this.activeOrderIds = this.activeOrderIds.filter(
+            (id) => id !== action.orderId,
+        );
+    }
+
     async executeActions(
         actions: AgentAction[],
         ctx: SimContext,
     ): Promise<string[]> {
         const logs: string[] = [];
-        for (const action of actions) {
+        const scenarioMode = ctx.scenarioProfile != null;
+        const plannedActions = scenarioMode ? actions.slice(0, 2) : actions;
+        const actionTimeoutMs = scenarioMode ? 3_000 : 10_000;
+        const receiptTimeoutMs = scenarioMode ? 3_000 : 10_000;
+        const postActionSleepMs = scenarioMode ? 1 : 25;
+        for (const action of plannedActions) {
             try {
                 if (action.type === "placeOrder" && action.side && action.price && action.amount) {
                     const valueNeeded = quoteWithFees(
@@ -78,15 +134,24 @@ export abstract class BaseAgent {
                         ctx.mmFeeBps,
                     ) + 50n; // small buffer
 
-                    const tx = await (this.clob.connect(this.signer) as any).placeOrder(
-                        ctx.duelKey,
-                        MARKET_KIND_DUEL_WINNER,
-                        action.side,
-                        action.price,
-                        action.amount,
-                        { value: valueNeeded },
+                    const tx: any = await withTimeout(
+                        (this.clob.connect(this.signer) as any).placeOrder(
+                            ctx.duelKey,
+                            MARKET_KIND_DUEL_WINNER,
+                            action.side,
+                            action.price,
+                            action.amount,
+                            ORDER_FLAG_GTC,
+                            { value: valueNeeded },
+                        ),
+                        actionTimeoutMs,
+                        `${this.config.name} placeOrder`,
                     );
-                    const receipt = await tx.wait();
+                    const receipt: any = await withTimeout(
+                        tx.wait(),
+                        receiptTimeoutMs,
+                        `${this.config.name} placeOrder receipt`,
+                    );
                     this.tradeCount++;
 
                     // Extract order ID from events
@@ -99,29 +164,39 @@ export abstract class BaseAgent {
                                 orderId = Number(parsed.args.orderId ?? parsed.args[1]);
                                 break;
                             }
-                        } catch { /* skip */ }
+                        } catch (_parseErr) {
+                            // Expected: receipt contains logs from other contracts that don't match this ABI
+                        }
                     }
-                    if (orderId > 0) this.activeOrderIds.push(orderId);
+                    this.onOrderPlaced(action, orderId, ctx);
 
                     const sideLabel = action.side === BUY_SIDE ? "BUY" : "SELL";
                     logs.push(
                         `[${this.config.name}] ${sideLabel} @${action.price} x${action.amount} (order #${orderId})`,
                     );
+                    await sleep(postActionSleepMs);
                 } else if (action.type === "cancelOrder" && action.orderId) {
                     try {
-                        const tx = await (this.clob.connect(this.signer) as any).cancelOrder(
-                            ctx.duelKey,
-                            MARKET_KIND_DUEL_WINNER,
-                            action.orderId,
+                        const tx: any = await withTimeout(
+                            (this.clob.connect(this.signer) as any).cancelOrder(
+                                ctx.duelKey,
+                                MARKET_KIND_DUEL_WINNER,
+                                action.orderId,
+                            ),
+                            actionTimeoutMs,
+                            `${this.config.name} cancelOrder`,
                         );
-                        await tx.wait();
+                        await withTimeout(
+                            tx.wait(),
+                            receiptTimeoutMs,
+                            `${this.config.name} cancelOrder receipt`,
+                        );
                         logs.push(`[${this.config.name}] CANCEL order #${action.orderId}`);
+                        await sleep(postActionSleepMs);
                     } catch {
                         // Order was already filled or cancelled — silently clean up
                     }
-                    this.activeOrderIds = this.activeOrderIds.filter(
-                        (id) => id !== action.orderId,
-                    );
+                    this.onOrderCancelled(action);
                 }
             } catch (err: any) {
                 const msg = err.message || "";
@@ -152,9 +227,9 @@ export class RetailAgent extends BaseAgent {
     }
 
     decide(ctx: SimContext): AgentAction[] {
-        if (Math.random() < 0.4) return []; // 40% chance of sitting out
+        if (random() < 0.4) return []; // 40% chance of sitting out
 
-        const isBuy = Math.random() > 0.5;
+        const isBuy = random() > 0.5;
         const noise = randomInt(-50, 50);
         const price = clamp(ctx.mid + noise, 10, 990);
         const amount = BigInt(randomInt(1, 5)) * 100000000000000n;
@@ -173,7 +248,12 @@ export class RetailAgent extends BaseAgent {
 
 // ─── Market Maker Agent ──────────────────────────────────────────────────────
 export class MarketMakerAgent extends BaseAgent {
-    private targetSpreadBps = 200;
+    lastPlan: QuotePlan | null = null;
+    lastSnapshot: MarketSnapshot | null = null;
+    private managedQuotes: Record<"BID" | "ASK", ManagedQuoteRef | null> = {
+        BID: null,
+        ASK: null,
+    };
 
     constructor(signer: JsonRpcSigner, clob: Contract) {
         super(
@@ -191,29 +271,193 @@ export class MarketMakerAgent extends BaseAgent {
 
     decide(ctx: SimContext): AgentAction[] {
         const actions: AgentAction[] = [];
+        const runtimeProfile = ctx.scenarioProfile;
+        const nowMs = ctx.nowMs;
+        const staleStreamLagMs = (runtimeProfile?.staleStreamLagTicks ?? 0) * 500;
+        const staleOracleLagMs = (runtimeProfile?.staleOracleLagTicks ?? 0) * 500;
+        const staleRpcLagMs = (runtimeProfile?.staleRpcLagTicks ?? 0) * 500;
+        const betCloseTimeMs =
+            runtimeProfile?.betCloseTick != null
+                ? runtimeProfile.betCloseTick * 500
+                : null;
+        const quoteAges = Object.values(this.managedQuotes)
+            .filter((quote): quote is ManagedQuoteRef => quote != null)
+            .map((quote) => Math.max(0, nowMs - quote.placedAtMs));
 
-        // Cancel stale orders first
-        if (this.activeOrderIds.length > 4) {
-            const toCancel = this.activeOrderIds.slice(0, 2);
-            for (const id of toCancel) {
-                actions.push({ type: "cancelOrder", orderId: id });
-            }
+        const snapshot: MarketSnapshot = {
+            chainKey: toSnapshotChainKey(ctx.chainKey),
+            lifecycleStatus: "OPEN",
+            duelKey: ctx.duelKey,
+            marketRef: ctx.marketKey,
+            bestBid: ctx.bestBid > 0 ? ctx.bestBid : null,
+            bestAsk: ctx.bestAsk > 0 ? ctx.bestAsk : null,
+            betCloseTimeMs,
+            exposure: {
+                yes: Number(ctx.agentPosition.aShares / 1000n),
+                no: Number(ctx.agentPosition.bShares / 1000n),
+                openYes: 0,
+                openNo: 0,
+            },
+            lastStreamAtMs: nowMs - staleStreamLagMs,
+            lastOracleAtMs: nowMs - staleOracleLagMs,
+            lastRpcAtMs: nowMs - staleRpcLagMs,
+            quoteAgeMs:
+                quoteAges.length > 0
+                    ? Math.max(...quoteAges)
+                    : null,
+        };
+        this.lastSnapshot = snapshot;
+
+        const plan = buildQuotePlan(
+            snapshot,
+            {
+                signalPrice: ctx.mid,
+                signalWeight: runtimeProfile?.signalWeight ?? 0.35,
+            },
+            {
+                ...DEFAULT_MARKET_MAKER_CONFIG,
+                minQuoteUnits: 2,
+                maxQuoteUnits: 8,
+                maxInventoryPerSide: 40,
+                maxNetExposure: 25,
+                maxQuoteAgeMs: 2_500,
+                minRefreshIntervalMs: 1_000,
+                betCloseGuardMs:
+                    runtimeProfile?.marketMakerBetCloseGuardMs ??
+                    DEFAULT_MARKET_MAKER_CONFIG.betCloseGuardMs,
+            },
+            nowMs,
+        );
+        this.lastPlan = plan;
+
+        const bidDecision = evaluateQuoteDecision(
+            "BID",
+            plan,
+            this.managedQuotes.BID,
+            {
+                ...DEFAULT_MARKET_MAKER_CONFIG,
+                minQuoteUnits: 2,
+                maxQuoteUnits: 8,
+                maxInventoryPerSide: 40,
+                maxNetExposure: 25,
+                maxQuoteAgeMs: 2_500,
+                minRefreshIntervalMs: 1_000,
+                betCloseGuardMs:
+                    runtimeProfile?.marketMakerBetCloseGuardMs ??
+                    DEFAULT_MARKET_MAKER_CONFIG.betCloseGuardMs,
+            },
+            nowMs,
+        );
+        const askDecision = evaluateQuoteDecision(
+            "ASK",
+            plan,
+            this.managedQuotes.ASK,
+            {
+                ...DEFAULT_MARKET_MAKER_CONFIG,
+                minQuoteUnits: 2,
+                maxQuoteUnits: 8,
+                maxInventoryPerSide: 40,
+                maxNetExposure: 25,
+                maxQuoteAgeMs: 2_500,
+                minRefreshIntervalMs: 1_000,
+                betCloseGuardMs:
+                    runtimeProfile?.marketMakerBetCloseGuardMs ??
+                    DEFAULT_MARKET_MAKER_CONFIG.betCloseGuardMs,
+            },
+            nowMs,
+        );
+
+        if (bidDecision.shouldCancel && this.managedQuotes.BID) {
+            actions.push({
+                type: "cancelOrder",
+                orderId: this.managedQuotes.BID.orderId as unknown as number,
+                label: "MM cancel bid",
+                managedQuoteSide: "BID",
+            });
+        }
+        if (askDecision.shouldCancel && this.managedQuotes.ASK) {
+            actions.push({
+                type: "cancelOrder",
+                orderId: this.managedQuotes.ASK.orderId as unknown as number,
+                label: "MM cancel ask",
+                managedQuoteSide: "ASK",
+            });
+        }
+        if (
+            bidDecision.shouldPlace &&
+            bidDecision.targetPrice != null &&
+            bidDecision.targetUnits > 0
+        ) {
+            actions.push({
+                type: "placeOrder",
+                side: BUY_SIDE,
+                price: bidDecision.targetPrice,
+                amount: BigInt(bidDecision.targetUnits) * 1000n,
+                label: "MM bid",
+                managedQuoteSide: "BID",
+                managedQuoteUnits: bidDecision.targetUnits,
+            });
+        }
+        if (
+            askDecision.shouldPlace &&
+            askDecision.targetPrice != null &&
+            askDecision.targetUnits > 0
+        ) {
+            actions.push({
+                type: "placeOrder",
+                side: SELL_SIDE,
+                price: askDecision.targetPrice,
+                amount: BigInt(askDecision.targetUnits) * 1000n,
+                label: "MM ask",
+                managedQuoteSide: "ASK",
+                managedQuoteUnits: askDecision.targetUnits,
+            });
         }
 
-        const quoteWidth = Math.max(
-            Math.ceil((this.targetSpreadBps * ctx.mid) / 10000),
-            5,
-        );
-        const bidPrice = clamp(Math.floor(ctx.mid - quoteWidth / 2), 10, 990);
-        const askPrice = clamp(Math.ceil(ctx.mid + quoteWidth / 2), 10, 990);
-        const amount = BigInt(randomInt(2, 8)) * 100000000000000n;
-
-        actions.push(
-            { type: "placeOrder", side: BUY_SIDE, price: bidPrice, amount, label: "MM bid" },
-            { type: "placeOrder", side: SELL_SIDE, price: askPrice, amount, label: "MM ask" },
-        );
-
         return actions;
+    }
+
+    protected override onOrderPlaced(
+        action: AgentAction,
+        orderId: number,
+        ctx: SimContext,
+    ): void {
+        if (action.managedQuoteSide && orderId > 0) {
+            this.managedQuotes[action.managedQuoteSide] = {
+                orderId,
+                price: action.price ?? 0,
+                units: action.managedQuoteUnits ?? 0,
+                placedAtMs: ctx.nowMs,
+            };
+            this.syncManagedOrderIds();
+            return;
+        }
+        super.onOrderPlaced(action, orderId, ctx);
+    }
+
+    protected override onOrderCancelled(action: AgentAction): void {
+        if (action.managedQuoteSide) {
+            this.managedQuotes[action.managedQuoteSide] = null;
+            this.syncManagedOrderIds();
+            return;
+        }
+        super.onOrderCancelled(action);
+    }
+
+    override resetForScenario(): void {
+        super.resetForScenario();
+        this.lastPlan = null;
+        this.lastSnapshot = null;
+        this.managedQuotes = {
+            BID: null,
+            ASK: null,
+        };
+    }
+
+    private syncManagedOrderIds(): void {
+        this.activeOrderIds = (["BID", "ASK"] as const)
+            .map((side) => this.managedQuotes[side]?.orderId)
+            .filter((orderId): orderId is number => orderId != null);
     }
 }
 
@@ -234,9 +478,9 @@ export class WhaleAgent extends BaseAgent {
     }
 
     decide(ctx: SimContext): AgentAction[] {
-        if (Math.random() < 0.7) return []; // Only trades 30% of ticks
+        if (random() < 0.7) return []; // Only trades 30% of ticks
 
-        const isBuy = Math.random() > 0.5;
+        const isBuy = random() > 0.5;
         const price = isBuy
             ? clamp(ctx.mid + randomInt(10, 40), 10, 990)
             : clamp(ctx.mid - randomInt(10, 40), 10, 990);
@@ -274,10 +518,19 @@ export class MevFrontrunnerAgent extends BaseAgent {
     }
 
     decide(ctx: SimContext): AgentAction[] {
-        if (Math.random() < 0.6) return [];
+        // The close-window scenario is meant to test attack activity only inside
+        // the guarded betting-close interval, not random earlier speculation.
+        if (
+            ctx.scenarioProfile?.betCloseTick != null &&
+            !isScenarioCloseGuardWindow(ctx.scenarioProfile, ctx.tick)
+        ) {
+            return [];
+        }
+
+        if (random() < 0.6) return [];
 
         // Simulate front-running by placing aggressive orders at better prices
-        const isBuy = Math.random() > 0.5;
+        const isBuy = random() > 0.5;
         const price = isBuy
             ? clamp(ctx.bestAsk > 0 && ctx.bestAsk < MAX_PRICE ? ctx.bestAsk : ctx.mid + 20, 10, 990)
             : clamp(ctx.bestBid > 0 ? ctx.bestBid : ctx.mid - 20, 10, 990);
@@ -312,7 +565,7 @@ export class SandwichAgent extends BaseAgent {
     }
 
     decide(ctx: SimContext): AgentAction[] {
-        if (Math.random() < 0.7) return [];
+        if (random() < 0.7) return [];
 
         const amount = BigInt(randomInt(1, 5)) * 100000000000000n;
         // Buy before and sell after — in sim, these are sequential
@@ -352,7 +605,7 @@ export class WashTraderAgent extends BaseAgent {
     }
 
     decide(ctx: SimContext): AgentAction[] {
-        if (Math.random() < 0.5) return [];
+        if (random() < 0.5) return [];
 
         const price = clamp(ctx.mid, 10, 990);
         const amount = BigInt(randomInt(1, 3)) * 100000000000000n;
@@ -392,7 +645,7 @@ export class OracleAttackAgent extends BaseAgent {
     async executeOracleAttack(duelKey: string): Promise<string> {
         try {
             const { ethers } = await import("ethers");
-            const tx = await (this.oracle.connect(this.signer) as any).reportResult(
+            const tx = await (this.oracle.connect(this.signer) as any).proposeResult(
                 duelKey,
                 SIDE_A,
                 13,
@@ -429,7 +682,7 @@ export class CabalAgent extends BaseAgent {
     }
 
     decide(ctx: SimContext): AgentAction[] {
-        if (Math.random() < 0.3) return [];
+        if (random() < 0.3) return [];
 
         // Cabal always bets one direction aggressively
         const side = this.biasAgainstHouse ? BUY_SIDE : SELL_SIDE;
@@ -504,10 +757,10 @@ export class StressTestAgent extends BaseAgent {
 
     decide(ctx: SimContext): AgentAction[] {
         const actions: AgentAction[] = [];
-        const count = randomInt(3, 8);
+        const count = randomInt(2, 4);
 
         for (let i = 0; i < count; i++) {
-            const isBuy = Math.random() > 0.5;
+            const isBuy = random() > 0.5;
             const price = clamp(ctx.mid + randomInt(-100, 100), 10, 990);
             const amount = BigInt(randomInt(1, 3)) * 100000000000000n;
             actions.push({
@@ -523,107 +776,37 @@ export class StressTestAgent extends BaseAgent {
     }
 }
 
-// ─── Scenario Presets ────────────────────────────────────────────────────────
+export class CancelReplaceAgent extends BaseAgent {
+    constructor(signer: JsonRpcSigner, clob: Contract) {
+        super(
+            {
+                name: "Cancel/Replace Griefer",
+                strategy: "cancel_replace",
+                description: "Rapidly churns its own quotes to stress cancel-replace paths",
+                enabled: false,
+                color: "#8d6e63",
+            },
+            signer,
+            clob,
+        );
+    }
 
-export type ScenarioPreset = {
-    name: string;
-    description: string;
-    enabledStrategies: string[];
-};
-
-export const SCENARIO_PRESETS: ScenarioPreset[] = [
-    {
-        name: "Normal Market",
-        description: "Retail traders + market maker in a balanced market",
-        enabledStrategies: ["retail", "market_maker"],
-    },
-    {
-        name: "Retail Rush",
-        description: "All retail traders active, overwhelming thin MM liquidity",
-        enabledStrategies: ["retail", "market_maker"],
-    },
-    {
-        name: "Whale Impact",
-        description: "Normal market with a whale dumping large orders",
-        enabledStrategies: ["retail", "market_maker", "whale"],
-    },
-    {
-        name: "MEV Extraction",
-        description: "Multiple MEV bots frontrunning retail order flow",
-        enabledStrategies: ["retail", "market_maker", "mev_frontrunner"],
-    },
-    {
-        name: "Sandwich Attack",
-        description: "Multiple sandwich bots wrapping retail orders",
-        enabledStrategies: ["retail", "market_maker", "sandwich"],
-    },
-    {
-        name: "Double Sandwich + MEV",
-        description: "Both sandwich bots and MEV bots extracting from retail",
-        enabledStrategies: ["retail", "market_maker", "sandwich", "mev_frontrunner"],
-    },
-    {
-        name: "Wash Trading",
-        description: "Wash trader inflating volume alongside normal flow",
-        enabledStrategies: ["retail", "market_maker", "wash_trader"],
-    },
-    {
-        name: "Oracle Attack",
-        description: "Attacker trying to manipulate the duel oracle",
-        enabledStrategies: ["retail", "market_maker", "oracle_attack"],
-    },
-    {
-        name: "Cabal Coordination",
-        description: "Two coordinated cabal groups betting against each other",
-        enabledStrategies: ["retail", "market_maker", "cabal"],
-    },
-    {
-        name: "Arbitrage Hunt",
-        description: "Arbitrageur exploiting tight/crossed spreads",
-        enabledStrategies: ["retail", "market_maker", "arbitrageur"],
-    },
-    {
-        name: "Stress Test",
-        description: "High-frequency flood of orders overwhelming the book",
-        enabledStrategies: ["retail", "market_maker", "stress_test"],
-    },
-    {
-        name: "Whale vs MEV",
-        description: "Whale moving markets while MEV bots try to extract",
-        enabledStrategies: ["market_maker", "whale", "mev_frontrunner"],
-    },
-    {
-        name: "Attack Gauntlet",
-        description: "All attack agents vs thin MM — maximum adversarial pressure",
-        enabledStrategies: [
-            "market_maker",
-            "mev_frontrunner",
-            "sandwich",
-            "wash_trader",
-            "cabal",
-            "arbitrageur",
-        ],
-    },
-    {
-        name: "Liquidity Crisis",
-        description: "Only the underfunded MM and whale — tests insolvency edge cases",
-        enabledStrategies: ["market_maker", "whale"],
-    },
-    {
-        name: "Full Chaos",
-        description: "All 15 agents active simultaneously — maximum entropy",
-        enabledStrategies: [
-            "retail",
-            "market_maker",
-            "whale",
-            "mev_frontrunner",
-            "sandwich",
-            "wash_trader",
-            "oracle_attack",
-            "cabal",
-            "arbitrageur",
-            "stress_test",
-        ],
-    },
-];
-
+    decide(ctx: SimContext): AgentAction[] {
+        const actions: AgentAction[] = [];
+        for (const orderId of this.activeOrderIds.slice(0, 2)) {
+            actions.push({ type: "cancelOrder", orderId, label: "cancel/replace" });
+        }
+        const orderCount = randomInt(1, 2);
+        for (let i = 0; i < orderCount; i += 1) {
+            const isBuy = random() > 0.5;
+            actions.push({
+                type: "placeOrder",
+                side: isBuy ? BUY_SIDE : SELL_SIDE,
+                price: clamp(ctx.mid + randomInt(-15, 15), 10, 990),
+                amount: BigInt(randomInt(1, 2)) * 1000n,
+                label: `cancel-replace #${i + 1}`,
+            });
+        }
+        return actions;
+    }
+}

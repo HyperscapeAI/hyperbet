@@ -1,4 +1,9 @@
-import { HardhatUserConfig } from "hardhat/config";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+
+import { HardhatUserConfig, subtask } from "hardhat/config";
+import { TASK_COMPILE_SOLIDITY_GET_SOLC_BUILD } from "hardhat/builtin-tasks/task-names";
 import "@nomicfoundation/hardhat-ethers";
 import "@nomicfoundation/hardhat-chai-matchers";
 import * as dotenv from "dotenv";
@@ -19,6 +24,52 @@ function normalizePrivateKey(raw?: string): string | undefined {
 const privateKey = normalizePrivateKey(process.env.PRIVATE_KEY);
 const anvilPort = process.env.ANVIL_PORT || "18545";
 const anvilRpcUrl = process.env.ANVIL_RPC_URL || `http://127.0.0.1:${anvilPort}`;
+const LOCAL_SOLC_VERSION = "0.8.33";
+
+function resolveLocalSolcPath(): string | null {
+  const explicit = process.env.HARDHAT_LOCAL_SOLC_PATH?.trim();
+  const candidates = [
+    explicit,
+    path.join(
+      os.homedir(),
+      "Library",
+      "Application Support",
+      "svm",
+      LOCAL_SOLC_VERSION,
+      `solc-${LOCAL_SOLC_VERSION}`,
+    ),
+    path.join(
+      os.homedir(),
+      ".svm",
+      LOCAL_SOLC_VERSION,
+      `solc-${LOCAL_SOLC_VERSION}`,
+    ),
+  ].filter((candidate): candidate is string => Boolean(candidate));
+
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+
+  return null;
+}
+
+subtask(TASK_COMPILE_SOLIDITY_GET_SOLC_BUILD).setAction(
+  async ({ solcVersion }, _hre, runSuper) => {
+    const localSolcPath = resolveLocalSolcPath();
+    if (localSolcPath && solcVersion === LOCAL_SOLC_VERSION) {
+      return {
+        compilerPath: localSolcPath,
+        isSolcJs: false,
+        version: LOCAL_SOLC_VERSION,
+        longVersion: `${LOCAL_SOLC_VERSION}+local`,
+      };
+    }
+
+    return runSuper();
+  },
+);
 
 function resolveAccounts(networkKey: string): string[] {
   const specificKey = normalizePrivateKey(process.env[networkKey]);
@@ -30,7 +81,7 @@ function resolveAccounts(networkKey: string): string[] {
 
 const config: HardhatUserConfig = {
   solidity: {
-    version: "0.8.24",
+    version: LOCAL_SOLC_VERSION,
     settings: {
       viaIR: true,
       optimizer: {

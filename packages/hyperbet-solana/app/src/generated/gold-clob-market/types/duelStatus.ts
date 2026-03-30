@@ -8,7 +8,7 @@
 
 import { combineCodec, getEnumDecoder, getEnumEncoder, type FixedSizeCodec, type FixedSizeDecoder, type FixedSizeEncoder } from '@solana/kit';
 
-export enum DuelStatus { Scheduled, BettingOpen, Locked, Resolved, Cancelled };
+export enum DuelStatus { Scheduled, BettingOpen, Locked, Proposed, Challenged, Resolved, Cancelled };
 
 export type DuelStatusArgs = DuelStatus;
 

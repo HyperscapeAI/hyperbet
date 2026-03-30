@@ -1,7 +1,15 @@
 import React from "react";
 import { PublicKey } from "@solana/web3.js";
+import type { HyperbetThemeId } from "../src/lib/theme";
 
 export const STORY_TIME = new Date("2026-03-09T18:20:00.000Z").getTime();
+export const HYPERBET_THEME_IDS: HyperbetThemeId[] = [
+  "evm",
+  "avax",
+  "bsc",
+  "base",
+  "solana",
+];
 
 export function StorySurface({
   children,
@@ -19,6 +27,41 @@ export function StorySurface({
       }}
     >
       {children}
+    </div>
+  );
+}
+
+export function ThemeMatrix({
+  children,
+  columns = "repeat(auto-fit, minmax(240px, 1fr))",
+}: {
+  children: (theme: HyperbetThemeId) => React.ReactNode;
+  columns?: string;
+}) {
+  return (
+    <div
+      style={{
+        display: "grid",
+        gridTemplateColumns: columns,
+        gap: 16,
+      }}
+    >
+      {HYPERBET_THEME_IDS.map((themeId) => (
+        <section key={themeId}>
+          <p
+            style={{
+              margin: "0 0 10px",
+              fontSize: 12,
+              letterSpacing: "0.12em",
+              textTransform: "uppercase",
+              color: "rgba(255,255,255,0.65)",
+            }}
+          >
+            {themeId}
+          </p>
+          {children(themeId)}
+        </section>
+      ))}
     </div>
   );
 }

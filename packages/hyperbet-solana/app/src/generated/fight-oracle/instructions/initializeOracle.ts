@@ -6,7 +6,7 @@
  * @see https://github.com/codama-idl/codama
  */
 
-import { combineCodec, fixDecoderSize, fixEncoderSize, getAddressDecoder, getAddressEncoder, getBytesDecoder, getBytesEncoder, getProgramDerivedAddress, getStructDecoder, getStructEncoder, transformEncoder, type AccountMeta, type AccountSignerMeta, type Address, type FixedSizeCodec, type FixedSizeDecoder, type FixedSizeEncoder, type Instruction, type InstructionWithAccounts, type InstructionWithData, type ReadonlyAccount, type ReadonlyUint8Array, type TransactionSigner, type WritableAccount, type WritableSignerAccount } from '@solana/kit';
+import { combineCodec, fixDecoderSize, fixEncoderSize, getAddressDecoder, getAddressEncoder, getBytesDecoder, getBytesEncoder, getI64Decoder, getI64Encoder, getProgramDerivedAddress, getStructDecoder, getStructEncoder, transformEncoder, type AccountMeta, type AccountSignerMeta, type Address, type FixedSizeCodec, type FixedSizeDecoder, type FixedSizeEncoder, type Instruction, type InstructionWithAccounts, type InstructionWithData, type ReadonlyAccount, type ReadonlyUint8Array, type TransactionSigner, type WritableAccount, type WritableSignerAccount } from '@solana/kit';
 import { FIGHT_ORACLE_PROGRAM_ADDRESS } from '../programs/index.js';
 import { getAccountMetaFactory, type ResolvedAccount } from '../shared/index.js';
 
@@ -14,19 +14,19 @@ export const INITIALIZE_ORACLE_DISCRIMINATOR: ReadonlyUint8Array = new Uint8Arra
 
 export function getInitializeOracleDiscriminatorBytes(): ReadonlyUint8Array { return fixEncoderSize(getBytesEncoder(), 8).encode(INITIALIZE_ORACLE_DISCRIMINATOR); }
 
-export type InitializeOracleInstruction<TProgram extends string = typeof FIGHT_ORACLE_PROGRAM_ADDRESS, TAccountAuthority extends string | AccountMeta<string> = string, TAccountOracleConfig extends string | AccountMeta<string> = string, TAccountProgram extends string | AccountMeta<string> = "6tpRysBFd1yXRipYEYwAw9jxEoVHk15kVXfkDGFLMqcD", TAccountProgramData extends string | AccountMeta<string> = string, TAccountSystemProgram extends string | AccountMeta<string> = "11111111111111111111111111111111", TRemainingAccounts extends readonly AccountMeta<string>[] = []> =
+export type InitializeOracleInstruction<TProgram extends string = typeof FIGHT_ORACLE_PROGRAM_ADDRESS, TAccountAuthority extends string | AccountMeta<string> = string, TAccountOracleConfig extends string | AccountMeta<string> = string, TAccountProgram extends string | AccountMeta<string> = "B5mRCRDJk9BrnH7regMWW5mpTQ8QG1CcCGSnDxMt8hmo", TAccountProgramData extends string | AccountMeta<string> = string, TAccountSystemProgram extends string | AccountMeta<string> = "11111111111111111111111111111111", TRemainingAccounts extends readonly AccountMeta<string>[] = []> =
 Instruction<TProgram> & InstructionWithData<ReadonlyUint8Array> & InstructionWithAccounts<[TAccountAuthority extends string ? WritableSignerAccount<TAccountAuthority> & AccountSignerMeta<TAccountAuthority> : TAccountAuthority, TAccountOracleConfig extends string ? WritableAccount<TAccountOracleConfig> : TAccountOracleConfig, TAccountProgram extends string ? ReadonlyAccount<TAccountProgram> : TAccountProgram, TAccountProgramData extends string ? ReadonlyAccount<TAccountProgramData> : TAccountProgramData, TAccountSystemProgram extends string ? ReadonlyAccount<TAccountSystemProgram> : TAccountSystemProgram, ...TRemainingAccounts]>;
 
-export type InitializeOracleInstructionData = { discriminator: ReadonlyUint8Array; reporter: Address;  };
+export type InitializeOracleInstructionData = { discriminator: ReadonlyUint8Array; reporter: Address; finalizer: Address; challenger: Address; disputeWindowSecs: bigint;  };
 
-export type InitializeOracleInstructionDataArgs = { reporter: Address;  };
+export type InitializeOracleInstructionDataArgs = { reporter: Address; finalizer: Address; challenger: Address; disputeWindowSecs: number | bigint;  };
 
 export function getInitializeOracleInstructionDataEncoder(): FixedSizeEncoder<InitializeOracleInstructionDataArgs> {
-    return transformEncoder(getStructEncoder([['discriminator', fixEncoderSize(getBytesEncoder(), 8)], ['reporter', getAddressEncoder()]]), (value) => ({ ...value, discriminator: INITIALIZE_ORACLE_DISCRIMINATOR }));
+    return transformEncoder(getStructEncoder([['discriminator', fixEncoderSize(getBytesEncoder(), 8)], ['reporter', getAddressEncoder()], ['finalizer', getAddressEncoder()], ['challenger', getAddressEncoder()], ['disputeWindowSecs', getI64Encoder()]]), (value) => ({ ...value, discriminator: INITIALIZE_ORACLE_DISCRIMINATOR }));
 }
 
 export function getInitializeOracleInstructionDataDecoder(): FixedSizeDecoder<InitializeOracleInstructionData> {
-    return getStructDecoder([['discriminator', fixDecoderSize(getBytesDecoder(), 8)], ['reporter', getAddressDecoder()]]);
+    return getStructDecoder([['discriminator', fixDecoderSize(getBytesDecoder(), 8)], ['reporter', getAddressDecoder()], ['finalizer', getAddressDecoder()], ['challenger', getAddressDecoder()], ['disputeWindowSecs', getI64Decoder()]]);
 }
 
 export function getInitializeOracleInstructionDataCodec(): FixedSizeCodec<InitializeOracleInstructionDataArgs, InitializeOracleInstructionData> {
@@ -40,6 +40,9 @@ program?: Address<TAccountProgram>;
 programData: Address<TAccountProgramData>;
 systemProgram?: Address<TAccountSystemProgram>;
 reporter: InitializeOracleInstructionDataArgs["reporter"];
+finalizer: InitializeOracleInstructionDataArgs["finalizer"];
+challenger: InitializeOracleInstructionDataArgs["challenger"];
+disputeWindowSecs: InitializeOracleInstructionDataArgs["disputeWindowSecs"];
 }
 
 export async function getInitializeOracleInstructionAsync<TAccountAuthority extends string, TAccountOracleConfig extends string, TAccountProgram extends string, TAccountProgramData extends string, TAccountSystemProgram extends string, TProgramAddress extends Address = typeof FIGHT_ORACLE_PROGRAM_ADDRESS>(input: InitializeOracleAsyncInput<TAccountAuthority, TAccountOracleConfig, TAccountProgram, TAccountProgramData, TAccountSystemProgram>, config?: { programAddress?: TProgramAddress } ): Promise<InitializeOracleInstruction<TProgramAddress, TAccountAuthority, TAccountOracleConfig, TAccountProgram, TAccountProgramData, TAccountSystemProgram>> {
@@ -60,7 +63,7 @@ if (!accounts.oracleConfig.value) {
 accounts.oracleConfig.value = await getProgramDerivedAddress({ programAddress, seeds: [getBytesEncoder().encode(new Uint8Array([111, 114, 97, 99, 108, 101, 95, 99, 111, 110, 102, 105, 103]))] });
 }
 if (!accounts.program.value) {
-accounts.program.value = '6tpRysBFd1yXRipYEYwAw9jxEoVHk15kVXfkDGFLMqcD' as Address<'6tpRysBFd1yXRipYEYwAw9jxEoVHk15kVXfkDGFLMqcD'>;
+accounts.program.value = 'B5mRCRDJk9BrnH7regMWW5mpTQ8QG1CcCGSnDxMt8hmo' as Address<'B5mRCRDJk9BrnH7regMWW5mpTQ8QG1CcCGSnDxMt8hmo'>;
 }
 if (!accounts.systemProgram.value) {
 accounts.systemProgram.value = '11111111111111111111111111111111' as Address<'11111111111111111111111111111111'>;
@@ -77,6 +80,9 @@ program?: Address<TAccountProgram>;
 programData: Address<TAccountProgramData>;
 systemProgram?: Address<TAccountSystemProgram>;
 reporter: InitializeOracleInstructionDataArgs["reporter"];
+finalizer: InitializeOracleInstructionDataArgs["finalizer"];
+challenger: InitializeOracleInstructionDataArgs["challenger"];
+disputeWindowSecs: InitializeOracleInstructionDataArgs["disputeWindowSecs"];
 }
 
 export function getInitializeOracleInstruction<TAccountAuthority extends string, TAccountOracleConfig extends string, TAccountProgram extends string, TAccountProgramData extends string, TAccountSystemProgram extends string, TProgramAddress extends Address = typeof FIGHT_ORACLE_PROGRAM_ADDRESS>(input: InitializeOracleInput<TAccountAuthority, TAccountOracleConfig, TAccountProgram, TAccountProgramData, TAccountSystemProgram>, config?: { programAddress?: TProgramAddress } ): InitializeOracleInstruction<TProgramAddress, TAccountAuthority, TAccountOracleConfig, TAccountProgram, TAccountProgramData, TAccountSystemProgram> {
@@ -94,7 +100,7 @@ const args = { ...input,  };
 
 // Resolve default values.
 if (!accounts.program.value) {
-accounts.program.value = '6tpRysBFd1yXRipYEYwAw9jxEoVHk15kVXfkDGFLMqcD' as Address<'6tpRysBFd1yXRipYEYwAw9jxEoVHk15kVXfkDGFLMqcD'>;
+accounts.program.value = 'B5mRCRDJk9BrnH7regMWW5mpTQ8QG1CcCGSnDxMt8hmo' as Address<'B5mRCRDJk9BrnH7regMWW5mpTQ8QG1CcCGSnDxMt8hmo'>;
 }
 if (!accounts.systemProgram.value) {
 accounts.systemProgram.value = '11111111111111111111111111111111' as Address<'11111111111111111111111111111111'>;

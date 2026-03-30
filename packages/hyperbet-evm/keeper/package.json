@@ -1,0 +1,32 @@
+{
+  "name": "hyperbet-evm-keeper",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "service": "bun --bun src/service.ts",
+    "bot": "bun --bun src/bot.ts"
+  },
+  "dependencies": {
+    "@coral-xyz/anchor": "0.32.1",
+    "@hyperbet/chain-registry": "workspace:*",
+    "@hyperbet/evm-keeper-core": "workspace:*",
+    "@hyperbet/mm-core": "workspace:*",
+    "@solana/spl-token": "0.4.14",
+    "@solana/web3.js": "1.98.4",
+    "bn.js": "5.2.2",
+    "bs58": "^6.0.0",
+    "dotenv": "16.5.0",
+    "socket.io-client": "^4.8.3",
+    "viem": "^2.38.0",
+    "yargs": "17.7.2"
+  },
+  "devDependencies": {
+    "@types/bn.js": "5.2.0",
+    "@types/bun": "latest",
+    "@types/node": "25.3.0",
+    "@types/yargs": "^17.0.33",
+    "tsx": "4.20.6",
+    "typescript": "5.9.3"
+  }
+}

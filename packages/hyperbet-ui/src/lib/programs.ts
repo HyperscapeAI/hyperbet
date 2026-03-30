@@ -1,5 +1,8 @@
 import { AnchorProvider, BN, Idl, Program } from "@coral-xyz/anchor";
-import { Connection, PublicKey } from "@solana/web3.js";
+import {
+  Connection,
+  PublicKey,
+} from "@solana/web3.js";
 import { WalletContextState } from "@solana/wallet-adapter-react";
 
 import fightOracleIdl from "../idl/fight_oracle.json";
@@ -75,7 +78,13 @@ export type ProgramsBundle = {
   goldClobMarket: Program<any>;
 };
 
-function asAnchorWallet(wallet: WalletContextState): any {
+export type SigningWalletLike = {
+  publicKey: WalletContextState["publicKey"];
+  signTransaction?: WalletContextState["signTransaction"];
+  signAllTransactions?: WalletContextState["signAllTransactions"];
+};
+
+function asAnchorWallet(wallet: SigningWalletLike): any {
   if (
     !wallet.publicKey ||
     !wallet.signTransaction ||
@@ -104,7 +113,7 @@ function readonlyAnchorWallet(): any {
 
 export function createPrograms(
   connection: Connection,
-  wallet: WalletContextState,
+  wallet: SigningWalletLike,
 ): ProgramsBundle {
   const anchorWallet = asAnchorWallet(wallet);
   const provider = new AnchorProvider(connection, anchorWallet, {

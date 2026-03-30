@@ -1,0 +1,22 @@
+{
+  "name": "@hyperbet/mm-core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "bunx tsc --noEmit",
+    "lint": "bunx tsc --noEmit",
+    "typecheck": "bunx tsc --noEmit",
+    "test": "bun test"
+  },
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@hyperbet/chain-registry": "workspace:*"
+  },
+  "devDependencies": {
+    "bun-types": "^1.2.20",
+    "typescript": "5.9.3"
+  }
+}

@@ -1,0 +1,61 @@
+{
+  "release_candidate_tag": "rc-2026-03-audit-handoff",
+  "freeze_generated_at_utc": "2026-03-13T12:50:54Z",
+  "source_commit": "a0f36b6a7506885a545a7aa9d3e0cd36e2f2fc56",
+  "abi_freeze": {
+    "evm": [
+      {
+        "artifact": "gold_clob.abi.json",
+        "path": "docs/release/abi/gold_clob.abi.json",
+        "sha256": "113d8cb993d1c4a56509260cbc49bff713521244a84a182d41f1af943f085e86",
+        "implementation_surface": "GoldClob.sol"
+      },
+      {
+        "artifact": "duel_outcome_oracle.abi.json",
+        "path": "docs/release/abi/duel_outcome_oracle.abi.json",
+        "sha256": "54facb16c174d4bc7612e2c8f7758f51e978c7883d504c67de0c8f808926fd9f",
+        "implementation_surface": "DuelOutcomeOracle.sol"
+      }
+    ],
+    "svm": [
+      {
+        "artifact": "fight_oracle.idl.json",
+        "path": "packages/hyperbet-solana/anchor/target/idl/fight_oracle.json",
+        "sha256": "53647c8d46e4580bda316e8588894fc069e7f2b84b016d27274a35bc50a73b76",
+        "program_id": "6tpRysBFd1yXRipYEYwAw9jxEoVHk15kVXfkDGFLMqcD"
+      },
+      {
+        "artifact": "gold_clob_market.idl.json",
+        "path": "packages/hyperbet-solana/anchor/target/idl/gold_clob_market.json",
+        "sha256": "810073b2345d1b373a7b10c62d12120df2cbe46cea04da6b76b53517b1421887",
+        "program_id": "ARVJNJp49VZnkB8QBYZAAFJmufvtVSPhnuuenwwSLwpi"
+      },
+      {
+        "artifact": "gold_perps_market.idl.json",
+        "path": "packages/hyperbet-solana/anchor/target/idl/gold_perps_market.json",
+        "sha256": "c3db88f7063d6faf4128e660993afa9dfbaf2000f62ef0b53c024206d8c4c30f",
+        "program_id": "HbXhqEFevpkfYdZCN6YmJGRmQmj9vsBun2ZHjeeaLRik"
+      }
+    ]
+  },
+  "deployment_metadata": {
+    "solana": {
+      "deployment_registry_path": "packages/hyperbet-solana/deployments/contracts.json",
+      "deployment_registry_sha256": "adfd84642ff7b2dbda4cf443c121c94e038364f548beeb073fcc0d7ffbb0a089",
+      "clusters": [
+        "localnet",
+        "devnet",
+        "testnet",
+        "mainnet-beta"
+      ]
+    },
+    "evm": {
+      "status": "addresses are env/registry driven for release operations",
+      "required_env_keys": [
+        "BSC_GOLD_CLOB_ADDRESS",
+        "BASE_GOLD_CLOB_ADDRESS"
+      ],
+      "avax_release_state": "launch blocked pending canonical registry values and staged-proof artifacts"
+    }
+  }
+}

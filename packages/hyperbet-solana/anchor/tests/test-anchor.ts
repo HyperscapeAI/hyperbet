@@ -195,6 +195,242 @@ async function sendAndConfirmWithPolling(
   throw lastError instanceof Error ? lastError : new Error(String(lastError));
 }
 
+function uniquePubkeys(
+  pubkeys: anchor.web3.PublicKey[],
+): anchor.web3.PublicKey[] {
+  const seen = new Set<string>();
+  const unique: anchor.web3.PublicKey[] = [];
+  for (const pubkey of pubkeys) {
+    const key = pubkey.toBase58();
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    unique.push(pubkey);
+  }
+  return unique;
+}
+
+function chunkPubkeys(
+  pubkeys: anchor.web3.PublicKey[],
+  size: number,
+): anchor.web3.PublicKey[][] {
+  const chunks: anchor.web3.PublicKey[][] = [];
+  for (let index = 0; index < pubkeys.length; index += size) {
+    chunks.push(pubkeys.slice(index, index + size));
+  }
+  return chunks;
+}
+
+export async function sendVersionedTransactionWithLookupTable(
+  provider: anchor.AnchorProvider,
+  instructions: anchor.web3.TransactionInstruction[],
+  signers: anchor.web3.Signer[] = [],
+  options?: anchor.web3.ConfirmOptions,
+): Promise<string> {
+  const wallet = provider.wallet as anchor.Wallet & {
+    payer?: anchor.web3.Keypair;
+  };
+  if (!wallet.payer) {
+    throw new Error("Anchor wallet does not expose a payer for v0 transactions");
+  }
+
+  const lookupTableAddresses = uniquePubkeys(
+    instructions.flatMap((instruction) =>
+      instruction.keys
+        .filter((accountMeta) => !accountMeta.isSigner)
+        .map((accountMeta) => accountMeta.pubkey),
+    ),
+  ).filter((pubkey) => !pubkey.equals(wallet.publicKey));
+
+  const recentSlot = await provider.connection.getSlot(DEFAULT_COMMITMENT);
+  let lastLookupMutationSlot = recentSlot;
+  const [createLookupTableIx, lookupTableAddress] =
+    anchor.web3.AddressLookupTableProgram.createLookupTable({
+      authority: wallet.publicKey,
+      payer: wallet.publicKey,
+      recentSlot,
+    });
+  await sendAndConfirmWithPolling(
+    provider,
+    new anchor.web3.Transaction().add(createLookupTableIx),
+    [],
+    options,
+  );
+
+  for (const addressChunk of chunkPubkeys(lookupTableAddresses, 20)) {
+    if (addressChunk.length === 0) {
+      continue;
+    }
+    await sendAndConfirmWithPolling(
+      provider,
+      new anchor.web3.Transaction().add(
+        anchor.web3.AddressLookupTableProgram.extendLookupTable({
+          payer: wallet.publicKey,
+          authority: wallet.publicKey,
+          lookupTable: lookupTableAddress,
+          addresses: addressChunk,
+        }),
+      ),
+      [],
+      options,
+    );
+    lastLookupMutationSlot = await provider.connection.getSlot(
+      DEFAULT_COMMITMENT,
+    );
+  }
+
+  // Newly extended lookup table entries only become usable in a later bank slot.
+  const waitForSlot = async (minimumSlotExclusive: number): Promise<void> => {
+    for (let attempt = 0; attempt < 40; attempt += 1) {
+      const currentSlot = await provider.connection.getSlot(DEFAULT_COMMITMENT);
+      if (currentSlot > minimumSlotExclusive) {
+        return;
+      }
+      await sleep(250);
+    }
+    throw new Error(
+      `lookup table ${lookupTableAddress.toBase58()} did not advance past slot ${minimumSlotExclusive}`,
+    );
+  };
+  await waitForSlot(lastLookupMutationSlot);
+
+  const lookupTableAccount = (
+    await provider.connection.getAddressLookupTable(lookupTableAddress)
+  ).value;
+  if (!lookupTableAccount) {
+    throw new Error(
+      `Failed to fetch lookup table account ${lookupTableAddress.toBase58()}`,
+    );
+  }
+
+  const opts = {
+    ...provider.opts,
+    ...options,
+  };
+  const commitment =
+    opts.preflightCommitment || opts.commitment || DEFAULT_COMMITMENT;
+  const versionedInstructions = [
+    anchor.web3.ComputeBudgetProgram.setComputeUnitLimit({
+      units: 1_400_000,
+    }),
+    ...instructions,
+  ];
+  const allSigners = [wallet.payer, ...signers].filter(
+    (signer, index, collection) =>
+      collection.findIndex((candidate) =>
+        candidate.publicKey.equals(signer.publicKey),
+      ) === index,
+  );
+  let lastError: unknown = null;
+
+  for (let attempt = 1; attempt <= 4; attempt += 1) {
+    try {
+      const { blockhash, lastValidBlockHeight } =
+        await getLatestBlockhashWithRetries(provider.connection, commitment);
+      const message = new anchor.web3.TransactionMessage({
+        payerKey: wallet.publicKey,
+        recentBlockhash: blockhash,
+        instructions: versionedInstructions,
+      }).compileToV0Message([lookupTableAccount]);
+      const transaction = new anchor.web3.VersionedTransaction(message);
+      transaction.sign(allSigners);
+
+      const signature = await provider.connection.sendRawTransaction(
+        transaction.serialize(),
+        {
+          maxRetries: 32,
+          preflightCommitment: commitment,
+          skipPreflight: opts.skipPreflight ?? false,
+        },
+      );
+      await confirmSignatureByPolling(
+        provider.connection,
+        signature,
+        lastValidBlockHeight,
+      );
+      return signature;
+    } catch (error) {
+      lastError = error;
+      if (attempt < 4) {
+        await sleep(250 * attempt);
+      }
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error(String(lastError));
+}
+
+async function sendVersionedTransactionWithPolling(
+  provider: anchor.AnchorProvider,
+  transaction: anchor.web3.VersionedTransaction,
+  signers: anchor.web3.Signer[] = [],
+  options?: anchor.web3.ConfirmOptions,
+): Promise<string> {
+  const opts = {
+    ...provider.opts,
+    ...options,
+  };
+  const commitment =
+    opts.preflightCommitment || opts.commitment || DEFAULT_COMMITMENT;
+  let lastError: unknown = null;
+
+  for (let attempt = 1; attempt <= 4; attempt += 1) {
+    try {
+      if (signers.length > 0) {
+        transaction.sign(signers);
+      }
+      const signedTx = await provider.wallet.signTransaction(transaction);
+      const signature = await provider.connection.sendRawTransaction(
+        signedTx.serialize(),
+        {
+          maxRetries: 8,
+          preflightCommitment: commitment,
+          skipPreflight: opts.skipPreflight ?? false,
+        },
+      );
+      await confirmSignatureByPolling(provider.connection, signature);
+      return signature;
+    } catch (error) {
+      lastError = error;
+      if (attempt < 4) {
+        await sleep(250 * attempt);
+      }
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error(String(lastError));
+}
+
+export function createPollingProvider(
+  connection: anchor.web3.Connection,
+  wallet: anchor.Wallet,
+  options?: Partial<anchor.AnchorProvider["opts"]>,
+): anchor.AnchorProvider {
+  const provider = new anchor.AnchorProvider(connection, wallet, {
+    commitment: DEFAULT_COMMITMENT,
+    preflightCommitment: DEFAULT_COMMITMENT,
+    ...(options ?? {}),
+  });
+  provider.sendAndConfirm = async (tx, signers, overrideOptions) => {
+    if (tx instanceof anchor.web3.VersionedTransaction) {
+      return sendVersionedTransactionWithPolling(
+        provider,
+        tx,
+        signers ?? [],
+        overrideOptions,
+      );
+    }
+    return sendAndConfirmWithPolling(
+      provider,
+      tx,
+      signers ?? [],
+      overrideOptions,
+    );
+  };
+  return provider;
+}
+
 export function configureAnchorTests(): anchor.AnchorProvider {
   process.env.ANCHOR_WALLET = resolveAnchorWalletPath();
   const providerUrl =
@@ -208,19 +444,9 @@ export function configureAnchorTests(): anchor.AnchorProvider {
     confirmTransactionInitialTimeout: CONFIRM_TIMEOUT_MS,
     wsEndpoint: process.env.ANCHOR_WS_URL,
   });
-  const provider = new anchor.AnchorProvider(connection, envProvider.wallet, {
+  const provider = createPollingProvider(connection, envProvider.wallet, {
     ...envProvider.opts,
-    commitment: DEFAULT_COMMITMENT,
-    preflightCommitment: DEFAULT_COMMITMENT,
   });
-  provider.sendAndConfirm = async (tx, signers, options) => {
-    if (!(tx instanceof anchor.web3.Transaction)) {
-      throw new Error(
-        "Versioned transactions are not supported in local tests",
-      );
-    }
-    return sendAndConfirmWithPolling(provider, tx, signers ?? [], options);
-  };
   anchor.setProvider(provider);
   return provider;
 }

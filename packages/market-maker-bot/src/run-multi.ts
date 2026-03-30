@@ -7,6 +7,7 @@ type WalletInstance = {
   evmPrivateKey?: string;
   evmPrivateKeyBsc?: string;
   evmPrivateKeyBase?: string;
+  evmPrivateKeyAvax?: string;
   solanaPrivateKey?: string;
   env?: Record<string, string>;
 };
@@ -116,6 +117,10 @@ async function main() {
         wallet.evmPrivateKeyBase ||
         wallet.evmPrivateKey ||
         process.env.EVM_PRIVATE_KEY_BASE,
+      EVM_PRIVATE_KEY_AVAX:
+        wallet.evmPrivateKeyAvax ||
+        wallet.evmPrivateKey ||
+        process.env.EVM_PRIVATE_KEY_AVAX,
       SOLANA_PRIVATE_KEY:
         wallet.solanaPrivateKey || process.env.SOLANA_PRIVATE_KEY,
     };

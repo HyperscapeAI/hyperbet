@@ -168,7 +168,7 @@ function formatPointsScope(
 
 export function ReferralPanel(props: {
   activeChain: ChainId;
-  solanaWallet: string | null;
+  solanaWallet?: string | null;
   evmWallet: string | null;
   evmWalletPlatform: EvmPlatform | null;
   locale?: UiLocale;

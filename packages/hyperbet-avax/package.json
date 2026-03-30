@@ -24,6 +24,8 @@
     "test:e2e:mainnet": "bun run --cwd app test:e2e:mainnet"
   },
   "dependencies": {
+    "@hyperbet/chain-registry": "workspace:*",
+    "@hyperbet/mm-core": "workspace:*",
     "@rainbow-me/rainbowkit": "^2.2.10",
     "@tanstack/react-query": "^5.90.21",
     "@vitejs/plugin-react": "^5.1.4",

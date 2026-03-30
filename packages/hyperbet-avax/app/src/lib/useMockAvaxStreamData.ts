@@ -6,7 +6,7 @@ import React, {
 } from "react";
 import { useMockStreamingEngine } from "@hyperbet/ui/lib/useMockStreamingEngine";
 import type { StreamingStateUpdate } from "@hyperbet/ui/spectator/types";
-import type { HmChartPoint } from "../components/HmChart";
+import type { HmChartPoint } from "@hyperbet/ui/components/HmChart";
 
 // ── Public shape ─────────────────────────────────────────────────────────────
 

@@ -49,7 +49,7 @@ kill_listeners "$APP_PORT"
 kill_listeners "$ANVIL_PORT"
 
 echo "[local-demo] compiling EVM contracts"
-bun run --cwd "$EVM_DIR" compile >/tmp/hyperbet-avax-local-build.log 2>&1
+forge build --root "$EVM_DIR" >/tmp/hyperbet-avax-local-build.log 2>&1
 
 echo "[local-demo] starting local Anvil (chain id $EVM_CHAIN_ID)"
 anvil \

@@ -8,6 +8,9 @@ from hyperbet_sdk.types import (
     CreateOrderParams,
     CancelOrderParams,
     ClaimParams,
+    ORDER_FLAG_GTC,
+    ORDER_FLAG_IOC,
+    ORDER_FLAG_POST_ONLY,
     SIDE_BID,
     SIDE_ASK,
     MARKET_KIND_DUEL_WINNER,
@@ -43,9 +46,20 @@ class HyperbetEVMClient:
         tx_hash = self.w3.eth.send_raw_transaction(signed_tx.raw_transaction) # type: ignore
         return self.w3.eth.wait_for_transaction_receipt(tx_hash)
 
+    def _encode_order_flags(self, time_in_force: str, post_only: bool) -> int:
+        if time_in_force == "ioc":
+            if post_only:
+                raise ValueError("post_only orders must use time_in_force='gtc'")
+            return ORDER_FLAG_IOC
+        return ORDER_FLAG_GTC | ORDER_FLAG_POST_ONLY if post_only else ORDER_FLAG_GTC
+
     def place_order(self, params: CreateOrderParams):
         duel_key = Web3.keccak(text=params.duel_id)
         side_int = SIDE_BID if params.side == "buy" else SIDE_ASK
+        order_flags = self._encode_order_flags(
+            params.time_in_force,
+            params.post_only,
+        )
         
         treasury_fee_bps = self.clob.functions.tradeTreasuryFeeBps().call()
         mm_fee_bps = self.clob.functions.tradeMarketMakerFeeBps().call()
@@ -62,7 +76,8 @@ class HyperbetEVMClient:
             MARKET_KIND_DUEL_WINNER,
             side_int,
             params.price,
-            params.amount
+            params.amount,
+            order_flags,
         )
         
         return self._sign_and_send(func_call, self._get_tx_params(value=total_value + 1000))

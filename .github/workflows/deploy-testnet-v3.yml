@@ -1,0 +1,187 @@
+name: Deploy Testnet v3
+
+on:
+  push:
+    branches:
+      - enoomian/pm16-17-20-21
+    paths:
+      - .github/workflows/deploy-testnet-v3.yml
+      - scripts/export-stage-a-env.sh
+      - packages/evm-contracts/**
+      - packages/hyperbet-solana/**
+      - docs/release/testnet-operations-ledger.md
+      - docs/release/pm-launch-execution-plan.md
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "Deployment target"
+        required: true
+        default: all
+        type: choice
+        options:
+          - all
+          - bsc
+          - avax
+          - solana
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  deploy-testnet-v3:
+    name: Deploy Testnet v3
+    runs-on: ubuntu-latest
+    env:
+      STAGE_A_TARGET: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.target || 'all' }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Hyperbet toolchain
+        uses: ./.github/actions/setup-hyperbet
+        with:
+          install-foundry: "true"
+          install-rust: "true"
+          install-solana: "true"
+          install-anchor: "true"
+
+      - name: Install dependencies
+        run: bash scripts/ci-install-verified.sh root
+
+      - name: Resolve Stage A runtime env
+        env:
+          TESTNET_DEPLOYER_PRIVATE_KEY: ${{ secrets.TESTNET_DEPLOYER_PRIVATE_KEY }}
+          ADMIN_ADDRESS: ${{ secrets.ADMIN_ADDRESS }}
+          BSC_TESTNET_RPC: ${{ secrets.BSC_TESTNET_RPC }}
+          AVAX_FUJI_RPC: ${{ secrets.AVAX_FUJI_RPC }}
+          TESTNET_MARKET_OPERATOR_PRIVATE_KEY: ${{ secrets.TESTNET_MARKET_OPERATOR_PRIVATE_KEY }}
+          TESTNET_REPORTER_PRIVATE_KEY: ${{ secrets.TESTNET_REPORTER_PRIVATE_KEY }}
+          TESTNET_FINALIZER_PRIVATE_KEY: ${{ secrets.TESTNET_FINALIZER_PRIVATE_KEY }}
+          TESTNET_CHALLENGER_PRIVATE_KEY: ${{ secrets.TESTNET_CHALLENGER_PRIVATE_KEY }}
+          TESTNET_PAUSER_PRIVATE_KEY: ${{ secrets.TESTNET_PAUSER_PRIVATE_KEY }}
+          TESTNET_TREASURY_PRIVATE_KEY: ${{ secrets.TESTNET_TREASURY_PRIVATE_KEY }}
+          TESTNET_MARKET_MAKER_PRIVATE_KEY: ${{ secrets.TESTNET_MARKET_MAKER_PRIVATE_KEY }}
+          TESTNET_SOLANA_DEPLOYER_KEYPAIR: ${{ secrets.TESTNET_SOLANA_DEPLOYER_KEYPAIR }}
+          BSC_TESTNET_MUSD_TOKEN_ADDRESS: ${{ secrets.BSC_TESTNET_MUSD_TOKEN_ADDRESS }}
+          AVAX_FUJI_MUSD_TOKEN_ADDRESS: ${{ secrets.AVAX_FUJI_MUSD_TOKEN_ADDRESS }}
+          BSC_TESTNET_GOLD_TOKEN_ADDRESS: ${{ secrets.BSC_TESTNET_GOLD_TOKEN_ADDRESS }}
+          AVAX_FUJI_GOLD_TOKEN_ADDRESS: ${{ secrets.AVAX_FUJI_GOLD_TOKEN_ADDRESS }}
+          BSC_TESTNET_PERPS_MARGIN_TOKEN_ADDRESS: ${{ secrets.BSC_TESTNET_PERPS_MARGIN_TOKEN_ADDRESS }}
+          AVAX_FUJI_PERPS_MARGIN_TOKEN_ADDRESS: ${{ secrets.AVAX_FUJI_PERPS_MARGIN_TOKEN_ADDRESS }}
+          DISPUTE_WINDOW_SECONDS: "3600"
+        run: bash scripts/export-stage-a-env.sh
+
+      - name: Prepare deployment artifact directory
+        run: mkdir -p .ci-artifacts/testnet-deployment
+
+      - name: Prepare verification artifact directory
+        run: mkdir -p .ci-artifacts/testnet-verification
+
+      - name: Deploy v3 PM contracts to BSC Testnet
+        if: ${{ env.STAGE_A_TARGET == 'all' || env.STAGE_A_TARGET == 'bsc' }}
+        run: bun run --cwd packages/evm-contracts deploy:create2:bsc-testnet
+
+      - name: Deploy v3 AMM contracts to BSC Testnet
+        if: ${{ env.STAGE_A_TARGET == 'all' || env.STAGE_A_TARGET == 'bsc' }}
+        env:
+          MUSD_TOKEN_ADDRESS: ${{ env.BSC_TESTNET_MUSD_TOKEN_ADDRESS }}
+        run: |
+          export DUEL_ORACLE_ADDRESS="$(node -e "const fs=require('fs'); const data=JSON.parse(fs.readFileSync('packages/evm-contracts/deployments/bscTestnet.json','utf8')); process.stdout.write(data.duelOracleAddress || '')")"
+          bun run --cwd packages/evm-contracts deploy:amm:bsc-testnet
+
+      - name: Deploy v3 perps contracts to BSC Testnet
+        if: ${{ env.STAGE_A_TARGET == 'all' || env.STAGE_A_TARGET == 'bsc' }}
+        env:
+          GOLD_TOKEN_ADDRESS: ${{ env.BSC_TESTNET_GOLD_TOKEN_ADDRESS }}
+          PERPS_MARGIN_TOKEN_ADDRESS: ${{ env.BSC_TESTNET_PERPS_MARGIN_TOKEN_ADDRESS }}
+        run: bun run --cwd packages/evm-contracts deploy:perps:bsc-testnet
+
+      - name: Verify BSC Testnet full-product deployment
+        if: ${{ env.STAGE_A_TARGET == 'all' || env.STAGE_A_TARGET == 'bsc' }}
+        run: |
+          node --import tsx packages/evm-contracts/scripts/verify-deployment.ts \
+            --network bscTestnet \
+            --out .ci-artifacts/testnet-verification/bscTestnet.json
+
+      - name: Copy BSC deployment receipt
+        if: ${{ always() && (env.STAGE_A_TARGET == 'all' || env.STAGE_A_TARGET == 'bsc') }}
+        run: |
+          if [[ -f packages/evm-contracts/deployments/bscTestnet.json ]]; then
+            cp packages/evm-contracts/deployments/bscTestnet.json .ci-artifacts/testnet-deployment/
+          fi
+
+      - name: Deploy v3 PM contracts to AVAX Fuji
+        if: ${{ env.STAGE_A_TARGET == 'all' || env.STAGE_A_TARGET == 'avax' }}
+        run: bun run --cwd packages/evm-contracts deploy:create2:avax-fuji
+
+      - name: Deploy v3 AMM contracts to AVAX Fuji
+        if: ${{ env.STAGE_A_TARGET == 'all' || env.STAGE_A_TARGET == 'avax' }}
+        env:
+          MUSD_TOKEN_ADDRESS: ${{ env.AVAX_FUJI_MUSD_TOKEN_ADDRESS }}
+        run: |
+          export DUEL_ORACLE_ADDRESS="$(node -e "const fs=require('fs'); const data=JSON.parse(fs.readFileSync('packages/evm-contracts/deployments/avaxFuji.json','utf8')); process.stdout.write(data.duelOracleAddress || '')")"
+          bun run --cwd packages/evm-contracts deploy:amm:avax-fuji
+
+      - name: Deploy v3 perps contracts to AVAX Fuji
+        if: ${{ env.STAGE_A_TARGET == 'all' || env.STAGE_A_TARGET == 'avax' }}
+        env:
+          GOLD_TOKEN_ADDRESS: ${{ env.AVAX_FUJI_GOLD_TOKEN_ADDRESS }}
+          PERPS_MARGIN_TOKEN_ADDRESS: ${{ env.AVAX_FUJI_PERPS_MARGIN_TOKEN_ADDRESS }}
+        run: bun run --cwd packages/evm-contracts deploy:perps:avax-fuji
+
+      - name: Verify AVAX Fuji full-product deployment
+        if: ${{ env.STAGE_A_TARGET == 'all' || env.STAGE_A_TARGET == 'avax' }}
+        run: |
+          node --import tsx packages/evm-contracts/scripts/verify-deployment.ts \
+            --network avaxFuji \
+            --out .ci-artifacts/testnet-verification/avaxFuji.json
+
+      - name: Copy AVAX deployment receipt
+        if: ${{ always() && (env.STAGE_A_TARGET == 'all' || env.STAGE_A_TARGET == 'avax') }}
+        run: |
+          if [[ -f packages/evm-contracts/deployments/avaxFuji.json ]]; then
+            cp packages/evm-contracts/deployments/avaxFuji.json .ci-artifacts/testnet-deployment/
+          fi
+
+      - name: Solana full-product preflight (devnet)
+        if: ${{ env.STAGE_A_TARGET == 'all' || env.STAGE_A_TARGET == 'solana' }}
+        run: bun run --cwd packages/hyperbet-solana deploy:preflight:devnet
+
+      - name: Deploy Solana full-product programs to devnet
+        if: ${{ env.STAGE_A_TARGET == 'all' || env.STAGE_A_TARGET == 'solana' }}
+        run: bun run --cwd packages/hyperbet-solana anchor:deploy:devnet
+
+      - name: Initialize and freeze Solana launch config
+        if: ${{ env.STAGE_A_TARGET == 'all' || env.STAGE_A_TARGET == 'solana' }}
+        run: |
+          node --import tsx packages/hyperbet-solana/scripts/init-pm-config.ts \
+            --cluster devnet \
+            --freeze \
+            --out .ci-artifacts/testnet-deployment/solana-launch-init-devnet.json
+
+      - name: Verify Solana full-product deployment
+        if: ${{ env.STAGE_A_TARGET == 'all' || env.STAGE_A_TARGET == 'solana' }}
+        run: |
+          node --import tsx packages/hyperbet-solana/scripts/verify-deployment.ts \
+            --cluster devnet \
+            --out .ci-artifacts/testnet-verification/solana-devnet.json
+
+      - name: Upload testnet deployment artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: testnet-deployment
+          path: .ci-artifacts/testnet-deployment
+          if-no-files-found: ignore
+
+      - name: Upload testnet verification artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: testnet-verification
+          path: .ci-artifacts/testnet-verification
+          if-no-files-found: ignore

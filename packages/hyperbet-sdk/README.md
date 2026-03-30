@@ -30,6 +30,8 @@ await client.evmBsc!.placeOrder({
   side: "buy",
   price: 600,           // 60.0% implied probability
   amount: 10000000000000000n, // 0.01 ETH worth of shares
+  timeInForce: "gtc",
+  postOnly: false,
 });
 
 // Place an order on Solana
@@ -68,7 +70,7 @@ Pass your own Alchemy, Helius, or QuickNode URLs via the config object for bette
 ## API
 
 ### `HyperbetEVMClient`
-- `placeOrder({ duelId, side, price, amount })` — Place a CLOB order
+- `placeOrder({ duelId, side, price, amount, timeInForce, postOnly })` — Place a CLOB order. Defaults to `timeInForce: "gtc"` and `postOnly: false`.
 - `cancelOrder({ duelId, orderId })` — Cancel an existing order
 - `claim({ duelId })` — Claim winnings after resolution
 

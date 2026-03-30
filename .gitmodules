@@ -1,0 +1,3 @@
+[submodule "packages/evm-contracts/lib/solady"]
+	path = packages/evm-contracts/lib/solady
+	url = https://github.com/Vectorized/solady

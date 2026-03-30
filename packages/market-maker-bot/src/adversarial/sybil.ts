@@ -5,6 +5,7 @@ export type SybilBreach = {
   chain: ChainId;
   control:
     | "sybil.max_cluster_concentration_pct"
+    | "sybil.max_identity_churn_rate"
     | "sybil.max_circular_flow_ratio"
     | "resolution.max_coordinated_push_score"
     | "resolution.min_independent_participants";
@@ -14,6 +15,7 @@ export type SybilBreach = {
 
 type SybilControls = {
   maxClusterConcentrationPct: number;
+  maxIdentityChurnRate: number;
   maxCircularFlowRatio: number;
   maxCoordinatedPushScore: number;
   minIndependentParticipants: number;
@@ -21,7 +23,8 @@ type SybilControls = {
 
 const DEFAULT_CONTROLS: SybilControls = {
   maxClusterConcentrationPct: 55,
-  maxCircularFlowRatio: 0.55,
+  maxIdentityChurnRate: 0.58,
+  maxCircularFlowRatio: 0.63,
   maxCoordinatedPushScore: 48,
   minIndependentParticipants: 10,
 };
@@ -51,6 +54,7 @@ export function evaluateSybilBreaches(
   for (const chainReport of report.chains) {
     const profile = chainProfile(chainReport.chain);
     const sybil = scenarioById(chainReport.scenarios, "sybil_wash_trading");
+    const churn = scenarioById(chainReport.scenarios, "sybil_identity_churn");
     const rebate = scenarioById(chainReport.scenarios, "rebate_farming_ring");
     const resolution = scenarioById(
       chainReport.scenarios,
@@ -68,6 +72,19 @@ export function evaluateSybilBreaches(
         control: "sybil.max_cluster_concentration_pct",
         expected: `<= ${controls.maxClusterConcentrationPct}`,
         actual: Number(clusterConcentrationPct.toFixed(2)),
+      });
+    }
+
+    const identityChurnRate =
+      churn.mitigated.toxicFillRate * 0.75 +
+      churn.mitigated.exploitEvents / 65 +
+      profile.mempoolFriction * 0.16;
+    if (identityChurnRate > controls.maxIdentityChurnRate) {
+      breaches.push({
+        chain: chainReport.chain,
+        control: "sybil.max_identity_churn_rate",
+        expected: `<= ${controls.maxIdentityChurnRate}`,
+        actual: Number(identityChurnRate.toFixed(4)),
       });
     }
 

@@ -12,18 +12,18 @@ export const ORDER_DISCRIMINATOR: ReadonlyUint8Array = new Uint8Array([134, 173,
 
 export function getOrderDiscriminatorBytes(): ReadonlyUint8Array { return fixEncoderSize(getBytesEncoder(), 8).encode(ORDER_DISCRIMINATOR); }
 
-export type Order = { discriminator: ReadonlyUint8Array; marketState: Address; id: bigint; side: number; price: number; maker: Address; amount: bigint; filled: bigint; prevOrderId: bigint; nextOrderId: bigint; active: boolean; bump: number;  };
+export type Order = { discriminator: ReadonlyUint8Array; marketState: Address; id: bigint; side: number; price: number; orderBehavior: number; maker: Address; amount: bigint; filled: bigint; prevOrderId: bigint; nextOrderId: bigint; active: boolean; continuationPending: boolean; bump: number;  };
 
-export type OrderArgs = { marketState: Address; id: number | bigint; side: number; price: number; maker: Address; amount: number | bigint; filled: number | bigint; prevOrderId: number | bigint; nextOrderId: number | bigint; active: boolean; bump: number;  };
+export type OrderArgs = { marketState: Address; id: number | bigint; side: number; price: number; orderBehavior: number; maker: Address; amount: number | bigint; filled: number | bigint; prevOrderId: number | bigint; nextOrderId: number | bigint; active: boolean; continuationPending: boolean; bump: number;  };
 
 /** Gets the encoder for {@link OrderArgs} account data. */
 export function getOrderEncoder(): FixedSizeEncoder<OrderArgs> {
-    return transformEncoder(getStructEncoder([['discriminator', fixEncoderSize(getBytesEncoder(), 8)], ['marketState', getAddressEncoder()], ['id', getU64Encoder()], ['side', getU8Encoder()], ['price', getU16Encoder()], ['maker', getAddressEncoder()], ['amount', getU64Encoder()], ['filled', getU64Encoder()], ['prevOrderId', getU64Encoder()], ['nextOrderId', getU64Encoder()], ['active', getBooleanEncoder()], ['bump', getU8Encoder()]]), (value) => ({ ...value, discriminator: ORDER_DISCRIMINATOR }));
+    return transformEncoder(getStructEncoder([['discriminator', fixEncoderSize(getBytesEncoder(), 8)], ['marketState', getAddressEncoder()], ['id', getU64Encoder()], ['side', getU8Encoder()], ['price', getU16Encoder()], ['orderBehavior', getU8Encoder()], ['maker', getAddressEncoder()], ['amount', getU64Encoder()], ['filled', getU64Encoder()], ['prevOrderId', getU64Encoder()], ['nextOrderId', getU64Encoder()], ['active', getBooleanEncoder()], ['continuationPending', getBooleanEncoder()], ['bump', getU8Encoder()]]), (value) => ({ ...value, discriminator: ORDER_DISCRIMINATOR }));
 }
 
 /** Gets the decoder for {@link Order} account data. */
 export function getOrderDecoder(): FixedSizeDecoder<Order> {
-    return getStructDecoder([['discriminator', fixDecoderSize(getBytesDecoder(), 8)], ['marketState', getAddressDecoder()], ['id', getU64Decoder()], ['side', getU8Decoder()], ['price', getU16Decoder()], ['maker', getAddressDecoder()], ['amount', getU64Decoder()], ['filled', getU64Decoder()], ['prevOrderId', getU64Decoder()], ['nextOrderId', getU64Decoder()], ['active', getBooleanDecoder()], ['bump', getU8Decoder()]]);
+    return getStructDecoder([['discriminator', fixDecoderSize(getBytesDecoder(), 8)], ['marketState', getAddressDecoder()], ['id', getU64Decoder()], ['side', getU8Decoder()], ['price', getU16Decoder()], ['orderBehavior', getU8Decoder()], ['maker', getAddressDecoder()], ['amount', getU64Decoder()], ['filled', getU64Decoder()], ['prevOrderId', getU64Decoder()], ['nextOrderId', getU64Decoder()], ['active', getBooleanDecoder()], ['continuationPending', getBooleanDecoder()], ['bump', getU8Decoder()]]);
 }
 
 /** Gets the codec for {@link Order} account data. */

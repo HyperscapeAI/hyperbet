@@ -14,8 +14,8 @@ export const CANCEL_DUEL_DISCRIMINATOR: ReadonlyUint8Array = new Uint8Array([83,
 
 export function getCancelDuelDiscriminatorBytes(): ReadonlyUint8Array { return fixEncoderSize(getBytesEncoder(), 8).encode(CANCEL_DUEL_DISCRIMINATOR); }
 
-export type CancelDuelInstruction<TProgram extends string = typeof FIGHT_ORACLE_PROGRAM_ADDRESS, TAccountReporter extends string | IAccountMeta<string> = string, TAccountOracleConfig extends string | IAccountMeta<string> = string, TAccountDuelState extends string | IAccountMeta<string> = string, TRemainingAccounts extends readonly IAccountMeta<string>[] = []> =
-IInstruction<TProgram> & IInstructionWithData<ReadonlyUint8Array> & IInstructionWithAccounts<[TAccountReporter extends string ? WritableSignerAccount<TAccountReporter> & IAccountSignerMeta<TAccountReporter> : TAccountReporter, TAccountOracleConfig extends string ? ReadonlyAccount<TAccountOracleConfig> : TAccountOracleConfig, TAccountDuelState extends string ? WritableAccount<TAccountDuelState> : TAccountDuelState, ...TRemainingAccounts]>;
+export type CancelDuelInstruction<TProgram extends string = typeof FIGHT_ORACLE_PROGRAM_ADDRESS, TAccountAuthority extends string | IAccountMeta<string> = string, TAccountOracleConfig extends string | IAccountMeta<string> = string, TAccountDuelState extends string | IAccountMeta<string> = string, TRemainingAccounts extends readonly IAccountMeta<string>[] = []> =
+IInstruction<TProgram> & IInstructionWithData<ReadonlyUint8Array> & IInstructionWithAccounts<[TAccountAuthority extends string ? WritableSignerAccount<TAccountAuthority> & IAccountSignerMeta<TAccountAuthority> : TAccountAuthority, TAccountOracleConfig extends string ? ReadonlyAccount<TAccountOracleConfig> : TAccountOracleConfig, TAccountDuelState extends string ? WritableAccount<TAccountDuelState> : TAccountDuelState, ...TRemainingAccounts]>;
 
 export type CancelDuelInstructionData = { discriminator: ReadonlyUint8Array; duelKey: Array<number>; metadataUri: string;  };
 
@@ -33,20 +33,20 @@ export function getCancelDuelInstructionDataCodec(): Codec<CancelDuelInstruction
     return combineCodec(getCancelDuelInstructionDataEncoder(), getCancelDuelInstructionDataDecoder());
 }
 
-export type CancelDuelAsyncInput<TAccountReporter extends string = string, TAccountOracleConfig extends string = string, TAccountDuelState extends string = string> =  {
-  reporter: TransactionSigner<TAccountReporter>;
+export type CancelDuelAsyncInput<TAccountAuthority extends string = string, TAccountOracleConfig extends string = string, TAccountDuelState extends string = string> =  {
+  authority: TransactionSigner<TAccountAuthority>;
 oracleConfig?: Address<TAccountOracleConfig>;
 duelState?: Address<TAccountDuelState>;
 duelKey: CancelDuelInstructionDataArgs["duelKey"];
 metadataUri: CancelDuelInstructionDataArgs["metadataUri"];
 }
 
-export async function getCancelDuelInstructionAsync<TAccountReporter extends string, TAccountOracleConfig extends string, TAccountDuelState extends string, TProgramAddress extends Address = typeof FIGHT_ORACLE_PROGRAM_ADDRESS>(input: CancelDuelAsyncInput<TAccountReporter, TAccountOracleConfig, TAccountDuelState>, config?: { programAddress?: TProgramAddress } ): Promise<CancelDuelInstruction<TProgramAddress, TAccountReporter, TAccountOracleConfig, TAccountDuelState>> {
+export async function getCancelDuelInstructionAsync<TAccountAuthority extends string, TAccountOracleConfig extends string, TAccountDuelState extends string, TProgramAddress extends Address = typeof FIGHT_ORACLE_PROGRAM_ADDRESS>(input: CancelDuelAsyncInput<TAccountAuthority, TAccountOracleConfig, TAccountDuelState>, config?: { programAddress?: TProgramAddress } ): Promise<CancelDuelInstruction<TProgramAddress, TAccountAuthority, TAccountOracleConfig, TAccountDuelState>> {
   // Program address.
 const programAddress = config?.programAddress ?? FIGHT_ORACLE_PROGRAM_ADDRESS;
 
  // Original accounts.
-const originalAccounts = { reporter: { value: input.reporter ?? null, isWritable: true }, oracleConfig: { value: input.oracleConfig ?? null, isWritable: false }, duelState: { value: input.duelState ?? null, isWritable: true } }
+const originalAccounts = { authority: { value: input.authority ?? null, isWritable: true }, oracleConfig: { value: input.oracleConfig ?? null, isWritable: false }, duelState: { value: input.duelState ?? null, isWritable: true } }
 const accounts = originalAccounts as Record<keyof typeof originalAccounts, ResolvedAccount>;
 
 
@@ -63,23 +63,23 @@ accounts.duelState.value = await getProgramDerivedAddress({ programAddress, seed
 }
 
 const getAccountMeta = getAccountMetaFactory(programAddress, 'programId');
-return Object.freeze({ accounts: [getAccountMeta(accounts.reporter), getAccountMeta(accounts.oracleConfig), getAccountMeta(accounts.duelState)], data: getCancelDuelInstructionDataEncoder().encode(args as CancelDuelInstructionDataArgs), programAddress } as CancelDuelInstruction<TProgramAddress, TAccountReporter, TAccountOracleConfig, TAccountDuelState>);
+return Object.freeze({ accounts: [getAccountMeta(accounts.authority), getAccountMeta(accounts.oracleConfig), getAccountMeta(accounts.duelState)], data: getCancelDuelInstructionDataEncoder().encode(args as CancelDuelInstructionDataArgs), programAddress } as CancelDuelInstruction<TProgramAddress, TAccountAuthority, TAccountOracleConfig, TAccountDuelState>);
 }
 
-export type CancelDuelInput<TAccountReporter extends string = string, TAccountOracleConfig extends string = string, TAccountDuelState extends string = string> =  {
-  reporter: TransactionSigner<TAccountReporter>;
+export type CancelDuelInput<TAccountAuthority extends string = string, TAccountOracleConfig extends string = string, TAccountDuelState extends string = string> =  {
+  authority: TransactionSigner<TAccountAuthority>;
 oracleConfig: Address<TAccountOracleConfig>;
 duelState: Address<TAccountDuelState>;
 duelKey: CancelDuelInstructionDataArgs["duelKey"];
 metadataUri: CancelDuelInstructionDataArgs["metadataUri"];
 }
 
-export function getCancelDuelInstruction<TAccountReporter extends string, TAccountOracleConfig extends string, TAccountDuelState extends string, TProgramAddress extends Address = typeof FIGHT_ORACLE_PROGRAM_ADDRESS>(input: CancelDuelInput<TAccountReporter, TAccountOracleConfig, TAccountDuelState>, config?: { programAddress?: TProgramAddress } ): CancelDuelInstruction<TProgramAddress, TAccountReporter, TAccountOracleConfig, TAccountDuelState> {
+export function getCancelDuelInstruction<TAccountAuthority extends string, TAccountOracleConfig extends string, TAccountDuelState extends string, TProgramAddress extends Address = typeof FIGHT_ORACLE_PROGRAM_ADDRESS>(input: CancelDuelInput<TAccountAuthority, TAccountOracleConfig, TAccountDuelState>, config?: { programAddress?: TProgramAddress } ): CancelDuelInstruction<TProgramAddress, TAccountAuthority, TAccountOracleConfig, TAccountDuelState> {
   // Program address.
 const programAddress = config?.programAddress ?? FIGHT_ORACLE_PROGRAM_ADDRESS;
 
  // Original accounts.
-const originalAccounts = { reporter: { value: input.reporter ?? null, isWritable: true }, oracleConfig: { value: input.oracleConfig ?? null, isWritable: false }, duelState: { value: input.duelState ?? null, isWritable: true } }
+const originalAccounts = { authority: { value: input.authority ?? null, isWritable: true }, oracleConfig: { value: input.oracleConfig ?? null, isWritable: false }, duelState: { value: input.duelState ?? null, isWritable: true } }
 const accounts = originalAccounts as Record<keyof typeof originalAccounts, ResolvedAccount>;
 
 
@@ -90,12 +90,12 @@ const args = { ...input,  };
 
 
 const getAccountMeta = getAccountMetaFactory(programAddress, 'programId');
-return Object.freeze({ accounts: [getAccountMeta(accounts.reporter), getAccountMeta(accounts.oracleConfig), getAccountMeta(accounts.duelState)], data: getCancelDuelInstructionDataEncoder().encode(args as CancelDuelInstructionDataArgs), programAddress } as CancelDuelInstruction<TProgramAddress, TAccountReporter, TAccountOracleConfig, TAccountDuelState>);
+return Object.freeze({ accounts: [getAccountMeta(accounts.authority), getAccountMeta(accounts.oracleConfig), getAccountMeta(accounts.duelState)], data: getCancelDuelInstructionDataEncoder().encode(args as CancelDuelInstructionDataArgs), programAddress } as CancelDuelInstruction<TProgramAddress, TAccountAuthority, TAccountOracleConfig, TAccountDuelState>);
 }
 
 export type ParsedCancelDuelInstruction<TProgram extends string = typeof FIGHT_ORACLE_PROGRAM_ADDRESS, TAccountMetas extends readonly IAccountMeta[] = readonly IAccountMeta[]> = { programAddress: Address<TProgram>;
 accounts: {
-reporter: TAccountMetas[0];
+authority: TAccountMetas[0];
 oracleConfig: TAccountMetas[1];
 duelState: TAccountMetas[2];
 };
@@ -112,5 +112,5 @@ const getNextAccount = () => {
   accountIndex += 1;
   return accountMeta;
 }
-  return { programAddress: instruction.programAddress, accounts: { reporter: getNextAccount(), oracleConfig: getNextAccount(), duelState: getNextAccount() }, data: getCancelDuelInstructionDataDecoder().decode(instruction.data) };
+  return { programAddress: instruction.programAddress, accounts: { authority: getNextAccount(), oracleConfig: getNextAccount(), duelState: getNextAccount() }, data: getCancelDuelInstructionDataDecoder().decode(instruction.data) };
 }

@@ -8,13 +8,14 @@ import {
   saveWalletDisplay,
   saveWalletGoldState,
 } from "../../../keeper/src/db";
-import { modelMarketIdFromCharacterId } from "../../src/lib/modelMarkets";
+import { modelMarketIdFromCharacterId } from "../../../../hyperbet-ui/src/lib/modelMarkets";
 
 type E2eState = {
   solanaTraderPublicKey?: string;
   perpsCharacterId?: string;
   perpsMarketId?: number;
   perpsModelName?: string;
+  perpsOracleSpotIndex?: number;
 };
 
 function normalizeWallet(wallet: string): string {
@@ -43,6 +44,11 @@ async function main(): Promise<void> {
   const marketId =
     Number(state.perpsMarketId) || modelMarketIdFromCharacterId(characterId);
   const modelName = state.perpsModelName?.trim() || "E2E Model Alpha";
+  const perpsOracleSpotIndex =
+    typeof state.perpsOracleSpotIndex === "number" &&
+    Number.isFinite(state.perpsOracleSpotIndex)
+      ? state.perpsOracleSpotIndex
+      : 100;
   const now = Date.now();
 
   const seededWallets = [
@@ -86,11 +92,31 @@ async function main(): Promise<void> {
   });
 
   const oracleSnapshots = [
-    { spotIndex: 118, mu: 27.2, sigma: 4.6, recordedAt: now - 60 * 60 * 1000 },
-    { spotIndex: 120, mu: 27.6, sigma: 4.4, recordedAt: now - 45 * 60 * 1000 },
-    { spotIndex: 122, mu: 27.9, sigma: 4.3, recordedAt: now - 30 * 60 * 1000 },
-    { spotIndex: 124, mu: 28.0, sigma: 4.1, recordedAt: now - 15 * 60 * 1000 },
-    { spotIndex: 125, mu: 28.0, sigma: 4.0, recordedAt: now },
+    {
+      spotIndex: Math.max(80, perpsOracleSpotIndex - 2),
+      mu: 27.2,
+      sigma: 4.6,
+      recordedAt: now - 60 * 60 * 1000,
+    },
+    {
+      spotIndex: Math.max(80, perpsOracleSpotIndex - 1),
+      mu: 27.6,
+      sigma: 4.4,
+      recordedAt: now - 45 * 60 * 1000,
+    },
+    {
+      spotIndex: perpsOracleSpotIndex,
+      mu: 27.9,
+      sigma: 4.3,
+      recordedAt: now - 30 * 60 * 1000,
+    },
+    {
+      spotIndex: perpsOracleSpotIndex,
+      mu: 28.0,
+      sigma: 4.1,
+      recordedAt: now - 15 * 60 * 1000,
+    },
+    { spotIndex: perpsOracleSpotIndex, mu: 28.0, sigma: 4.0, recordedAt: now },
   ];
 
   for (const snapshot of oracleSnapshots) {

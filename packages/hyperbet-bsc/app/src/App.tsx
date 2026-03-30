@@ -30,6 +30,7 @@ import {
   captureInviteCodeFromLocation,
   getStoredInviteCode,
 } from "@hyperbet/ui/lib/invite";
+import { usePredictionMarketLifecycle } from "@hyperbet/ui/lib/predictionMarkets";
 import { StreamPlayer } from "@hyperbet/ui/components/StreamPlayer";
 import { PointsDisplay } from "@hyperbet/ui/components/PointsDisplay";
 import { useChain } from "./lib/ChainContext";
@@ -113,6 +114,10 @@ function formatCountdown(seconds: number): string {
   return `${m}:${s}`;
 }
 
+function normalizeEvmAddress(value: string | null | undefined): string | null {
+  const trimmed = value?.trim() ?? "";
+  return /^0x[a-fA-F0-9]{40}$/.test(trimmed) ? trimmed : null;
+}
 
 function getAppCopy(locale: UiLocale) {
   if (locale === "zh") {
@@ -600,9 +605,9 @@ const EvmBettingPanel = lazy(() =>
     default: module.EvmBettingPanel,
   })),
 );
-const ModelsMarketView = lazy(() =>
-  import("@hyperbet/ui/components/ModelsMarketView").then((module) => ({
-    default: module.ModelsMarketView,
+const EvmModelsMarketView = lazy(() =>
+  import("@hyperbet/ui/components/EvmModelsMarketView").then((module) => ({
+    default: module.EvmModelsMarketView,
   })),
 );
 const PointsLeaderboard = lazy(() =>
@@ -661,9 +666,20 @@ export function App() {
   const isE2eMode = import.meta.env.MODE === "e2e";
   const isE2eDebugMode =
     isE2eMode && new URLSearchParams(window.location.search).has("debug");
+  const configuredHeadlessEvmAddress = useMemo(
+    () =>
+      normalizeEvmAddress(
+        import.meta.env.VITE_E2E_EVM_ADDRESS ||
+          import.meta.env.VITE_HEADLESS_EVM_ADDRESS ||
+          "",
+      ),
+    [],
+  );
   // Only poll chain data when a wallet is connected (saves unnecessary RPC calls for spectators).
   const shouldPollChainData = Boolean(isE2eMode || evmWalletAddress);
-  const pointsWalletAddress = evmWalletAddress ?? null;
+  const effectiveEvmWalletAddress =
+    evmWalletAddress ?? configuredHeadlessEvmAddress;
+  const pointsWalletAddress = effectiveEvmWalletAddress ?? null;
   const invitePlatformQuery = "evm" as const;
 
   const [surfaceMode, setSurfaceMode] = useState<"DUELS" | "MODELS">("DUELS");
@@ -708,6 +724,17 @@ export function App() {
   const { state: streamingState } = useStreamingState();
   const { context: duelContext } = useDuelContext();
   const liveCycle = streamingState?.cycle ?? null;
+  const lifecycleChainKey =
+    activeChain === "bsc" || activeChain === "base" || activeChain === "avax"
+      ? activeChain
+      : "solana";
+  const {
+    duel: lifecycleDuel,
+    market: lifecycleMarket,
+    refresh: refreshLifecycle,
+  } = usePredictionMarketLifecycle(
+    lifecycleChainKey,
+  );
   const streamSources = STREAM_URLS;
   const activeStreamUrl = isE2eMode ? "" : (streamSources[streamSourceIndex] ?? "");
 
@@ -864,6 +891,7 @@ export function App() {
 
   const handleRefresh = () => {
     setRefreshNonce((value) => value + 1);
+    window.dispatchEvent(new CustomEvent("hyperbet:market-refresh"));
   };
 
   const effYesPot = 0;
@@ -957,7 +985,10 @@ export function App() {
 
   const streamPhaseText = liveCycle?.phase ?? null;
   const marketStatusText = getMarketStatusLabel(
-    streamPhaseText ?? currentMatch?.status ?? copy.phaseLive,
+    lifecycleMarket?.lifecycleStatus ??
+      currentMatch?.status ??
+      streamPhaseText ??
+      copy.phaseLive,
     copy,
   );
   const countdownText = liveCycle
@@ -1056,7 +1087,7 @@ export function App() {
                 alignItems: "center",
                 marginBottom: 16,
                 position: "relative",
-                zIndex: 1,
+                zIndex: 2,
               }}
             >
               <div
@@ -1103,7 +1134,7 @@ export function App() {
                 gap: 4,
                 marginBottom: 16,
                 position: "relative",
-                zIndex: 1,
+                zIndex: 2,
               }}
             >
               {(
@@ -1148,7 +1179,7 @@ export function App() {
             </div>
 
             {/* Non-compact points summary */}
-            <div style={{ marginBottom: 16, position: "relative", zIndex: 1 }}>
+            <div style={{ marginBottom: 16, position: "relative", zIndex: 2 }}>
               <PointsDisplay walletAddress={pointsWalletAddress} locale={locale} />
             </div>
 
@@ -1179,7 +1210,7 @@ export function App() {
                   <ReferralPanel
                     activeChain={activeChain}
                     solanaWallet={null}
-                    evmWallet={evmWalletAddress ?? null}
+                    evmWallet={effectiveEvmWalletAddress ?? null}
                     locale={locale}
                     evmWalletPlatform={
                       activeChain === "bsc"
@@ -1598,8 +1629,12 @@ export function App() {
                 <PanelFallback label={copy.loadingModelMarkets} minHeight={480} />
               }
             >
-              <ModelsMarketView
-                activeMatchup={`${effA1.name} vs ${effA2.name}`}
+              <EvmModelsMarketView
+                fightingAgentA={effA1.name}
+                fightingAgentB={effA2.name}
+                gameApiUrl={GAME_API_URL}
+                chainLabel="BSC"
+                collateralSymbol="BNB"
               />
             </Suspense>
           </div>
@@ -1995,6 +2030,9 @@ export function App() {
                       agent2Name={effAgent2Name}
                       compact
                       locale={locale}
+                      lifecycleDuelOverride={lifecycleDuel}
+                      lifecycleMarketOverride={lifecycleMarket}
+                      onLifecycleRefreshRequested={() => void refreshLifecycle()}
                     />
                   </Suspense>
                 </div>

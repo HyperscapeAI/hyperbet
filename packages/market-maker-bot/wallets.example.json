@@ -2,7 +2,11 @@
   "defaults": {
     "MM_ENABLE_BSC": "true",
     "MM_ENABLE_BASE": "true",
+    "MM_ENABLE_AVAX": "true",
     "MM_ENABLE_SOLANA": "true",
+    "SOLANA_RPC_URL": "https://api.testnet.solana.com",
+    "FIGHT_ORACLE_PROGRAM_ID": "<fight-oracle-program-id>",
+    "GOLD_CLOB_MARKET_PROGRAM_ID": "<gold-clob-program-id>",
     "TARGET_SPREAD_BPS": "200",
     "MAX_INVENTORY_CAP": "500000"
   },
@@ -10,12 +14,12 @@
     {
       "name": "mm-wallet-1",
       "evmPrivateKey": "0x...",
-      "solanaPrivateKey": "..."
+      "solanaPrivateKey": "<funded signer secret key>"
     },
     {
       "name": "mm-wallet-2",
       "evmPrivateKey": "0x...",
-      "solanaPrivateKey": "...",
+      "solanaPrivateKey": "<funded signer secret key>",
       "env": {
         "MM_ENABLE_SOLANA": "false"
       }

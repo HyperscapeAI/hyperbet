@@ -16,10 +16,10 @@ import {
   Connection,
 } from "@solana/web3.js";
 
-import fightOracleIdl from "../../../anchor/target/idl/fight_oracle.json";
-import goldClobIdl from "../../../anchor/target/idl/gold_clob_market.json";
-import goldPerpsIdl from "../../../anchor/target/idl/gold_perps_market.json";
-import { modelMarketIdFromCharacterId } from "../../src/lib/modelMarkets";
+import fightOracleIdl from "../../../../hyperbet-solana/anchor/target/idl/fight_oracle.json";
+import goldClobIdl from "../../../../hyperbet-solana/anchor/target/idl/gold_clob_market.json";
+import goldPerpsIdl from "../../../../hyperbet-solana/anchor/target/idl/gold_perps_market.json";
+import { modelMarketIdFromCharacterId } from "../../../../hyperbet-ui/src/lib/modelMarkets";
 
 type SignableTx = Transaction | VersionedTransaction;
 type AnchorLikeWallet = Wallet & { payer: Keypair };
@@ -172,18 +172,58 @@ function lamportsBn(sol: number): BN {
 }
 
 async function loadBootstrapAuthority(): Promise<Keypair> {
-  const keypairPath =
-    process.env.E2E_SOLANA_BOOTSTRAP_KEYPAIR ||
+  const candidates = [
+    process.env.E2E_SOLANA_BOOTSTRAP_KEYPAIR,
     path.join(
       process.env.HOME ?? "",
       ".config/solana/hyperscape-keys/deployer.json",
-    );
-  const secret = JSON.parse(await fs.readFile(keypairPath, "utf8")) as number[];
-  return Keypair.fromSecretKey(Uint8Array.from(secret));
+    ),
+    path.join(process.env.HOME ?? "", ".config/solana/id.json"),
+  ].filter((value): value is string => Boolean(value?.trim()));
+
+  for (const candidate of candidates) {
+    try {
+      const secret = JSON.parse(await fs.readFile(candidate, "utf8")) as number[];
+      return Keypair.fromSecretKey(Uint8Array.from(secret));
+    } catch {
+      // Try the next configured wallet path.
+    }
+  }
+
+  throw new Error(
+    `Could not find a bootstrap Solana keypair. Checked: ${candidates.join(", ")}`,
+  );
 }
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function advanceChainUnixTimestamp(
+  connection: Connection,
+  provider: AnchorProvider,
+  authority: Keypair,
+  minimumUnixTimestamp: number,
+  timeoutMs = 30_000,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const current = await currentChainUnixTimestamp(connection);
+    if (current >= minimumUnixTimestamp) {
+      return;
+    }
+    const tickTx = new Transaction().add(
+      SystemProgram.transfer({
+        fromPubkey: authority.publicKey,
+        toPubkey: authority.publicKey,
+        lamports: 1,
+      }),
+    );
+    await provider.sendAndConfirm(tickTx, [authority]);
+  }
+  throw new Error(
+    `Timed out advancing chain time to ${minimumUnixTimestamp}`,
+  );
 }
 
 function markStage(label: string): void {
@@ -469,7 +509,14 @@ async function main(): Promise<void> {
   const envPath = path.resolve(appDir, ".env.e2e");
   const solanaRpcUrl =
     process.env.E2E_SOLANA_RPC_URL || "http://127.0.0.1:8899";
-  const solanaWsUrl = process.env.E2E_SOLANA_WS_URL || "ws://127.0.0.1:8900";
+  const solanaWsUrl =
+    process.env.E2E_SOLANA_WS_URL ||
+    (() => {
+      const rpcUrl = new URL(solanaRpcUrl);
+      rpcUrl.protocol = rpcUrl.protocol === "https:" ? "wss:" : "ws:";
+      rpcUrl.port = String(Number(rpcUrl.port || "80") + 1);
+      return rpcUrl.toString();
+    })();
   const browserSolanaRpcUrl =
     process.env.E2E_BROWSER_SOLANA_RPC_URL || solanaRpcUrl;
   const browserSolanaWsUrl =
@@ -554,16 +601,42 @@ async function main(): Promise<void> {
   const currentBetOpenTs = currentUnixTs - 15;
   const currentBetCloseTs = currentUnixTs + currentBetWindowSeconds;
   const currentDuelStartTs = currentUnixTs + currentFightDelaySeconds;
+  const localDisputeWindowSeconds = 60;
 
-  markStage("initialize fight oracle");
+  const existingOracleConfig =
+    await fight.account.oracleConfig.fetchNullable(oracleConfigPda);
+  if (!existingOracleConfig) {
+    markStage("initialize fight oracle");
+    await fight.methods
+      .initializeOracle(
+        authority.publicKey,
+        authority.publicKey,
+        authority.publicKey,
+        new BN(localDisputeWindowSeconds),
+      )
+      .accountsPartial({
+        authority: authority.publicKey,
+        oracleConfig: oracleConfigPda,
+        program: fightProgram.programId,
+        programData: deriveProgramDataAddress(fightProgram.programId),
+        systemProgram: SystemProgram.programId,
+      })
+      .signers([authority])
+      .rpc();
+  }
+
+  markStage("configure fight oracle");
   await fight.methods
-    .initializeOracle(authority.publicKey)
+    .updateOracleConfig(
+      authority.publicKey,
+      authority.publicKey,
+      authority.publicKey,
+      authority.publicKey,
+      new BN(localDisputeWindowSeconds),
+    )
     .accountsPartial({
       authority: authority.publicKey,
       oracleConfig: oracleConfigPda,
-      program: fightProgram.programId,
-      programData: deriveProgramDataAddress(fightProgram.programId),
-      systemProgram: SystemProgram.programId,
     })
     .signers([authority])
     .rpc();
@@ -571,7 +644,13 @@ async function main(): Promise<void> {
   const existingResolvedDuel =
     await fight.account.duelState.fetchNullable(resolvedDuelPda);
   const resolvedStatus = enumKey(existingResolvedDuel?.status);
-  if (resolvedStatus !== "resolved" && resolvedStatus !== "cancelled") {
+  const seedResolvedDuel =
+    process.env.E2E_SEED_RESOLVED_DUEL === "true";
+  if (
+    seedResolvedDuel &&
+    resolvedStatus !== "resolved" &&
+    resolvedStatus !== "cancelled"
+  ) {
     markStage("seed resolved duel");
     await fight.methods
       .upsertDuel(
@@ -593,9 +672,9 @@ async function main(): Promise<void> {
       .signers([authority])
       .rpc();
 
-    markStage("report resolved duel result");
+    markStage("propose resolved duel result");
     await fight.methods
-      .reportResult(
+      .proposeResult(
         [...resolvedDuelKey],
         { a: {} },
         new BN(42),
@@ -606,6 +685,26 @@ async function main(): Promise<void> {
       )
       .accountsPartial({
         reporter: authority.publicKey,
+        oracleConfig: oracleConfigPda,
+        duelState: resolvedDuelPda,
+      })
+      .signers([authority])
+      .rpc();
+    const proposalRecordedAt = await currentChainUnixTimestamp(connection);
+    await advanceChainUnixTimestamp(
+      connection,
+      provider,
+      authority,
+      proposalRecordedAt + localDisputeWindowSeconds + 1,
+    );
+    markStage("finalize resolved duel result");
+    await fight.methods
+      .finalizeResult(
+        [...resolvedDuelKey],
+        "https://hyperbet.local/e2e/resolved/final",
+      )
+      .accountsPartial({
+        finalizer: authority.publicKey,
         oracleConfig: oracleConfigPda,
         duelState: resolvedDuelPda,
       })
@@ -830,7 +929,7 @@ async function main(): Promise<void> {
   if (!existingFirstOrder) {
     markStage("seed first clob order");
     await clob.methods
-      .placeOrder(new BN(1), SIDE_ASK, 600, seededClobOrderAmount)
+      .placeOrder(new BN(1), SIDE_ASK, 600, seededClobOrderAmount, 0)
       .accountsPartial({
         marketState: clobMarketState,
         duelState: currentDuelPda,
@@ -851,7 +950,7 @@ async function main(): Promise<void> {
   if (!existingSecondOrder) {
     markStage("seed second clob order");
     await clob.methods
-      .placeOrder(new BN(2), SIDE_BID, 400, seededClobOrderAmount)
+      .placeOrder(new BN(2), SIDE_BID, 400, seededClobOrderAmount, 0)
       .accountsPartial({
         marketState: clobMarketState,
         duelState: currentDuelPda,

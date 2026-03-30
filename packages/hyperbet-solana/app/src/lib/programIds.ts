@@ -42,3 +42,12 @@ export const GOLD_CLOB_MARKET_PROGRAM_ID = new PublicKey(
 export const GOLD_PERPS_MARKET_PROGRAM_ID = new PublicKey(
   goldPerpsMarketProgramAddress,
 );
+
+export const goldAmmMarketProgramAddress = configuredAddress(
+  CONFIG.goldAmmMarketProgramId,
+  "12E8Lz5w8Qxyj8Fh6LgsCgPDQNJMCLMV1y43LhPrH66w",
+);
+
+export const GOLD_AMM_MARKET_PROGRAM_ID = new PublicKey(
+  goldAmmMarketProgramAddress,
+);

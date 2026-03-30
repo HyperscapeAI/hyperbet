@@ -681,6 +681,21 @@
               "type": "uint8"
             },
             {
+              "internalType": "uint16",
+              "name": "tradeTreasuryFeeBpsSnapshot",
+              "type": "uint16"
+            },
+            {
+              "internalType": "uint16",
+              "name": "tradeMarketMakerFeeBpsSnapshot",
+              "type": "uint16"
+            },
+            {
+              "internalType": "uint16",
+              "name": "winningsMarketMakerFeeBpsSnapshot",
+              "type": "uint16"
+            },
+            {
               "internalType": "uint64",
               "name": "nextOrderId",
               "type": "uint64"
@@ -946,6 +961,11 @@
           "internalType": "uint128",
           "name": "amount",
           "type": "uint128"
+        },
+        {
+          "internalType": "uint8",
+          "name": "orderFlags",
+          "type": "uint8"
         }
       ],
       "name": "placeOrder",

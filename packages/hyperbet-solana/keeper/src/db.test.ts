@@ -1,3 +1,4 @@
+import { Database } from "bun:sqlite";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import os from "node:os";
@@ -26,6 +27,109 @@ function cleanupTempDir(tempDir: string): void {
       sleepMs(25 * (attempt + 1));
     }
   }
+}
+
+function seedDuplicateBets(dbPath: string): void {
+  const seedDb = new Database(dbPath, { create: true });
+  seedDb.run(`CREATE TABLE IF NOT EXISTS bets (
+    id TEXT PRIMARY KEY,
+    bettor_wallet TEXT NOT NULL,
+    chain TEXT NOT NULL,
+    source_asset TEXT NOT NULL,
+    source_amount REAL NOT NULL DEFAULT 0,
+    gold_amount REAL NOT NULL DEFAULT 0,
+    fee_bps INTEGER NOT NULL DEFAULT 0,
+    tx_signature TEXT NOT NULL DEFAULT '',
+    market_pda TEXT,
+    duel_key TEXT,
+    duel_id TEXT,
+    invite_code TEXT,
+    external_bet_ref TEXT,
+    recorded_at INTEGER NOT NULL
+  )`);
+  const insertBet = seedDb.prepare(
+    `INSERT INTO bets (
+      id,
+      bettor_wallet,
+      chain,
+      source_asset,
+      source_amount,
+      gold_amount,
+      fee_bps,
+      tx_signature,
+      market_pda,
+      duel_key,
+      duel_id,
+      invite_code,
+      external_bet_ref,
+      recorded_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  );
+  insertBet.run(
+    "bet-1",
+    "wallet-1",
+    "solana",
+    "SOL",
+    1,
+    1,
+    25,
+    "tx-1",
+    null,
+    "duel-key-1",
+    "duel-1",
+    null,
+    "ext-1",
+    10,
+  );
+  insertBet.run(
+    "bet-2",
+    "wallet-2",
+    "solana",
+    "SOL",
+    2,
+    2,
+    25,
+    "tx-1",
+    null,
+    "duel-key-1",
+    "duel-1",
+    null,
+    "ext-2",
+    20,
+  );
+  insertBet.run(
+    "bet-3",
+    "wallet-3",
+    "solana",
+    "SOL",
+    3,
+    3,
+    25,
+    "tx-3",
+    null,
+    "duel-key-2",
+    "duel-2",
+    null,
+    "ext-shared",
+    30,
+  );
+  insertBet.run(
+    "bet-4",
+    "wallet-4",
+    "solana",
+    "SOL",
+    4,
+    4,
+    25,
+    "tx-4",
+    null,
+    "duel-key-2",
+    "duel-2",
+    null,
+    "ext-shared",
+    40,
+  );
+  seedDb.close(false);
 }
 
 describe("keeper db persistence", () => {
@@ -139,5 +243,33 @@ describe("keeper db persistence", () => {
         updatedAt: 1_700_000_000_500,
       },
     ]);
+  });
+
+  test("quarantines duplicate recorded bets before enforcing uniqueness", async () => {
+    seedDuplicateBets(process.env.KEEPER_DB_PATH!);
+
+    const db = (await import(
+      `./db.ts?case=${Date.now()}-duplicate-bets`
+    )) as typeof import("./db.ts");
+    loadedModules.push(db);
+
+    const state = db.loadAll();
+    expect(state.bets.map((bet) => bet.id).sort()).toEqual(["bet-1", "bet-3"]);
+
+    const inspectDb = new Database(process.env.KEEPER_DB_PATH!);
+    try {
+      const conflicts = inspectDb
+        .prepare(
+          `SELECT original_id AS originalId, reason
+             FROM bets_duplicate_conflicts
+            ORDER BY original_id ASC`,
+        )
+        .all() as Array<{ originalId: string; reason: string }>;
+      expect(conflicts.map((row) => row.originalId)).toEqual(["bet-2", "bet-4"]);
+      expect(conflicts[0]?.reason).toContain("duplicate chain+tx_signature");
+      expect(conflicts[1]?.reason).toContain("duplicate external_bet_ref");
+    } finally {
+      inspectDb.close(false);
+    }
   });
 });

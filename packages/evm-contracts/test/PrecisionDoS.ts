@@ -1,35 +1,84 @@
 import { expect } from "chai";
+import type { EventLog, LogDescription } from "ethers";
 import { ethers } from "hardhat";
 
+import { deployDuelOutcomeOracle, deployGoldClob } from "../typed-contracts";
+
 describe("GoldClob Precision DoS", () => {
-    it("should process perfectly valid mixed-quantity matching without precision revert", async () => {
-        const signers = await ethers.getSigners();
-        const admin = signers[0];
-        const maker = signers[1];
-        const taker = signers[2];
+  const ORDER_FLAG_GTC = 0x01;
 
-        // Mocks
-        const MockOracle = await ethers.getContractFactory("DuelOutcomeOracle");
-        const oracle = await MockOracle.deploy(admin.address, admin.address);
+  it("should process perfectly valid mixed-quantity matching without precision revert", async () => {
+    const [admin, maker, taker] = await ethers.getSigners();
 
-        const GoldClob = await ethers.getContractFactory("GoldClob");
-        const clob = await GoldClob.deploy(admin.address, admin.address, await oracle.getAddress(), admin.address, admin.address);
-        await clob.setFeeConfig(0, 0, 0);
+    const oracle = await deployDuelOutcomeOracle(
+      admin.address,
+      admin.address,
+      admin.address,
+      admin.address,
+      admin.address,
+      3600,
+      admin,
+    );
+    await oracle.waitForDeployment();
 
-        const duelKey = ethers.id("duel-123");
-        await oracle.upsertDuel(duelKey, ethers.id("p1"), ethers.id("p2"), 1, 2000000000, 2000000001, "m", 2);
+    const clob = await deployGoldClob(
+      admin.address,
+      admin.address,
+      await oracle.getAddress(),
+      admin.address,
+      admin.address,
+      admin.address,
+      admin,
+    );
+    await clob.waitForDeployment();
+    await expect(clob.setFeeConfig(0, 0, 0)).to.be.revertedWithCustomError(
+      clob,
+      "GovernanceSurfaceFrozen",
+    );
 
-        await clob.createMarketForDuel(duelKey, 0);
+    const duelKey = ethers.id("duel-123");
+    await oracle.upsertDuel(
+      duelKey,
+      ethers.id("p1"),
+      ethers.id("p2"),
+      1,
+      2000000000,
+      2000000001,
+      "m",
+      2,
+    );
 
-        // Maker sells 4000 amount at price 250 (requires 4000 * 750 / 1000 = 3000 value)
-        await clob.connect(maker).placeOrder(duelKey, 0, 2, 250, 4000, { value: 3000 });
+    await clob.createMarketForDuel(duelKey, 0);
 
-        const expectedMarketKey = await clob.marketKey(duelKey, 0);
+    await clob.connect(maker).placeOrder(duelKey, 0, 2, 250, 4000, ORDER_FLAG_GTC, { value: 3000 });
 
-        // Taker buys 2000 amount at limit price 500 (requires 2000 * 500 / 1000 = 1000 value)
-        // Match fillAmount = 2000 at boundary 250. This must succeed.
-        await expect(clob.connect(taker).placeOrder(duelKey, 0, 1, 500, 2000, { value: 1000 }))
-          .to.emit(clob, "OrderMatched")
-          .withArgs(expectedMarketKey, 1, 2, 2000, 250);
-    });
+    const expectedMarketKey = await clob.marketKey(duelKey, 0);
+
+    const tx = await clob
+      .connect(taker)
+      .placeOrder(duelKey, 0, 1, 500, 2000, ORDER_FLAG_GTC, { value: 1000 });
+    const receipt = await tx.wait();
+
+    expect(receipt).to.not.equal(null);
+
+    const matchedEvent = receipt!.logs
+      .map((log) => {
+        try {
+          return clob.interface.parseLog(log as EventLog);
+        } catch {
+          return null;
+        }
+      })
+      .find((parsed): parsed is LogDescription => parsed?.name === "OrderMatched");
+
+    expect(matchedEvent).to.not.equal(undefined);
+    if (!matchedEvent) {
+      throw new Error("OrderMatched event not found");
+    }
+    expect(matchedEvent.args[0]).to.equal(expectedMarketKey);
+    expect(matchedEvent.args[1]).to.equal(1n);
+    expect(matchedEvent.args[2]).to.equal(2n);
+    expect(matchedEvent.args[3]).to.equal(2000n);
+    expect(matchedEvent.args[4]).to.equal(250n);
+  });
 });

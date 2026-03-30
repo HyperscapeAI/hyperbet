@@ -18,6 +18,12 @@ export interface AgentInfo {
   damageDealtThisFight: number;
 }
 
+export interface RendererHealthInfo {
+  ready: boolean;
+  degradedReason: string | null;
+  updatedAt: number | null;
+}
+
 export interface LeaderboardEntry {
   rank: number;
   name: string;
@@ -48,6 +54,7 @@ export interface StreamingCycle {
   winnerId: string | null;
   winnerName: string | null;
   winReason: string | null;
+  rendererHealth?: RendererHealthInfo | null;
   seed?: string | null;
   replayHash?: string | null;
 }

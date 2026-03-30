@@ -138,6 +138,8 @@ function defaultRpcUrlForEvmNetwork(network: BettingEvmNetwork): string {
       return "https://api.avax.network/ext/bc/C/rpc";
     case "avaxFuji":
       return "https://api.avax-test.network/ext/bc/C/rpc";
+    default:
+      return "https://api.avax.network/ext/bc/C/rpc";
   }
 }
 

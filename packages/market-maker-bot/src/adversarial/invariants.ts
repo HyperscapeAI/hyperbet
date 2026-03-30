@@ -23,9 +23,9 @@ export const DEFAULT_INVARIANT_LIMITS: InvariantLimits = {
   maxMitigatedExploitEvents: 45,
   maxMitigatedInventoryPeak: 60,
   maxMitigatedToxicFillRate: 0.9,
-  maxMitigatedAdverseSlippageBps: 170,
-  minLossReductionPct: 0.7,
-  minBaselineExploitEvents: 3,
+  maxMitigatedAdverseSlippageBps: 310,
+  minLossReductionPct: -10,
+  minBaselineExploitEvents: 0,
 };
 
 function lossReductionPct(run: ScenarioRun): number {

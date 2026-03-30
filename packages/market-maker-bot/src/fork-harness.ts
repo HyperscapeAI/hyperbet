@@ -33,6 +33,7 @@ export const FORK_ATTACK_SCENARIOS: ScenarioId[] = [
   "quote_stuffing_burst",
   "cancel_storm_griefing",
   "sybil_wash_trading",
+  "sybil_identity_churn",
 ];
 
 function parseBoolean(raw: string | undefined): boolean {
@@ -62,21 +63,13 @@ export function parseForkAttackSeeds(raw: string | undefined): number[] {
   return [...new Set(parsed.map((entry) => Math.trunc(entry)))];
 }
 
-function pctReduction(run: ScenarioRun): number {
-  if (run.baseline.attackerPnl <= 0) {
-    return 1;
-  }
-  return 1 - run.mitigated.attackerPnl / run.baseline.attackerPnl;
-}
-
 function evaluateScenarioBreaches(chain: ChainId, seed: number, run: ScenarioRun): string[] {
   const budget = SCENARIO_RISK_BUDGETS[run.scenario];
-  const reduction = pctReduction(run);
   const breaches: string[] = [];
 
-  if (!run.mitigationPass) {
+  if (!run.budgetPass) {
     breaches.push(
-      `[seed=${seed}] ${chain}/${run.scenario} mitigationPass=false (improved=${run.improved})`,
+      `[seed=${seed}] ${chain}/${run.scenario} budgetPass=false (${run.budgetBreaches.map((entry) => entry.control).join(",")})`,
     );
   }
   if (run.mitigated.attackerPnl > budget.maxMitigatedAttackerPnl) {
@@ -99,9 +92,24 @@ function evaluateScenarioBreaches(chain: ChainId, seed: number, run: ScenarioRun
       `[seed=${seed}] ${chain}/${run.scenario} adverse slippage ${run.mitigated.avgAdverseSlippageBps.toFixed(2)} > ${budget.maxAdverseSlippageBps}`,
     );
   }
-  if (reduction < budget.minAttackerPnlReductionRatio) {
+  if (run.mitigated.staleQuoteUptimeRatio > budget.maxStaleQuoteUptimeRatio) {
     breaches.push(
-      `[seed=${seed}] ${chain}/${run.scenario} reduction ratio ${reduction.toFixed(4)} < ${budget.minAttackerPnlReductionRatio}`,
+      `[seed=${seed}] ${chain}/${run.scenario} stale quote uptime ${run.mitigated.staleQuoteUptimeRatio.toFixed(4)} > ${budget.maxStaleQuoteUptimeRatio}`,
+    );
+  }
+  if (run.mitigated.orphanOrderCount > budget.maxOrphanOrderCount) {
+    breaches.push(
+      `[seed=${seed}] ${chain}/${run.scenario} orphan orders ${run.mitigated.orphanOrderCount} > ${budget.maxOrphanOrderCount}`,
+    );
+  }
+  if (run.mitigated.reconciliationLagMs > budget.maxReconciliationLagMs) {
+    breaches.push(
+      `[seed=${seed}] ${chain}/${run.scenario} reconciliation lag ${run.mitigated.reconciliationLagMs} > ${budget.maxReconciliationLagMs}`,
+    );
+  }
+  if (run.mitigated.unresolvedClaimBacklog > budget.maxUnresolvedClaimBacklog) {
+    breaches.push(
+      `[seed=${seed}] ${chain}/${run.scenario} unresolved claim backlog ${run.mitigated.unresolvedClaimBacklog} > ${budget.maxUnresolvedClaimBacklog}`,
     );
   }
 

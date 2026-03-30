@@ -17,6 +17,9 @@ export type GoldClobMatch = {
   duelKey: string;
   status: bigint;
   winner: bigint;
+  tradeTreasuryFeeBpsSnapshot: bigint;
+  tradeMarketMakerFeeBpsSnapshot: bigint;
+  winningsMarketMakerFeeBpsSnapshot: bigint;
   nextOrderId: bigint;
   bestBid: bigint;
   bestAsk: bigint;
@@ -49,6 +52,34 @@ export type PerpPosition = {
   entryPrice: bigint;
 };
 
+export type AgentPerpPosition = PerpPosition & {
+  lastCumulativeFundingRate: bigint;
+};
+
+export type AgentPerpMarketConfig = {
+  skewScale: bigint;
+  maxLeverage: bigint;
+  maintenanceMarginBps: bigint;
+  liquidationRewardBps: bigint;
+  maxOracleDelay: bigint;
+  exists: boolean;
+};
+
+export type AgentPerpMarketState = {
+  totalLongOI: bigint;
+  totalShortOI: bigint;
+  currentFundingRate: bigint;
+  cumulativeFundingRate: bigint;
+  lastFundingTimestamp: bigint;
+  lastOraclePrice: bigint;
+  lastConservativeSkill: bigint;
+  lastOracleTimestamp: bigint;
+  vaultBalance: bigint;
+  insuranceFund: bigint;
+  badDebt: bigint;
+  status: bigint;
+};
+
 interface TypedContract<Self extends BaseContract> extends BaseContract {
   connect(runner: ContractRunner | null): Self;
   waitForDeployment(): Promise<this>;
@@ -66,6 +97,7 @@ export interface GoldClobContract extends TypedContract<GoldClobContract> {
     side: BigNumberish,
     price: BigNumberish,
     amount: BigNumberish,
+    orderFlags: BigNumberish,
     overrides?: PayableOverrides,
   ): Promise<ContractTransactionResponse>;
   syncMarketFromOracle(
@@ -99,6 +131,16 @@ export interface GoldClobContract extends TypedContract<GoldClobContract> {
     tradeMarketMakerFeeBps: BigNumberish,
     winningsMarketMakerFeeBps: BigNumberish,
   ): Promise<ContractTransactionResponse>;
+  setPauser(
+    pauser: string,
+    enabled: boolean,
+  ): Promise<ContractTransactionResponse>;
+  setMarketCreationPaused(
+    paused: boolean,
+  ): Promise<ContractTransactionResponse>;
+  setOrderPlacementPaused(
+    paused: boolean,
+  ): Promise<ContractTransactionResponse>;
 }
 
 export interface DuelOutcomeOracleContract
@@ -113,7 +155,7 @@ export interface DuelOutcomeOracleContract
     metadataUri: string,
     status: BigNumberish,
   ): Promise<ContractTransactionResponse>;
-  reportResult(
+  proposeResult(
     duelKey: BytesLike,
     winner: BigNumberish,
     seed: BigNumberish,
@@ -122,6 +164,19 @@ export interface DuelOutcomeOracleContract
     duelEndTs: BigNumberish,
     metadataUri: string,
   ): Promise<ContractTransactionResponse>;
+  challengeResult(
+    duelKey: BytesLike,
+    metadataUri: string,
+  ): Promise<ContractTransactionResponse>;
+  finalizeResult(
+    duelKey: BytesLike,
+    metadataUri: string,
+  ): Promise<ContractTransactionResponse>;
+  proposalId(
+    duelKey: BytesLike,
+    resultHash: BytesLike,
+    replayHash: BytesLike,
+  ): Promise<string>;
   cancelDuel(
     duelKey: BytesLike,
     metadataUri: string,
@@ -129,6 +184,21 @@ export interface DuelOutcomeOracleContract
   setReporter(
     reporter: string,
     enabled: boolean,
+  ): Promise<ContractTransactionResponse>;
+  setFinalizer(
+    finalizer: string,
+    enabled: boolean,
+  ): Promise<ContractTransactionResponse>;
+  setChallenger(
+    challenger: string,
+    enabled: boolean,
+  ): Promise<ContractTransactionResponse>;
+  setPauser(
+    pauser: string,
+    enabled: boolean,
+  ): Promise<ContractTransactionResponse>;
+  setOraclePaused(
+    paused: boolean,
   ): Promise<ContractTransactionResponse>;
   getDuel(duelKey: BytesLike): Promise<{
     duelKey: string;
@@ -143,8 +213,16 @@ export interface DuelOutcomeOracleContract
     seed: bigint;
     resultHash: string;
     replayHash: string;
+    activeProposalId: string;
     metadataUri: string;
   }>;
+  disputeWindowSeconds(): Promise<bigint>;
+  oracleActionsPaused(): Promise<boolean>;
+  REPORTER_ROLE(): Promise<string>;
+  FINALIZER_ROLE(): Promise<string>;
+  CHALLENGER_ROLE(): Promise<string>;
+  PAUSER_ROLE(): Promise<string>;
+  hasRole(role: BytesLike, account: string): Promise<boolean>;
 }
 
 export interface SkillOracleContract extends TypedContract<SkillOracleContract> {
@@ -153,6 +231,15 @@ export interface SkillOracleContract extends TypedContract<SkillOracleContract> 
     mu: BigNumberish,
     sigma: BigNumberish,
   ): Promise<ContractTransactionResponse>;
+  setReporter(
+    reporter: string,
+    enabled: boolean,
+  ): Promise<ContractTransactionResponse>;
+  agentSkills(agentId: BytesLike): Promise<{
+    mu: bigint;
+    sigma: bigint;
+    lastUpdate: bigint;
+  }>;
   getIndexPrice(agentId: BytesLike): Promise<bigint>;
   globalMeanMu(): Promise<bigint>;
 }
@@ -167,16 +254,54 @@ export interface MockERC20Contract extends TypedContract<MockERC20Contract> {
 }
 
 export interface AgentPerpEngineContract extends TypedContract<AgentPerpEngineContract> {
+  createMarket(agentId: BytesLike): Promise<ContractTransactionResponse>;
+  createMarket(
+    agentId: BytesLike,
+    skewScale: BigNumberish,
+    maxLeverage: BigNumberish,
+    maintenanceMarginBps: BigNumberish,
+    liquidationRewardBps: BigNumberish,
+    maxOracleDelay: BigNumberish,
+  ): Promise<ContractTransactionResponse>;
+  updateMarketConfig(
+    agentId: BytesLike,
+    skewScale: BigNumberish,
+    maxLeverage: BigNumberish,
+    maintenanceMarginBps: BigNumberish,
+    liquidationRewardBps: BigNumberish,
+    maxOracleDelay: BigNumberish,
+  ): Promise<ContractTransactionResponse>;
   modifyPosition(
     agentId: BytesLike,
     marginDelta: BigNumberish,
     sizeDelta: BigNumberish,
   ): Promise<ContractTransactionResponse>;
+  withdrawMargin(
+    agentId: BytesLike,
+    amount: BigNumberish,
+  ): Promise<ContractTransactionResponse>;
   liquidate(
     agentId: BytesLike,
     trader: string,
   ): Promise<ContractTransactionResponse>;
-  positions(agentId: BytesLike, trader: string): Promise<PerpPosition>;
+  depositInsuranceFund(
+    agentId: BytesLike,
+    amount: BigNumberish,
+  ): Promise<ContractTransactionResponse>;
+  withdrawInsuranceFund(
+    agentId: BytesLike,
+    to: string,
+    amount: BigNumberish,
+  ): Promise<ContractTransactionResponse>;
+  setMarketStatus(
+    agentId: BytesLike,
+    status: BigNumberish,
+  ): Promise<ContractTransactionResponse>;
+  syncOracle(agentId: BytesLike): Promise<ContractTransactionResponse>;
+  marketCount(): Promise<bigint>;
+  marketConfigs(agentId: BytesLike): Promise<AgentPerpMarketConfig>;
+  markets(agentId: BytesLike): Promise<AgentPerpMarketState>;
+  positions(agentId: BytesLike, trader: string): Promise<AgentPerpPosition>;
 }
 
 export interface AgentPerpEngineNativeContract extends TypedContract<AgentPerpEngineNativeContract> {
@@ -198,6 +323,7 @@ export async function deployGoldClob(
   oracle: string,
   treasury: string,
   marketMaker: string,
+  pauser: string,
   runner?: Signer,
 ): Promise<GoldClobContract> {
   const factory = runner
@@ -209,12 +335,17 @@ export async function deployGoldClob(
     oracle,
     treasury,
     marketMaker,
+    pauser,
   )) as unknown as GoldClobContract;
 }
 
 export async function deployDuelOutcomeOracle(
   admin: string,
   reporter: string,
+  finalizer: string,
+  challenger: string,
+  pauser: string,
+  disputeWindowSeconds: bigint | number = 3600,
   runner?: Signer,
 ): Promise<DuelOutcomeOracleContract> {
   const factory = runner
@@ -223,6 +354,10 @@ export async function deployDuelOutcomeOracle(
   return (await factory.deploy(
     admin,
     reporter,
+    finalizer,
+    challenger,
+    pauser,
+    disputeWindowSeconds,
   )) as unknown as DuelOutcomeOracleContract;
 }
 
@@ -233,8 +368,15 @@ export async function deploySkillOracle(
   const factory = runner
     ? await ethers.getContractFactory("SkillOracle", runner)
     : await ethers.getContractFactory("SkillOracle");
+  const signerAddr = runner
+    ? await runner.getAddress()
+    : await (await ethers.getSigners())[0].getAddress();
   return (await factory.deploy(
     initialBasePrice,
+    120, // maxOracleDelay: 2 minutes
+    signerAddr, // admin
+    signerAddr, // reporter
+    signerAddr, // pauser
   )) as unknown as SkillOracleContract;
 }
 
@@ -258,10 +400,16 @@ export async function deployAgentPerpEngine(
   const factory = runner
     ? await ethers.getContractFactory("AgentPerpEngine", runner)
     : await ethers.getContractFactory("AgentPerpEngine");
+  const signerAddr = runner
+    ? await runner.getAddress()
+    : await (await ethers.getSigners())[0].getAddress();
   return (await factory.deploy(
     oracleAddress,
     marginTokenAddress,
     skewScale,
+    signerAddr, // admin
+    signerAddr, // marketOperator
+    signerAddr, // pauser
   )) as unknown as AgentPerpEngineContract;
 }
 
@@ -273,8 +421,14 @@ export async function deployAgentPerpEngineNative(
   const factory = runner
     ? await ethers.getContractFactory("AgentPerpEngineNative", runner)
     : await ethers.getContractFactory("AgentPerpEngineNative");
+  const signerAddr = runner
+    ? await runner.getAddress()
+    : await (await ethers.getSigners())[0].getAddress();
   return (await factory.deploy(
     oracleAddress,
     skewScale,
+    signerAddr, // admin
+    signerAddr, // marketOperator
+    signerAddr, // pauser
   )) as unknown as AgentPerpEngineNativeContract;
 }

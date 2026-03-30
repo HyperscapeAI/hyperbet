@@ -32,16 +32,18 @@ import {
   captureInviteCodeFromLocation,
   getStoredInviteCode,
 } from "@hyperbet/ui/lib/invite";
+import { usePredictionMarketLifecycle } from "@hyperbet/ui/lib/predictionMarkets";
 import { StreamPlayer } from "@hyperbet/ui/components/StreamPlayer";
 import { ChainSelector } from "@hyperbet/ui/components/ChainSelector";
-import { ThemeSelector } from "./components/ThemeSelector";
+import { ThemeSelector } from "@hyperbet/ui/components/ThemeSelector";
+import { PointsDisplay } from "@hyperbet/ui/components/PointsDisplay";
 
 import { useChain } from "./lib/ChainContext";
 import { useStreamingState } from "@hyperbet/ui/spectator/useStreamingState";
 import { useDuelContext } from "@hyperbet/ui/spectator/useDuelContext";
 import { useResizePanel, useIsMobile } from "@hyperbet/ui/lib/useResizePanel";
 import { ResizeHandle } from "@hyperbet/ui/components/ResizeHandle";
-import { HmChart, type HmChartPoint } from "./components/HmChart";
+import { HmChart, type HmChartPoint } from "@hyperbet/ui/components/HmChart";
 import {
   getMarketMeta,
   createEvmPublicClient,
@@ -77,6 +79,11 @@ function formatTimeAgo(ts: number, locale: UiLocale): string {
 function truncateAddr(addr: string): string {
   if (addr.length <= 12) return addr;
   return `${addr.slice(0, 6)}...${addr.slice(-4)}`;
+}
+
+function normalizeEvmAddress(value: string | null | undefined): string | null {
+  const trimmed = value?.trim() ?? "";
+  return /^0x[a-fA-F0-9]{40}$/.test(trimmed) ? trimmed : null;
 }
 
 const FOOTER_SOCIALS = [
@@ -183,7 +190,7 @@ function getAppCopy(locale: UiLocale) {
       loadingReferral: "正在加载推荐",
       loadingAgentStats: "正在加载代理数据",
       loadingModelMarkets: "正在加载模型市场",
-      loadingEvmMarket: "正在加载 AVAX 市场",
+      loadingEvmMarket: "正在加载 EVM 市场",
       debugTitle: "极简对战下注",
       chain: "链",
       currentMatch: "当前对局",
@@ -191,13 +198,13 @@ function getAppCopy(locale: UiLocale) {
       yesPool: "YES 池",
       noPool: "NO 池",
       refresh: "刷新",
-      connectEvm: "连接 AVAX",
+      connectEvm: "连接 EVM",
       wrongNet: "网络错误",
       duels: "对决",
       models: "模型",
       modelMarkets: "模型市场",
       leaderboardAndStats: "排行榜与统计",
-      addEvmWallet: "添加 AVAX 钱包",
+      addEvmWallet: "添加 EVM 钱包",
       switchNetwork: "切换网络",
       unmuteStream: "开启声音",
       muteStream: "静音",
@@ -273,7 +280,7 @@ function getAppCopy(locale: UiLocale) {
     loadingReferral: "Loading referral",
     loadingAgentStats: "Loading agent stats",
     loadingModelMarkets: "Loading model markets",
-    loadingEvmMarket: "Loading AVAX market",
+    loadingEvmMarket: "Loading EVM market",
     debugTitle: "Ultra Simple Fight Bet",
     chain: "Chain",
     currentMatch: "Current match",
@@ -281,13 +288,13 @@ function getAppCopy(locale: UiLocale) {
     yesPool: "YES pool",
     noPool: "NO pool",
     refresh: "Refresh",
-    connectEvm: "Connect AVAX",
+    connectEvm: "Connect EVM",
     wrongNet: "Wrong Net",
     duels: "Duels",
     models: "Models",
     modelMarkets: "Model Markets",
     leaderboardAndStats: "Leaderboard & Stats",
-    addEvmWallet: "Add AVAX Wallet",
+    addEvmWallet: "Add EVM Wallet",
     switchNetwork: "Switch Network",
     unmuteStream: "Unmute stream",
     muteStream: "Mute stream",
@@ -441,16 +448,41 @@ export function App() {
   const mockData = useMockDataOptional();
   const { address: evmWalletAddress } = useAccount();
   const { activeChain, setActiveChain, availableChains } = useChain();
+  const activeEvmChain =
+    activeChain === "bsc" || activeChain === "base" || activeChain === "avax"
+      ? activeChain
+      : ((availableChains[0] as "bsc" | "base" | "avax" | undefined) ?? "bsc");
+  const activeChainLabel =
+    activeEvmChain === "base"
+      ? "BASE"
+      : activeEvmChain === "bsc"
+        ? "BSC"
+        : "AVAX";
   const [locale, setLocale] = useState<UiLocale>(() => resolveUiLocale());
   const copy = useMemo(() => getAppCopy(locale), [locale]);
   const isE2eMode = import.meta.env.MODE === "e2e";
   const isStreamUiMode = import.meta.env.MODE === "stream-ui";
   const isE2eDebugMode =
     isE2eMode && new URLSearchParams(window.location.search).has("debug");
+  const configuredHeadlessEvmAddress = useMemo(
+    () =>
+      normalizeEvmAddress(
+        import.meta.env.VITE_E2E_EVM_ADDRESS ||
+          import.meta.env.VITE_HEADLESS_EVM_ADDRESS ||
+          "",
+      ),
+    [],
+  );
   // Only poll chain data when a wallet is connected (saves unnecessary RPC calls for spectators).
-  const shouldPollChainData = Boolean(!isStreamUiMode && (isE2eMode || evmWalletAddress));
+  const effectiveEvmWalletAddress =
+    evmWalletAddress ?? configuredHeadlessEvmAddress;
+  const shouldPollChainData = Boolean(
+    !isStreamUiMode && (isE2eMode || effectiveEvmWalletAddress),
+  );
   // In stream-ui mode treat wallet as disconnected so invite/points fetches don't fire.
-  const pointsWalletAddress = isStreamUiMode ? null : (evmWalletAddress ?? null);
+  const pointsWalletAddress = isStreamUiMode
+    ? null
+    : (effectiveEvmWalletAddress ?? null);
   const invitePlatformQuery = "evm" as const;
 
   const [surfaceMode, setSurfaceMode] = useState<"DUELS" | "MODELS">("DUELS");
@@ -501,6 +533,17 @@ export function App() {
   const { state: streamingState } = useStreamingState();
   const { context: duelContext } = useDuelContext();
   const liveCycle = streamingState?.cycle ?? null;
+  const lifecycleChainKey =
+    activeChain === "bsc" || activeChain === "base" || activeChain === "avax"
+      ? activeChain
+      : "solana";
+  const {
+    duel: lifecycleDuel,
+    market: lifecycleMarket,
+    refresh: refreshLifecycle,
+  } = usePredictionMarketLifecycle(
+    lifecycleChainKey,
+  );
   const streamSources = STREAM_URLS;
   const activeStreamUrl = isE2eMode ? "" : (streamSources[streamSourceIndex] ?? "");
 
@@ -657,6 +700,7 @@ export function App() {
 
   const handleRefresh = () => {
     setRefreshNonce((value) => value + 1);
+    window.dispatchEvent(new CustomEvent("hyperbet:market-refresh"));
   };
 
   // ── Market data polling ───────────────────────────────────────────────────
@@ -664,7 +708,7 @@ export function App() {
   useEffect(() => {
     const duelKeyHex =
       typeof liveCycle?.duelKeyHex === "string" ? liveCycle.duelKeyHex : null;
-    const chainConfig = getEvmChainConfig("avax");
+    const chainConfig = getEvmChainConfig(activeEvmChain);
     if (!duelKeyHex || !chainConfig) return;
 
     const publicClient = createEvmPublicClient(chainConfig);
@@ -711,7 +755,7 @@ export function App() {
       cancelled = true;
       clearInterval(id);
     };
-  }, [liveCycle?.duelKeyHex]);
+  }, [activeEvmChain, liveCycle?.duelKeyHex]);
 
   // Reset chart when duel changes
   useEffect(() => {
@@ -830,7 +874,10 @@ export function App() {
 
   const streamPhaseText = liveCycle?.phase ?? null;
   const marketStatusText = getMarketStatusLabel(
-    streamPhaseText ?? currentMatch?.status ?? copy.phaseLive,
+    lifecycleMarket?.lifecycleStatus ??
+      currentMatch?.status ??
+      streamPhaseText ??
+      copy.phaseLive,
     copy,
   );
   const countdownText = liveCycle
@@ -928,7 +975,7 @@ const [hmBottomTab, setHmBottomTab] = useState<
                 alignItems: "center",
                 marginBottom: 16,
                 position: "relative",
-                zIndex: 1,
+                zIndex: 2,
               }}
             >
               <div
@@ -975,7 +1022,7 @@ const [hmBottomTab, setHmBottomTab] = useState<
                 gap: 4,
                 marginBottom: 16,
                 position: "relative",
-                zIndex: 1,
+                zIndex: 2,
               }}
             >
               {(
@@ -991,9 +1038,7 @@ const [hmBottomTab, setHmBottomTab] = useState<
                     key={tab.key}
                     type="button"
                     data-testid={`points-drawer-tab-${tab.key}`}
-                    onClick={() =>
-                      startTransition(() => setPointsDrawerTab(tab.key))
-                    }
+                    onClick={() => setPointsDrawerTab(tab.key)}
                     style={{
                       flex: 1,
                       padding: "8px 0",
@@ -1019,10 +1064,9 @@ const [hmBottomTab, setHmBottomTab] = useState<
               })}
             </div>
 
-            {/* Non-compact points summary — hidden for now */}
-            {/* <div style={{ marginBottom: 16, position: "relative", zIndex: 1 }}>
+            <div style={{ marginBottom: 16, position: "relative", zIndex: 2 }}>
               <PointsDisplay walletAddress={pointsWalletAddress} locale={locale} />
-            </div> */}
+            </div>
 
             {/* Tab Content */}
             <div
@@ -1050,12 +1094,9 @@ const [hmBottomTab, setHmBottomTab] = useState<
                 <Suspense fallback={<PanelFallback label={copy.loadingReferral} />}>
                   <ReferralPanel
                     activeChain={activeChain}
-                    solanaWallet={null}
-                    evmWallet={evmWalletAddress ?? null}
+                    evmWallet={effectiveEvmWalletAddress ?? null}
                     locale={locale}
-                    evmWalletPlatform={
-                      activeChain === "avax" ? "AVAX" : null
-                    }
+                    evmWalletPlatform={activeChainLabel}
                   />
                 </Suspense>
               )}
@@ -1214,7 +1255,7 @@ const [hmBottomTab, setHmBottomTab] = useState<
               value={activeChain}
               onChange={(event) =>
                 setActiveChain(
-                  event.target.value as "avax",
+                  event.target.value as typeof activeChain,
                 )
               }
             >
@@ -1266,13 +1307,16 @@ const [hmBottomTab, setHmBottomTab] = useState<
                   onChange={handleLocaleChange}
                   compact
                 />
-                <ThemeSelector compact />
+                <ThemeSelector compact theme="avax" />
                 <button
                   type="button"
                   className="hm-header-mob-icon-btn"
                   title={copy.leaderboardAndStats}
                   data-testid="points-drawer-open"
-                  onClick={() => setShowPointsDrawer(true)}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    setShowPointsDrawer(true);
+                  }}
                 >
                   🏆
                 </button>
@@ -1311,7 +1355,7 @@ const [hmBottomTab, setHmBottomTab] = useState<
                         className="hm-header-mob-wallet-btn hm-header-mob-wallet-btn--linked"
                         onClick={openAccountModal}
                       >
-                        ⬡ {account.displayName?.slice(0, 6) ?? "AVAX"}
+                        ⬡ {account.displayName?.slice(0, 6) ?? activeChainLabel}
                       </button>
                     );
                   }}
@@ -1370,7 +1414,7 @@ const [hmBottomTab, setHmBottomTab] = useState<
 
             <div className="hm-header-right">
               <LocaleSelector locale={locale} onChange={handleLocaleChange} />
-              <ThemeSelector />
+              <ThemeSelector theme="avax" />
               {/* <PointsDisplay
                 walletAddress={pointsWalletAddress}
                 compact
@@ -1381,7 +1425,10 @@ const [hmBottomTab, setHmBottomTab] = useState<
                 className="dock-collapse-btn"
                 title={copy.leaderboardAndStats}
                 data-testid="points-drawer-open"
-                onClick={() => setShowPointsDrawer(true)}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setShowPointsDrawer(true);
+                }}
                 style={{ fontSize: 16 }}
               >
                 🏆
@@ -1556,7 +1603,7 @@ const [hmBottomTab, setHmBottomTab] = useState<
                     </span>
                   </div>
                   <div className="hm-chart-container">
-                    <HmChart data={effChartData} />
+                    <HmChart data={effChartData} theme="avax" />
                   </div>
                 </div>
               </div>
@@ -2009,6 +2056,9 @@ const [hmBottomTab, setHmBottomTab] = useState<
                       agent2Name={effAgent2Name}
                       compact
                       locale={locale}
+                      lifecycleDuelOverride={lifecycleDuel}
+                      lifecycleMarketOverride={lifecycleMarket}
+                      onLifecycleRefreshRequested={() => void refreshLifecycle()}
                     />
                   </Suspense>
                 </div>

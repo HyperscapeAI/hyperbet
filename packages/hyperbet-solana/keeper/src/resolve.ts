@@ -58,10 +58,16 @@ const duelPda = findDuelStatePda(fightOracle.programId, duelKey);
 const oracleConfigPda = findOracleConfigPda(fightOracle.programId);
 
 const duelState = await oracleAccounts["duelState"].fetch(duelPda);
+const oracleConfig = await oracleAccounts["oracleConfig"].fetch(oracleConfigPda);
 const nowTs = Math.floor(Date.now() / 1000);
 
-let postResultSig: string | null = null;
+let proposeResultSig: string | null = null;
+let finalizeResultSig: string | null = null;
+
 if (!enumIs(duelState.status, "resolved")) {
+  if (enumIs(duelState.status, "challenged")) {
+    throw new Error("Duel result is challenged; refusing to finalize");
+  }
   if (nowTs < Number(duelState.betCloseTs)) {
     throw new Error("Bet window still open; refusing to resolve early");
   }
@@ -71,38 +77,64 @@ if (!enumIs(duelState.status, "resolved")) {
     throw new Error("replay-hash must be a 32-byte hex string");
   }
 
-  const resultHash = buildResultHash(
-    args["duel-key"],
-    args.winner === "a" ? "A" : "B",
-    args.seed,
-    replayHashHex,
-  );
+  if (enumIs(duelState.status, "locked")) {
+    const resultHash = buildResultHash(
+      args["duel-key"],
+      args.winner === "a" ? "A" : "B",
+      args.seed,
+      replayHashHex,
+    );
 
-  postResultSig = await oracleProgram.methods
-    .reportResult(
-      Array.from(duelKey),
-      args.winner === "a" ? { a: {} } : { b: {} },
-      new BN(args.seed),
-      Array.from(Buffer.from(replayHashHex, "hex")),
-      resultHash,
-      new BN(nowTs),
-      args.metadata,
-    )
-    .accounts(
-      {
-        reporter: oracleAuthority.publicKey,
-        oracleConfig: oracleConfigPda,
-        duelState: duelPda,
-      } as never,
-    )
-    .rpc();
+    proposeResultSig = await oracleProgram.methods
+      .proposeResult(
+        Array.from(duelKey),
+        args.winner === "a" ? { a: {} } : { b: {} },
+        new BN(args.seed),
+        Array.from(Buffer.from(replayHashHex, "hex")),
+        resultHash,
+        new BN(nowTs),
+        args.metadata,
+      )
+      .accounts(
+        {
+          reporter: oracleAuthority.publicKey,
+          oracleConfig: oracleConfigPda,
+          duelState: duelPda,
+        } as never,
+      )
+      .rpc();
+  }
+
+  const refreshedDuelState = await oracleAccounts["duelState"].fetch(duelPda);
+  if (enumIs(refreshedDuelState.status, "challenged")) {
+    throw new Error("Duel result is challenged; refusing to finalize");
+  }
+
+  if (enumIs(refreshedDuelState.status, "proposed")) {
+    const finalizableAt =
+      Number(refreshedDuelState.pendingProposedAt) +
+      Number(oracleConfig.disputeWindowSecs);
+    if (nowTs >= finalizableAt) {
+      finalizeResultSig = await oracleProgram.methods
+        .finalizeResult(Array.from(duelKey), args.metadata)
+        .accounts(
+          {
+            finalizer: oracleAuthority.publicKey,
+            oracleConfig: oracleConfigPda,
+            duelState: duelPda,
+          } as never,
+        )
+        .rpc();
+    }
+  }
 }
 
 console.log(
   JSON.stringify(
     {
       duel: duelPda.toBase58(),
-      postResultSig,
+      proposeResultSig,
+      finalizeResultSig,
     },
     null,
     2,
