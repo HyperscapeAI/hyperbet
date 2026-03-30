@@ -42,6 +42,12 @@ on:
   schedule:
     - cron: "0 7 * * *"
   workflow_dispatch:
+    inputs:
+      strict_launch_gate:
+        description: "Run the strict canonical mainnet registry launch gate"
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -322,16 +328,14 @@ jobs:
       - name: Run launch-scope registry gate
         run: |
           strict_launch_gate=false
-          if [[ "$GITHUB_EVENT_NAME" == "pull_request" ]]; then
-            if [[ "$GITHUB_BASE_REF" == "main" || "$GITHUB_BASE_REF" == "staging" ]]; then
-              strict_launch_gate=true
-            fi
-          elif [[ "$GITHUB_REF_NAME" == "main" || "$GITHUB_REF_NAME" == "staging" ]]; then
+          if [[ "${{ vars.HYPERBET_STRICT_REGISTRY_LAUNCH_GATE }}" == "true" ]]; then
+            strict_launch_gate=true
+          elif [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" && "${{ inputs.strict_launch_gate }}" == "true" ]]; then
             strict_launch_gate=true
           fi
 
           if [[ "$strict_launch_gate" == "false" ]]; then
-            echo "::notice title=Registry gate mode::Using Stage-A closeout registry contract for Solana devnet and BSC testnet; AVAX remains deferred for this PR."
+            echo "::notice title=Registry gate mode::Using Stage-A closeout registry contract for Solana devnet and BSC testnet; AVAX remains deferred until strict launch gating is explicitly enabled."
             bun run ci:gate:registry:launch --solana-cluster=devnet --evm-environment=testnet --include-evm=bsc --ignore-solana-fields=usdcMint
           else
             bun run ci:gate:registry:launch

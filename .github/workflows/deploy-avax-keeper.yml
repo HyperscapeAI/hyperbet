@@ -98,7 +98,7 @@ jobs:
           fi
           printf '%s\n' "$changed_files"
 
-          keeper_change_pattern='^(packages/hyperbet-avax/keeper/|packages/hyperbet-chain-registry/|packages/hyperbet-mm-core/|packages/hyperbet-evm-keeper-core/|scripts/|\.github/actions/setup-hyperbet/|package\.json$|bun\.lock$)'
+          keeper_change_pattern='^(packages/hyperbet-avax/keeper/|packages/hyperbet-chain-registry/|packages/hyperbet-mm-core/|packages/hyperbet-evm-keeper-core/|scripts/|\.github/actions/setup-hyperbet/)'
           keeper_source_changed=false
           if printf '%s\n' "$changed_files" | grep -Eq "${keeper_change_pattern}"; then
             keeper_source_changed=true
