@@ -20,6 +20,7 @@
     "@jup-ag/api": "^6.0.48",
     "@noble/curves": "^2.0.1",
     "@rainbow-me/rainbowkit": "^2.2.10",
+    "@wagmi/core": "^3.4.0",
     "@solana/spl-token": "0.4.14",
     "@solana/wallet-adapter-base": "0.9.27",
     "@solana/wallet-adapter-phantom": "0.9.28",
