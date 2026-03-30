@@ -130,10 +130,34 @@ export default defineConfig(async ({ mode }) => {
   // Fix for @noble/curves import resolution inside the turbo monorepo
   aliasMap["@noble/curves/ed25519"] = ed25519Path;
   aliasMap["@noble/curves/secp256k1"] = secp256k1Path;
-  const alias = Object.entries(aliasMap).map(([find, replacement]) => ({
-    find,
-    replacement,
-  }));
+  const alias = [
+    { find: /^wagmi$/, replacement: require.resolve("wagmi") },
+    {
+      find: /^wagmi\/chains$/,
+      replacement: require.resolve("wagmi/chains"),
+    },
+    {
+      find: /^wagmi\/connectors$/,
+      replacement: require.resolve("wagmi/connectors"),
+    },
+    { find: /^@wagmi\/core$/, replacement: require.resolve("@wagmi/core") },
+    {
+      find: /^@wagmi\/core\/internal$/,
+      replacement: require.resolve("@wagmi/core/internal"),
+    },
+    {
+      find: /^@wagmi\/core\/query$/,
+      replacement: require.resolve("@wagmi/core/query"),
+    },
+    {
+      find: /^@rainbow-me\/rainbowkit$/,
+      replacement: require.resolve("@rainbow-me/rainbowkit"),
+    },
+    ...Object.entries(aliasMap).map(([find, replacement]) => ({
+      find,
+      replacement,
+    })),
+  ];
   plugins.push({
     name: "resolve-node-polyfill-shims",
     enforce: "pre",
@@ -388,7 +412,6 @@ export default defineConfig(async ({ mode }) => {
         onwarn(warning, warn) {
           if (
             warning.code === "SOURCEMAP_ERROR" ||
-            warning.code === "UNRESOLVED_IMPORT" ||
             (warning.message &&
               warning.message.includes(
                 "contains an annotation that Rollup cannot interpret",

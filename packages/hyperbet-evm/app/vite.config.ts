@@ -283,7 +283,31 @@ export default defineConfig(async ({ mode }) => {
       host: true,
     },
     resolve: {
-      alias,
+      alias: [
+        { find: /^wagmi$/, replacement: require.resolve("wagmi") },
+        {
+          find: /^wagmi\/chains$/,
+          replacement: require.resolve("wagmi/chains"),
+        },
+        {
+          find: /^wagmi\/connectors$/,
+          replacement: require.resolve("wagmi/connectors"),
+        },
+        { find: /^@wagmi\/core$/, replacement: require.resolve("@wagmi/core") },
+        {
+          find: /^@wagmi\/core\/internal$/,
+          replacement: require.resolve("@wagmi/core/internal"),
+        },
+        {
+          find: /^@wagmi\/core\/query$/,
+          replacement: require.resolve("@wagmi/core/query"),
+        },
+        {
+          find: /^@rainbow-me\/rainbowkit$/,
+          replacement: require.resolve("@rainbow-me/rainbowkit"),
+        },
+        ...alias,
+      ],
       dedupe: [
         "react",
         "react-dom",
@@ -313,7 +337,6 @@ export default defineConfig(async ({ mode }) => {
         onwarn(warning, warn) {
           if (
             warning.code === "SOURCEMAP_ERROR" ||
-            warning.code === "UNRESOLVED_IMPORT" ||
             (warning.message &&
               warning.message.includes(
                 "contains an annotation that Rollup cannot interpret",
