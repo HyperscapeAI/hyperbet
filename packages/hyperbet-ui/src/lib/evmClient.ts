@@ -161,7 +161,7 @@ export function createEvmPublicClient(
   return createPublicClient({
     chain: chainConfig.wagmiChain,
     ccipRead: false,
-    transport: createEvmTransport(chainConfig.rpcUrl),
+    transport: createEvmTransport(chainConfig.readRpcUrl),
   });
 }
 
@@ -202,7 +202,7 @@ export function createUnlockedRpcWalletClient(
         functionName,
         args: (args ?? []) as readonly unknown[],
       });
-      const response = await fetch(chainConfig.rpcUrl, {
+      const response = await fetch(chainConfig.submitRpcUrl, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -304,12 +304,14 @@ export function createSignedRpcWalletClient(
         ...(value !== undefined ? { value: toHex(value) } : {}),
       };
       const [nonceHex, gasPriceHex, gasEstimateHex] = await Promise.all([
-        callEvmRpc<Hex>(chainConfig.rpcUrl, "eth_getTransactionCount", [
+        callEvmRpc<Hex>(chainConfig.submitRpcUrl, "eth_getTransactionCount", [
           from,
           "pending",
         ]),
-        callEvmRpc<Hex>(chainConfig.rpcUrl, "eth_gasPrice", []),
-        callEvmRpc<Hex>(chainConfig.rpcUrl, "eth_estimateGas", [txRequest]),
+        callEvmRpc<Hex>(chainConfig.submitRpcUrl, "eth_gasPrice", []),
+        callEvmRpc<Hex>(chainConfig.submitRpcUrl, "eth_estimateGas", [
+          txRequest,
+        ]),
       ]);
       const serialized = await account.signTransaction({
         chainId: chainConfig.evmChainId,
@@ -321,9 +323,11 @@ export function createSignedRpcWalletClient(
         type: "legacy",
         value: value ?? 0n,
       });
-      return callEvmRpc<Hash>(chainConfig.rpcUrl, "eth_sendRawTransaction", [
-        serialized,
-      ]);
+      return callEvmRpc<Hash>(
+        chainConfig.submitRpcUrl,
+        "eth_sendRawTransaction",
+        [serialized],
+      );
     },
   };
 }

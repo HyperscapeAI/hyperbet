@@ -12,12 +12,12 @@ import { CONFIG } from "./config";
 const chains = getWagmiChains();
 const enabledEvmChains = getEnabledEvmChains();
 const fallbackRpcUrl =
-  enabledEvmChains[0]?.rpcUrl ?? chains[0]?.rpcUrls.default.http[0] ?? "";
+  enabledEvmChains[0]?.readRpcUrl ?? chains[0]?.rpcUrls.default.http[0] ?? "";
 
 // Build transport map from enabled chains
 const transports: Record<number, ReturnType<typeof http>> = {};
 for (const evmChain of enabledEvmChains) {
-  transports[evmChain.evmChainId] = http(evmChain.rpcUrl);
+  transports[evmChain.evmChainId] = http(evmChain.readRpcUrl);
 }
 // Fallback for any chain that didn't get explicitly mapped
 for (const chain of chains) {

@@ -27,7 +27,11 @@ import {
   type VerifiedExternalBetRecord,
 } from "@hyperbet/evm-keeper-core";
 import {
+  findUnsupportedJsonRpcMethod,
+  isWriteRateLimitedRoute,
   mergePredictionMarketsWithHealth,
+  PUBLIC_EVM_RPC_READ_METHODS,
+  PUBLIC_SOLANA_RPC_READ_METHODS,
   type KeeperBotHealthSnapshot,
   type KeeperMarketHealthRecord,
 } from "@hyperbet/mm-core";
@@ -2832,6 +2836,19 @@ async function handleSolanaRpcProxy(req: Request): Promise<Response> {
   if (!rpcBody.ok) {
     return rpcBody.response;
   }
+  const unsupportedMethod = findUnsupportedJsonRpcMethod(
+    rpcBody.requests,
+    PUBLIC_SOLANA_RPC_READ_METHODS,
+  );
+  if (unsupportedMethod) {
+    return jsonResponse(
+      req,
+      {
+        error: `JSON-RPC method ${unsupportedMethod} is not allowed on the public Solana RPC proxy`,
+      },
+      403,
+    );
+  }
 
   try {
     const ttlMs = resolveJsonRpcCacheTtlMs(
@@ -2960,6 +2977,19 @@ async function handleEvmRpcProxy(req: Request, url: URL): Promise<Response> {
   const rpcBody = await readJsonRpcBody(req, EVM_RPC_PROXY_MAX_BODY_BYTES);
   if (!rpcBody.ok) {
     return rpcBody.response;
+  }
+  const unsupportedMethod = findUnsupportedJsonRpcMethod(
+    rpcBody.requests,
+    PUBLIC_EVM_RPC_READ_METHODS,
+  );
+  if (unsupportedMethod) {
+    return jsonResponse(
+      req,
+      {
+        error: `JSON-RPC method ${unsupportedMethod} is not allowed on the public EVM RPC proxy`,
+      },
+      403,
+    );
   }
 
   try {
@@ -3116,8 +3146,7 @@ const server = Bun.serve({
   development: process.env.NODE_ENV !== "production",
   fetch: async (req: Request) => {
     const url = new URL(req.url);
-    const isWriteRoute =
-      req.method === "POST" || url.pathname === "/api/streaming/state/publish";
+    const isWriteRoute = isWriteRateLimitedRoute(req.method, url.pathname);
     const allowed = checkRateLimit(
       req,
       url.pathname,

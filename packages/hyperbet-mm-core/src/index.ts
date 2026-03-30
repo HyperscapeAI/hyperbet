@@ -840,3 +840,5 @@ export function buildAmmTradeDecision(
     reason: `deviation-${deviationBps}bps`,
   };
 }
+
+export * from "./rpcProxyPolicy.js";
