@@ -46,6 +46,7 @@ Current audited GitHub state:
 - repo-level deploy and testnet secrets exist
 - no GitHub `staging` environment exists yet
 - no `HYPERBET_*_STAGING_*` vars or secrets are provisioned yet
+- BSC/AVAX auto-deploy flags can now be split per surface with `HYPERBET_*_PAGES_DEPLOY_ENABLED` and `HYPERBET_*_KEEPER_DEPLOY_ENABLED`; the older shared `HYPERBET_*_DEPLOY_ENABLED` vars remain as a fallback
 
 That means the code path is ready, but staged proof and staged soak remain
 operationally blocked until staging is provisioned.

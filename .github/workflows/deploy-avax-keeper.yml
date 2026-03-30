@@ -34,7 +34,7 @@ concurrency:
 
 jobs:
   deploy:
-    if: ${{ vars.HYPERBET_AVAX_DEPLOY_ENABLED == 'true' || (github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'staging') }}
+    if: ${{ github.event_name == 'workflow_dispatch' || vars.HYPERBET_AVAX_KEEPER_DEPLOY_ENABLED == 'true' || (vars.HYPERBET_AVAX_KEEPER_DEPLOY_ENABLED == '' && vars.HYPERBET_AVAX_DEPLOY_ENABLED == 'true') }}
     name: Deploy hyperbet-avax keeper
     runs-on: ubuntu-latest
     environment: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'staging' && 'staging' || 'production' }}
