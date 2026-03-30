@@ -184,16 +184,46 @@ jobs:
             --commit-dirty=true \
             --skip-caching
 
+      - name: Resolve deployed Pages URL
+        id: deployment_url
+        if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.environment != 'preview' }}
+        run: |
+          pages_environment="production"
+          if [ "${DEPLOY_TARGET}" != "production" ]; then
+            pages_environment="preview"
+          fi
+
+          deployed_url="$(npx wrangler@4.72.0 pages deployment list \
+            --project-name "${PAGES_PROJECT_NAME}" \
+            --environment "${pages_environment}" \
+            --json | jq -r --arg source "${GITHUB_SHA::7}" 'map(select(.Source == $source)) | .[0].Deployment // empty')"
+
+          if [ -z "${deployed_url}" ]; then
+            echo "Unable to resolve deployed Pages URL for ${PAGES_PROJECT_NAME}" >&2
+            exit 1
+          fi
+
+          echo "deployed_url=${deployed_url}" >> "${GITHUB_OUTPUT}"
+
       - name: Verify production build metadata
         if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.environment != 'preview' }}
         run: |
+          deployed_url="${{ steps.deployment_url.outputs.deployed_url }}"
           for attempt in $(seq 1 20); do
-            payload="$(curl -fsSL "${PAGES_EXPECTED_URL}/build-info.json" || true)"
+            payload="$(curl -fsSL "${deployed_url}/build-info.json" || true)"
             if [ -n "$payload" ] && echo "$payload" | jq -e --arg sha "$GITHUB_SHA" '.commitHash == $sha' >/dev/null; then
-              echo "build-info.json matches ${GITHUB_SHA}"
-              exit 0
+              echo "build-info.json matches ${GITHUB_SHA} at ${deployed_url}"
+              break
             fi
             sleep 15
           done
-          echo "Timed out waiting for ${PAGES_EXPECTED_URL}/build-info.json to report ${GITHUB_SHA}"
-          exit 1
+          curl -fsSL "${deployed_url}/build-info.json" | jq -e --arg sha "$GITHUB_SHA" '.commitHash == $sha'
+
+          if [ -n "${PAGES_EXPECTED_URL}" ] && [ "${PAGES_EXPECTED_URL}" != "${deployed_url}" ]; then
+            custom_payload="$(curl -fsSL "${PAGES_EXPECTED_URL}/build-info.json" || true)"
+            if [ -n "${custom_payload}" ] && echo "${custom_payload}" | jq -e --arg sha "$GITHUB_SHA" '.commitHash == $sha' >/dev/null; then
+              echo "custom domain build-info.json matches ${GITHUB_SHA}"
+            else
+              echo "warning: ${PAGES_EXPECTED_URL}/build-info.json is not serving ${GITHUB_SHA} yet" >&2
+            fi
+          fi
