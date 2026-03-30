@@ -30,7 +30,7 @@ jobs:
       RECIPIENTS: ${{ github.event_name == 'workflow_dispatch' && inputs.recipients || '0x4f2714dc431dc948B5B138Ef9b998e943568DE4d=0.20ether' }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6.0.2
 
       - name: Setup funding toolchain
         uses: ./.github/actions/setup-hyperbet

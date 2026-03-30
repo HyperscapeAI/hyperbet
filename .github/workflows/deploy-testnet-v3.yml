@@ -39,7 +39,7 @@ jobs:
       STAGE_A_TARGET: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.target || 'all' }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6.0.2
 
       - name: Setup Hyperbet toolchain
         uses: ./.github/actions/setup-hyperbet
@@ -172,7 +172,7 @@ jobs:
 
       - name: Upload testnet deployment artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.0
         with:
           name: testnet-deployment
           path: .ci-artifacts/testnet-deployment
@@ -180,7 +180,7 @@ jobs:
 
       - name: Upload testnet verification artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.0
         with:
           name: testnet-verification
           path: .ci-artifacts/testnet-verification

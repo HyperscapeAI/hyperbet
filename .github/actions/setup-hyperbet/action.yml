@@ -40,7 +40,7 @@ runs:
         bun-version: ${{ inputs.bun-version }}
 
     - name: Cache Bun store
-      uses: actions/cache@v4
+      uses: actions/cache@v5.0.4
       with:
         path: ~/.bun/install/cache
         key: ${{ runner.os }}-bun-${{ inputs.bun-version }}-${{ hashFiles('bun.lock', 'package.json', 'packages/*/package.json') }}
@@ -61,7 +61,7 @@ runs:
 
     - name: Cache Cargo registry
       if: ${{ inputs.install-rust == 'true' || inputs.install-anchor == 'true' }}
-      uses: actions/cache@v4
+      uses: actions/cache@v5.0.4
       with:
         path: |
           ~/.cargo/bin
@@ -77,7 +77,7 @@ runs:
 
     - name: Cache Solana CLI
       if: ${{ inputs.install-solana == 'true' }}
-      uses: actions/cache@v4
+      uses: actions/cache@v5.0.4
       with:
         path: ~/.local/share/solana
         key: ${{ runner.os }}-solana-${{ inputs.solana-version }}

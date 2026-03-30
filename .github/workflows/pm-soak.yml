@@ -71,7 +71,7 @@ jobs:
       HYPERBET_AVAX_STAGING_STREAM_PUBLISH_KEY: ${{ secrets.HYPERBET_AVAX_STAGING_STREAM_PUBLISH_KEY }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6.0.2
 
       - name: Setup Hyperbet toolchain
         uses: ./.github/actions/setup-hyperbet
@@ -119,7 +119,7 @@ jobs:
 
       - name: Upload PM soak artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.0
         with:
           name: pm-soak
           path: .ci-artifacts/pm-soak

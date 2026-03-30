@@ -73,7 +73,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6.0.2
         with:
           ref: ${{ env.PREDICTION_MARKET_GATE_REF }}
 
@@ -92,7 +92,7 @@ jobs:
 
       - name: Upload Solana build artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.0
         with:
           name: solana-program-build-gate
           path: .ci-artifacts/solana-program-build-gate
@@ -103,7 +103,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6.0.2
         with:
           ref: ${{ env.PREDICTION_MARKET_GATE_REF }}
 
@@ -120,7 +120,7 @@ jobs:
 
       - name: Upload EVM contract proof artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.0
         with:
           name: evm-contract-proof-gate
           path: .ci-artifacts/evm-contract-proof-gate
@@ -131,7 +131,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6.0.2
         with:
           ref: ${{ env.PREDICTION_MARKET_GATE_REF }}
 
@@ -141,7 +141,7 @@ jobs:
           install-foundry: "true"
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6.2.0
         with:
           python-version: "3.12"
 
@@ -156,7 +156,7 @@ jobs:
 
       - name: Upload EVM contract security artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.0
         with:
           name: evm-contract-security-gate
           path: .ci-artifacts/evm-contract-security-gate
@@ -167,7 +167,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6.0.2
         with:
           ref: ${{ env.PREDICTION_MARKET_GATE_REF }}
 
@@ -187,7 +187,7 @@ jobs:
 
       - name: Upload EVM gate artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.0
         with:
           name: evm-exploit-gate
           path: .ci-artifacts/evm-exploit-gate
@@ -198,7 +198,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6.0.2
         with:
           ref: ${{ env.PREDICTION_MARKET_GATE_REF }}
 
@@ -221,7 +221,7 @@ jobs:
 
       - name: Upload Solana gate artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.0
         with:
           name: solana-exploit-gate
           path: .ci-artifacts/solana-exploit-gate
@@ -236,7 +236,7 @@ jobs:
         chain: [solana, bsc, avax]
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6.0.2
         with:
           ref: ${{ env.PREDICTION_MARKET_GATE_REF }}
 
@@ -266,7 +266,7 @@ jobs:
 
       - name: Upload E2E artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.0
         with:
           name: cross-chain-e2e-${{ matrix.chain }}
           path: .ci-artifacts/e2e-${{ matrix.chain }}
@@ -277,7 +277,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6.0.2
         with:
           ref: ${{ env.PREDICTION_MARKET_GATE_REF }}
 
@@ -298,7 +298,7 @@ jobs:
 
       - name: Upload Base smoke artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.0
         with:
           name: base-add-chain-smoke
           path: .ci-artifacts/base-add-chain-smoke
@@ -309,7 +309,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6.0.2
         with:
           ref: ${{ env.PREDICTION_MARKET_GATE_REF }}
 
@@ -339,7 +339,7 @@ jobs:
 
       - name: Upload registry gate artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.0
         with:
           name: registry-launch-gate
           path: .ci-artifacts/registry-launch-gate
@@ -350,7 +350,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6.0.2
         with:
           ref: ${{ env.PREDICTION_MARKET_GATE_REF }}
 
@@ -365,7 +365,7 @@ jobs:
 
       - name: Upload soak contract artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.0
         with:
           name: soak-harness-contract
           path: .ci-artifacts/soak-harness-contract
@@ -376,7 +376,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6.0.2
         with:
           ref: ${{ env.PREDICTION_MARKET_GATE_REF }}
 
@@ -393,7 +393,7 @@ jobs:
 
       - name: Upload AMM Forge artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.0
         with:
           name: amm-forge-gate
           path: .ci-artifacts/amm-forge-gate
@@ -404,7 +404,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6.0.2
         with:
           ref: ${{ env.PREDICTION_MARKET_GATE_REF }}
 
@@ -423,7 +423,7 @@ jobs:
 
       - name: Upload AMM Solana artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.0
         with:
           name: amm-solana-gate
           path: .ci-artifacts/amm-solana-gate
@@ -434,7 +434,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6.0.2
         with:
           ref: ${{ env.PREDICTION_MARKET_GATE_REF }}
 
@@ -451,7 +451,7 @@ jobs:
 
       - name: Upload perps Forge artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.0
         with:
           name: perps-forge-gate
           path: .ci-artifacts/perps-forge-gate
@@ -462,7 +462,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6.0.2
         with:
           ref: ${{ env.PREDICTION_MARKET_GATE_REF }}
 
@@ -481,7 +481,7 @@ jobs:
 
       - name: Upload Solana perps build artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.0
         with:
           name: perps-solana-gate
           path: .ci-artifacts/perps-solana-gate

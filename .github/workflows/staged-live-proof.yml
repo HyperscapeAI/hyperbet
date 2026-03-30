@@ -87,7 +87,7 @@ jobs:
       HYPERBET_AVAX_RAILWAY_STAGING_KEEPER_SERVICE_ID: ${{ vars.HYPERBET_AVAX_RAILWAY_STAGING_KEEPER_SERVICE_ID }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6.0.2
 
       - name: Setup Hyperbet toolchain
         uses: ./.github/actions/setup-hyperbet
@@ -105,7 +105,7 @@ jobs:
 
       - name: Upload staged proof artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.0
         with:
           name: staged-live-proof
           path: .ci-artifacts/staged-live-proof
