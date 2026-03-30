@@ -176,7 +176,7 @@ jobs:
 
           COMMIT_MSG=$(git log -1 --pretty=%s | tr -d '"' | cut -c1-100)
 
-          npx wrangler pages deploy dist \
+          npx wrangler@4.72.0 pages deploy dist \
             --project-name="${PAGES_PROJECT_NAME}" \
             --branch="${BRANCH}" \
             --commit-hash="${GITHUB_SHA}" \
