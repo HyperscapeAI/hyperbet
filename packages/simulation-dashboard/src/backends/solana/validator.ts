@@ -29,6 +29,9 @@ export type SolanaValidatorHandle = {
     stop(): Promise<void>;
 };
 
+const DEFAULT_VALIDATOR_READY_TIMEOUT_MS = 180_000;
+const DEFAULT_VALIDATOR_START_ATTEMPTS = 3;
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const REPO_ROOT = join(__dirname, "..", "..", "..", "..", "..");
@@ -147,6 +150,37 @@ async function getFreePort(): Promise<number> {
     });
 }
 
+async function canBindPort(port: number): Promise<boolean> {
+    return await new Promise((resolve) => {
+        const server = createServer();
+        server.unref();
+        server.once("error", () => {
+            resolve(false);
+        });
+        server.listen(port, "127.0.0.1", () => {
+            server.close((error) => {
+                resolve(!error);
+            });
+        });
+    });
+}
+
+async function getFreeRpcPort(): Promise<number> {
+    for (let attempt = 0; attempt < 32; attempt += 1) {
+        const candidate = await getFreePort();
+        if (candidate >= 65_535) {
+            continue;
+        }
+        if (await canBindPort(candidate + 1)) {
+            return candidate;
+        }
+    }
+
+    throw new Error(
+        "Unable to allocate Solana validator RPC/WS port pair on 127.0.0.1",
+    );
+}
+
 async function rpcRequest(
     rpcUrl: string,
     payload: Record<string, unknown>,
@@ -162,9 +196,29 @@ async function rpcRequest(
     return response.json();
 }
 
-async function waitForRpcReady(rpcUrl: string, timeoutMs = 120_000): Promise<void> {
+function validatorExitError(
+    validator: ChildProcess,
+    rpcUrl: string,
+    stage: string,
+): Error {
+    const code =
+        validator.exitCode == null ? "null" : String(validator.exitCode);
+    const signal = validator.signalCode ?? "null";
+    return new Error(
+        `solana-test-validator exited during ${stage} for ${rpcUrl} (code=${code}, signal=${signal})`,
+    );
+}
+
+async function waitForRpcReady(
+    rpcUrl: string,
+    validator: ChildProcess,
+    timeoutMs = DEFAULT_VALIDATOR_READY_TIMEOUT_MS,
+): Promise<void> {
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
+        if (validator.exitCode !== null) {
+            throw validatorExitError(validator, rpcUrl, "rpc readiness");
+        }
         try {
             await rpcRequest(rpcUrl, {
                 jsonrpc: "2.0",
@@ -192,10 +246,18 @@ async function waitForRpcReady(rpcUrl: string, timeoutMs = 120_000): Promise<voi
 async function waitForProgram(
     rpcUrl: string,
     programId: string,
-    timeoutMs = 120_000,
+    validator: ChildProcess,
+    timeoutMs = DEFAULT_VALIDATOR_READY_TIMEOUT_MS,
 ): Promise<void> {
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
+        if (validator.exitCode !== null) {
+            throw validatorExitError(
+                validator,
+                rpcUrl,
+                `program readiness for ${programId}`,
+            );
+        }
         try {
             const result = await rpcRequest(rpcUrl, {
                 jsonrpc: "2.0",
@@ -231,13 +293,21 @@ async function getConfirmedSlot(rpcUrl: string): Promise<number> {
 async function waitForSlotAdvances(
     rpcUrl: string,
     minimumAdvances: number,
-    timeoutMs = 120_000,
+    validator: ChildProcess,
+    timeoutMs = DEFAULT_VALIDATOR_READY_TIMEOUT_MS,
 ): Promise<void> {
     const targetAdvances = Math.max(1, minimumAdvances);
     const baselineSlot = await getConfirmedSlot(rpcUrl);
     const deadline = Date.now() + timeoutMs;
 
     while (Date.now() < deadline) {
+        if (validator.exitCode !== null) {
+            throw validatorExitError(
+                validator,
+                rpcUrl,
+                "confirmed slot advance warmup",
+            );
+        }
         const currentSlot = await getConfirmedSlot(rpcUrl);
         if (currentSlot >= baselineSlot + targetAdvances) {
             return;
@@ -250,13 +320,13 @@ async function waitForSlotAdvances(
     );
 }
 
-export async function startSolanaValidator(): Promise<SolanaValidatorHandle> {
+async function startSolanaValidatorAttempt(): Promise<SolanaValidatorHandle> {
     if (!commandExists("solana-test-validator")) {
         throw new Error("Missing required command: solana-test-validator");
     }
 
     const assets = resolveSolanaRuntimeAssets();
-    const rpcPort = await getFreePort();
+    const rpcPort = await getFreeRpcPort();
     let faucetPort = await getFreePort();
     while (faucetPort === rpcPort || faucetPort === rpcPort + 1) {
         faucetPort = await getFreePort();
@@ -333,12 +403,12 @@ export async function startSolanaValidator(): Promise<SolanaValidatorHandle> {
     };
 
     try {
-        await waitForRpcReady(rpcUrl);
-        await waitForProgram(rpcUrl, assets.fightOracle.programId);
-        await waitForProgram(rpcUrl, assets.goldClobMarket.programId);
+        await waitForRpcReady(rpcUrl, validator);
+        await waitForProgram(rpcUrl, assets.fightOracle.programId, validator);
+        await waitForProgram(rpcUrl, assets.goldClobMarket.programId, validator);
         // The program accounts can report executable slightly before the validator
         // is ready to execute and confirm the first program instructions.
-        await waitForSlotAdvances(rpcUrl, 1);
+        await waitForSlotAdvances(rpcUrl, 1, validator);
         return {
             rpcUrl,
             wsUrl,
@@ -349,4 +419,25 @@ export async function startSolanaValidator(): Promise<SolanaValidatorHandle> {
         await stop();
         throw error;
     }
+}
+
+export async function startSolanaValidator(): Promise<SolanaValidatorHandle> {
+    let lastError: unknown = null;
+
+    for (
+        let attempt = 1;
+        attempt <= DEFAULT_VALIDATOR_START_ATTEMPTS;
+        attempt += 1
+    ) {
+        try {
+            return await startSolanaValidatorAttempt();
+        } catch (error) {
+            lastError = error;
+            if (attempt < DEFAULT_VALIDATOR_START_ATTEMPTS) {
+                continue;
+            }
+        }
+    }
+
+    throw lastError instanceof Error ? lastError : new Error(String(lastError));
 }

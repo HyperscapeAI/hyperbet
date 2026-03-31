@@ -63,7 +63,7 @@ function u64Le(value: bigint | number): Buffer {
 
 export const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-async function currentChainUnixTimestamp(
+export async function currentChainUnixTimestamp(
   connection: anchor.web3.Connection,
 ): Promise<number> {
   for (let attempt = 0; attempt < 5; attempt += 1) {
@@ -79,6 +79,25 @@ async function currentChainUnixTimestamp(
     await sleep(250);
   }
   return Math.floor(Date.now() / 1000);
+}
+
+export async function waitForChainUnixTimestamp(
+  connection: anchor.web3.Connection,
+  minimumUnixTimestamp: number,
+  timeoutMs = 15_000,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const current = await currentChainUnixTimestamp(connection);
+    const wallClock = Math.floor(Date.now() / 1000);
+    if (current >= minimumUnixTimestamp || wallClock >= minimumUnixTimestamp) {
+      return;
+    }
+    await sleep(250);
+  }
+  throw new Error(
+    `Timed out waiting for chain time >= ${minimumUnixTimestamp}`,
+  );
 }
 
 function toBn(value: bigint | number): BN {
@@ -228,6 +247,14 @@ export function hasProgramError(error: unknown, fragment: string): boolean {
   return message.includes(fragment);
 }
 
+function enumIs(value: unknown, key: string): boolean {
+  return Boolean(
+    value &&
+      typeof value === "object" &&
+      key in (value as Record<string, unknown>),
+  );
+}
+
 export function writableAccount(pubkey: PublicKey): AccountMeta {
   return {
     pubkey,
@@ -268,20 +295,27 @@ export async function ensureOracleReady(
     return oracleConfig;
   }
 
-  await program.methods
-    .updateOracleConfig(
-      authority.publicKey,
-      reporter,
-      finalizer,
-      challenger,
-      new BN(disputeWindowSecs),
-    )
-    .accountsPartial({
-      authority: authority.publicKey,
-      oracleConfig,
-    })
-    .signers([authority])
-    .rpc();
+  try {
+    await program.methods
+      .updateOracleConfig(
+        authority.publicKey,
+        reporter,
+        finalizer,
+        challenger,
+        new BN(disputeWindowSecs),
+      )
+      .accountsPartial({
+        authority: authority.publicKey,
+        oracleConfig,
+      })
+      .signers([authority])
+      .rpc();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (!/ConfigFrozen/i.test(message)) {
+      throw error;
+    }
+  }
 
   return oracleConfig;
 }
@@ -491,6 +525,9 @@ export async function finalizeDuelResult(
   finalizer: Keypair,
   duelKey: readonly number[],
   metadataUri = "https://hyperscape.gg/duels/final",
+  options?: {
+    skipDisputeWindowWait?: boolean;
+  },
 ): Promise<PublicKey> {
   const oracleConfig = deriveOracleConfigPda(program.programId);
   const duelState = deriveDuelStatePda(program.programId, duelKey);
@@ -510,7 +547,16 @@ export async function finalizeDuelResult(
       return duelState;
     } catch (error) {
       lastError = error;
-      if (!hasProgramError(error, "DisputeWindowActive")) {
+      if (hasProgramError(error, "NotProposed")) {
+        const duelStateAccount = await program.account.duelState.fetch(duelState);
+        if (enumIs((duelStateAccount as { status?: unknown }).status, "resolved")) {
+          return duelState;
+        }
+      }
+      if (
+        !hasProgramError(error, "DisputeWindowActive") ||
+        options?.skipDisputeWindowWait
+      ) {
         throw error;
       }
       const [oracleConfigAccount, duelStateAccount] = await Promise.all([
@@ -881,6 +927,10 @@ export async function createOpenMarketFixture(
     marketOperator?: PublicKey;
     treasury?: PublicKey;
     marketMaker?: PublicKey;
+    duelStatus?:
+      | { scheduled: Record<string, never> }
+      | { bettingOpen: Record<string, never> }
+      | { locked: Record<string, never> };
     betOpenTs?: number;
     betCloseTs?: number;
     duelStartTs?: number;
@@ -907,7 +957,7 @@ export async function createOpenMarketFixture(
     marketMaker,
   });
   const duelState = await upsertDuel(fightProgram, authority, duelKey, {
-    status: duelStatusBettingOpen(),
+    status: options?.duelStatus ?? duelStatusBettingOpen(),
     betOpenTs: options?.betOpenTs ?? now - 30,
     betCloseTs: options?.betCloseTs ?? now + 3600,
     duelStartTs:

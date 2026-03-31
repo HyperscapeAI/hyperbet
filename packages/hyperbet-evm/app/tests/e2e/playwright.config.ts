@@ -2,6 +2,7 @@ import { defineConfig, devices } from "@playwright/test";
 
 const IS_LINUX = process.platform === "linux";
 const PW_HEADLESS = (process.env.PW_HEADLESS ?? "1") !== "0";
+const BROWSER_CHANNEL = process.env.PW_BROWSER_CHANNEL?.trim() || undefined;
 const DEFAULT_LINUX_WEBGPU_ARGS = [
   "--enable-unsafe-webgpu",
   "--ozone-platform=x11",
@@ -26,7 +27,7 @@ delete process.env.NO_COLOR;
 
 export default defineConfig({
   testDir: ".",
-  testMatch: "**/*.spec.ts",
+  testMatch: "**/*.e2e.ts",
   timeout: 180_000,
   expect: {
     timeout: 30_000,
@@ -50,7 +51,8 @@ export default defineConfig({
     actionTimeout: 30_000,
     navigationTimeout: 60_000,
     headless: PW_HEADLESS,
-    launchOptions: !PW_HEADLESS && WEBGPU_LAUNCH_ARGS.length
+    channel: BROWSER_CHANNEL,
+    launchOptions: WEBGPU_LAUNCH_ARGS.length
       ? { args: WEBGPU_LAUNCH_ARGS }
       : undefined,
   },

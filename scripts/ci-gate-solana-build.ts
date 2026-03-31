@@ -11,6 +11,7 @@ const deployArtifacts = [
   "fight_oracle.so",
   "gold_clob_market.so",
   "gold_perps_market.so",
+  "lvr_amm.so",
 ];
 const trackedArtifactPaths = [
   "packages/hyperbet-solana/anchor/target/idl",

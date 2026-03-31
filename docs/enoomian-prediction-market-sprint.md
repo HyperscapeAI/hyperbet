@@ -1,5 +1,7 @@
 # Enoomian Prediction Market Sprint
 
+> **TL;DR:** Historical sprint tracker for `enoomian/prediction-market-sprint-base`. Status: closed. Keep this as branch history only. It is not the current phase-1 launch closeout plan. Use [`docs/release/pm-launch-execution-plan.md`](release/pm-launch-execution-plan.md) and [`docs/release/prediction-market-launch-freeze-tracker.md`](release/prediction-market-launch-freeze-tracker.md) for current status.
+
 This is the living gate tracker for the `enoomian/prediction-market-sprint-base` branch.
 
 Update this document every time the sprint base branch is pushed, or when the

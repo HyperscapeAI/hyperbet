@@ -1,3 +1,4 @@
+import "./setup";
 import { describe, expect, it } from "bun:test";
 import { LocaleSelector } from "../src/components/LocaleSelector";
 import { changeValue, getByTestId, render } from "./render";

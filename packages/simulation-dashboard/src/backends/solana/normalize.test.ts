@@ -151,4 +151,118 @@ describe("normalizeSolanaProofOutcome", () => {
             },
         ]);
     });
+
+    test("keeps the stale-resolution-window gate green when the invalid report is rejected", () => {
+        const preset = getScenarioPresetByIdOrName("solana-stale-resolution-window");
+        expect(preset).not.toBeNull();
+
+        const outcome: SolanaProofOutcome = {
+            preset: preset!,
+            seed: "solana-stale-resolution-seed-1",
+            winner: "A",
+            duelLabel: "solana-stale-resolution-window:solana-stale-resolution-seed-1",
+            duelKeyHex: "1234".repeat(16),
+            marketRef: "Market222222222222222222222222222222222",
+            rpcUrl: "http://127.0.0.1:9999",
+            contracts: {
+                oracle: "Oracle222222222222222222222222222222222",
+                clob: "Clob22222222222222222222222222222222222",
+            },
+            fees: {
+                treasuryBps: 100,
+                mmBps: 100,
+                winningsMmBps: 200,
+                treasuryAccruedLamports: 8n,
+                mmAccruedLamports: 12n,
+            },
+            actors: [
+                {
+                    name: "Solana MM",
+                    role: "market-maker",
+                    description: "Provides resting liquidity.",
+                    color: "#22d3ee",
+                    address: "Actor22222222222222222222222222222222222",
+                    tradeCount: 2,
+                    activeOrders: 0,
+                    balance: {
+                        lamports: 2_750_000_000n,
+                        pnlSol: 0.05,
+                    },
+                    position: {
+                        aShares: 2n,
+                        bShares: 0n,
+                        aLockedLamports: 250_000_000n,
+                        bLockedLamports: 0n,
+                    },
+                },
+            ],
+            book: {
+                bids: [],
+                asks: [],
+            },
+            traces: [
+                {
+                    actor: "Authority Reporter",
+                    action: "invalid_resolution_rejected",
+                    chainKey: "solana",
+                    duelKey: "1234",
+                    marketRef: "Market222222222222222222222222222222222",
+                    price: null,
+                    units: null,
+                    txRef: null,
+                    ok: true,
+                    message: "pre-close resolution rejected by oracle lifecycle checks",
+                },
+            ],
+            attackRejected: true,
+            staleStreamGuardTrips: 0,
+            staleOracleGuardTrips: 1,
+            closeGuardTrips: 0,
+            peakInventory: 1_000,
+            quoteChecks: 1,
+            quoteActiveChecks: 1,
+            orderChurn: 2,
+            lockTransitionLatencyMs: 900,
+            resolvedCorrectly: true,
+            claimCorrectly: true,
+            settlementStatus: "RESOLVED",
+            settlementStatusCode: 3,
+            winnerCode: 1,
+            winnerLabel: "A",
+            totalAShares: 0n,
+            totalBShares: 0n,
+            bestBid: 0,
+            bestAsk: 1_000,
+            marketMakerPnl: -0.01,
+            attackerPnl: 0,
+            treasuryPnl: 0.000008,
+            marketMakerDrawdownBps: 18,
+            claimsProcessed: true,
+            bookNotCrossed: true,
+            mmSolvent: true,
+            degraded: false,
+            debug: {
+                staleEndTs: 1_700_000_000,
+            },
+        };
+
+        const normalized = normalizeSolanaProofOutcome(outcome);
+
+        expect(normalized.result.passed).toBeTrue();
+        expect(
+            normalized.result.gates.some(
+                (gate) => gate.name === "adversarialActionRejected" && gate.passed,
+            ),
+        ).toBeTrue();
+        expect(
+            normalized.result.gates.some(
+                (gate) => gate.name === "scenarioMmSolvent" && gate.passed,
+            ),
+        ).toBeTrue();
+        expect(
+            normalized.result.gates.some(
+                (gate) => gate.name === "expectedSettlementObserved" && gate.passed,
+            ),
+        ).toBeTrue();
+    });
 });

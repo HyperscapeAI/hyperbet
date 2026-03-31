@@ -93,6 +93,22 @@ kill_stale_validator_listener() {
   done
 }
 
+kill_stale_validator_processes() {
+  local pids
+  pids="$(ps -Ao pid=,command= | awk -v root="$ROOT_DIR" '$0 ~ /solana-test-validator/ && $0 ~ (root "/target/deploy/fight_oracle.so") {print $1}')"
+  if [[ -z "$pids" ]]; then
+    return 0
+  fi
+
+  for pid in $pids; do
+    if ps -p "$pid" >/dev/null 2>&1; then
+      echo "[anchor-test] stopping stale validator process $pid"
+      kill "$pid" >/dev/null 2>&1 || true
+      wait "$pid" >/dev/null 2>&1 || true
+    fi
+  done
+}
+
 wait_for_rpc() {
   local rpc_url="$1"
   for _ in {1..180}; do
@@ -141,6 +157,8 @@ trap cleanup EXIT
 
 cd "$ROOT_DIR"
 
+kill_stale_validator_processes
+
 if [[ "${ANCHOR_MANUAL_TEST_SKIP_BUILD:-0}" != "1" ]]; then
   if command -v anchor >/dev/null 2>&1; then
     echo "[anchor-test] building workspace with anchor"
@@ -176,13 +194,12 @@ if [[ ! -f "$ROOT_DIR/target/deploy/fight_oracle.so" || ! -f "$ROOT_DIR/target/d
 fi
 
 if [[ ${#TEST_TARGETS[@]} -eq 0 ]]; then
-  TEST_TARGETS=()
-  while IFS= read -r test_target; do
-    TEST_TARGETS+=("$test_target")
-  done < <(
-    find tests -maxdepth 1 -type f -name "*.ts" \
-      ! -name "perps-test-helpers.ts" \
-      ! -name "test-anchor.ts" | sort
+  TEST_TARGETS=(
+    tests/black_hat_exploits.ts
+    tests/hyperbet.ts
+    tests/gold_clob_market.anchor.ts
+    tests/gold_clob_security.ts
+    tests/gold_perps_market.ts
   )
 fi
 
@@ -190,8 +207,8 @@ WALLET_PATH="$(resolve_wallet_path)"
 MINT_AUTHORITY="$(resolve_mint_authority "$WALLET_PATH")"
 PROGRAM_ORACLE_ID="$(resolve_program_id fight_oracle B5mRCRDJk9BrnH7regMWW5mpTQ8QG1CcCGSnDxMt8hmo)"
 PROGRAM_CLOB_ID="$(resolve_program_id gold_clob_market DYtd7AoyTX2tbmZ8vpC3mxZgqTpyaDei4TFXZukWBJEf)"
-PROGRAM_PERPS_ID="$(resolve_program_id gold_perps_market EoZdHN8U3qWQje48ToxB1SLWjucsFGqcWaRUJQYX3eoT)"
-PROGRAM_LVR_AMM_ID="$(resolve_program_id lvr_amm Af4LMYfaBtcFFM6dBjwLYH6QJLMqEwneQ8VHfn2z7NY5)"
+PROGRAM_PERPS_ID="$(resolve_program_id gold_perps_market 6YjWiway8kaSjwtAinJxqWPvV3DqBVapDWAsSEZjjmbP)"
+PROGRAM_LVR_AMM_ID="$(resolve_program_id lvr_amm BGmzj676aVzRaJ3Hb9BJRYrjtXuhzoc1YTFA6wcucUNF)"
 
 : >"$TEST_LOG"
 

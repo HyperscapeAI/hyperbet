@@ -1,145 +1,113 @@
-# CREATE2 Deterministic Deployment — Mainnet Runbook
+# CREATE2 Deterministic Deployment Runbook
 
-> **Version**: v3 — CREATE2 redeployment  
-> **Factory**: Arachnid Deterministic Deployment Proxy (`0x4e59b44847b379578588920cA78FbF26c0B4956C`)
+> **TL;DR:** This runbook covers the EVM portion of the phase-1 launch train. The launch-blocking EVM chains are `BSC` and `AVAX`. `Base` remains an optional add-chain rehearsal lane and is not required for phase-1 signoff. PM CREATE2 deployment must be followed by AMM and perps deployment plus full-product verification before any registry values are promoted.
 
-## Pre-flight (all chains)
+> **Factory:** Arachnid Deterministic Deployment Proxy (`0x4e59b44847b379578588920cA78FbF26c0B4956C`)
 
-### 1. Compute deterministic addresses
+## Preflight
+
+1. Compute deterministic PM addresses:
+
 ```bash
 npx hardhat run scripts/predict-create2-addresses.ts
 ```
-Record both predicted addresses — they will be identical on every chain.
 
-### 2. Verify Arachnid proxy exists on target chain
+2. Verify the deterministic deployment proxy exists on the target chain:
+
 ```bash
-cast code 0x4e59b44847b379578588920cA78FbF26c0B4956C --rpc-url $RPC_URL
-# Must return non-empty bytecode
+cast code 0x4e59b44847b379578588920cA78FbF26c0B4956C --rpc-url "$RPC_URL"
 ```
 
-### 3. Fund deployer wallet
-- Same deployer EOA on all chains
-- Required: ~0.1 native token per chain for gas
+3. Confirm governance and operator addresses are finalized for the target
+   environment:
 
-### 4. Prepare governance wallet addresses
-All addresses **must be identical** across chains for CREATE2 address parity:
+- `ADMIN_ADDRESS`
+- `REPORTER_ADDRESS`
+- `FINALIZER_ADDRESS`
+- `CHALLENGER_ADDRESS`
+- `PAUSER_ADDRESS`
+- `MARKET_OPERATOR_ADDRESS`
+- `TREASURY_ADDRESS`
+- `MARKET_MAKER_ADDRESS`
 
-| Role | Env Var |
-|---|---|
-| Admin/Timelock | `ADMIN_ADDRESS` |
-| Reporter | `REPORTER_ADDRESS` |
-| Finalizer | `FINALIZER_ADDRESS` |
-| Challenger | `CHALLENGER_ADDRESS` |
-| Pauser | `PAUSER_ADDRESS` |
-| Market Operator | `MARKET_OPERATOR_ADDRESS` |
-| Treasury | `TREASURY_ADDRESS` |
-| Market Maker | `MARKET_MAKER_ADDRESS` |
-| Dispute Window | `DISPUTE_WINDOW_SECONDS` (default: 3600) |
+4. Confirm shared token inputs for AMM and perps exist for the target
+   environment:
 
----
+- `MUSD_TOKEN_ADDRESS`
+- `GOLD_TOKEN_ADDRESS`
+- perps margin token address when distinct from `GOLD_TOKEN_ADDRESS`
 
-## Rehearsal: Testnet Deploy
+## Testnet Rehearsal
 
-### 5. Deploy to AVAX Fuji
+### BSC testnet
+
 ```bash
-ADMIN_ADDRESS=0x... REPORTER_ADDRESS=0x... FINALIZER_ADDRESS=0x... \
-CHALLENGER_ADDRESS=0x... MARKET_OPERATOR_ADDRESS=0x... \
-TREASURY_ADDRESS=0x... MARKET_MAKER_ADDRESS=0x... \
-npx hardhat run scripts/deploy-create2.ts --network avaxFuji
-```
-
-### 6. Deploy to BSC Testnet
-```bash
-# Same governance vars as step 5
 npx hardhat run scripts/deploy-create2.ts --network bscTestnet
+npx hardhat run scripts/deploy-amm.ts --network bscTestnet
+npx hardhat run scripts/deploy-perps.ts --network bscTestnet
+node --import tsx scripts/verify-deployment.ts --network bscTestnet
 ```
 
-### 7. Deploy to Base Sepolia
+### AVAX Fuji
+
+```bash
+npx hardhat run scripts/deploy-create2.ts --network avaxFuji
+npx hardhat run scripts/deploy-amm.ts --network avaxFuji
+npx hardhat run scripts/deploy-perps.ts --network avaxFuji
+node --import tsx scripts/verify-deployment.ts --network avaxFuji
+```
+
+### Optional Base add-chain rehearsal
+
 ```bash
 npx hardhat run scripts/deploy-create2.ts --network baseSepolia
+npx hardhat run scripts/deploy-amm.ts --network baseSepolia
+npx hardhat run scripts/deploy-perps.ts --network baseSepolia
+node --import tsx scripts/verify-deployment.ts --network baseSepolia
 ```
 
-### 8. Verify address parity across testnets
-```bash
-diff <(jq .duelOracleAddress deployments/avaxFuji.json) \
-     <(jq .duelOracleAddress deployments/bscTestnet.json)
-diff <(jq .duelOracleAddress deployments/avaxFuji.json) \
-     <(jq .duelOracleAddress deployments/baseSepolia.json)
-# Both diffs must be empty
-```
+## Promotion Rules
 
-### 9. Run bootstrap smoke on each testnet
-```bash
-# Verify full lifecycle: upsert → bet → propose → finalize → claim
-node packages/hyperbet-avax/keeper/avax-fuji-bootstrap.mjs --scenario unmatched-gtc
-```
+- Do not promote testnet receipts into mainnet registry truth.
+- Do not treat Base success as a phase-1 blocker or phase-1 completion signal.
+- Do not treat PM CREATE2 success alone as full-product completion. AMM,
+  perps, and full-product verification must also pass.
 
-### 10. Signoff checkpoint
-- [ ] All testnet addresses match
-- [ ] Bootstrap smoke passes on all testnets
-- [ ] Parity tests pass in CI
-- [ ] Governance roles confirmed on-chain via block explorer
+## Mainnet Sequence
 
----
+### BSC mainnet
 
-## Mainnet Deploy
-
-### 11. Deploy to BSC Mainnet
 ```bash
 npx hardhat run scripts/deploy-create2.ts --network bsc
+npx hardhat run scripts/deploy-amm.ts --network bsc
+npx hardhat run scripts/deploy-perps.ts --network bsc
+node --import tsx scripts/verify-deployment.ts --network bsc
 ```
 
-### 12. Deploy to Base Mainnet
-```bash
-npx hardhat run scripts/deploy-create2.ts --network base
-```
+### AVAX mainnet
 
-### 13. Deploy to AVAX Mainnet
 ```bash
 npx hardhat run scripts/deploy-create2.ts --network avax
+npx hardhat run scripts/deploy-amm.ts --network avax
+npx hardhat run scripts/deploy-perps.ts --network avax
+node --import tsx scripts/verify-deployment.ts --network avax
 ```
 
-### 14. Verify mainnet address parity
-Same diff checks as testnet step 8.
+### Optional Base mainnet after phase-1
 
-### 15. Update chain registry
-Verify the deployment receipts match and update `hyperbet-chain-registry` with v3 addresses.
-
-### 16. Block explorer verification
-For each chain, verify:
-- [ ] Contract source matches committed Solidity
-- [ ] Constructor args decode correctly
-- [ ] Roles assigned as expected
-- [ ] `duelOracle` on GoldClob points to correct oracle
-
-### 17. Staged live proof
 ```bash
-gh workflow run staged-live-proof.yml -f target=all -f mode=read-only
-# After review:
-gh workflow run staged-live-proof.yml -f target=all -f mode=canary-write
+npx hardhat run scripts/deploy-create2.ts --network base
+npx hardhat run scripts/deploy-amm.ts --network base
+npx hardhat run scripts/deploy-perps.ts --network base
+node --import tsx scripts/verify-deployment.ts --network base
 ```
 
----
+## Registry And Evidence
 
-## Post-deploy
+After final mainnet verification succeeds:
 
-### 18. Archive old addresses
-Update `docs/release/deprecated-v2-addresses.md` with deprecation date.
-
-### 19. Update downstream consumers
-- Chain registry ✅ (step 15)
-- Keeper configs
-- UI contract references
-- Block explorer links in docs
-
----
-
-## Adding a New Chain (Post-Refactor)
-
-After the data-driven refactor, extending to a new EVM chain requires:
-
-1. Add network block to `hardhat.config.ts` (6 lines)
-2. Add deployment entry to chain registry `EVM_DEPLOYMENTS` (25 lines)
-3. Run `npx hardhat run scripts/deploy-create2.ts --network newChain`
-
-**Addresses will be identical** — CREATE2 guarantees same address from same args.
+1. Update `packages/hyperbet-chain-registry/src/index.ts` from final receipts
+   only.
+2. Archive deployment receipts and verify outputs.
+3. Capture staged proof and soak evidence against the promoted environment.
+4. Record governance transfer and freeze transaction hashes.

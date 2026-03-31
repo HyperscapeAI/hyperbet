@@ -167,5 +167,5 @@ echo "[e2e] running canonical EVM smoke tests"
   cd "$APP_DIR"
   E2E_BASE_URL="http://127.0.0.1:$APP_PORT" \
   E2E_GAME_API_URL="$GAME_API_URL" \
-    bunx playwright test --config "tests/e2e/playwright.config.ts" "tests/e2e/debug-page.spec.ts" "$@"
+    bunx playwright test --config "tests/e2e/playwright.config.ts" "tests/e2e/debug-page.e2e.ts" "$@"
 )

@@ -1,3 +1,4 @@
+import "./setup";
 import { describe, expect, it } from "bun:test";
 
 import {
@@ -17,6 +18,7 @@ describe("evmPrivateKey helpers", () => {
   it("selects the first configured private key from VITE env", () => {
     expect(
       selectConfiguredEvmPrivateKey({
+        MODE: "test",
         VITE_EVM_PRIVATE_KEY:
           "ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
       }),
@@ -25,6 +27,7 @@ describe("evmPrivateKey helpers", () => {
     );
     expect(
       selectConfiguredEvmPrivateKey({
+        MODE: "test",
         VITE_HEADLESS_EVM_PRIVATE_KEY:
           "ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
       }),

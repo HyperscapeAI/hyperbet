@@ -11,7 +11,42 @@ if [[ -n "$COMMON_GIT_DIR" && -d "$COMMON_GIT_DIR" ]]; then
 else
   WORKSPACE_ROOT="$(cd "$ROOT/.." && pwd)"
 fi
-HYPERSCAPES_ROOT="${HYPERSCAPES_ROOT:-$WORKSPACE_ROOT/.worktrees/hyperscapes-stream-bet-sync}"
+
+resolve_hyperscapes_root() {
+  local -a candidates=()
+  if [[ -n "${E2E_HYPERSCAPES_ROOT:-}" ]]; then
+    candidates+=("${E2E_HYPERSCAPES_ROOT}")
+  fi
+  if [[ -n "${HYPERSCAPES_ROOT:-}" ]]; then
+    candidates+=("${HYPERSCAPES_ROOT}")
+  fi
+  candidates+=(
+    "$WORKSPACE_ROOT/.worktrees/hyperscapes-main-latest-e2e"
+    "$WORKSPACE_ROOT/.worktrees/hyperscapes-main-acceptance"
+    "$WORKSPACE_ROOT/.worktrees/hyperscapes-main-sync"
+    "$WORKSPACE_ROOT/.worktrees/hyperscapes-stream-bet-sync"
+    "$WORKSPACE_ROOT/hyperscapes-stream-bet-sync"
+    "$WORKSPACE_ROOT/hyperscapes-mono"
+    "$ROOT/../.worktrees/hyperscapes-main-latest-e2e"
+    "$ROOT/../.worktrees/hyperscapes-main-acceptance"
+    "$ROOT/../.worktrees/hyperscapes-main-sync"
+    "$ROOT/../.worktrees/hyperscapes-stream-bet-sync"
+    "$ROOT/../hyperscapes-stream-bet-sync"
+    "$ROOT/../hyperscapes-mono"
+  )
+
+  local candidate=""
+  for candidate in "${candidates[@]}"; do
+    if [[ -n "$candidate" && -d "$candidate" ]]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+HYPERSCAPES_ROOT="${HYPERSCAPES_ROOT:-$(resolve_hyperscapes_root 2>/dev/null || true)}"
 PM_LOCAL_EVM_MODE="${PM_LOCAL_EVM_MODE:-anvil}"
 ANVIL_BIN="${ANVIL_BIN:-$(command -v anvil 2>/dev/null || true)}"
 if [[ -z "$ANVIL_BIN" && -x "/opt/homebrew/bin/anvil" ]]; then
@@ -30,7 +65,84 @@ if [[ -z "$BUN_BIN" ]]; then
   exit 1
 fi
 export PATH="$(dirname "$BUN_BIN"):$PATH"
-NODE_BIN="${NODE_BIN:-$(command -v node 2>/dev/null || true)}"
+
+resolve_node_bin() {
+  local candidate="${1:-}"
+  local path_candidate=""
+  local version=""
+  local major=""
+
+  if [[ -n "$candidate" && -x "$candidate" ]]; then
+    printf '%s\n' "$candidate"
+    return 0
+  fi
+
+  if [[ -n "${NVM_BIN:-}" && -x "${NVM_BIN}/node" ]]; then
+    printf '%s\n' "${NVM_BIN}/node"
+    return 0
+  fi
+
+  for path_candidate in "$HOME"/.nvm/versions/node/v22*/bin/node; do
+    if [[ -x "$path_candidate" ]]; then
+      printf '%s\n' "$path_candidate"
+      return 0
+    fi
+  done
+
+  if command -v node >/dev/null 2>&1; then
+    path_candidate="$(command -v node)"
+    version="$("$path_candidate" -p 'process.versions.node' 2>/dev/null || true)"
+    major="${version%%.*}"
+    if [[ "$major" == "22" ]]; then
+      printf '%s\n' "$path_candidate"
+      return 0
+    fi
+  fi
+
+  for path_candidate in /usr/local/bin/node /opt/homebrew/bin/node; do
+    if [[ ! -x "$path_candidate" ]]; then
+      continue
+    fi
+    version="$("$path_candidate" -p 'process.versions.node' 2>/dev/null || true)"
+    major="${version%%.*}"
+    if [[ "$major" == "22" ]]; then
+      printf '%s\n' "$path_candidate"
+      return 0
+    fi
+  done
+
+  if [[ -n "$path_candidate" && -x "$path_candidate" ]]; then
+    printf '%s\n' "$path_candidate"
+    return 0
+  fi
+
+  if [[ -x "/usr/local/bin/node" ]]; then
+    printf '%s\n' "/usr/local/bin/node"
+    return 0
+  fi
+  if [[ -x "/opt/homebrew/bin/node" ]]; then
+    printf '%s\n' "/opt/homebrew/bin/node"
+    return 0
+  fi
+  return 1
+}
+
+require_node_major() {
+  local bin="$1"
+  local label="$2"
+  local expected_major="$3"
+  local version=""
+  local major=""
+
+  version="$("$bin" -p 'process.versions.node' 2>/dev/null || true)"
+  major="${version%%.*}"
+  if [[ -z "$version" || "$major" != "$expected_major" ]]; then
+    echo "[pm-local] ${label} must use Node ${expected_major}.x for local Hyperscapes validation (got ${version:-unknown} via ${bin})" >&2
+    exit 1
+  fi
+}
+
+NODE_BIN="${NODE_BIN:-$(resolve_node_bin "" 2>/dev/null || true)}"
 if [[ -z "$NODE_BIN" && -x "/usr/local/bin/node" ]]; then
   NODE_BIN="/usr/local/bin/node"
 fi
@@ -41,19 +153,60 @@ if [[ -z "$NODE_BIN" ]]; then
   echo "[pm-local] node binary not found; set NODE_BIN or install node" >&2
   exit 1
 fi
-DUEL_CLIENT_NODE_BIN="${DUEL_CLIENT_NODE_BIN:-$(command -v node 2>/dev/null || true)}"
-if [[ -z "$DUEL_CLIENT_NODE_BIN" && -x "/opt/homebrew/bin/node" ]]; then
-  DUEL_CLIENT_NODE_BIN="/opt/homebrew/bin/node"
-fi
+export PATH="$(dirname "$NODE_BIN"):$PATH"
+require_node_major "$NODE_BIN" "NODE_BIN" "22"
+DUEL_CLIENT_NODE_BIN="${DUEL_CLIENT_NODE_BIN:-$NODE_BIN}"
 if [[ -z "$DUEL_CLIENT_NODE_BIN" ]]; then
   echo "[pm-local] duel client node binary not found; set DUEL_CLIENT_NODE_BIN or install node" >&2
   exit 1
 fi
+require_node_major "$DUEL_CLIENT_NODE_BIN" "DUEL_CLIENT_NODE_BIN" "22"
 
 if [[ ! -d "$HYPERSCAPES_ROOT" ]]; then
-  echo "[pm-local] hyperscapes repo not found at $HYPERSCAPES_ROOT" >&2
+  echo "[pm-local] hyperscapes repo not found; set HYPERSCAPES_ROOT to the local hyperscapes-stream-bet-sync checkout" >&2
   exit 1
 fi
+
+ensure_hyperscapes_physx_dist() {
+  local physx_pkg_dir="$HYPERSCAPES_ROOT/packages/physx-js-webidl"
+  local dist_dir="$physx_pkg_dir/dist"
+  local js_path="$dist_dir/physx-js-webidl.js"
+  local wasm_path="$dist_dir/physx-js-webidl.wasm"
+  local dts_path="$dist_dir/physx-js-webidl.d.ts"
+  local type_source="$physx_pkg_dir/types/physx-js-webidl.d.ts"
+  local source_dir=""
+  local candidate=""
+  local -a candidates=(
+    "$HYPERSCAPES_ROOT/packages/client/public/web"
+    "$HYPERSCAPES_ROOT/packages/server/public/web"
+    "$HYPERSCAPES_ROOT/packages/client/public"
+    "$HYPERSCAPES_ROOT/packages/server/public"
+  )
+
+  if [[ -f "$js_path" && -f "$wasm_path" ]]; then
+    return 0
+  fi
+
+  for candidate in "${candidates[@]}"; do
+    if [[ -f "$candidate/physx-js-webidl.js" && -f "$candidate/physx-js-webidl.wasm" ]]; then
+      source_dir="$candidate"
+      break
+    fi
+  done
+
+  if [[ -z "$source_dir" ]]; then
+    echo "[pm-local] unable to bootstrap PhysX dist; no checked-in PhysX assets found in $HYPERSCAPES_ROOT" >&2
+    return 1
+  fi
+
+  mkdir -p "$dist_dir"
+  cp "$source_dir/physx-js-webidl.js" "$js_path"
+  cp "$source_dir/physx-js-webidl.wasm" "$wasm_path"
+  if [[ -f "$type_source" ]]; then
+    cp "$type_source" "$dts_path"
+  fi
+  echo "[pm-local] bootstrapped Hyperscapes PhysX dist from $source_dir"
+}
 
 ENV_FILES=(
   "$ROOT/.env.stage-a.testnet.local"
@@ -105,13 +258,58 @@ for env_file in "${ENV_FILES[@]}"; do
 done
 
 GAME_HTTP_URL="${GAME_HTTP_URL:-http://127.0.0.1:5555}"
-GAME_WS_URL="${GAME_WS_URL:-ws://127.0.0.1:5555/ws}"
+GAME_WS_URL="${GAME_WS_URL:-ws://127.0.0.1:5556/ws}"
 GAME_CLIENT_URL="${GAME_CLIENT_URL:-http://127.0.0.1:3333}"
 GAME_PORT="${GAME_PORT:-5555}"
 GAME_CLIENT_PORT="${GAME_CLIENT_PORT:-3333}"
 KEEPER_PORT="${KEEPER_PORT:-8080}"
 APP_PORT="${APP_PORT:-4179}"
+
+resolve_hyperscapes_assets_root() {
+  local -a candidates=()
+  if [[ -n "${HYPERSCAPES_ASSETS_SOURCE_ROOT:-}" ]]; then
+    candidates+=("${HYPERSCAPES_ASSETS_SOURCE_ROOT}")
+  fi
+  candidates+=(
+    "$WORKSPACE_ROOT/hyperscapes-mono/packages/server/world/assets"
+    "$ROOT/../hyperscapes-mono/packages/server/world/assets"
+    "$WORKSPACE_ROOT/.worktrees/hyperscapes-stream-bet-sync/packages/server/world/assets"
+    "$ROOT/../.worktrees/hyperscapes-stream-bet-sync/packages/server/world/assets"
+  )
+
+  local candidate=""
+  for candidate in "${candidates[@]}"; do
+    if [[ -z "$candidate" || "$candidate" == "$HYPERSCAPES_ROOT/packages/server/world/assets" ]]; then
+      continue
+    fi
+    if [[ -f "$candidate/avatars/avatar-male-01.vrm" && -f "$candidate/manifests/npcs.json" ]]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+ensure_hyperscapes_local_assets() {
+  local source_root=""
+
+  if [[ -f "$HYPERSCAPES_ASSETS_ROOT/avatars/avatar-male-01.vrm" && -f "$HYPERSCAPES_ASSETS_ROOT/manifests/npcs.json" ]]; then
+    return 0
+  fi
+
+  source_root="$(resolve_hyperscapes_assets_root 2>/dev/null || true)"
+  if [[ -z "$source_root" ]]; then
+    return 0
+  fi
+
+  mkdir -p "$HYPERSCAPES_ASSETS_ROOT"
+  rsync -a --ignore-existing "$source_root/" "$HYPERSCAPES_ASSETS_ROOT/"
+  echo "[pm-local] seeded Hyperscapes local assets from $source_root"
+}
+
 HYPERSCAPES_ASSETS_ROOT="${HYPERSCAPES_ASSETS_ROOT:-$HYPERSCAPES_ROOT/packages/server/world/assets}"
+ensure_hyperscapes_local_assets
 DEFAULT_HYPERSCAPES_PUBLIC_CDN_URL="${GAME_HTTP_URL}/game-assets"
 if [[ ! -f "$HYPERSCAPES_ASSETS_ROOT/avatars/avatar-male-01.vrm" ]]; then
   DEFAULT_HYPERSCAPES_PUBLIC_CDN_URL="https://assets.hyperscape.club"
@@ -128,23 +326,102 @@ EVM_KEEPER_CHAINS="${EVM_KEEPER_CHAINS:-bsc,avax}"
 HYPERSCAPES_SKIP_CHAIN_SETUP="${HYPERSCAPES_SKIP_CHAIN_SETUP:-true}"
 HYPERSCAPES_DUEL_NODE_ENV="${HYPERSCAPES_DUEL_NODE_ENV:-development}"
 HYPERSCAPES_USE_PRODUCTION_CLIENT="${HYPERSCAPES_USE_PRODUCTION_CLIENT:-true}"
+HYPERSCAPES_REUSE_EXISTING_CLIENT="${HYPERSCAPES_REUSE_EXISTING_CLIENT:-false}"
+HYPERSCAPES_DUEL_FRESH="${HYPERSCAPES_DUEL_FRESH:-false}"
+if [[ -n "${STREAMING_ANNOUNCEMENT_MS:-}" ]]; then
+  STREAMING_ANNOUNCEMENT_MS="$STREAMING_ANNOUNCEMENT_MS"
+elif [[ "$HYPERSCAPES_DUEL_FRESH" == "true" ]]; then
+  STREAMING_ANNOUNCEMENT_MS="420000"
+else
+  STREAMING_ANNOUNCEMENT_MS="180000"
+fi
+STREAMING_FIGHTING_MS="${STREAMING_FIGHTING_MS:-60000}"
+STREAMING_END_WARNING_MS="${STREAMING_END_WARNING_MS:-5000}"
+STREAMING_RESOLUTION_MS="${STREAMING_RESOLUTION_MS:-5000}"
+STREAMING_COUNTDOWN_TICKS="${STREAMING_COUNTDOWN_TICKS:-3}"
 DUEL_ALLOW_FRAME_EMBED="${DUEL_ALLOW_FRAME_EMBED:-true}"
 HYPERSCAPES_JWT_SECRET="${HYPERSCAPES_JWT_SECRET:-local-dev-secret}"
+HYPERSCAPES_LOCAL_POSTGRES_USER="${HYPERSCAPES_LOCAL_POSTGRES_USER:-${LOCAL_POSTGRES_USER:-${USER:-postgres}}}"
+HYPERSCAPES_LOCAL_POSTGRES_PORT="${HYPERSCAPES_LOCAL_POSTGRES_PORT:-${LOCAL_POSTGRES_PORT:-5432}}"
+HYPERSCAPES_LOCAL_POSTGRES_DB="${HYPERSCAPES_LOCAL_POSTGRES_DB:-${POSTGRES_DB:-hyperscape}}"
+HYPERSCAPES_DUEL_DATABASE_URL="${HYPERSCAPES_DUEL_DATABASE_URL:-postgresql://${HYPERSCAPES_LOCAL_POSTGRES_USER}@127.0.0.1:${HYPERSCAPES_LOCAL_POSTGRES_PORT}/${HYPERSCAPES_LOCAL_POSTGRES_DB}}"
 STREAMING_VIEWER_ACCESS_TOKEN="${STREAMING_VIEWER_ACCESS_TOKEN:-pm-local-stream-viewer-token}"
 BETTING_FEED_ACCESS_TOKEN="${BETTING_FEED_ACCESS_TOKEN:-$STREAMING_VIEWER_ACCESS_TOKEN}"
+LOCAL_STREAM_PUBLISH_KEY="${LOCAL_STREAM_PUBLISH_KEY:-${STREAM_PUBLISH_KEY:-${ARENA_EXTERNAL_BET_WRITE_KEY:-hyperbet-e2e-local-write-key}}}"
 KEEPER_URL="http://127.0.0.1:${KEEPER_PORT}"
 LOCAL_EVM_UI_KEY_FILE="${LOCAL_EVM_UI_KEY_FILE:-$ROOT/keys/local-smoke/evm-ui.privatekey}"
 DEFAULT_STREAM_URL="${GAME_CLIENT_URL}/stream.html?disableBridgeCapture=1&streamToken=${STREAMING_VIEWER_ACCESS_TOKEN}"
 STREAM_URL="${VITE_STREAM_URL:-${DEFAULT_STREAM_URL}}"
 HYPERSCAPES_UI_URL="${HYPERSCAPES_UI_URL:-${DEFAULT_STREAM_URL}}"
-HYPERBET_UI_URL="${HYPERBET_UI_URL:-http://127.0.0.1:${APP_PORT}/?debug}"
-OPEN_LOCAL_UI="${OPEN_LOCAL_UI:-true}"
-CAPTURE_LOCAL_UI_FLOW="${CAPTURE_LOCAL_UI_FLOW:-true}"
+HYPERBET_UI_DEBUG="${HYPERBET_UI_DEBUG:-false}"
+DEFAULT_HYPERBET_UI_URL="http://127.0.0.1:${APP_PORT}/"
+if [[ "$HYPERBET_UI_DEBUG" == "true" ]]; then
+  DEFAULT_HYPERBET_UI_URL="${DEFAULT_HYPERBET_UI_URL}?debug=1"
+fi
+HYPERBET_UI_URL="${HYPERBET_UI_URL:-${DEFAULT_HYPERBET_UI_URL}}"
+OPEN_LOCAL_UI="${OPEN_LOCAL_UI:-false}"
+CAPTURE_LOCAL_UI_FLOW="${CAPTURE_LOCAL_UI_FLOW:-false}"
+PM_E2E_MONITOR="${PM_E2E_MONITOR:-$CAPTURE_LOCAL_UI_FLOW}"
+PM_E2E_FULL_SOAK="${PM_E2E_FULL_SOAK:-false}"
+PM_SOAK_LOCAL_DURATION_MIN="${PM_SOAK_LOCAL_DURATION_MIN:-25}"
+PM_SOAK_POLL_MS="${PM_SOAK_POLL_MS:-5000}"
+PM_E2E_HARNESS_DURATION_MIN="${PM_E2E_HARNESS_DURATION_MIN:-$PM_SOAK_LOCAL_DURATION_MIN}"
+PM_E2E_HARNESS_GAME_URL="${PM_E2E_HARNESS_GAME_URL:-${GAME_HTTP_URL}}"
+PM_E2E_HARNESS_BSC_RPC_URL="${PM_E2E_HARNESS_BSC_RPC_URL:-${LOCAL_BSC_RPC_URL:-http://127.0.0.1:${LOCAL_BSC_ANVIL_PORT:-18545}}}"
+
+normalize_bool_env() {
+  case "${1:-}" in
+    1|true|TRUE|yes|YES|on|ON) echo "true" ;;
+    0|false|FALSE|no|NO|off|OFF) echo "false" ;;
+    *) echo "$2" ;;
+  esac
+}
+
+PW_HEADLESS="${PW_HEADLESS:-1}"
+PW_WEBGPU_ARGS="${PW_WEBGPU_ARGS:---enable-unsafe-webgpu}"
+PW_BROWSER_CHANNEL="${PW_BROWSER_CHANNEL:-}"
+if [[ "$(uname -s)" == "Darwin" && -z "$PW_BROWSER_CHANNEL" ]]; then
+  PW_BROWSER_CHANNEL="chrome"
+fi
+PW_HEADLESS="$(normalize_bool_env "$PW_HEADLESS" "true")"
+PM_SOAK_HEADLESS="${PM_SOAK_HEADLESS:-$PW_HEADLESS}"
+PM_SOAK_BROWSER_CHANNEL="${PM_SOAK_BROWSER_CHANNEL:-$PW_BROWSER_CHANNEL}"
+PM_SOAK_WEBGPU_ARGS="${PM_SOAK_WEBGPU_ARGS:-$PW_WEBGPU_ARGS}"
+PM_SOAK_SCREENSHOT_WIDTH="${PM_SOAK_SCREENSHOT_WIDTH:-1280}"
+PM_SOAK_SCREENSHOT_HEIGHT="${PM_SOAK_SCREENSHOT_HEIGHT:-720}"
+STREAM_CAPTURE_HEADLESS="${STREAM_CAPTURE_HEADLESS:-$PW_HEADLESS}"
+STREAM_CAPTURE_CHANNEL="${STREAM_CAPTURE_CHANNEL:-}"
+STREAM_CAPTURE_WIDTH="${STREAM_CAPTURE_WIDTH:-$PM_SOAK_SCREENSHOT_WIDTH}"
+STREAM_CAPTURE_HEIGHT="${STREAM_CAPTURE_HEIGHT:-$PM_SOAK_SCREENSHOT_HEIGHT}"
+PM_SOAK_HEADLESS="$(normalize_bool_env "$PM_SOAK_HEADLESS" "$PW_HEADLESS")"
+STREAM_CAPTURE_HEADLESS="$(normalize_bool_env "$STREAM_CAPTURE_HEADLESS" "$PW_HEADLESS")"
+if [[ -z "$STREAM_CAPTURE_CHANNEL" ]]; then
+  if [[ "$(uname -s)" == "Darwin" && "$STREAM_CAPTURE_HEADLESS" == "true" ]]; then
+    STREAM_CAPTURE_CHANNEL="chromium"
+  else
+    STREAM_CAPTURE_CHANNEL="$PW_BROWSER_CHANNEL"
+  fi
+fi
+export PW_HEADLESS
+export PW_WEBGPU_ARGS
+export PW_BROWSER_CHANNEL
+export PM_SOAK_HEADLESS
+export PM_SOAK_BROWSER_CHANNEL
+export PM_SOAK_WEBGPU_ARGS
+export PM_SOAK_SCREENSHOT_WIDTH
+export PM_SOAK_SCREENSHOT_HEIGHT
+export STREAM_CAPTURE_HEADLESS
+export STREAM_CAPTURE_CHANNEL
+export STREAM_CAPTURE_WIDTH
+export STREAM_CAPTURE_HEIGHT
 LOCAL_CORS_ORIGINS="${CORS_ORIGINS:-http://127.0.0.1:3333,http://localhost:3333,http://127.0.0.1:4179,http://localhost:4179}"
 WRITER_KEYS_READY="false"
 KEEPER_BOT_DEFAULT="true"
 EVM_KEEPER_DEFER_FINALIZE="${EVM_KEEPER_DEFER_FINALIZE:-true}"
 RESEED_LOCAL_EVM_ON_DUEL_CHANGE="${RESEED_LOCAL_EVM_ON_DUEL_CHANGE:-true}"
+if [[ "$PM_E2E_FULL_SOAK" == "true" ]] && ! env_name_was_preset "RESEED_LOCAL_EVM_ON_DUEL_CHANGE"; then
+  RESEED_LOCAL_EVM_ON_DUEL_CHANGE="false"
+fi
 LOCAL_STREAM_DUEL_KEY_HEX=""
 LOCAL_STREAM_DUEL_ID=""
 LOCAL_STREAM_PHASE=""
@@ -167,6 +444,15 @@ LOCAL_AVAX_SETUP_SCRIPT="$ROOT/packages/hyperbet-avax/app/tests/e2e/setup-evm-lo
 LOCAL_BSC_ENV_PATH="$ROOT/packages/hyperbet-bsc/app/.env.e2e"
 LOCAL_AVAX_ENV_PATH="$ROOT/packages/hyperbet-avax/app/.env.e2e"
 LOCAL_EVM_BUILD_LOG="/tmp/hyperbet-pm-local-evm-build.log"
+ACCEPTANCE_SERVICE_DIR="${ACCEPTANCE_SERVICE_DIR:-$ROOT/.ci-artifacts/stage-a/acceptance-services}"
+HYPERSCAPES_DUEL_PID_FILE="$ACCEPTANCE_SERVICE_DIR/hyperscapes.pid"
+HYPERSCAPES_DUEL_LOG_FILE="$ACCEPTANCE_SERVICE_DIR/hyperscapes.log"
+HYPERSCAPES_DUEL_ENV_FILE="$ACCEPTANCE_SERVICE_DIR/hyperscapes.env"
+HYPERSCAPES_CLIENT_PID_FILE="$ACCEPTANCE_SERVICE_DIR/hyperscapes-client.pid"
+HYPERSCAPES_CLIENT_LOG_FILE="$ACCEPTANCE_SERVICE_DIR/hyperscapes-client.log"
+HYPERSCAPES_CLIENT_ENV_FILE="$ACCEPTANCE_SERVICE_DIR/hyperscapes-client.env"
+
+mkdir -p "$ACCEPTANCE_SERVICE_DIR"
 
 DUEL_PID=""
 LOCAL_BSC_ANVIL_PID=""
@@ -174,7 +460,11 @@ LOCAL_AVAX_ANVIL_PID=""
 KEEPER_PID=""
 APP_PID=""
 CAPTURE_PID=""
+HYPERSCAPES_CLIENT_PID=""
 EVM_SEED_FOLLOW_PID=""
+PM_E2E_HARNESS_PID=""
+CAPTURE_EXIT_CODE=""
+PM_E2E_HARNESS_EXIT_CODE=""
 
 cleanup() {
   local exit_code=$?
@@ -190,6 +480,12 @@ cleanup() {
     wait "$APP_PID" >/dev/null 2>&1 || true
   fi
 
+  if [[ -n "$HYPERSCAPES_CLIENT_PID" ]] && kill -0 "$HYPERSCAPES_CLIENT_PID" >/dev/null 2>&1; then
+    kill "$HYPERSCAPES_CLIENT_PID" >/dev/null 2>&1 || true
+    wait "$HYPERSCAPES_CLIENT_PID" >/dev/null 2>&1 || true
+  fi
+  rm -f "$HYPERSCAPES_CLIENT_PID_FILE"
+
   if [[ -n "$KEEPER_PID" ]] && kill -0 "$KEEPER_PID" >/dev/null 2>&1; then
     kill "$KEEPER_PID" >/dev/null 2>&1 || true
     wait "$KEEPER_PID" >/dev/null 2>&1 || true
@@ -199,6 +495,7 @@ cleanup() {
     kill "$DUEL_PID" >/dev/null 2>&1 || true
     wait "$DUEL_PID" >/dev/null 2>&1 || true
   fi
+  rm -f "$HYPERSCAPES_DUEL_PID_FILE"
 
   if [[ -n "$LOCAL_AVAX_ANVIL_PID" ]] && kill -0 "$LOCAL_AVAX_ANVIL_PID" >/dev/null 2>&1; then
     kill "$LOCAL_AVAX_ANVIL_PID" >/dev/null 2>&1 || true
@@ -213,6 +510,11 @@ cleanup() {
   if [[ -n "$EVM_SEED_FOLLOW_PID" ]] && kill -0 "$EVM_SEED_FOLLOW_PID" >/dev/null 2>&1; then
     kill "$EVM_SEED_FOLLOW_PID" >/dev/null 2>&1 || true
     wait "$EVM_SEED_FOLLOW_PID" >/dev/null 2>&1 || true
+  fi
+
+  if [[ -n "$PM_E2E_HARNESS_PID" ]] && kill -0 "$PM_E2E_HARNESS_PID" >/dev/null 2>&1; then
+    kill "$PM_E2E_HARNESS_PID" >/dev/null 2>&1 || true
+    wait "$PM_E2E_HARNESS_PID" >/dev/null 2>&1 || true
   fi
 
   exit "$exit_code"
@@ -299,6 +601,64 @@ json_field() {
   "$NODE_BIN" -e 'const fs=require("fs"); const file=process.argv[1]; const key=process.argv[2]; const data=JSON.parse(fs.readFileSync(file,"utf8")); process.stdout.write(String(data[key] ?? ""));' "$path" "$field"
 }
 
+write_shell_env_file() {
+  local output_path="$1"
+  shift
+  : >"$output_path"
+  while (($#)); do
+    local key="$1"
+    local value="$2"
+    shift 2
+    printf '%s=%q\n' "$key" "$value" >>"$output_path"
+  done
+}
+
+write_hyperscapes_service_envs() {
+  write_shell_env_file \
+    "$HYPERSCAPES_DUEL_ENV_FILE" \
+    HYPERSCAPES_ROOT "$HYPERSCAPES_ROOT" \
+    BUN_BIN "$BUN_BIN" \
+    NODE_BIN "$NODE_BIN" \
+    DUEL_CLIENT_NODE_BIN "$DUEL_CLIENT_NODE_BIN" \
+    GAME_HTTP_URL "$GAME_HTTP_URL" \
+    GAME_WS_URL "$GAME_WS_URL" \
+    GAME_CLIENT_URL "$GAME_CLIENT_URL" \
+    GAME_PORT "$GAME_PORT" \
+    DUEL_BOTS "$DUEL_BOTS" \
+    HYPERSCAPES_SKIP_CHAIN_SETUP "$HYPERSCAPES_SKIP_CHAIN_SETUP" \
+    HYPERSCAPES_DUEL_NODE_ENV "$HYPERSCAPES_DUEL_NODE_ENV" \
+    HYPERSCAPES_USE_PRODUCTION_CLIENT "$HYPERSCAPES_USE_PRODUCTION_CLIENT" \
+    HYPERSCAPES_REUSE_EXISTING_CLIENT "$HYPERSCAPES_REUSE_EXISTING_CLIENT" \
+    HYPERSCAPES_DUEL_FRESH "$HYPERSCAPES_DUEL_FRESH" \
+    HYPERSCAPES_DUEL_DATABASE_URL "$HYPERSCAPES_DUEL_DATABASE_URL" \
+    DUEL_ALLOW_FRAME_EMBED "$DUEL_ALLOW_FRAME_EMBED" \
+    HYPERSCAPES_JWT_SECRET "$HYPERSCAPES_JWT_SECRET" \
+    HYPERSCAPES_PUBLIC_CDN_URL "$HYPERSCAPES_PUBLIC_CDN_URL" \
+    STREAMING_ANNOUNCEMENT_MS "$STREAMING_ANNOUNCEMENT_MS" \
+    STREAMING_FIGHTING_MS "$STREAMING_FIGHTING_MS" \
+    STREAMING_END_WARNING_MS "$STREAMING_END_WARNING_MS" \
+    STREAMING_RESOLUTION_MS "$STREAMING_RESOLUTION_MS" \
+    STREAMING_COUNTDOWN_TICKS "$STREAMING_COUNTDOWN_TICKS" \
+    STREAMING_VIEWER_ACCESS_TOKEN "$STREAMING_VIEWER_ACCESS_TOKEN" \
+    BETTING_FEED_ACCESS_TOKEN "$BETTING_FEED_ACCESS_TOKEN" \
+    STREAM_CAPTURE_HEADLESS "$STREAM_CAPTURE_HEADLESS" \
+    STREAM_CAPTURE_CHANNEL "$STREAM_CAPTURE_CHANNEL" \
+    STREAM_CAPTURE_WIDTH "$STREAM_CAPTURE_WIDTH" \
+    STREAM_CAPTURE_HEIGHT "$STREAM_CAPTURE_HEIGHT"
+
+  write_shell_env_file \
+    "$HYPERSCAPES_CLIENT_ENV_FILE" \
+    HYPERSCAPES_ROOT "$HYPERSCAPES_ROOT" \
+    GAME_HTTP_URL "$GAME_HTTP_URL" \
+    GAME_WS_URL "$GAME_WS_URL" \
+    HYPERSCAPES_PUBLIC_CDN_URL "$HYPERSCAPES_PUBLIC_CDN_URL" \
+    GAME_CLIENT_PORT "$GAME_CLIENT_PORT" \
+    NODE_BIN "$NODE_BIN" \
+    DUEL_CLIENT_NODE_BIN "$DUEL_CLIENT_NODE_BIN"
+}
+
+write_hyperscapes_service_envs
+
 seed_hyperscapes_agents() {
   local agents_url="${GAME_HTTP_URL}/api/embedded-agents"
   local desired_agents=(
@@ -372,15 +732,21 @@ start_local_evm_chain() {
   local anvil_pid=""
   local anvil_log="/tmp/hyperbet-pm-local-${chain_key}-anvil.log"
   local seed_log="/tmp/hyperbet-pm-local-${chain_key}-seed.log"
+  local code_size_limit="${LOCAL_EVM_ANVIL_CODE_SIZE_LIMIT:-49152}"
+  local anvil_args=(
+    --silent
+    --host 127.0.0.1
+    --port "$anvil_port"
+    --chain-id "$chain_id"
+  )
+
+  if [[ -n "$code_size_limit" ]]; then
+    anvil_args+=(--code-size-limit "$code_size_limit")
+  fi
 
   echo "[pm-local] starting local ${chain_key} anvil on ${rpc_url}"
   close_existing_anvil_listeners "$anvil_port"
-  "$ANVIL_BIN" \
-    --silent \
-    --host 127.0.0.1 \
-    --port "$anvil_port" \
-    --chain-id "$chain_id" \
-    >"$anvil_log" 2>&1 &
+  "$ANVIL_BIN" "${anvil_args[@]}" >"$anvil_log" 2>&1 &
   anvil_pid=$!
 
   if ! wait_for_json_rpc "$rpc_url" "${chain_key} anvil"; then
@@ -624,34 +990,110 @@ open_url() {
   fi
 }
 
-echo "[pm-local] starting Hyperscapes duel stack from $HYPERSCAPES_ROOT"
-close_existing_anvil_listeners "$GAME_CLIENT_PORT"
-(
-  cd "$HYPERSCAPES_ROOT"
-  duel_args=(
-    run
-    duel
-    --skip-betting
-    --skip-keeper
-    "--bots=${DUEL_BOTS}"
-  )
-  if [[ "$HYPERSCAPES_SKIP_CHAIN_SETUP" == "true" ]]; then
-    duel_args+=(--skip-chain-setup)
+write_hyperscapes_client_runtime_env() {
+  local client_dist="$1"
+
+  echo "[pm-local] writing Hyperscapes runtime env for local preview"
+  PUBLIC_API_URL="$GAME_HTTP_URL" \
+  PUBLIC_WS_URL="$GAME_WS_URL" \
+  PUBLIC_CDN_URL="$HYPERSCAPES_PUBLIC_CDN_URL" \
+  "$NODE_BIN" -e '
+    const fs = require("node:fs");
+    const path = require("node:path");
+    const distDir = process.argv[1];
+    fs.mkdirSync(distDir, { recursive: true });
+    const payload = {
+      PUBLIC_API_URL: process.env.PUBLIC_API_URL,
+      PUBLIC_WS_URL: process.env.PUBLIC_WS_URL,
+      PUBLIC_CDN_URL: process.env.PUBLIC_CDN_URL,
+    };
+    const serialized = JSON.stringify(payload, null, 2)
+      .replace(/</g, "\\u003c")
+      .replace(/\u2028/g, "\\u2028")
+      .replace(/\u2029/g, "\\u2029");
+    fs.writeFileSync(
+      path.join(distDir, "env.js"),
+      `// Generated by local PM runner\nwindow.env = ${serialized};\n`,
+      "utf8",
+    );
+  ' "$client_dist"
+}
+
+ensure_hyperscapes_client_build_deps() {
+  local impostor_build="$HYPERSCAPES_ROOT/packages/impostors/dist/index.js"
+  local decimation_build="$HYPERSCAPES_ROOT/packages/decimation/dist/index.js"
+  local procgen_build="$HYPERSCAPES_ROOT/packages/procgen/dist/index.js"
+  local shared_build_dir="$HYPERSCAPES_ROOT/packages/shared/build"
+  local shared_client_build="$shared_build_dir/framework.client.js"
+  local shared_full_build="$shared_build_dir/framework.js"
+
+  if [[ "$HYPERSCAPES_DUEL_FRESH" != "true" \
+    && -f "$impostor_build" \
+    && -f "$decimation_build" \
+    && -f "$procgen_build" \
+    && -f "$shared_client_build" \
+    && -f "$shared_full_build" ]]; then
+    return 0
   fi
-  DUEL_WITH_HYPERBET=false \
-    PORT="$GAME_PORT" \
-    DUEL_NODE_ENV="$HYPERSCAPES_DUEL_NODE_ENV" \
-    DUEL_USE_PRODUCTION_CLIENT="$HYPERSCAPES_USE_PRODUCTION_CLIENT" \
-    DUEL_ALLOW_FRAME_EMBED="$DUEL_ALLOW_FRAME_EMBED" \
-    DUEL_SERVER_NODE_BIN="$NODE_BIN" \
-    DUEL_CLIENT_NODE_BIN="$DUEL_CLIENT_NODE_BIN" \
-    JWT_SECRET="$HYPERSCAPES_JWT_SECRET" \
-    PUBLIC_CDN_URL="$HYPERSCAPES_PUBLIC_CDN_URL" \
-    STREAMING_VIEWER_ACCESS_TOKEN="$STREAMING_VIEWER_ACCESS_TOKEN" \
-    BETTING_FEED_ACCESS_TOKEN="$BETTING_FEED_ACCESS_TOKEN" \
-    "$BUN_BIN" "${duel_args[@]}"
-) &
+
+  echo "[pm-local] building Hyperscapes client dependency artifacts"
+  (
+    cd "$HYPERSCAPES_ROOT"
+    "$BUN_BIN" run --cwd packages/impostors build
+    "$BUN_BIN" run --cwd packages/decimation build
+    "$BUN_BIN" run --cwd packages/procgen build
+    "$BUN_BIN" run --cwd packages/shared build
+  )
+}
+
+start_hyperscapes_client_preview() {
+  local client_dir="$HYPERSCAPES_ROOT/packages/client"
+  local client_dist="$client_dir/dist"
+
+  if curl -fsSL "$GAME_CLIENT_URL" >/dev/null 2>&1; then
+    echo "[pm-local] reusing existing Hyperscapes preview client at $GAME_CLIENT_URL"
+    write_hyperscapes_client_runtime_env "$client_dist"
+    return 0
+  fi
+
+  if [[ ! -f "$client_dist/stream.html" || "$HYPERSCAPES_DUEL_FRESH" == "true" ]]; then
+    ensure_hyperscapes_client_build_deps
+    echo "[pm-local] building Hyperscapes production client preview assets"
+    (
+      cd "$HYPERSCAPES_ROOT"
+      PUBLIC_API_URL="$GAME_HTTP_URL" \
+      PUBLIC_WS_URL="$GAME_WS_URL" \
+      PUBLIC_CDN_URL="$HYPERSCAPES_PUBLIC_CDN_URL" \
+      "$BUN_BIN" run --cwd packages/client build:cf
+    )
+  fi
+
+  write_hyperscapes_client_runtime_env "$client_dist"
+
+  echo "[pm-local] starting Hyperscapes preview client at $GAME_CLIENT_URL"
+  nohup bash -lc "set -a; source \"$HYPERSCAPES_CLIENT_ENV_FILE\"; set +a; exec \"$ROOT/scripts/start-hyperscapes-client-preview.sh\"" \
+    >>"$HYPERSCAPES_CLIENT_LOG_FILE" 2>&1 < /dev/null &
+  HYPERSCAPES_CLIENT_PID=$!
+  printf '%s\n' "$HYPERSCAPES_CLIENT_PID" >"$HYPERSCAPES_CLIENT_PID_FILE"
+
+  wait_for_http "$GAME_CLIENT_URL" "Hyperscapes game client preview"
+}
+
+echo "[pm-local] starting Hyperscapes duel stack from $HYPERSCAPES_ROOT"
+echo "[pm-local] using local Hyperscapes database: $HYPERSCAPES_DUEL_DATABASE_URL"
+if [[ "$HYPERSCAPES_REUSE_EXISTING_CLIENT" != "true" ]]; then
+  close_existing_anvil_listeners "$GAME_CLIENT_PORT"
+fi
+if [[ "$HYPERSCAPES_USE_PRODUCTION_CLIENT" == "true" ]]; then
+  start_hyperscapes_client_preview
+elif [[ "$HYPERSCAPES_REUSE_EXISTING_CLIENT" == "true" ]]; then
+  echo "[pm-local] reusing externally managed Hyperscapes client at $GAME_CLIENT_URL"
+fi
+ensure_hyperscapes_physx_dist
+nohup bash -lc "set -a; source \"$HYPERSCAPES_DUEL_ENV_FILE\"; set +a; exec \"$ROOT/scripts/start-hyperscapes-duel-service.sh\"" \
+  >>"$HYPERSCAPES_DUEL_LOG_FILE" 2>&1 < /dev/null &
 DUEL_PID=$!
+printf '%s\n' "$DUEL_PID" >"$HYPERSCAPES_DUEL_PID_FILE"
 
 wait_for_http "${GAME_HTTP_URL}/api/streaming/state" "Hyperscapes streaming state"
 seed_hyperscapes_agents
@@ -699,6 +1141,8 @@ close_existing_anvil_listeners "$KEEPER_PORT"
       EVM_KEEPER_CHAINS="$EVM_KEEPER_CHAINS"
       ENABLE_KEEPER_BOT="$ENABLE_KEEPER_BOT"
       ENABLE_STREAM_PUBLISH="true"
+      ARENA_EXTERNAL_BET_WRITE_KEY="$LOCAL_STREAM_PUBLISH_KEY"
+      STREAM_PUBLISH_KEY="$LOCAL_STREAM_PUBLISH_KEY"
     )
   if [[ -n "${BSC_RPC_URL:-}" ]]; then
     keeper_env+=(BSC_RPC_URL="$BSC_RPC_URL")
@@ -729,6 +1173,8 @@ close_existing_anvil_listeners "$APP_PORT"
 (
   cd "$ROOT"
   app_env=(
+    ACCEPTANCE_DUEL_SOURCE="real_hyperscapes"
+    E2E_DUEL_SOURCE="real_hyperscapes"
     VITE_GAME_API_URL="$KEEPER_URL"
     VITE_GAME_WS_URL="$GAME_WS_URL"
     VITE_WS_URL="$GAME_WS_URL"
@@ -764,32 +1210,80 @@ if [[ "$OPEN_LOCAL_UI" == "true" ]]; then
   open_url "$HYPERBET_UI_URL"
 fi
 
-if [[ "$CAPTURE_LOCAL_UI_FLOW" == "true" ]]; then
+if [[ "$PM_E2E_MONITOR" == "true" ]]; then
   echo "[pm-local] starting local PM follow monitor"
   (
     cd "$ROOT"
-      HYPERSCAPES_UI_URL="$HYPERSCAPES_UI_URL" \
-      HYPERBET_UI_URL="$HYPERBET_UI_URL" \
-      VITE_STREAM_URL="${VITE_STREAM_URL:-$HYPERSCAPES_UI_URL}" \
-      SOURCE_STREAM_STATE_URL="${SOURCE_STREAM_STATE_URL:-${GAME_HTTP_URL}/api/streaming/state}" \
-      SOURCE_BET_SYNC_STATE_URL="${SOURCE_BET_SYNC_STATE_URL:-${GAME_HTTP_URL}/api/internal/bet-sync/state}" \
-      SOURCE_BET_SYNC_BEARER_TOKEN="${SOURCE_BET_SYNC_BEARER_TOKEN:-$BETTING_FEED_ACCESS_TOKEN}" \
-      SOURCE_RTMP_STATUS_URL="${SOURCE_RTMP_STATUS_URL:-${GAME_HTTP_URL}/api/streaming/rtmp/status}" \
-      STREAM_STATE_URL="${STREAM_STATE_URL:-${KEEPER_URL}/api/streaming/state}" \
-      ACTIVE_MARKETS_URL="${KEEPER_URL}/api/arena/prediction-markets/active" \
-      OVERVIEW_MARKETS_URL="${OVERVIEW_MARKETS_URL:-${KEEPER_URL}/api/arena/prediction-markets/overview}" \
-      SYNC_STATUS_URL="${SYNC_STATUS_URL:-${KEEPER_URL}/api/sync/status}" \
-      PM_SOAK_RECONCILE_PUBLISH_URL="${PM_SOAK_RECONCILE_PUBLISH_URL:-${KEEPER_URL}/api/streaming/state/publish}" \
-      PM_SOAK_RECONCILE_PUBLISH_KEY="${PM_SOAK_RECONCILE_PUBLISH_KEY:-${STREAM_PUBLISH_KEY:-${ARENA_EXTERNAL_BET_WRITE_KEY:-${E2E_ARENA_WRITE_KEY:-}}}}" \
-      PM_SOAK_SCREENSHOTS="${PM_SOAK_SCREENSHOTS:-true}" \
-      BUN_BIN="$BUN_BIN" \
-      "$NODE_BIN" --import tsx scripts/pm-soak-monitor.ts --mode=local --follow --duration-min="${PM_SOAK_LOCAL_DURATION_MIN:-25}" --poll-ms="${PM_SOAK_POLL_MS:-5000}"
+      soak_args=(
+        --mode=local
+        --duration-min="${PM_SOAK_LOCAL_DURATION_MIN}"
+        --poll-ms="${PM_SOAK_POLL_MS}"
+      )
+      soak_env=(
+        HYPERSCAPES_UI_URL="$HYPERSCAPES_UI_URL"
+        HYPERBET_UI_URL="$HYPERBET_UI_URL"
+        ACCEPTANCE_DUEL_SOURCE="real_hyperscapes"
+        E2E_DUEL_SOURCE="real_hyperscapes"
+        VITE_STREAM_URL="${VITE_STREAM_URL:-$HYPERSCAPES_UI_URL}"
+        SOURCE_STREAM_STATE_URL="${SOURCE_STREAM_STATE_URL:-${GAME_HTTP_URL}/api/streaming/state}"
+        SOURCE_BET_SYNC_STATE_URL="${SOURCE_BET_SYNC_STATE_URL:-${GAME_HTTP_URL}/api/internal/bet-sync/state}"
+        SOURCE_BET_SYNC_BEARER_TOKEN="${SOURCE_BET_SYNC_BEARER_TOKEN:-$BETTING_FEED_ACCESS_TOKEN}"
+        SOURCE_RTMP_STATUS_URL="${SOURCE_RTMP_STATUS_URL:-${GAME_HTTP_URL}/api/streaming/rtmp/status}"
+        STREAM_STATE_URL="${STREAM_STATE_URL:-${KEEPER_URL}/api/streaming/state}"
+        ACTIVE_MARKETS_URL="${KEEPER_URL}/api/arena/prediction-markets/active"
+        OVERVIEW_MARKETS_URL="${OVERVIEW_MARKETS_URL:-${KEEPER_URL}/api/arena/prediction-markets/overview}"
+        SYNC_STATUS_URL="${SYNC_STATUS_URL:-${KEEPER_URL}/api/sync/status}"
+        PM_SOAK_SIGNOFF_MODE="${PM_SOAK_SIGNOFF_MODE:-false}"
+        PM_SOAK_SCREENSHOTS="${PM_SOAK_SCREENSHOTS:-true}"
+        PM_SOAK_HEADLESS="${PM_SOAK_HEADLESS}"
+        PM_SOAK_BROWSER_CHANNEL="${PM_SOAK_BROWSER_CHANNEL}"
+        PM_SOAK_WEBGPU_ARGS="${PM_SOAK_WEBGPU_ARGS}"
+        PM_SOAK_SCREENSHOT_WIDTH="${PM_SOAK_SCREENSHOT_WIDTH}"
+        PM_SOAK_SCREENSHOT_HEIGHT="${PM_SOAK_SCREENSHOT_HEIGHT}"
+        RUN_SCOPE="LOCALNET"
+        PERPS_MARKETS_URL="${KEEPER_URL}/api/perps/markets"
+        PERPS_ORACLE_HISTORY_URL="${KEEPER_URL}/api/perps/oracle-history"
+        BUN_BIN="$BUN_BIN"
+      )
+      if [[ "${PM_SOAK_SIGNOFF_MODE:-false}" != "true" ]]; then
+        soak_args+=(--follow)
+        soak_env+=(
+          PM_SOAK_RECONCILE_PUBLISH_URL="${PM_SOAK_RECONCILE_PUBLISH_URL:-${KEEPER_URL}/api/streaming/state/publish}"
+          PM_SOAK_RECONCILE_PUBLISH_KEY="${PM_SOAK_RECONCILE_PUBLISH_KEY:-$LOCAL_STREAM_PUBLISH_KEY}"
+        )
+      fi
+      env "${soak_env[@]}" \
+        "$NODE_BIN" --import tsx scripts/pm-soak-monitor.ts "${soak_args[@]}"
   ) &
   CAPTURE_PID=$!
 fi
 
+if [[ "$PM_E2E_FULL_SOAK" == "true" ]]; then
+  if [[ "$PM_LOCAL_EVM_MODE" != "anvil" ]]; then
+    echo "[pm-local] full e2e soak requested, but PM_LOCAL_EVM_MODE must be anvil" >&2
+    exit 1
+  fi
+
+  echo "[pm-local] starting local PM-AMM + perps harness soak"
+  (
+    cd "$ROOT"
+    SOURCE_BET_SYNC_STATE_URL="${SOURCE_BET_SYNC_STATE_URL:-${GAME_HTTP_URL}/api/internal/bet-sync/state}" \
+    SOURCE_BET_SYNC_BEARER_TOKEN="${SOURCE_BET_SYNC_BEARER_TOKEN:-$BETTING_FEED_ACCESS_TOKEN}" \
+    SYNC_STATUS_URL="${SYNC_STATUS_URL:-${KEEPER_URL}/api/sync/status}" \
+    STREAM_STATE_URL="${STREAM_STATE_URL:-${KEEPER_URL}/api/streaming/state}" \
+    ACCEPTANCE_DUEL_SOURCE="real_hyperscapes" \
+    E2E_DUEL_SOURCE="real_hyperscapes" \
+    "$BUN_BIN" run pm:soak:harness -- \
+      --duration-min="$PM_E2E_HARNESS_DURATION_MIN" \
+      --bsc-rpc="$PM_E2E_HARNESS_BSC_RPC_URL" \
+      --game-url="$PM_E2E_HARNESS_GAME_URL"
+  ) &
+  PM_E2E_HARNESS_PID=$!
+fi
+
 cat <<EOF
 [pm-local] integrated local stack is up
+  hyperscapes-root: ${HYPERSCAPES_ROOT}
   hyperscapes: ${GAME_HTTP_URL}
   keeper:      ${KEEPER_URL}
   app:         http://127.0.0.1:${APP_PORT}
@@ -800,6 +1294,7 @@ cat <<EOF
   write-keys:  ${WRITER_KEYS_READY}
   evm-defer-finalize: ${EVM_KEEPER_DEFER_FINALIZE}
   evm-auto-reseed:    ${RESEED_LOCAL_EVM_ON_DUEL_CHANGE}
+  acceptance-duel-source: real_hyperscapes
 
 [pm-local] notes:
   - Hyperscapes remains the duel event source.
@@ -809,6 +1304,15 @@ cat <<EOF
   - This local runner defaults to skipping Hyperscapes MUD chain bootstrap and
     running the duel server in development mode because Hyperbet consumes the
     duel telemetry API, not the sibling repo's local anvil world.
+  monitor:             ${PM_E2E_MONITOR}
+  e2e-full-soak:        ${PM_E2E_FULL_SOAK}
+  e2e-harness-duration: ${PM_E2E_HARNESS_DURATION_MIN}
+  e2e-harness-game-url: ${PM_E2E_HARNESS_GAME_URL}
+  e2e-harness-bsc-rpc:  ${PM_E2E_HARNESS_BSC_RPC_URL}
+  headless:            ${PW_HEADLESS}
+  browser-channel:     ${PW_BROWSER_CHANNEL:-chromium}
+  screenshot-viewport: ${PM_SOAK_SCREENSHOT_WIDTH}x${PM_SOAK_SCREENSHOT_HEIGHT}
+  stream-capture:      headless=${STREAM_CAPTURE_HEADLESS} channel=${STREAM_CAPTURE_CHANNEL:-chromium} viewport=${STREAM_CAPTURE_WIDTH}x${STREAM_CAPTURE_HEIGHT}
 EOF
 
 while true; do
@@ -824,9 +1328,37 @@ while true; do
     wait "$APP_PID"
     exit $?
   fi
+  if [[ -n "$PM_E2E_HARNESS_PID" ]] && ! kill -0 "$PM_E2E_HARNESS_PID" >/dev/null 2>&1; then
+    if wait "$PM_E2E_HARNESS_PID"; then
+      PM_E2E_HARNESS_EXIT_CODE="${PM_E2E_HARNESS_EXIT_CODE:-0}"
+    else
+      PM_E2E_HARNESS_EXIT_CODE="${PM_E2E_HARNESS_EXIT_CODE:-$?}"
+    fi
+    PM_E2E_HARNESS_PID=""
+  fi
   if [[ -n "$EVM_SEED_FOLLOW_PID" ]] && ! kill -0 "$EVM_SEED_FOLLOW_PID" >/dev/null 2>&1; then
     wait "$EVM_SEED_FOLLOW_PID"
     exit $?
+  fi
+  if [[ -n "$CAPTURE_PID" ]] && ! kill -0 "$CAPTURE_PID" >/dev/null 2>&1; then
+    if wait "$CAPTURE_PID"; then
+      CAPTURE_EXIT_CODE="${CAPTURE_EXIT_CODE:-0}"
+    else
+      CAPTURE_EXIT_CODE="${CAPTURE_EXIT_CODE:-$?}"
+    fi
+    CAPTURE_PID=""
+  fi
+  if [[ "$PM_E2E_MONITOR" == "true" && "$PM_E2E_FULL_SOAK" == "true" ]]; then
+    if [[ -z "$CAPTURE_PID" && -z "$PM_E2E_HARNESS_PID" ]]; then
+      if [[ "${CAPTURE_EXIT_CODE:-0}" -ne 0 ]]; then
+        exit "${CAPTURE_EXIT_CODE}"
+      fi
+      exit "${PM_E2E_HARNESS_EXIT_CODE:-0}"
+    fi
+  elif [[ "$PM_E2E_MONITOR" == "true" && -z "$CAPTURE_PID" ]]; then
+    exit "${CAPTURE_EXIT_CODE:-0}"
+  elif [[ "$PM_E2E_FULL_SOAK" == "true" && -z "$PM_E2E_HARNESS_PID" ]]; then
+    exit "${PM_E2E_HARNESS_EXIT_CODE:-0}"
   fi
   sleep 2
 done

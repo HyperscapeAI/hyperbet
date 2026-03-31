@@ -2,25 +2,28 @@
   "solana": {
     "localnet": {
       "cluster": "localnet",
-      "fightOracleProgramId": "B5mRCRDJk9BrnH7regMWW5mpTQ8QG1CcCGSnDxMt8hmo",
-      "goldClobMarketProgramId": "DYtd7AoyTX2tbmZ8vpC3mxZgqTpyaDei4TFXZukWBJEf",
-      "goldPerpsMarketProgramId": "EoZdHN8U3qWQje48ToxB1SLWjucsFGqcWaRUJQYX3eoT",
+      "fightOracleProgramId": "GFdnu7kUnZGiXh4ejWiJSBCUxvq4UfdEeUv9jjFzr5EM",
+      "goldClobMarketProgramId": "3QUVoaKJqo1rg9eXe7vyFewJrY75NWdtH8JZfvTb79Uy",
+      "goldPerpsMarketProgramId": "BFbmQbSbf3R6fMDdXKMKQZCTyMhMs9MCcjAhGDBLETXS",
+      "goldAmmMarketProgramId": "12E8Lz5w8Qxyj8Fh6LgsCgPDQNJMCLMV1y43LhPrH66w",
       "goldMint": "DK9nBUMfdu4XprPRWeh8f6KnQiGWD8Z4xz3yzs9gpump",
       "usdcMint": ""
     },
     "devnet": {
       "cluster": "devnet",
-      "fightOracleProgramId": "B5mRCRDJk9BrnH7regMWW5mpTQ8QG1CcCGSnDxMt8hmo",
-      "goldClobMarketProgramId": "DYtd7AoyTX2tbmZ8vpC3mxZgqTpyaDei4TFXZukWBJEf",
-      "goldPerpsMarketProgramId": "EoZdHN8U3qWQje48ToxB1SLWjucsFGqcWaRUJQYX3eoT",
+      "fightOracleProgramId": "GFdnu7kUnZGiXh4ejWiJSBCUxvq4UfdEeUv9jjFzr5EM",
+      "goldClobMarketProgramId": "3QUVoaKJqo1rg9eXe7vyFewJrY75NWdtH8JZfvTb79Uy",
+      "goldPerpsMarketProgramId": "BFbmQbSbf3R6fMDdXKMKQZCTyMhMs9MCcjAhGDBLETXS",
+      "goldAmmMarketProgramId": "12E8Lz5w8Qxyj8Fh6LgsCgPDQNJMCLMV1y43LhPrH66w",
       "goldMint": "DK9nBUMfdu4XprPRWeh8f6KnQiGWD8Z4xz3yzs9gpump",
       "usdcMint": ""
     },
     "testnet": {
       "cluster": "testnet",
-      "fightOracleProgramId": "B5mRCRDJk9BrnH7regMWW5mpTQ8QG1CcCGSnDxMt8hmo",
-      "goldClobMarketProgramId": "DYtd7AoyTX2tbmZ8vpC3mxZgqTpyaDei4TFXZukWBJEf",
-      "goldPerpsMarketProgramId": "EoZdHN8U3qWQje48ToxB1SLWjucsFGqcWaRUJQYX3eoT",
+      "fightOracleProgramId": "GFdnu7kUnZGiXh4ejWiJSBCUxvq4UfdEeUv9jjFzr5EM",
+      "goldClobMarketProgramId": "3QUVoaKJqo1rg9eXe7vyFewJrY75NWdtH8JZfvTb79Uy",
+      "goldPerpsMarketProgramId": "BFbmQbSbf3R6fMDdXKMKQZCTyMhMs9MCcjAhGDBLETXS",
+      "goldAmmMarketProgramId": "12E8Lz5w8Qxyj8Fh6LgsCgPDQNJMCLMV1y43LhPrH66w",
       "goldMint": "",
       "usdcMint": ""
     },
@@ -28,7 +31,8 @@
       "cluster": "mainnet-beta",
       "fightOracleProgramId": "B5mRCRDJk9BrnH7regMWW5mpTQ8QG1CcCGSnDxMt8hmo",
       "goldClobMarketProgramId": "DYtd7AoyTX2tbmZ8vpC3mxZgqTpyaDei4TFXZukWBJEf",
-      "goldPerpsMarketProgramId": "EoZdHN8U3qWQje48ToxB1SLWjucsFGqcWaRUJQYX3eoT",
+      "goldPerpsMarketProgramId": "6YjWiway8kaSjwtAinJxqWPvV3DqBVapDWAsSEZjjmbP",
+      "goldAmmMarketProgramId": "",
       "goldMint": "DK9nBUMfdu4XprPRWeh8f6KnQiGWD8Z4xz3yzs9gpump",
       "usdcMint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
     }

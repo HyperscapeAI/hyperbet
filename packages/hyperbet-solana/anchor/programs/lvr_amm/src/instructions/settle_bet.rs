@@ -62,64 +62,52 @@ fn read_oracle_duel_key(data: &[u8]) -> Result<[u8; 32]> {
     Ok(duel_key)
 }
 
-pub fn settle_bet_instruction(ctx: Context<SettleBet>, _bet_id: u64, side_won: u8) -> Result<()> {
+pub fn settle_bet_instruction(ctx: Context<SettleBet>, _bet_id: u64, _side_won: u8) -> Result<()> {
     require!(
         ctx.accounts.bet.is_initialized,
         PredictionMarketError::BetNotInitialized
     );
 
-    // If an oracle duel_state is provided, read winner from oracle (trustless path)
-    let final_side_won = if let Some(duel_account) = &ctx.accounts.duel_state {
-        let amm_config = ctx.accounts.amm_config.as_ref()
-            .ok_or(error!(PredictionMarketError::MissingAmmConfig))?;
-        require_keys_eq!(
-            *duel_account.owner,
-            amm_config.fight_oracle_program,
-            PredictionMarketError::InvalidFightOracleProgram
-        );
+    let duel_account = ctx.accounts.duel_state.as_ref()
+        .ok_or(error!(PredictionMarketError::InvalidDuelState))?;
+    let amm_config = ctx.accounts.amm_config.as_ref()
+        .ok_or(error!(PredictionMarketError::MissingAmmConfig))?;
+    require_keys_eq!(
+        *duel_account.owner,
+        amm_config.fight_oracle_program,
+        PredictionMarketError::InvalidFightOracleProgram
+    );
 
-        let data = duel_account.try_borrow_data()?;
-        let duel_key = read_oracle_duel_key(&data)?;
-        // Compare full 32-byte duel key if set, otherwise fall back to first 8 bytes (bet_id)
-        if ctx.accounts.bet.duel_key != [0u8; 32] {
-            require!(
-                duel_key == ctx.accounts.bet.duel_key,
-                PredictionMarketError::OracleBetMismatch
-            );
-        } else {
-            require!(
-                duel_key[..8] == ctx.accounts.bet.bet_id.to_le_bytes(),
-                PredictionMarketError::OracleBetMismatch
-            );
-        }
-        let (status, winner) = read_oracle_duel(&data)?;
-
+    let data = duel_account.try_borrow_data()?;
+    let duel_key = read_oracle_duel_key(&data)?;
+    // Compare full 32-byte duel key if set, otherwise fall back to first 8 bytes (bet_id)
+    if ctx.accounts.bet.duel_key != [0u8; 32] {
         require!(
-            status == OracleDuelStatus::Resolved || status == OracleDuelStatus::Cancelled,
-            PredictionMarketError::BetNotExpired
+            duel_key == ctx.accounts.bet.duel_key,
+            PredictionMarketError::OracleBetMismatch
         );
-
-        if status == OracleDuelStatus::Cancelled {
-            // Cancelled = no winner, use sentinel 2
-            2u8
-        } else {
-            match winner {
-                OracleMarketSide::A => 0u8,
-                OracleMarketSide::B => 1u8,
-                OracleMarketSide::None => return err!(PredictionMarketError::InvalidOracleAccount),
-            }
-        }
     } else {
-        // Fallback: admin-only settlement (legacy path)
         require!(
-            ctx.accounts.signer.key() == ctx.accounts.admin_state.admin.key(),
-            PredictionMarketError::SignerIsNotSettlePubKey
+            duel_key[..8] == ctx.accounts.bet.bet_id.to_le_bytes(),
+            PredictionMarketError::OracleBetMismatch
         );
-        require!(
-            side_won <= 2,
-            PredictionMarketError::InvalidSettlementOutcome
-        );
-        side_won
+    }
+    let (status, winner) = read_oracle_duel(&data)?;
+
+    require!(
+        status == OracleDuelStatus::Resolved || status == OracleDuelStatus::Cancelled,
+        PredictionMarketError::BetNotExpired
+    );
+
+    let final_side_won = if status == OracleDuelStatus::Cancelled {
+        // Cancelled = no winner, use sentinel 2
+        2u8
+    } else {
+        match winner {
+            OracleMarketSide::A => 0u8,
+            OracleMarketSide::B => 1u8,
+            OracleMarketSide::None => return err!(PredictionMarketError::InvalidOracleAccount),
+        }
     };
 
     let clock = Clock::get()?;
@@ -154,15 +142,14 @@ pub struct SettleBet<'info> {
     )]
     pub bet: Account<'info, Bet>,
 
-    /// Optional: AmmConfig for oracle program ID validation (required when duel_state is provided)
+    /// Optional to preserve the instruction interface, but required in practice for settlement validation.
     #[account(
         seeds = [b"amm_config"],
         bump = amm_config.bump,
     )]
     pub amm_config: Option<Account<'info, AmmConfig>>,
 
-    /// Optional: fight_oracle DuelState account. When provided, winner is read
-    /// from the oracle rather than trusting the caller's `side_won` argument.
+    /// Optional to preserve the instruction interface, but required in practice for settlement validation.
     /// CHECK: We manually deserialize the data at known offsets.
     pub duel_state: Option<UncheckedAccount<'info>>,
 }

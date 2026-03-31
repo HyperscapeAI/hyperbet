@@ -1,6 +1,6 @@
 # PM-AMM Hardening Plan
 
-> Formalized from audit findings against PR #19 (`feat/amm-swap-fees`) and the convergence branch audit. This plan governs `feature/pm-amm-hardening-v1` (Phase 1) and `feature/pm-amm-integration-v1` (Phase 2).
+> **TL;DR:** Historical AMM hardening plan from the earlier multi-branch execution model. Status: closed. Keep this as audit and planning history only. AMM closeout work is now being folded into `audit/develop-pm-hardening`, and current launch truth lives in the launch execution plan and freeze tracker.
 
 ---
 

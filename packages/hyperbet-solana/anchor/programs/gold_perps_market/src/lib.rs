@@ -4,8 +4,7 @@
 use anchor_lang::prelude::*;
 use anchor_lang::system_program;
 use std::cmp;
-
-declare_id!("EoZdHN8U3qWQje48ToxB1SLWjucsFGqcWaRUJQYX3eoT");
+declare_id!("BFbmQbSbf3R6fMDdXKMKQZCTyMhMs9MCcjAhGDBLETXS");
 
 const FUNDING_RATE_PRECISION: i128 = 1_000_000_000;
 const BPS_DENOMINATOR: u64 = 10_000;
@@ -70,6 +69,7 @@ pub mod gold_perps_market {
         )?;
 
         let config = &mut ctx.accounts.config;
+        // One-time initialization only. No bootstrap fallback pattern.
         require!(
             config.authority == Pubkey::default(),
             PerpsError::AlreadyInitialized
@@ -113,7 +113,6 @@ pub mod gold_perps_market {
             ctx.accounts.authority.key() == ctx.accounts.config.authority,
             PerpsError::InvalidAuthority
         );
-        require!(!ctx.accounts.config.config_frozen, PerpsError::ConfigFrozen);
         ctx.accounts.config.paused = paused;
         Ok(())
     }

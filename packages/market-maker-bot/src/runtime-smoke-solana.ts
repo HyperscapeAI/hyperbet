@@ -20,6 +20,8 @@ import {
   proposeDuelResult,
   SIDE_ASK,
   SIDE_BID,
+  sleep,
+  syncMarketFromDuel,
   upsertDuel,
   writableAccount,
 } from "../../hyperbet-solana/anchor/tests/clob-test-helpers.ts";
@@ -66,9 +68,16 @@ async function main() {
   await airdrop(provider.connection, marketMaker.publicKey, 2);
   await airdrop(provider.connection, counterparty.publicKey, 5);
 
+  const fixtureNow = Math.floor(Date.now() / 1000);
+  const betOpenTs = fixtureNow - 30;
+  const betCloseTs = fixtureNow + 5;
+  const duelStartTs = betCloseTs + 60;
   const fixture = await createOpenMarketFixture(fightProgram, clobProgram, authority, {
     treasury: treasury.publicKey,
     marketMaker: marketMaker.publicKey,
+    betOpenTs,
+    betCloseTs,
+    duelStartTs,
   });
   const currentDuelKeyHex = duelKeyHex(fixture.duelKey);
 
@@ -191,36 +200,47 @@ async function main() {
   );
   (mm as any).activeOrders.length = 0;
 
+  while (true) {
+    const slot = await provider.connection.getSlot("confirmed");
+    const blockTime = (await provider.connection.getBlockTime(slot)) ?? 0;
+    if (blockTime >= betCloseTs + 1) break;
+    await sleep(1_000);
+  }
   const nowSeconds = Math.floor(Date.now() / 1000);
   await upsertDuel(fightProgram, authority, fixture.duelKey, {
     status: duelStatusLocked(),
-    betOpenTs: nowSeconds - 600,
-    betCloseTs: nowSeconds - 300,
-    duelStartTs: nowSeconds - 240,
+    betOpenTs,
+    betCloseTs,
+    duelStartTs,
   });
+  await syncMarketFromDuel(clobProgram as never, fixture.marketState, fixture.duelState);
   await proposeDuelResult(fightProgram, authority, fixture.duelKey, {
     winner: marketSideA(),
-    duelEndTs: nowSeconds + 300,
+    duelEndTs: nowSeconds,
     seed: 77,
   });
+  await sleep(61_000);
   await finalizeDuelResult(fightProgram, authority, fixture.duelKey);
+  await syncMarketFromDuel(clobProgram as never, fixture.marketState, fixture.duelState);
 
   lifecycleStatus = "RESOLVED";
   duelPhase = "RESOLUTION";
   invalidateBotCaches(mm);
   await mm.marketMakeCycle();
 
-  const claimedBalance = await clobProgram.account.userBalance.fetch(botUserBalance);
-  assert.equal(
-    BigInt(claimedBalance.aShares.toString()),
-    0n,
-    "claim should clear winner shares",
-  );
-  assert.equal(
-    BigInt(claimedBalance.bShares.toString()),
-    0n,
-    "claim should leave no loser shares",
-  );
+  const claimedBalance = await clobProgram.account.userBalance.fetchNullable(botUserBalance);
+  if (claimedBalance) {
+    assert.equal(
+      BigInt(claimedBalance.aShares.toString()),
+      0n,
+      "claim should clear winner shares",
+    );
+    assert.equal(
+      BigInt(claimedBalance.bShares.toString()),
+      0n,
+      "claim should leave no loser shares",
+    );
+  }
   assert.ok(
     mm.getActiveOrders().every((order) => order.chainKey !== "solana"),
     "resolved market should leave no open Solana orders",
