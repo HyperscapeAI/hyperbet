@@ -31,6 +31,8 @@
     "@solana/web3-compat": "latest",
     "@solana/web3.js": "1.98.4",
     "@tanstack/react-query": "^5.90.21",
+    "@wallet-standard/app": "^1.1.0",
+    "@wallet-standard/features": "^1.1.0",
     "bn.js": "5.2.2",
     "bs58": "^6.0.0",
     "hls.js": "^1.6.15",
