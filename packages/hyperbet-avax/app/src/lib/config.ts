@@ -191,7 +191,8 @@ export interface EnvConfig {
 const DEFAULT_STREAM_URL = "https://www.twitch.tv/hyperscapeai";
 const DEFAULT_STREAM_FALLBACK_URL = "";
 const DEFAULT_GAME_API_URL = "http://127.0.0.1:5555";
-const DEFAULT_PRODUCTION_GAME_API_URL = "https://api.hyperbet.win";
+const DEFAULT_PRODUCTION_GAME_API_URL =
+  "https://gold-betting-keeper-production.up.railway.app";
 
 const baseConfig: Partial<EnvConfig> = {
   betWindowSeconds: 300,

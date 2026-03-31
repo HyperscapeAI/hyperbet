@@ -1,6 +1,5 @@
 {
   "lockfileVersion": 1,
-  "configVersion": 0,
   "workspaces": {
     "": {
       "name": "@hyperbet/monorepo",
@@ -306,7 +305,6 @@
         "@solana/web3.js": "^1.95.4",
         "bn.js": "^5.2.1",
         "bs58": "^6.0.0",
-        "clsx": "^2.1.1",
         "ethers": "^6.13.4",
       },
       "devDependencies": {

@@ -244,8 +244,8 @@ jobs:
             avax_gold_clob_address: ""
     env:
       CF_PAGES_COMMIT_SHA: ${{ github.sha }}
-      VITE_GAME_API_URL: https://api.hyperbet.win
-      VITE_GAME_WS_URL: wss://api.hyperbet.win/ws
+      VITE_GAME_API_URL: https://gold-betting-keeper-production.up.railway.app
+      VITE_GAME_WS_URL: wss://gold-betting-keeper-production.up.railway.app/ws
       VITE_SOLANA_CLUSTER: ${{ matrix.solana_cluster }}
       VITE_USE_GAME_RPC_PROXY: "true"
       VITE_USE_GAME_EVM_RPC_PROXY: "true"
@@ -335,8 +335,8 @@ jobs:
     needs: shared-validation
     env:
       CF_PAGES_COMMIT_SHA: ${{ github.sha }}
-      VITE_GAME_API_URL: https://api.hyperbet.win
-      VITE_GAME_WS_URL: wss://api.hyperbet.win/ws
+      VITE_GAME_API_URL: https://gold-betting-keeper-production.up.railway.app
+      VITE_GAME_WS_URL: wss://gold-betting-keeper-production.up.railway.app/ws
       VITE_SOLANA_CLUSTER: mainnet-beta
       VITE_USE_GAME_RPC_PROXY: "true"
       VITE_USE_GAME_EVM_RPC_PROXY: "true"

@@ -45,7 +45,7 @@ jobs:
       - name: Resolve deployment target
         run: |
           deploy_target="production"
-          keeper_url="${{ vars.HYPERBET_BSC_KEEPER_URL != '' && vars.HYPERBET_BSC_KEEPER_URL || 'https://bsc-api.hyperbet.win' }}"
+          keeper_url="${{ vars.HYPERBET_BSC_KEEPER_URL != '' && vars.HYPERBET_BSC_KEEPER_URL || 'https://gold-betting-keeper-production.up.railway.app' }}"
           railway_project_id="${{ vars.HYPERBET_BSC_RAILWAY_PROJECT_ID != '' && vars.HYPERBET_BSC_RAILWAY_PROJECT_ID || '' }}"
           railway_environment_id="${{ vars.HYPERBET_BSC_RAILWAY_PRODUCTION_ENVIRONMENT_ID != '' && vars.HYPERBET_BSC_RAILWAY_PRODUCTION_ENVIRONMENT_ID || '' }}"
           railway_service_id="${{ vars.HYPERBET_BSC_RAILWAY_KEEPER_SERVICE_ID != '' && vars.HYPERBET_BSC_RAILWAY_KEEPER_SERVICE_ID || '' }}"
