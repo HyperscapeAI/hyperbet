@@ -1,137 +1,157 @@
 # Prediction Market Release Prep
 
-This document is the reviewer-facing release summary for the prediction-market
-sprint.
+> **TL;DR:** As of 2026-03-25, the repo is materially stronger and now carries full-product phase-1 rails for `PM + internal AMM + perps` plus the surrounding app shell and account surfaces that users actually touch. The active production-readiness gate is `Solana devnet + BSC testnet`; AVAX Fuji evidence is preserved but isolated and non-blocking. The remaining blockers are truthful active-scope registry values, staged environment provisioning, shared testnet token/address inputs, app-shell and account-surface closure, governance/evidence closeout, and the frozen audit packet plus external audit/remediation cycle.
 
-As of March 13, 2026, this is a phase-3 release-prep artifact:
+This document is the reviewer-facing release summary for the current launch
+closeout train on `audit/develop-pm-hardening`.
 
-- release-facing docs and runbooks are linked into a candidate audit package
-- AVAX deploy/runtime/proof plumbing is merged into the shared launch rails
-- EVM governance and emergency pause controls are implemented and documented
-- reviewer inventory, release memo, and audit checklist are assembled
-- AVAX Fuji deploy/runtime truth is canonicalized in chain registry, and AVAX
-  production semantics are already wired into fail-closed env/registry runtime
-  gates; AVAX mainnet canonical addresses plus staged proof and signer-proof
-  evidence are still outstanding before launch signoff
+Detailed implementation work is tracked in:
 
-This document does not declare the sprint release-ready for unrestricted real
-funds. It is the reviewer handoff for the sprint base after the deploy/proof
-rails, governance controls, and audit-package scaffolding have landed.
+- [GitHub Project Production Backlog](release/github-project-production-backlog.md)
+- [Runtime Integration Readiness Matrix](release/runtime-integration-readiness-matrix.md)
+- [Tracking Document Map](release/tracking-document-map.md)
 
-## Sprint Summary
+## Phase-1 Product Definition
 
-Completed work already merged into the sprint base covers:
+- Active production-readiness chains: `Solana`, `BSC`
+- Preserved but isolated follow-on lane: `AVAX`
+- Non-blocking add-chain lane: `Base`
+- Implementation target: shared `EVM` runtime plus `SVM`, with `BSC` as the
+  current active EVM proving wrapper
+- User-facing surfaces:
+  - `PM/CLOB duels`
+  - `perps/models`
+- Production-critical internal surface:
+  - `AMM` as a headless market-maker and liquidity engine, not a retail UI
 
-- deterministic EVM and Solana scenario execution, exploit gates, and shared
-  scenario history through the simulation dashboard
-- shared market-maker sizing and refresh policy in `@hyperbet/mm-core`
-- keeper health, recovery, and operator status visibility across Solana, BSC,
-  and AVAX
-- runtime parity and validator-backed Solana execution for the external
-  market-maker bot
-- frontend lifecycle and claim-state parity across Solana, BSC, and AVAX
-- cross-chain local E2E coverage and CI / ops hardening through Gate 11
-- contract-validation, proof, and security CI promotion through Gate 13
-- AVAX staging/runtime/proof plumbing and governance metadata rails for Gates
-  19 and 20
-- release evidence, governance runbooks, and audit-package scaffolding for
-  Gates 23 and 24
+## What Is Already Landed
 
-Current dependency state:
+- PM-core hardening is merged for oracle finality, order semantics, governance
+  freezes, and protocol guardrails.
+- repo artifact policy is enforced in CI, and the previously flagged tracked
+  Solana deploy artifacts are no longer present in the tracked tree.
+- AMM settlement implementation is materially stronger than before, but the
+  production settlement model still needs an explicit freeze between
+  oracle-driven and challenge-window paths.
+- Solana perps pause remains callable after freeze.
+- Solana full-product deploy, init, freeze, and verify paths now include
+  `lvr_amm`.
+- EVM deploy receipts now write canonical registry-shaped PM, AMM, and perps
+  fields.
+- Staged proof is no longer PM-only. The canary surface now emits `pm`,
+  `perps`, and `amm` results per chain.
+- Local Stage-A bring-up, staged proof, soak, AMM gates, and perps gates are
+  wired into the repo scripts and workflows.
+- Base has been demoted to a non-blocking add-chain lane for phase-1 release
+  gating.
 
-- Gate 13: complete as contract/security CI promotion
-- Gate 14A: proof rail implemented for Solana, BSC, and AVAX; staged
-  read-only/canary execution still outstanding
-- Gate 19: AVAX production rollout blocked pending canonical AVAX mainnet values,
-  effective AVAX wallet setup, and reviewed staged proof evidence
-- Gate 20: governance surfaces merged; live ownership-transfer evidence still
-  outstanding
-- Gate 23 / 24: reviewer docs and audit-package scaffold merged; final handoff
-  still depends on live artifacts plus incoming Engineer 1/3/4 evidence
+## What Is Still Blocking
 
-## Reviewer Artifact Inventory
+Detailed execution tickets for every blocker below live in the canonical
+backlog. This document is the summary view, not the issue owner.
 
-Primary documents:
+### 1. Active launch-chain canonical truth is incomplete
 
-- [Sprint tracker](enoomian-prediction-market-sprint.md)
-- [Five-engineer execution plan](release/five-engineer-execution.md)
-- [Engineer instructions](release/engineer-instructions.md)
-- [GitHub issue bodies](release/issues/README.md)
-- [Production deploy guide](hyperbet-production-deploy.md)
-- [Development setup](development-setup.md)
-- [Runbook index](runbooks/README.md)
-- [Market-maker bot README](../packages/market-maker-bot/README.md)
+Strict active-scope canonical truth is still incomplete, even though the
+develop-side Stage-A closeout gate now validates the real PR contract for
+`Solana devnet + BSC testnet` while AVAX is intentionally isolated:
+
+- active-scope launch constants still imply `avax` in places that should now
+  reflect the parked-chain decision
+- default feature flags still understate the intended active product surface
+- `solana`: `goldAmmMarketProgramId`
+- `bsc`: `goldAmmRouterAddress`, `mUsdTokenAddress`, `goldTokenAddress`,
+  `skillOracleAddress`, `perpEngineAddress`
+- `avax`: PM-core plus AMM and perps canonical fields remain preserved
+  follow-on work and are not blocking the current production-readiness path
+
+Those values must still come from final mainnet deployment receipts only before
+any true launch promotion to `main` or `staging`.
+
+### 2. Staged proof and staged soak are structurally ready but operationally blocked
+
+The workflows now expect a real staged environment contract. As of the latest
+GitHub secret and variable audit:
+
+- repo-level testnet deploy primitives exist
+- there is no GitHub `staging` environment
+- there are no `HYPERBET_*_STAGING_*` vars or secrets provisioned yet
+
+That means GitHub staged proof and staged soak cannot run honestly yet.
+
+### 3. Local Stage-A is only partially unblocked
+
+Local non-mainnet deploy and verification are now feasible, but the active BSC
+AMM/perps rehearsal still needs shared token/address inputs:
+
+- `BSC_TESTNET_MUSD_TOKEN_ADDRESS`
+- `BSC_TESTNET_GOLD_TOKEN_ADDRESS`
+- optional perps margin token addresses when margin is not the GOLD token
+
+### 4. Governance and audit evidence are not complete
+
+The repo-side governance and freeze logic is much closer to launch grade, but
+the final package still needs:
+
+- ownership transfer and freeze transaction evidence
+- signer and key-rotation closeout
+- staged proof artifact bundles
+- soak artifact bundles
+- final RC freeze manifest
+- external audit findings and remediation output
+
+### 5. AMM settlement truth, coordinated full-product smoke, and full app-shell closure are not yet closed
+
+- the EVM AMM still exposes both `settleMarket()` and `settleFromOracle()`
+- the Solana AMM settlement path still carries compatibility-oriented optional
+  account handling that needs either tighter validation or an audit-grade
+  rationale
+- PM has the strongest live evidence today; coordinated staged smoke and
+  evidence for the full active product destination still need to be frozen
+- wallet/account, points/referral, and broader app-shell product claims still
+  need one frozen acceptance and support contract for the active runtimes
+
+## Gold Asset Boundary
+
+Gold is currently tracked as a separate architecture concern, not a phase-1
+launch blocker for PM, AMM, perps, or market-maker audit readiness.
+
+- the current launch protocols already settle in native assets or designated
+  collateral tokens
+- Solana still carries the meaningful `goldMint` surface
+- the long-term `Hyperscapes Gold -> Solana Gold -> future multi-chain Gold`
+  model still needs a dedicated asset architecture spec
+
+For the current-state interpretation and the follow-on spec-planning document,
+see:
+
+- [Gold current state](protocol/gold-current-state.md)
+- [Gold architecture spec plan](protocol/gold-architecture-spec-plan.md)
+
+## Current Reviewer Checklist
+
+Reviewers should verify that the repo now reflects these truths consistently:
+
+- active production-readiness scope is `Solana + BSC`
+- AVAX is preserved but isolated and non-blocking
+- `Base` is non-blocking
+- `BSC` is the active EVM wrapper, not the exclusive EVM implementation target
+- launch destination is `PM + perps + internal AMM`, not PM-only
+- active launch scope includes the application shell and account surfaces
+  around those products, not only the underlying market engines
+- stage/testnet proof does not equal mainnet canonical truth
+- AMM settlement-model closure and coordinated full-product smoke are still
+  open blockers
+- launch remains blocked on registry truth, staged env provisioning, and audit
+  evidence
+
+## Source Documents
+
+- [Launch execution plan](release/pm-launch-execution-plan.md)
+- [Launch freeze tracker](release/prediction-market-launch-freeze-tracker.md)
 - [Launch-ops evidence index](release/launch-ops-evidence-index.md)
-- [Release memo template](release/release-memo-template.md)
+- [Production deploy guide](hyperbet-production-deploy.md)
+- [Gold current state](protocol/gold-current-state.md)
+- [Gold architecture spec plan](protocol/gold-architecture-spec-plan.md)
+- [Runbook index](runbooks/README.md)
 - [External audit package checklist](release/external-audit-package-checklist.md)
-
-Operational and CI surfaces to spot-check:
-
-- [Fast CI workflow](../.github/workflows/ci.yml)
-- [Prediction-market gate workflow](../.github/workflows/prediction-market-gates.yml)
-- [Staged live proof workflow](../.github/workflows/staged-live-proof.yml)
-- `scripts/ci-env-audit.ts`
-- `scripts/ci-contracts.ts`
-- `scripts/staged-live-proof.ts`
-- `packages/simulation-dashboard`
-- `packages/market-maker-bot`
-- `packages/hyperbet-solana/keeper`
-- `packages/hyperbet-bsc/keeper`
-- `packages/hyperbet-avax/keeper`
-
-Representative local verification entrypoints already documented elsewhere:
-
-- `bun run dev:doctor`
-- `bun run dev:bootstrap`
-- `bun run ci:contracts:fast`
-- `bun run ci:gate:base`
-- `bun run --cwd packages/market-maker-bot smoke:runtime:solana`
-- `bun run --cwd packages/simulation-dashboard scenario suite --fresh`
-
-## Merge Checklist For `develop`
-
-- tracked release-facing docs contain no accidental local absolute-path links
-- deploy, setup, and runbook wording matches current repo scripts and workflow
-  names
-- AVAX is described accurately as a launch chain whose production rollout is
-  blocked until canonical registry addresses and staged-proof artifacts exist
-- CI wording reflects the real required lanes:
-  - `Solana Program Build Gate`
-  - `EVM Contract Validation`
-  - `EVM Contract Proof Gate`
-  - `EVM Contract Security Gate`
-  - `EVM Exploit Gate`
-  - `Solana Exploit Gate`
-  - `Base Add-Chain Smoke`
-- Gate 14A is described as having a proof rail but not yet complete until a
-  real staged run succeeds
-- governance, signer-policy, and emergency runbooks are linked from the
-  release-facing package
-- targeted checks and broader regression for the dependency gates are green
-- sprint tracker is updated after the relevant base-branch push
-- ready-to-merge synthesis is written without overstating release readiness
-
-## Residual Risk And Blocked Follow-Ups
-
-- AVAX is still not fully canonicalized for production; the deploy/proof rails are
-  in place, Fuji is canonicalized in-chain, and mainnet still lacks canonical
-  addresses.
-- AVAX mainnet also depends on effective wallet setup for timelock, multisig,
-  emergency, reporter, finalizer, challenger, market-operator, treasury, and
-  market-maker roles; without that signer set the lane is intentionally not
-  deployable.
-- AVAX deploy/proof control plane has been aligned for Fuji and staged proof
-  behavior, but production sign-off still requires reviewed staged read-only + canary
-  evidence on the target environment.
-- Contract/security CI is now wired into the repo workflows, but local desktop
-  verification can still be constrained by toolchain issues such as Hardhat
-  compiler download and macOS-specific Foundry crashes.
-- Gate 14A staged live proof remains the largest outstanding operator proof
-  before claiming full audit-style deployment confidence.
-- Production ownership-transfer evidence for timelock, multisig, emergency, and
-  role separation is still outstanding.
-- Any release-facing summary that omits the AVAX Fuji/production distinction,
-  pending AVAX mainnet canonicality, remaining live proof work, or pending
-  governance receipts would be misleading.
-- AVAX Fuji bootstrap smoke should remain documented as an environment sanity
-  check, not production-canonical completion.

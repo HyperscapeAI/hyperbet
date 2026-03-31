@@ -1,59 +1,85 @@
 # External Audit Package Checklist
 
+> **TL;DR:** The audit package is no longer just PM-core plus EVM notes. It now has to prove the full phase-1 launch product: `PM/CLOB duels + perps/models + internal AMM` plus the surrounding app-shell, wallet/account, and rewards surfaces across the active production-readiness scope of `Solana` and `BSC`, with truthful active-scope registry values, staged proof and soak evidence, governance transfer receipts, and the frozen RC manifest. AVAX evidence remains preserved follow-on material and is non-blocking unless the lane is reactivated.
+
 Use this checklist with the candidate memo in
 [release-memo-template.md](release-memo-template.md) and the evidence index in
 [launch-ops-evidence-index.md](launch-ops-evidence-index.md).
 
+Detailed implementation work is tracked in:
+
+- [GitHub Project Production Backlog](github-project-production-backlog.md)
+- [Runtime Integration Readiness Matrix](runtime-integration-readiness-matrix.md)
+- [Tracking Document Map](tracking-document-map.md)
+
+This checklist owns audit-handoff packet completeness only. It does not own the
+underlying implementation backlog.
+
 ## Scope And Freeze
 
-- [ ] Freeze manifest regenerated and attached:
-  [manifests/rc-2026-03-audit-handoff-freeze.json](manifests/rc-2026-03-audit-handoff-freeze.json)
 - [x] Launch scope documented in
   [release-memo-template.md](release-memo-template.md)
-- [x] Engineer ownership and issue bodies linked in
-  [issues/README.md](issues/README.md)
+- [x] Launch freeze tracker linked in
+  [prediction-market-launch-freeze-tracker.md](prediction-market-launch-freeze-tracker.md)
 - [ ] Final RC branch and commit recorded at freeze time
+- [ ] Freeze manifest regenerated and attached:
+  [manifests/rc-2026-03-audit-handoff-freeze.json](manifests/rc-2026-03-audit-handoff-freeze.json)
 
-## Gate 14A: Staged Live Proof
+## Non-Mainnet Bring-Up And Proof
 
-- [x] Proof driver and workflow linked:
+- [x] Local Stage-A runner linked:
+  [../../scripts/run-local-stage-a.ts](../../scripts/run-local-stage-a.ts)
+- [x] Staged proof driver and workflow linked:
   [../../scripts/staged-live-proof.ts](../../scripts/staged-live-proof.ts),
   [../../.github/workflows/staged-live-proof.yml](../../.github/workflows/staged-live-proof.yml)
-- [x] Operator runbook linked:
-  [../runbooks/staged-live-proof.md](../runbooks/staged-live-proof.md)
-- [ ] Read-only artifact bundle attached from `.ci-artifacts/staged-live-proof`
-- [ ] Canary-write artifact bundle attached from `.ci-artifacts/staged-live-proof`
-- [ ] AVAX env-audit and `verify-chains` outputs attached
+- [x] Soak workflow and runbook linked:
+  [../../.github/workflows/pm-soak.yml](../../.github/workflows/pm-soak.yml),
+  [../runbooks/pm-confidence-soak.md](../runbooks/pm-confidence-soak.md)
+- [ ] Local Stage-A deploy and verify artifacts attached for Solana devnet and
+  BSC testnet
+- [ ] Preserved AVAX Fuji artifacts attached only if the AVAX lane is being
+  reactivated or explicitly reviewed
+- [ ] Read-only staged proof artifact bundle attached
+- [ ] Canary-write staged proof artifact bundle attached with `pm`, `perps`,
+  and `amm` sub-results per chain
+- [ ] Full app-shell acceptance evidence attached for wallet/account,
+  claims/positions, and points/referral surfaces
+- [ ] Staged soak artifact bundle attached
+- [ ] `verify-chains.json` attached and green
 
-## Gate 19: AVAX Canonicalization And Runtime
+## Launch-Chain Canonical Truth
 
-- [x] Shared registry schema linked:
-  [../../packages/hyperbet-chain-registry/src/index.ts](../../packages/hyperbet-chain-registry/src/index.ts)
-- [x] Shared and AVAX manifests linked:
-  [../../packages/hyperbet-deployments/contracts.json](../../packages/hyperbet-deployments/contracts.json),
-  [../../packages/hyperbet-avax/deployments/contracts.json](../../packages/hyperbet-avax/deployments/contracts.json)
-- [x] AVAX deploy workflows linked:
-  [../../.github/workflows/deploy-avax-pages.yml](../../.github/workflows/deploy-avax-pages.yml),
-  [../../.github/workflows/deploy-avax-keeper.yml](../../.github/workflows/deploy-avax-keeper.yml)
-- [ ] Canonical AVAX mainnet addresses committed from deployment evidence
-- [ ] Production AVAX runtime smoke attached
+- [x] Shared registry and gate linked:
+  [../../packages/hyperbet-chain-registry/src/index.ts](../../packages/hyperbet-chain-registry/src/index.ts),
+  [../../scripts/ci-gate-registry.ts](../../scripts/ci-gate-registry.ts)
+- [ ] Solana canonical `goldAmmMarketProgramId` committed from mainnet
+  deployment evidence
+- [ ] BSC canonical PM, AMM, perps, and governance fields committed from
+  mainnet deployment evidence
+- [ ] AVAX canonical PM, AMM, perps, and governance fields committed from
+  mainnet deployment evidence only if the AVAX lane is explicitly reactivated
 
-## Gate 20: Governance And Emergency Controls
+## Governance And Emergency Controls
 
-- [x] Oracle governance surface linked:
-  [../../packages/evm-contracts/contracts/DuelOutcomeOracle.sol](../../packages/evm-contracts/contracts/DuelOutcomeOracle.sol)
-- [x] Market pause surface linked:
-  [../../packages/evm-contracts/contracts/GoldClob.sol](../../packages/evm-contracts/contracts/GoldClob.sol)
-- [x] Deploy receipts/manifest writers linked:
-  [../../packages/evm-contracts/scripts/deploy.ts](../../packages/evm-contracts/scripts/deploy.ts),
-  [../../packages/evm-contracts/scripts/deploy-duel-oracle.ts](../../packages/evm-contracts/scripts/deploy-duel-oracle.ts)
 - [x] Governance and signer runbooks linked:
   [../runbooks/prediction-market-governance-and-emergency-controls.md](../runbooks/prediction-market-governance-and-emergency-controls.md),
   [../runbooks/signer-policy-and-key-rotation.md](../runbooks/signer-policy-and-key-rotation.md)
-- [ ] Production timelock, multisig, emergency, reporter, finalizer, and
-  challenger assignment tx hashes attached
+- [ ] Ownership-transfer, signer, and freeze tx hashes attached for all
+  launch-critical surfaces
+- [ ] Key-rotation completion recorded for any historically exposed deploy keys
 
-## Gate 23: Launch Evidence Package
+## Staging Provisioning
+
+- [ ] GitHub `staging` environment created
+- [ ] Required `HYPERBET_*_STAGING_*` vars and secrets loaded
+- [ ] Shared BSC testnet token addresses recorded in
+  [testnet-operations-ledger.md](testnet-operations-ledger.md)
+- [ ] Shared AVAX token addresses recorded only if the AVAX lane is explicitly
+  reactivated
+- [ ] Canary, admin, operator, and reporter wallets funded for staged proof and
+  staged soak
+
+## Audit Handoff Package
 
 - [x] Reviewer-facing release prep linked:
   [../prediction-market-release-prep.md](../prediction-market-release-prep.md)
@@ -61,14 +87,10 @@ Use this checklist with the candidate memo in
   [../hyperbet-production-deploy.md](../hyperbet-production-deploy.md)
 - [x] Runbook index linked:
   [../runbooks/README.md](../runbooks/README.md)
-- [x] Memo and checklist converted from blank templates into candidate docs
-
-## Gate 24: Audit Handoff Package
-
 - [ ] ABI freeze files refreshed and attached:
   [abi/gold_clob.abi.json](abi/gold_clob.abi.json),
   [abi/duel_outcome_oracle.abi.json](abi/duel_outcome_oracle.abi.json)
-- [x] Existing exploit/test evidence index linked:
-  [exploit-test-evidence-index.md](exploit-test-evidence-index.md)
-- [ ] Engineer `1`, `3`, and `4` artifacts attached
-- [ ] Final findings ledger and accepted residual risks attached
+- [ ] Residual-risk register attached:
+  [residual-risk-register.md](residual-risk-register.md)
+- [ ] Final findings ledger and accepted risks attached
+- [ ] Product-claim statement attached for wallet/account and rewards durability

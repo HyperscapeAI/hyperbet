@@ -1,68 +1,59 @@
-# Release Memo: RC Audit Handoff Candidate
+# Release Memo: Phase-1 RC Candidate
 
-This memo is the candidate-ready release summary for the prediction-market
-launch package as of March 13, 2026. It is intentionally written against
-concrete repo artifacts instead of blank placeholders.
+> **TL;DR:** This memo tracks the current release-candidate posture for the active `Solana + BSC` production-readiness gate, with `AVAX` preserved as an isolated follow-on lane. The repo now has full-product non-mainnet rails for `PM/CLOB duels + perps/models + internal AMM`, but launch is still blocked on canonical active-scope truth, staged environment provisioning, governance/evidence receipts, coordinated full-product smoke, and the external audit/remediation cycle.
 
 ## Release Candidate
 
-- Candidate label: `rc-2026-03-audit-handoff`
-- Freeze manifest: [manifests/rc-2026-03-audit-handoff-freeze.json](manifests/rc-2026-03-audit-handoff-freeze.json)
+- Candidate label: `rc-2026-03-phase1-launch`
+- Active closeout branch: `audit/develop-pm-hardening`
 - Release prep summary: [../prediction-market-release-prep.md](../prediction-market-release-prep.md)
 - Launch-ops evidence index: [launch-ops-evidence-index.md](launch-ops-evidence-index.md)
-- Release owner: fill at RC freeze
+- Freeze tracker: [prediction-market-launch-freeze-tracker.md](prediction-market-launch-freeze-tracker.md)
 
-## Launch Scope
+## Product Scope
 
-- Launch chains: Solana, BSC, AVAX
-- Current constraint: AVAX production rollout remains blocked until canonical
-  registry values and staged-proof artifacts are attached.
-- Required evidence gates for this lane: `14A`, `19`, `20`, `23`, `24`
+- Active production-readiness chains: `Solana`, `BSC`
+- Preserved but isolated follow-on lane: `AVAX`
+- Non-blocking add-chain lane: `Base`
+- User-facing launch surfaces:
+  - `PM/CLOB duels`
+  - `perps/models`
+- Internal launch-critical surface:
+  - `AMM` as headless MM and liquidity engine
 
-## Gate Summary
+## Repo Snapshot
 
-- Gate `14A`: proof rail is implemented in
-  [`scripts/staged-live-proof.ts`](../../scripts/staged-live-proof.ts) with
-  workflow support in
-  [../../.github/workflows/staged-live-proof.yml](../../.github/workflows/staged-live-proof.yml).
-  Real staged artifacts are still pending.
-- Gate `19`: AVAX runtime/deploy plumbing is wired through the shared registry,
-  manifests, deploy preflight, env audit, and AVAX deploy workflows. Canonical
-  mainnet addresses are still pending committed deployment evidence.
-- Gate `20`: EVM governance and emergency controls are implemented in
-  [../../packages/evm-contracts/contracts/DuelOutcomeOracle.sol](../../packages/evm-contracts/contracts/DuelOutcomeOracle.sol)
-  and
-  [../../packages/evm-contracts/contracts/GoldClob.sol](../../packages/evm-contracts/contracts/GoldClob.sol),
-  with operator guidance in
-  [../runbooks/prediction-market-governance-and-emergency-controls.md](../runbooks/prediction-market-governance-and-emergency-controls.md)
-  and
-  [../runbooks/signer-policy-and-key-rotation.md](../runbooks/signer-policy-and-key-rotation.md).
-- Gate `23`: release-facing deploy, runbook, memo, and checklist docs are now
-  linked and candidate-ready.
-- Gate `24`: ABI freeze files and the audit package scaffold exist, but final
-  handoff still depends on Engineer `1`, `3`, and `4` artifacts plus the live
-  Gate `14A` bundle.
+- PM-core hardening is merged.
+- AMM settlement implementation is materially stronger than before, but the
+  production settlement model still needs an explicit freeze.
+- Solana perps pause survives config freeze.
+- Solana full-product deploy, init, freeze, and verify paths include `lvr_amm`.
+- EVM deploy receipts and verification now cover PM, AMM, and perps.
+- Staged proof and soak rails now target launch-scope `pm`, `perps`, and `amm`
+  surfaces.
+
+## Blocking Items
+
+- active-scope launch constants, feature truth, and canonical registry fields
+  are still incomplete
+- GitHub staged environment vars and secrets are not provisioned yet
+- shared BSC testnet token addresses are still missing for local AMM/perps
+  rehearsal
+- governance transfer and freeze receipts are still pending
+- coordinated full-product staged smoke and evidence bundle are still pending
+- final audit packet, external audit, and remediation are still pending
 
 ## Evidence Links
 
-- Deploy guide: [../hyperbet-production-deploy.md](../hyperbet-production-deploy.md)
-- Staged proof runbook: [../runbooks/staged-live-proof.md](../runbooks/staged-live-proof.md)
-- Governance runbook:
-  [../runbooks/prediction-market-governance-and-emergency-controls.md](../runbooks/prediction-market-governance-and-emergency-controls.md)
-- Signer rotation runbook:
-  [../runbooks/signer-policy-and-key-rotation.md](../runbooks/signer-policy-and-key-rotation.md)
-- Audit checklist: [external-audit-package-checklist.md](external-audit-package-checklist.md)
-- Existing exploit/test evidence index:
-  [exploit-test-evidence-index.md](exploit-test-evidence-index.md)
+- [Production deploy guide](../hyperbet-production-deploy.md)
+- [Staged proof runbook](../runbooks/staged-live-proof.md)
+- [Soak runbook](../runbooks/pm-confidence-soak.md)
+- [Testnet operations ledger](testnet-operations-ledger.md)
+- [External audit checklist](external-audit-package-checklist.md)
 
-## Launch Decision Snapshot
+## Current Decision
 
 - Current decision: not ready for unrestricted real-funds launch
-- Blocking items:
-  - commit canonical AVAX mainnet registry values from deployment evidence
-  - complete effective AVAX wallet setup for governance and operator roles
-  - capture AVAX staged read-only and canary artifacts
-  - capture production timelock/multisig/emergency ownership transfer evidence
-  - merge final audit outputs from Engineers `1`, `3`, and `4`
-- Accepted residual-risk discussion can begin only after the blockers above are
-  closed and the freeze manifest is regenerated at the RC commit.
+- Next honest milestone: complete local Stage-A deploy and verify, provision the
+  staged environment, capture launch-scope staged proof and soak artifacts, and
+  then populate launch-chain canonical mainnet truth from final receipts

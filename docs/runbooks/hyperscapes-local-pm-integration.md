@@ -1,5 +1,7 @@
 # Hyperscapes Local PM Integration
 
+> **TL;DR:** This is the fastest local debug lane for the real `Hyperscapes -> Hyperbet` integration. It uses local Hyperscapes plus local keeper and UI, and it can optionally drive local BSC and AVAX write paths with anvil-backed deployments. For the EVM keeper path, the canonical upstream contract is the versioned authenticated bet-sync feed under `/api/internal/bet-sync/*`; the older `/api/streaming/state` route remains a compatibility and inspection surface. It is not the final signoff lane; release signoff still comes from staged proof and soak.
+
 This is the local integration path for prediction markets against the real
 Hyperscapes duel stack. It does **not** seed synthetic markets and it does
 **not** treat the game server as the Hyperbet API.
@@ -13,11 +15,15 @@ requirements.
 ## Architecture
 
 1. Hyperscapes is the duel event source.
-   - local game/server stack serves `GET /api/streaming/state`
+   - local game/server stack serves:
+     - `GET /api/internal/bet-sync/state`
+     - `GET /api/internal/bet-sync/events`
+     - `GET /api/streaming/state` for compatibility and inspection
    - duel lifecycle comes from the running game
 
 2. Hyperbet keeper is the bridge layer.
-   - polls the Hyperscapes streaming endpoint
+   - for the local EVM runner, consumes the versioned bet-sync feed
+   - older keepers may still poll the legacy streaming endpoint
    - optionally runs the keeper bot internally
    - exposes:
      - `/status`
@@ -30,7 +36,13 @@ requirements.
    - `VITE_GAME_WS_URL=ws://127.0.0.1:5555/ws`
 
 This split is required because the Hyperscapes server provides duel telemetry,
-while the keeper service provides prediction-market state.
+while the keeper service provides prediction-market state and chain-specific
+market views.
+
+For the richer feed path, Hyperscapes protects `/api/internal/bet-sync/*` with
+`BETTING_FEED_ACCESS_TOKEN` unless an explicit local development bypass is
+enabled. Treat that token as part of the keeper-to-game contract, not as a UI
+credential.
 
 For local write-path smoke, the runner can boot fresh anvil-backed BSC and
 AVAX deployments before starting the keeper. That path seeds fresh local EVM
@@ -106,9 +118,9 @@ There are two separate wallet classes:
    - used by the UI for order placement and claims
    - private keys stay local under `keys/local-smoke/`
    - public addresses are tracked in
-     [local-smoke-wallets.json](/Users/mac/Desktop/hyperbet/.claude/worktrees/blissful-golick/docs/release/evidence/local-smoke-wallets.json)
+     [local-smoke-wallets.json](../release/evidence/local-smoke-wallets.json)
    - GitHub can fund them through
-     [fund-local-smoke-wallets.yml](/Users/mac/Desktop/hyperbet/.claude/worktrees/blissful-golick/.github/workflows/fund-local-smoke-wallets.yml)
+     [fund-local-smoke-wallets.yml](../../.github/workflows/fund-local-smoke-wallets.yml)
 
 2. Keeper writer wallets
    - required for deployed testnet market automation
@@ -127,6 +139,17 @@ From the Hyperbet repo root:
 bash scripts/run-hyperscapes-pm-local.sh
 ```
 
+Repo location discovery:
+
+- the runner first honors `HYPERSCAPES_ROOT` if you set it explicitly
+- otherwise it auto-detects common sibling locations such as:
+  - `<workspace>/.worktrees/hyperscapes-main-latest-e2e`
+  - `<workspace>/hyperscapes-main-latest-e2e`
+  - `<workspace>/.worktrees/hyperscapes-stream-bet-sync`
+  - `<workspace>/hyperscapes-stream-bet-sync`
+- if your Hyperscapes checkout was moved elsewhere, set
+  `HYPERSCAPES_ROOT=/abs/path/to/hyperscapes`
+
 Defaults:
 
 - Hyperscapes game/server: `http://127.0.0.1:5555`
@@ -135,6 +158,9 @@ Defaults:
 - EVM keeper chain scope: `bsc,avax`
 - Hyperscapes chain bootstrap: skipped
 - Hyperscapes node env: `development`
+- interactive UI opening: disabled by default
+- local monitor browser mode: headless by default
+- screenshot viewport: `1280x720`
 
 The script:
 
@@ -144,14 +170,41 @@ The script:
    `packages/hyperbet-bsc/app/tests/e2e/` and
    `packages/hyperbet-avax/app/tests/e2e/`
 3. starts the local Hyperbet EVM keeper service against
-   `http://127.0.0.1:5555/api/streaming/state`
+   `http://127.0.0.1:5555/api/internal/bet-sync/state` and
+   `http://127.0.0.1:5555/api/internal/bet-sync/events`, with
+   `http://127.0.0.1:5555/api/streaming/state` retained as the compatibility
+   stream source
 4. starts the local Hyperbet EVM app pointed at the keeper service
-5. opens both local UIs by default:
-   - Hyperscapes stream UI: `http://127.0.0.1:3333/stream.html`
-   - Hyperbet EVM UI: `http://127.0.0.1:4179/?debug`
-6. starts the PM soak follow monitor in the background, which records JSON
+5. keeps UI opening off by default; manual browser launch is opt-in through
+   `OPEN_LOCAL_UI=true`
+6. can start the PM soak follow monitor in the background, which records JSON
    state plus paired UI screenshots into:
    - `output/playwright/pm-soak/<timestamp>/`
+   - screenshots are captured headlessly at `1280x720` unless overridden
+
+The default Hyperbet local page is now the normal betting surface:
+
+- `http://127.0.0.1:4179/`
+
+The `?debug=1` query is optional and only enables hidden E2E/operator controls.
+It is not required for the real local betting flow or for headless stream
+validation.
+
+Monitor and harness controls are explicit:
+- `PM_E2E_MONITOR=true|false` toggles `scripts/pm-soak-monitor.ts`
+- `PM_E2E_FULL_SOAK=true|false` toggles `scripts/soak-harness.ts`
+- `PW_HEADLESS=1` keeps Playwright headless
+- `PW_BROWSER_CHANNEL=chrome` is the preferred macOS local setting
+- `PW_WEBGPU_ARGS="--enable-unsafe-webgpu"` keeps the local stream renderer on
+  the headless WebGPU lane
+- `PM_SOAK_SCREENSHOT_WIDTH=1280`
+- `PM_SOAK_SCREENSHOT_HEIGHT=720`
+
+`PM_E2E_MONITOR` defaults to the value of `CAPTURE_LOCAL_UI_FLOW`.
+
+When you enable `PM_E2E_FULL_SOAK=true`, the runner also starts
+`scripts/soak-harness.ts` so the same local session executes an additional
+PM-AMM + perps path against local BSC and active stream cycles.
 
 The PM soak monitor records key incidences automatically:
 
@@ -166,10 +219,10 @@ The PM soak monitor records key incidences automatically:
 
 The runner auto-loads these gitignored local env files when present:
 
-- `/Users/mac/Desktop/hyperbet/.claude/worktrees/blissful-golick/.env.stage-a.testnet.local`
-- `/Users/mac/Desktop/hyperbet/.claude/worktrees/blissful-golick/.env.testnet.local`
-- `/Users/mac/Desktop/hyperbet/.claude/worktrees/blissful-golick/packages/hyperbet-evm/keeper/.env`
-- `/Users/mac/Desktop/hyperbet/.claude/worktrees/blissful-golick/packages/hyperbet-evm/app/.env.local`
+- `<repo-root>/.env.stage-a.testnet.local`
+- `<repo-root>/.env.testnet.local`
+- `<repo-root>/packages/hyperbet-evm/keeper/.env`
+- `<repo-root>/packages/hyperbet-evm/app/.env.local`
 
 Relevant writer env names:
 
@@ -199,6 +252,19 @@ HYPERSCAPES_SKIP_CHAIN_SETUP=false bash scripts/run-hyperscapes-pm-local.sh
 HYPERSCAPES_DUEL_NODE_ENV=production JWT_SECRET=... bash scripts/run-hyperscapes-pm-local.sh
 OPEN_LOCAL_UI=false bash scripts/run-hyperscapes-pm-local.sh
 CAPTURE_LOCAL_UI_FLOW=false bash scripts/run-hyperscapes-pm-local.sh
+HYPERBET_UI_DEBUG=true bash scripts/run-hyperscapes-pm-local.sh
+PM_E2E_MONITOR=true \
+PM_E2E_FULL_SOAK=true \
+PM_SOAK_LOCAL_DURATION_MIN=25 \
+PM_E2E_HARNESS_DURATION_MIN=25 \
+bash scripts/run-hyperscapes-pm-local.sh
+
+# Full E2E without local monitor/UI capture:
+OPEN_LOCAL_UI=false \
+PM_E2E_MONITOR=false \
+PM_E2E_FULL_SOAK=true \
+PM_E2E_HARNESS_DURATION_MIN=25 \
+bash scripts/run-hyperscapes-pm-local.sh
 ```
 
 ## Acceptance
@@ -206,21 +272,23 @@ CAPTURE_LOCAL_UI_FLOW=false bash scripts/run-hyperscapes-pm-local.sh
 Minimum healthy local integrated state:
 
 1. `GET http://127.0.0.1:5555/api/streaming/state` returns live duel state.
-2. `GET http://127.0.0.1:8080/status` returns keeper health.
-3. `GET http://127.0.0.1:8080/api/arena/prediction-markets/active` returns
+2. `GET http://127.0.0.1:5555/api/internal/bet-sync/state` returns a versioned
+   betting-feed payload when the local token contract is satisfied.
+3. `GET http://127.0.0.1:8080/status` returns keeper health.
+4. `GET http://127.0.0.1:8080/api/arena/prediction-markets/active` returns
    prediction-market state.
-4. `http://127.0.0.1:4179` loads with duel telemetry from Hyperscapes and
+5. `http://127.0.0.1:4179` loads with duel telemetry from Hyperscapes and
    prediction markets from the keeper service.
-5. With writer authority present locally, a live duel should drive:
+6. With writer authority present locally, a live duel should drive:
    - market open
    - market lock
    - oracle proposal/finalization
    - claimable resolved state
 
-6. If local writer authority is intentionally absent, the truthful expected
+7. If local writer authority is intentionally absent, the truthful expected
    state is:
    - live duel state visible in keeper and UI
    - empty `markets[]` on `/api/arena/prediction-markets/active`
    - `ENABLE_KEEPER_BOT=false`
-7. The local evidence bundle contains paired Hyperscapes and Hyperbet UI
+8. The local evidence bundle contains paired Hyperscapes and Hyperbet UI
    screenshots plus the backing keeper/game JSON for each captured incidence.

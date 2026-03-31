@@ -1,69 +1,71 @@
 # Launch Ops Evidence Index
 
-This index ties Gates `14A`, `19`, `20`, `23`, and `24` to concrete repo
-artifacts and notes what still requires live environment evidence before final
-release signoff.
+> **TL;DR:** The repo now contains the full phase-1 non-mainnet proving rails for `PM + perps + internal AMM` plus the surrounding app-shell and account surfaces, but the evidence bundle is still incomplete. The active production-readiness path is `Solana + BSC`; AVAX evidence is preserved but isolated and non-blocking. The remaining gaps are real staged environment provisioning, recorded Stage-A receipts, truthful active-scope registry values, frozen app-shell/account-surface evidence, governance transfer/freeze receipts, and the final audit freeze packet.
 
-## Gate 14A: Staged Live Proof
+This index ties the current launch closeout work to concrete repo artifacts and
+records what still needs live evidence before release signoff.
 
-| Surface | Path | Status |
-|---|---|---|
-| Proof driver | `scripts/staged-live-proof.ts` | Merged with `solana`, `bsc`, and `avax` targets. |
-| Manual workflow | `.github/workflows/staged-live-proof.yml` | Supports `target=avax`. |
-| Operator runbook | `docs/runbooks/staged-live-proof.md` | Updated for AVAX read-only, canary, and env-audit flow. |
-| AVAX canary entrypoint | `packages/hyperbet-avax/keeper/src/staged-proof-avax.ts` | Added; mirrors BSC canary shape. |
-| Expected artifact bundle | `.ci-artifacts/staged-live-proof/{summary.json,verify-chains.json,solana/*,bsc/*,avax/*}` | Pending a real staged execution with staging secrets. |
+Detailed implementation work is tracked in:
 
-## Gate 19: AVAX Canonicalization And Runtime Rails
+- [GitHub Project Production Backlog](github-project-production-backlog.md)
+- [Runtime Integration Readiness Matrix](runtime-integration-readiness-matrix.md)
+- [Tracking Document Map](tracking-document-map.md)
+
+## Phase-1 Non-Mainnet Proving
 
 | Surface | Path | Status |
 |---|---|---|
-| Shared registry schema | `packages/hyperbet-chain-registry/src/index.ts` | Governance-aware AVAX metadata fields added. |
-| Shared manifest | `packages/hyperbet-deployments/contracts.json` | New governance fields present for all EVM chains. |
-| AVAX package manifest | `packages/hyperbet-avax/deployments/contracts.json` | Governance fields present; production values still blank. |
-| Env/runtime audit | `scripts/ci-env-audit.ts` | AVAX staging app audit now expects real staging values. |
-| AVAX deploy preflight | `packages/hyperbet-avax/scripts/preflight-contract-deploy.ts` | Requires explicit governance env on mainnet deploys. |
-| AVAX deploy workflows | `.github/workflows/deploy-avax-pages.yml`, `.github/workflows/deploy-avax-keeper.yml` | Repo-backed staging and production rails exist. |
+| Local Stage-A runner | `scripts/run-local-stage-a.ts` | Merged; ready to orchestrate local-first bring-up once secrets and shared token addresses are present. |
+| Staged proof driver | `scripts/staged-live-proof.ts` | Merged with `pm`, `perps`, and `amm` canary surfaces per chain. |
+| Staged proof workflow | `.github/workflows/staged-live-proof.yml` | Merged; blocked on staged env provisioning. |
+| Staged proof runbook | `docs/runbooks/staged-live-proof.md` | Updated for launch-scope proof and staged env contract. |
+| Soak workflow | `.github/workflows/pm-soak.yml` | Merged; blocked on staged env provisioning and funded canary wallets. |
+| Soak runbook | `docs/runbooks/pm-confidence-soak.md` | Updated for launch-scope staged soak and local-first execution. |
+| Expected artifact bundle | `.ci-artifacts/staged-live-proof/{summary.json,verify-chains.json,solana/*,bsc/*,avax/*}` | Pending first real staged execution. |
+| Expected soak bundle | `.ci-artifacts/pm-soak/*` | Pending first real staged execution. |
 
-Canonical AVAX mainnet contract values are still pending committed deployment
-evidence. Final Gate `19` signoff stays blocked until those values are written
-into the shared registry and manifest.
-
-## Gate 20: Governance And Emergency Controls
+## Launch-Chain Canonical Truth
 
 | Surface | Path | Status |
 |---|---|---|
-| Oracle pause and role separation | `packages/evm-contracts/contracts/DuelOutcomeOracle.sol` | Added pauser role plus distinct reporter/finalizer/challenger surfaces. |
-| Market pause controls | `packages/evm-contracts/contracts/GoldClob.sol` | Added pause surfaces for market creation and order placement. |
-| Deploy wiring | `packages/evm-contracts/scripts/deploy.ts`, `packages/evm-contracts/scripts/deploy-duel-oracle.ts` | Writes timelock/multisig/emergency metadata into receipts and manifests. |
-| Hardhat tests | `packages/evm-contracts/test/DuelOutcomeOracle.ts`, `packages/evm-contracts/test/GoldClob.ts` | Covers pause gating and role rotation. |
-| Runbooks | `docs/runbooks/prediction-market-governance-and-emergency-controls.md`, `docs/runbooks/signer-policy-and-key-rotation.md` | Added operator evidence and signer policy guidance. |
+| Shared registry schema | `packages/hyperbet-chain-registry/src/index.ts` | Full-product launch gating is merged. |
+| Launch registry gate | `scripts/ci-gate-registry.ts` | Develop-side PRs now validate the Stage-A closeout registry contract (`Solana devnet + BSC testnet`, AVAX deferred); strict launch-branch runs still enforce canonical mainnet truth. |
+| Canonical EVM receipt writer | `packages/evm-contracts/scripts/deployment-receipt.ts` | Merged; writes registry-shaped PM, AMM, and perps fields. |
+| EVM verify script | `packages/evm-contracts/scripts/verify-deployment.ts` | Merged; full-product verification exists. |
+| Solana verify script | `packages/hyperbet-solana/scripts/verify-deployment.ts` | Merged; full-product verification now includes AMM. |
 
-Production ownership-transfer tx hashes and final role-assignment receipts are
-still pending live deploy execution.
+Canonical launch truth is still missing for:
 
-## Gate 23: Launch Evidence Packaging
+- `solana`: `goldAmmMarketProgramId`
+- `bsc`: AMM and perps canonical fields
+- `avax`: PM-core plus AMM and perps canonical fields remain preserved
+  follow-on work and are not blocking the active scope
 
-| Surface | Path | Status |
-|---|---|---|
-| Release prep summary | `docs/prediction-market-release-prep.md` | Updated reviewer-facing status for AVAX launch plumbing. |
-| Release memo | `docs/release/release-memo-template.md` | Converted into a candidate-ready memo scaffold with linked evidence. |
-| Audit checklist | `docs/release/external-audit-package-checklist.md` | Converted into a concrete handoff checklist. |
-| Deploy guide | `docs/hyperbet-production-deploy.md` | AVAX staging/prod workflow and proof expectations documented. |
-| Runbook index | `docs/runbooks/README.md` | Links governance, signer, and staged-proof runbooks. |
-
-## Gate 24: Audit Handoff Package
+## Governance And Operational Control
 
 | Surface | Path | Status |
 |---|---|---|
-| ABI freeze bundle | `docs/release/abi/gold_clob.abi.json`, `docs/release/abi/duel_outcome_oracle.abi.json` | Must match the committed EVM contract surfaces. |
-| Freeze manifest | `docs/release/manifests/rc-2026-03-audit-handoff-freeze.json` | Candidate freeze file; regenerate at final RC cut. |
-| Existing evidence index | `docs/release/exploit-test-evidence-index.md` | Carries exploit and scenario evidence expectations. |
-| Engineer inputs | `docs/release/issues/engineer-1-evm-protocol-safety.md`, `docs/release/issues/engineer-3-integration-parity.md`, `docs/release/issues/engineer-4-mm-durability.md` | Final audit bundle still depends on these lanes' artifacts. |
+| Governance and emergency runbook | `docs/runbooks/prediction-market-governance-and-emergency-controls.md` | Present and linked. |
+| Signer and key-rotation runbook | `docs/runbooks/signer-policy-and-key-rotation.md` | Present and linked. |
+| Freeze tracker | `docs/release/prediction-market-launch-freeze-tracker.md` | Current source for repo-side closeout status. |
+| Release prep summary | `docs/prediction-market-release-prep.md` | Updated for launch-scope repo reality. |
 
-## Remaining Blocking Evidence
+Remaining live evidence:
 
-- committed AVAX mainnet canonical addresses from deployment evidence
-- staged-proof read-only and canary artifacts for AVAX
-- production ownership-transfer and role-assignment tx hashes
-- final freeze manifest regenerated at the actual release-candidate commit
+- ownership-transfer transaction hashes
+- final freeze transactions per launch surface
+- signer provisioning and key-rotation completion
+
+## Current Operational Blockers
+
+These are blocker summaries only. Detailed owner tickets live in the canonical
+backlog.
+
+- no GitHub `staging` environment exists yet
+- no `HYPERBET_*_STAGING_*` vars or secrets are provisioned yet
+- local BSC AMM/perps bring-up still needs shared token addresses
+- no real staged proof artifact bundle exists yet
+- no real staged soak artifact bundle exists yet
+- no frozen full-app acceptance bundle exists yet for wallet/account,
+  claims/positions, and points/referral surfaces
+- no truthful launch-chain mainnet registry population exists yet
