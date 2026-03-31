@@ -12,7 +12,6 @@ import {
   type UiLocale,
 } from "@hyperbet/ui/i18n";
 import { BN } from "@coral-xyz/anchor";
-import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import {
   type AccountMeta,
   ComputeBudgetProgram,
@@ -340,8 +339,8 @@ interface SolanaClobPanelProps {
   compact?: boolean;
   onMarketSnapshot?: (snapshot: SolanaClobMarketSnapshot) => void;
   locale?: UiLocale;
-  connectionOverride?: Connection;
-  walletOverride?: SigningWalletLike;
+  connectionOverride: Connection;
+  walletOverride: SigningWalletLike;
 }
 
 export interface SolanaClobMarketSnapshot {
@@ -366,10 +365,8 @@ export function SolanaClobPanel({
 }: SolanaClobPanelProps) {
   const resolvedLocale = resolveUiLocale(locale);
   const isE2eMode = import.meta.env.MODE === "e2e" || import.meta.env.DEV;
-  const { connection: adapterConnection } = useConnection();
-  const adapterWallet = useWallet();
-  const connection = connectionOverride ?? adapterConnection;
-  const wallet = walletOverride ?? adapterWallet;
+  const connection = connectionOverride;
+  const wallet = walletOverride;
   const { state: streamingState } = useStreamingState();
 
   const [status, setStatus] = useState(() =>
