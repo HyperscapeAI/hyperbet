@@ -399,17 +399,25 @@ const resolvedGameApiUrl = envGameApiUrl ?? baseEnvConfig.gameApiUrl;
 const envGameWsUrl = readEnvString("VITE_GAME_WS_URL");
 const resolvedGameWsUrl =
   envGameWsUrl ?? `${resolvedGameApiUrl.replace(/^http/, "ws")}/ws`;
+const envStreamUrl = readEnvString("VITE_STREAM_URL");
+const envStreamSources = parseEnvList(readEnvString("VITE_STREAM_SOURCES"));
+const suppressDefaultStreamFallback =
+  envStreamUrl == null &&
+  envStreamSources.length === 0 &&
+  envGameApiUrl != null &&
+  envGameApiUrl !== baseEnvConfig.gameApiUrl;
 const defaultPrimaryStreamUrl =
-  readEnvString("VITE_STREAM_URL") ?? baseEnvConfig.streamUrl;
+  envStreamUrl ?? (suppressDefaultStreamFallback ? "" : baseEnvConfig.streamUrl);
 const resolvedStreamSources = (() => {
-  const fromListVar = parseEnvList(readEnvString("VITE_STREAM_SOURCES"));
-  if (fromListVar.length > 0) {
-    return uniqueList(fromListVar);
+  if (envStreamSources.length > 0) {
+    return uniqueList(envStreamSources);
   }
   const envFallbackUrl = readEnvString("VITE_STREAM_FALLBACK_URL");
   const fallbackUrl =
     envFallbackUrl ??
-    (defaultPrimaryStreamUrl ? DEFAULT_STREAM_FALLBACK_URL : "");
+    (defaultPrimaryStreamUrl && !suppressDefaultStreamFallback
+      ? DEFAULT_STREAM_FALLBACK_URL
+      : "");
   return uniqueList([defaultPrimaryStreamUrl, fallbackUrl ?? ""]).filter(
     (value) => value.length > 0,
   );
