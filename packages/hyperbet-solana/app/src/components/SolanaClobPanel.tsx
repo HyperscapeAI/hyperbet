@@ -6,11 +6,11 @@ import {
 
 import { useAppConnection, useAppWallet } from "../lib/appWallet";
 
-type SharedProps = ComponentProps<typeof SharedSolanaClobPanel>;
+type WrapperProps = Omit<ComponentProps<typeof SharedSolanaClobPanel>, "connectionOverride" | "walletOverride">;
 
 export type { SolanaClobMarketSnapshot };
 
-export function SolanaClobPanel(props: SharedProps) {
+export function SolanaClobPanel(props: WrapperProps) {
   const { connection } = useAppConnection();
   const wallet = useAppWallet();
 

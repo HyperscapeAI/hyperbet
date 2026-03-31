@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react";
+import { Connection } from "@solana/web3.js";
 import { SolanaClobPanel } from "../src/components/SolanaClobPanel";
 import { StorySurface } from "./storySupport";
 
@@ -17,6 +18,8 @@ const meta = {
     agent1Name: "StormWarden",
     agent2Name: "JadePhoenix",
     compact: false,
+    connectionOverride: new Connection("https://api.devnet.solana.com"),
+    walletOverride: { publicKey: null },
   },
 } satisfies Meta<typeof SolanaClobPanel>;
 
