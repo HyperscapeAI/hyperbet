@@ -525,6 +525,8 @@ export function EvmBettingPanel({
   );
 
   const lastSnapshotRef = useRef<{ a: bigint; b: bigint }>({ a: 0n, b: 0n });
+  const refreshDataRef = useRef<() => Promise<void>>(async () => {});
+  const refreshDataInFlightRef = useRef<Promise<void> | null>(null);
 
   const cycle = streamingState?.cycle ?? null;
   const streamedDuelKeyHex =
@@ -874,23 +876,41 @@ export function EvmBettingPanel({
   ]);
 
   useEffect(() => {
-    void refreshData();
-    const id = setInterval(() => void refreshData(), 5000);
-    return () => clearInterval(id);
+    refreshDataRef.current = refreshData;
   }, [refreshData]);
+
+  const requestRefreshData = useCallback(() => {
+    if (refreshDataInFlightRef.current) {
+      return refreshDataInFlightRef.current;
+    }
+
+    const pendingRefresh = refreshDataRef.current().finally(() => {
+      if (refreshDataInFlightRef.current === pendingRefresh) {
+        refreshDataInFlightRef.current = null;
+      }
+    });
+    refreshDataInFlightRef.current = pendingRefresh;
+    return pendingRefresh;
+  }, []);
+
+  useEffect(() => {
+    void requestRefreshData();
+    const id = setInterval(() => void requestRefreshData(), 5000);
+    return () => clearInterval(id);
+  }, [requestRefreshData]);
 
   useEffect(() => {
     const handleMarketRefresh = () => {
       const refreshLifecycleSource =
         onLifecycleRefreshRequested ?? refreshLifecycle;
       void refreshLifecycleSource();
-      void refreshData();
+      void requestRefreshData();
     };
     window.addEventListener("hyperbet:market-refresh", handleMarketRefresh);
     return () => {
       window.removeEventListener("hyperbet:market-refresh", handleMarketRefresh);
     };
-  }, [onLifecycleRefreshRequested, refreshData, refreshLifecycle]);
+  }, [onLifecycleRefreshRequested, refreshLifecycle, requestRefreshData]);
 
   useEffect(() => {
     setOptimisticPosition(null);
@@ -1022,7 +1042,7 @@ export function EvmBettingPanel({
       setStatus(copy.orderPlaced);
       setIsSubmitting(false);
       void recordPredictionMarketTrade(trackingInput);
-      void refreshData();
+      void requestRefreshData();
     } catch (error) {
       setLastOrderErrorDetail(
         error instanceof Error ? error.stack ?? error.message : String(error),
@@ -1045,7 +1065,7 @@ export function EvmBettingPanel({
     position,
     priceInput,
     publicClient,
-    refreshData,
+    requestRefreshData,
     side,
     tradeFeeBps,
     activeLifecycleMarket?.marketRef,
@@ -1081,7 +1101,7 @@ export function EvmBettingPanel({
       await publicClient?.waitForTransactionReceipt({ hash: tx });
       setOptimisticPosition(null);
       setStatus(copy.claimComplete);
-      await refreshData();
+      await requestRefreshData();
     } catch (error) {
       setStatus(copy.claimFailed((error as Error).message));
     }
@@ -1093,7 +1113,7 @@ export function EvmBettingPanel({
     effectiveWriteAccount,
     effectiveWalletClient,
     publicClient,
-    refreshData,
+    requestRefreshData,
   ]);
 
   const yesPercent =
