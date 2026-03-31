@@ -1491,7 +1491,7 @@ export function App() {
                 <button
                   data-testid="surface-mode-duels"
                   className={`hm-view-tab ${surfaceMode === "DUELS" ? "hm-view-tab--active" : ""}`}
-                  onClick={() => startTransition(() => setSurfaceMode("DUELS"))}
+                  onClick={() => setSurfaceMode("DUELS")}
                   type="button"
                 >
                   {copy.duels}
@@ -1499,9 +1499,7 @@ export function App() {
                 <button
                   data-testid="surface-mode-models"
                   className={`hm-view-tab ${surfaceMode === "MODELS" ? "hm-view-tab--active" : ""}`}
-                  onClick={() =>
-                    startTransition(() => setSurfaceMode("MODELS"))
-                  }
+                  onClick={() => setSurfaceMode("MODELS")}
                   type="button"
                 >
                   {copy.models}
@@ -1529,7 +1527,7 @@ export function App() {
                 <button
                   data-testid="surface-mode-duels"
                   className={`hm-view-tab ${surfaceMode === "DUELS" ? "hm-view-tab--active" : ""}`}
-                  onClick={() => startTransition(() => setSurfaceMode("DUELS"))}
+                  onClick={() => setSurfaceMode("DUELS")}
                   type="button"
                 >
                   {copy.duels}
@@ -1537,9 +1535,7 @@ export function App() {
                 <button
                   data-testid="surface-mode-models"
                   className={`hm-view-tab ${surfaceMode === "MODELS" ? "hm-view-tab--active" : ""}`}
-                  onClick={() =>
-                    startTransition(() => setSurfaceMode("MODELS"))
-                  }
+                  onClick={() => setSurfaceMode("MODELS")}
                   type="button"
                 >
                   {copy.models}
