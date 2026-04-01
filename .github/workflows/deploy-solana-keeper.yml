@@ -44,7 +44,7 @@ jobs:
       - name: Resolve deployment target
         run: |
           deploy_target="production"
-          keeper_url="${{ vars.HYPERBET_SOLANA_KEEPER_URL != '' && vars.HYPERBET_SOLANA_KEEPER_URL || 'https://api.hyperbet.win' }}"
+          keeper_url="${{ vars.HYPERBET_SOLANA_KEEPER_URL != '' && vars.HYPERBET_SOLANA_KEEPER_URL || vars.HYPERBET_PRODUCTION_KEEPER_URL }}"
           railway_project_id="${{ vars.HYPERBET_SOLANA_RAILWAY_PROJECT_ID != '' && vars.HYPERBET_SOLANA_RAILWAY_PROJECT_ID || 'e5f5ba11-0380-4d71-aa0b-343d89a58c0d' }}"
           railway_environment_id="${{ vars.HYPERBET_SOLANA_RAILWAY_PRODUCTION_ENVIRONMENT_ID != '' && vars.HYPERBET_SOLANA_RAILWAY_PRODUCTION_ENVIRONMENT_ID || '194f3565-ba2f-4c98-87d2-85dfc3a5110b' }}"
           railway_service_id="${{ vars.HYPERBET_SOLANA_RAILWAY_KEEPER_SERVICE_ID != '' && vars.HYPERBET_SOLANA_RAILWAY_KEEPER_SERVICE_ID || '330ea18e-b215-4cf9-9fe2-4bb09fc2ec63' }}"

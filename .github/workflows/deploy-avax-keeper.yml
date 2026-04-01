@@ -45,7 +45,7 @@ jobs:
       - name: Resolve deployment target
         run: |
           deploy_target="production"
-          keeper_url="${{ vars.HYPERBET_AVAX_KEEPER_URL != '' && vars.HYPERBET_AVAX_KEEPER_URL || 'https://avax-api.hyperbet.win' }}"
+          keeper_url="${{ vars.HYPERBET_AVAX_KEEPER_URL != '' && vars.HYPERBET_AVAX_KEEPER_URL || vars.HYPERBET_PRODUCTION_KEEPER_URL }}"
           railway_project_id="${{ vars.HYPERBET_AVAX_RAILWAY_PROJECT_ID != '' && vars.HYPERBET_AVAX_RAILWAY_PROJECT_ID || '' }}"
           railway_environment_id="${{ vars.HYPERBET_AVAX_RAILWAY_PRODUCTION_ENVIRONMENT_ID != '' && vars.HYPERBET_AVAX_RAILWAY_PRODUCTION_ENVIRONMENT_ID || '' }}"
           railway_service_id="${{ vars.HYPERBET_AVAX_RAILWAY_KEEPER_SERVICE_ID != '' && vars.HYPERBET_AVAX_RAILWAY_KEEPER_SERVICE_ID || '' }}"
