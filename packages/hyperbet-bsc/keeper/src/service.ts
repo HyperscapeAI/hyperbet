@@ -140,6 +140,11 @@ type RateBucket = {
   lastRefillMs: number;
 };
 
+type RateLimitResult = {
+  allowed: boolean;
+  retryAfterSeconds: number;
+};
+
 type JsonRpcRequestPayload = Record<string, unknown> & {
   method: string;
 };
@@ -1664,9 +1669,12 @@ function checkRateLimit(
   pathname: string,
   limitPerMinute: number,
   burst: number,
-): boolean {
+): RateLimitResult {
   if (DISABLE_RATE_LIMIT) {
-    return true;
+    return {
+      allowed: true,
+      retryAfterSeconds: 0,
+    };
   }
 
   const now = Date.now();
@@ -1689,12 +1697,23 @@ function checkRateLimit(
 
   if (bucket.tokens < 1) {
     rateBuckets.set(key, bucket);
-    return false;
+    const deficit = 1 - bucket.tokens;
+    const retryAfterSeconds = Math.max(
+      1,
+      Math.ceil((deficit * 60) / limitPerMinute),
+    );
+    return {
+      allowed: false,
+      retryAfterSeconds,
+    };
   }
 
   bucket.tokens -= 1;
   rateBuckets.set(key, bucket);
-  return true;
+  return {
+    allowed: true,
+    retryAfterSeconds: 0,
+  };
 }
 
 function requireWriteAuth(
@@ -3090,14 +3109,24 @@ const server = Bun.serve({
   fetch: async (req: Request) => {
     const url = new URL(req.url);
     const isWriteRoute = isWriteRateLimitedRoute(req.method, url.pathname);
-    const allowed = checkRateLimit(
+    const rateLimit = checkRateLimit(
       req,
       url.pathname,
       isWriteRoute ? WRITE_RATE_LIMIT_PER_MINUTE : READ_RATE_LIMIT_PER_MINUTE,
       isWriteRoute ? WRITE_RATE_LIMIT_BURST : READ_RATE_LIMIT_BURST,
     );
-    if (!allowed) {
-      return jsonResponse(req, { error: "Rate limit exceeded" }, 429);
+    if (!rateLimit.allowed) {
+      return jsonResponse(
+        req,
+        {
+          error: "Rate limit exceeded",
+          retryAfterSeconds: rateLimit.retryAfterSeconds,
+        },
+        429,
+        {
+          "retry-after": String(rateLimit.retryAfterSeconds),
+        },
+      );
     }
 
     if (req.method === "OPTIONS") {
