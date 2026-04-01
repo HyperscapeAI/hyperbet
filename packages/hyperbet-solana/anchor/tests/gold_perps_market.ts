@@ -1919,4 +1919,79 @@ describe("gold_perps_market", () => {
       );
     }
   });
+
+  it("keeps emergency pause available after config freeze", async () => {
+    const config = configPda(program.programId);
+
+    await program.methods
+      .freezeConfig()
+      .accountsPartial({
+        config,
+        authority: authority.publicKey,
+      })
+      .signers([authority])
+      .rpc();
+
+    let configState = await program.account.configState.fetch(config);
+    assert.strictEqual(configState.configFrozen, true);
+
+    await program.methods
+      .setPaused(true)
+      .accountsPartial({
+        config,
+        authority: authority.publicKey,
+      })
+      .signers([authority])
+      .rpc();
+
+    configState = await program.account.configState.fetch(config);
+    assert.strictEqual(configState.paused, true);
+
+    await program.methods
+      .setPaused(false)
+      .accountsPartial({
+        config,
+        authority: authority.publicKey,
+      })
+      .signers([authority])
+      .rpc();
+
+    configState = await program.account.configState.fetch(config);
+    assert.strictEqual(configState.paused, false);
+
+    try {
+      await program.methods
+        .updateConfig(
+          authority.publicKey,
+          authority.publicKey,
+          authority.publicKey,
+          toBn(DEFAULT_SKEW_SCALE),
+          new anchor.BN(DEFAULT_FUNDING_VELOCITY),
+          new anchor.BN(DEFAULT_MAX_ORACLE_STALENESS_SECONDS),
+          toBn(DEFAULT_MIN_ORACLE_SPOT_INDEX),
+          toBn(DEFAULT_MAX_ORACLE_SPOT_INDEX),
+          DEFAULT_MAX_ORACLE_PRICE_DELTA_BPS,
+          toBn(DEFAULT_MAX_LEVERAGE),
+          toBn(DEFAULT_MIN_MARGIN),
+          toBn(DEFAULT_MAX_MARKET_OPEN_INTEREST),
+          toBn(DEFAULT_MIN_MARKET_INSURANCE),
+          DEFAULT_MAINTENANCE_MARGIN_BPS,
+          DEFAULT_LIQUIDATION_FEE_BPS,
+          DEFAULT_TRADE_TREASURY_FEE_BPS,
+          DEFAULT_TRADE_MARKET_MAKER_FEE_BPS,
+        )
+        .accountsPartial({
+          config,
+          authority: authority.publicKey,
+        })
+        .signers([authority])
+        .rpc();
+      assert.fail("update_config should remain frozen after freeze_config");
+    } catch (error: unknown) {
+      assert.ok(
+        hasProgramError(error, "ConfigFrozen"),
+        `expected ConfigFrozen, got ${String(error)}`,
+      );
+    }
+  });
 });

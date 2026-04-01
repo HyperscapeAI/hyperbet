@@ -86,6 +86,29 @@ function resolveRpcEndpoint(endpoint: string): string {
   return endpoint;
 }
 
+function isKeeperSolanaReadProxyEndpoint(endpoint: string): boolean {
+  try {
+    return new URL(resolveRpcEndpoint(endpoint)).pathname === "/api/proxy/solana/rpc";
+  } catch {
+    return false;
+  }
+}
+
+function resolveSolanaSenderEndpoint(endpoint: string): string {
+  const resolvedEndpoint = resolveRpcEndpoint(endpoint);
+  try {
+    const parsed = new URL(resolvedEndpoint);
+    if (parsed.pathname === "/api/proxy/solana/rpc") {
+      parsed.pathname = "/api/proxy/solana/sender";
+      parsed.search = "";
+      return parsed.toString();
+    }
+  } catch {
+    // Fall through to the resolved endpoint.
+  }
+  return resolvedEndpoint;
+}
+
 async function callJsonRpc<T>(
   endpoint: string,
   method: string,
@@ -121,6 +144,31 @@ async function callJsonRpc<T>(
   return payload.result;
 }
 
+async function sendTransactionViaProxySender(
+  endpoint: string,
+  wireTransactionBase64: string,
+): Promise<string> {
+  const response = await fetch(resolveSolanaSenderEndpoint(endpoint), {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      transaction: wireTransactionBase64,
+    }),
+  });
+
+  const payload = (await response.json()) as
+    | { signature: string }
+    | { error?: string };
+  if (!response.ok || !("signature" in payload)) {
+    throw new Error(
+      ("error" in payload && payload.error) || `sendTransaction HTTP ${response.status}`,
+    );
+  }
+  return payload.signature;
+}
+
 export async function getLatestBlockhashViaRpc(
   connection: Connection,
 ): Promise<{
@@ -144,6 +192,13 @@ export async function sendRawTransactionViaRpc(
   transaction: Transaction | VersionedTransaction,
 ): Promise<string> {
   const serialized = transaction.serialize();
+  const wireTransactionBase64 = Buffer.from(serialized).toString("base64");
+  if (isKeeperSolanaReadProxyEndpoint(connection.rpcEndpoint)) {
+    return sendTransactionViaProxySender(
+      connection.rpcEndpoint,
+      wireTransactionBase64,
+    );
+  }
   try {
     return await connection.sendRawTransaction(serialized, {
       preflightCommitment: "confirmed",
@@ -152,7 +207,7 @@ export async function sendRawTransactionViaRpc(
     });
   } catch {
     return callJsonRpc<string>(connection.rpcEndpoint, "sendTransaction", [
-      Buffer.from(serialized).toString("base64"),
+      wireTransactionBase64,
       {
         encoding: "base64",
         preflightCommitment: "confirmed",

@@ -34,6 +34,9 @@ vi.mock("ethers", () => {
     Wallet: MockWallet,
     Contract: MockContract,
     ethers: {
+      JsonRpcProvider: MockJsonRpcProvider,
+      Wallet: MockWallet,
+      Contract: MockContract,
       keccak256: vi.fn((val) => "mock-hash"),
       toUtf8Bytes: vi.fn(),
     },

@@ -1,5 +1,5 @@
 {
-  "address": "Af4LMYfaBtcFFM6dBjwLYH6QJLMqEwneQ8VHfn2z7NY5",
+  "address": "12E8Lz5w8Qxyj8Fh6LgsCgPDQNJMCLMV1y43LhPrH66w",
   "metadata": {
     "name": "lvr_amm",
     "version": "0.1.0",
@@ -1197,7 +1197,7 @@
         {
           "name": "amm_config",
           "docs": [
-            "Optional: AmmConfig for oracle program ID validation (required when duel_state is provided)"
+            "Optional to preserve the instruction interface, but required in practice for settlement validation."
           ],
           "optional": true,
           "pda": {
@@ -1223,8 +1223,7 @@
         {
           "name": "duel_state",
           "docs": [
-            "Optional: fight_oracle DuelState account. When provided, winner is read",
-            "from the oracle rather than trusting the caller's `side_won` argument."
+            "Optional to preserve the instruction interface, but required in practice for settlement validation."
           ],
           "optional": true
         }

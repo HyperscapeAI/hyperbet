@@ -24,8 +24,10 @@ import fightOracleIdl from "./idl/fight_oracle.json";
 import type { FightOracle } from "./idl/fight_oracle";
 import goldClobMarketIdl from "./idl/gold_clob_market.json";
 import type { GoldClobMarket } from "./idl/gold_clob_market";
+import goldAmmMarketIdl from "./idl/lvr_amm.json";
 import goldPerpsMarketIdl from "./idl/gold_perps_market.json";
 import type { GoldPerpsMarket } from "./idl/gold_perps_market";
+import type { LvrAmm } from "./idl/lvr_amm";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const keeperRoot = path.resolve(__dirname, "..");
@@ -43,7 +45,6 @@ const envClusterSuffix =
   configuredCluster === "mainnet" || configuredCluster === "mainnet-beta"
     ? "mainnet"
     : configuredCluster;
-const solanaDeployment = resolveBettingSolanaDeployment(configuredClusterRaw);
 
 // Load cluster-specific defaults first, then generic .env fallback.
 dotenv.config({ path: path.join(envRoot, `.env.${envClusterSuffix}`) });
@@ -192,43 +193,75 @@ function ensureIdlAddress(idlJson: unknown, programId: PublicKey): Idl {
   } as Idl;
 }
 
-export const FIGHT_ORACLE_PROGRAM_ID = resolveConfiguredProgramId(
-  process.env.FIGHT_ORACLE_PROGRAM_ID,
-  fightOracleIdl,
-  solanaDeployment.fightOracleProgramId,
-);
-export const GOLD_CLOB_MARKET_PROGRAM_ID = resolveConfiguredProgramId(
-  process.env.GOLD_CLOB_MARKET_PROGRAM_ID,
-  goldClobMarketIdl,
-  solanaDeployment.goldClobMarketProgramId,
-);
-export const GOLD_PERPS_MARKET_PROGRAM_ID = resolveConfiguredProgramId(
-  process.env.GOLD_PERPS_MARKET_PROGRAM_ID,
-  goldPerpsMarketIdl,
-  solanaDeployment.goldPerpsMarketProgramId,
-);
-export const GOLD_AMM_MARKET_PROGRAM_ID = resolveOptionalProgramId(
-  process.env.GOLD_AMM_MARKET_PROGRAM_ID,
-  solanaDeployment.goldAmmMarketProgramId,
-);
+function currentConfiguredClusterRaw(): string {
+  return (
+    process.env.SOLANA_CLUSTER ||
+    process.env.CLUSTER ||
+    process.env.VITE_SOLANA_CLUSTER ||
+    "mainnet-beta"
+  );
+}
+
+function currentSolanaDeployment() {
+  return resolveBettingSolanaDeployment(currentConfiguredClusterRaw());
+}
+
+export function resolveFightOracleProgramId(): PublicKey {
+  return resolveConfiguredProgramId(
+    process.env.FIGHT_ORACLE_PROGRAM_ID,
+    fightOracleIdl,
+    currentSolanaDeployment().fightOracleProgramId,
+  );
+}
+
+export function resolveGoldClobMarketProgramId(): PublicKey {
+  return resolveConfiguredProgramId(
+    process.env.GOLD_CLOB_MARKET_PROGRAM_ID,
+    goldClobMarketIdl,
+    currentSolanaDeployment().goldClobMarketProgramId,
+  );
+}
+
+export function resolveGoldPerpsMarketProgramId(): PublicKey {
+  return resolveConfiguredProgramId(
+    process.env.GOLD_PERPS_MARKET_PROGRAM_ID,
+    goldPerpsMarketIdl,
+    currentSolanaDeployment().goldPerpsMarketProgramId,
+  );
+}
+
+export function resolveGoldAmmMarketProgramId(): PublicKey | null {
+  return resolveOptionalProgramId(
+    process.env.GOLD_AMM_MARKET_PROGRAM_ID,
+    currentSolanaDeployment().goldAmmMarketProgramId,
+  );
+}
+
+export const FIGHT_ORACLE_PROGRAM_ID = resolveFightOracleProgramId();
+export const GOLD_CLOB_MARKET_PROGRAM_ID = resolveGoldClobMarketProgramId();
+export const GOLD_PERPS_MARKET_PROGRAM_ID = resolveGoldPerpsMarketProgramId();
+export const GOLD_AMM_MARKET_PROGRAM_ID = resolveGoldAmmMarketProgramId();
 
 /** @deprecated Binary market is no longer deployed. Retained for backward compat. */
 export const GOLD_BINARY_MARKET_PROGRAM_ID = new PublicKey(
   "7pxwReoFYABrSN7rnqusAxniKvrdv3zWDLoVamX5NN3W",
 );
 
-const FIGHT_ORACLE_IDL = ensureIdlAddress(
-  fightOracleIdl,
-  FIGHT_ORACLE_PROGRAM_ID,
- ) as FightOracle;
-const GOLD_CLOB_MARKET_IDL = ensureIdlAddress(
-  goldClobMarketIdl,
-  GOLD_CLOB_MARKET_PROGRAM_ID,
- ) as GoldClobMarket;
-const GOLD_PERPS_MARKET_IDL = ensureIdlAddress(
-  goldPerpsMarketIdl,
-  GOLD_PERPS_MARKET_PROGRAM_ID,
- ) as GoldPerpsMarket;
+function resolveFightOracleIdl(programId: PublicKey): FightOracle {
+  return ensureIdlAddress(fightOracleIdl, programId) as FightOracle;
+}
+
+function resolveGoldClobMarketIdl(programId: PublicKey): GoldClobMarket {
+  return ensureIdlAddress(goldClobMarketIdl, programId) as GoldClobMarket;
+}
+
+function resolveGoldPerpsMarketIdl(programId: PublicKey): GoldPerpsMarket {
+  return ensureIdlAddress(goldPerpsMarketIdl, programId) as GoldPerpsMarket;
+}
+
+function resolveGoldAmmMarketIdl(programId: PublicKey): LvrAmm {
+  return ensureIdlAddress(goldAmmMarketIdl, programId) as LvrAmm;
+}
 
 export type KeeperPrograms = {
   connection: Connection;
@@ -236,11 +269,16 @@ export type KeeperPrograms = {
   fightOracle: Program<FightOracle>;
   goldClobMarket: Program<GoldClobMarket>;
   goldPerpsMarket: Program<GoldPerpsMarket>;
+  goldAmmMarket: Program<LvrAmm> | null;
   /** @deprecated Binary market removed. Returns null. */
   goldBinaryMarket: null;
 };
 
 export function createPrograms(signer: Keypair): KeeperPrograms {
+  const fightOracleProgramId = resolveFightOracleProgramId();
+  const goldClobMarketProgramId = resolveGoldClobMarketProgramId();
+  const goldPerpsMarketProgramId = resolveGoldPerpsMarketProgramId();
+  const goldAmmMarketProgramId = resolveGoldAmmMarketProgramId();
   const connection = new Connection(getRpcUrl(), {
     commitment: "confirmed",
   });
@@ -251,17 +289,23 @@ export function createPrograms(signer: Keypair): KeeperPrograms {
   });
 
   const fightOracle = new Program(
-    FIGHT_ORACLE_IDL,
+    resolveFightOracleIdl(fightOracleProgramId),
     provider,
   ) as Program<FightOracle>;
   const goldClobMarket = new Program(
-    GOLD_CLOB_MARKET_IDL,
+    resolveGoldClobMarketIdl(goldClobMarketProgramId),
     provider,
   ) as Program<GoldClobMarket>;
   const goldPerpsMarket = new Program(
-    GOLD_PERPS_MARKET_IDL,
+    resolveGoldPerpsMarketIdl(goldPerpsMarketProgramId),
     provider,
   ) as Program<GoldPerpsMarket>;
+  const goldAmmMarket = goldAmmMarketProgramId
+    ? (new Program(
+        resolveGoldAmmMarketIdl(goldAmmMarketProgramId),
+        provider,
+      ) as Program<LvrAmm>)
+    : null;
 
   return {
     connection,
@@ -269,6 +313,7 @@ export function createPrograms(signer: Keypair): KeeperPrograms {
     fightOracle,
     goldClobMarket,
     goldPerpsMarket,
+    goldAmmMarket,
     goldBinaryMarket: null,
   };
 }
@@ -288,6 +333,12 @@ export const SIDE_ASK = 2;
 export const ORDER_BEHAVIOR_GTC = 0;
 export const ORDER_BEHAVIOR_IOC = 1;
 export const ORDER_BEHAVIOR_POST_ONLY = 2;
+
+function u64LeBuffer(value: bigint | number): Buffer {
+  const buffer = Buffer.alloc(8);
+  buffer.writeBigUInt64LE(BigInt(value), 0);
+  return buffer;
+}
 
 export function duelKeyHexToBytes(duelKeyHex: string): Uint8Array {
   const normalized = duelKeyHex.trim().toLowerCase();
@@ -351,10 +402,8 @@ export function findOrderPda(
   marketPda: PublicKey,
   orderId: bigint,
 ): PublicKey {
-  const orderIdBytes = Buffer.alloc(8);
-  orderIdBytes.writeBigUInt64LE(orderId);
   return PublicKey.findProgramAddressSync(
-    [Buffer.from("order"), marketPda.toBuffer(), orderIdBytes],
+    [Buffer.from("order"), marketPda.toBuffer(), u64LeBuffer(orderId)],
     marketProgramId,
   )[0];
 }
@@ -375,6 +424,81 @@ export function findPriceLevelPda(
       priceBytes,
     ],
     marketProgramId,
+  )[0];
+}
+
+export function findAmmAdminPda(ammProgramId: PublicKey): PublicKey {
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from("admin_state")],
+    ammProgramId,
+  )[0];
+}
+
+export function findAmmConfigPda(ammProgramId: PublicKey): PublicKey {
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from("amm_config")],
+    ammProgramId,
+  )[0];
+}
+
+export function findAmmBetPda(
+  ammProgramId: PublicKey,
+  betId: bigint | number,
+  creator: PublicKey,
+): PublicKey {
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from("bet"), u64LeBuffer(betId), creator.toBuffer()],
+    ammProgramId,
+  )[0];
+}
+
+export function findAmmMintYesPda(
+  ammProgramId: PublicKey,
+  betId: bigint | number,
+  creator: PublicKey,
+): PublicKey {
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from("mint_yes"), u64LeBuffer(betId), creator.toBuffer()],
+    ammProgramId,
+  )[0];
+}
+
+export function findAmmMintNoPda(
+  ammProgramId: PublicKey,
+  betId: bigint | number,
+  creator: PublicKey,
+): PublicKey {
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from("mint_no"), u64LeBuffer(betId), creator.toBuffer()],
+    ammProgramId,
+  )[0];
+}
+
+export function findPerpsConfigPda(perpsProgramId: PublicKey): PublicKey {
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from("config")],
+    perpsProgramId,
+  )[0];
+}
+
+export function findPerpsMarketPda(
+  perpsProgramId: PublicKey,
+  marketId: bigint | number,
+): PublicKey {
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from("market"), u64LeBuffer(marketId)],
+    perpsProgramId,
+  )[0];
+}
+
+export function findPerpsPositionPda(
+  perpsProgramId: PublicKey,
+  trader: PublicKey,
+  marketId: bigint | number,
+): PublicKey {
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from("position"), trader.toBuffer(), u64LeBuffer(marketId)],
+    perpsProgramId,
   )[0];
 }
 

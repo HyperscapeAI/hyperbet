@@ -23,6 +23,7 @@ import {
   syncMarketFromDuel,
   uniqueDuelKey,
   upsertDuel,
+  waitForChainUnixTimestamp,
   writableAccount,
 } from "./clob-test-helpers";
 import { configureAnchorTests } from "./test-anchor";
@@ -119,6 +120,10 @@ describe("hyperbet-solana", () => {
     const marketMaker = Keypair.generate();
     const maker = Keypair.generate();
     const taker = Keypair.generate();
+    const now = Math.floor(Date.now() / 1000);
+    const betOpenTs = now - 120;
+    const betCloseTs = now + 15;
+    const duelStartTs = now + 75;
     await Promise.all([
       airdrop(provider.connection, treasury.publicKey, 2),
       airdrop(provider.connection, marketMaker.publicKey, 2),
@@ -134,6 +139,9 @@ describe("hyperbet-solana", () => {
         duelKey: uniqueDuelKey("resolved-claim"),
         treasury: treasury.publicKey,
         marketMaker: marketMaker.publicKey,
+        betOpenTs,
+        betCloseTs,
+        duelStartTs,
       },
     );
 
@@ -169,13 +177,12 @@ describe("hyperbet-solana", () => {
         writableAccount(makerAsk.userBalance),
       ],
     });
-
-    const now = Math.floor(Date.now() / 1000);
+    await waitForChainUnixTimestamp(provider.connection, betCloseTs + 1);
     await upsertDuel(fightProgram, authority, market.duelKey, {
       status: duelStatusLocked(),
-      betOpenTs: now - 120,
-      betCloseTs: now - 10,
-      duelStartTs: now - 5,
+      betOpenTs,
+      betCloseTs,
+      duelStartTs,
       metadataUri: "https://hyperscape.gg/tests/demo/locked",
     });
     await syncMarketFromDuel(
@@ -191,7 +198,7 @@ describe("hyperbet-solana", () => {
 
     await proposeDuelResult(fightProgram, authority, market.duelKey, {
       winner: marketSideA(),
-      duelEndTs: now + 5,
+      duelEndTs: betCloseTs,
       seed: 777,
       metadataUri: "https://hyperscape.gg/tests/demo/resolved",
     });
@@ -218,9 +225,8 @@ describe("hyperbet-solana", () => {
       user: taker,
     });
 
-    const takerBalance = await clobProgram.account.userBalance.fetch(userBalance);
-    assert.strictEqual(takerBalance.aShares.toString(), "0");
-    assert.strictEqual(takerBalance.bShares.toString(), "0");
+    const takerBalance = await provider.connection.getAccountInfo(userBalance);
+    assert.strictEqual(takerBalance, null);
 
     const marketMakerAfter = await provider.connection.getBalance(
       marketMaker.publicKey,
@@ -312,12 +318,8 @@ describe("hyperbet-solana", () => {
     const vaultBalanceAfterClaim = await provider.connection.getBalance(
       market.vault,
     );
-    const takerState = await clobProgram.account.userBalance.fetch(userBalance);
-
-    assert.strictEqual(takerState.aShares.toString(), "0");
-    assert.strictEqual(takerState.bShares.toString(), "0");
-    assert.strictEqual(takerState.aLockedLamports.toString(), "0");
-    assert.strictEqual(takerState.bLockedLamports.toString(), "0");
+    const takerState = await provider.connection.getAccountInfo(userBalance);
+    assert.strictEqual(takerState, null);
     assert.strictEqual(vaultBalanceBeforeClaim - vaultBalanceAfterClaim, 600);
   });
 
@@ -325,6 +327,10 @@ describe("hyperbet-solana", () => {
   it("keeps disputed proposals fail-closed and rejects settlement", async () => {
     const maker = Keypair.generate();
     const taker = Keypair.generate();
+    const now = Math.floor(Date.now() / 1000);
+    const betOpenTs = now - 120;
+    const betCloseTs = now + 15;
+    const duelStartTs = now + 75;
     await Promise.all([
       airdrop(provider.connection, maker.publicKey, 5),
       airdrop(provider.connection, taker.publicKey, 5),
@@ -334,7 +340,12 @@ describe("hyperbet-solana", () => {
       fightProgram,
       clobProgram,
       authority,
-      { duelKey: uniqueDuelKey("disputed-claim") },
+        {
+          duelKey: uniqueDuelKey("disputed-claim"),
+          betOpenTs,
+          betCloseTs,
+          duelStartTs,
+        },
     );
 
     await ensureOracleReady(
@@ -378,17 +389,17 @@ describe("hyperbet-solana", () => {
         writableAccount(makerAsk.userBalance),
       ],
     });
-
-    const now = Math.floor(Date.now() / 1000);
+    await waitForChainUnixTimestamp(provider.connection, betCloseTs + 1);
     await upsertDuel(fightProgram, authority, market.duelKey, {
       status: duelStatusLocked(),
-      betOpenTs: now - 120,
-      betCloseTs: now - 10,
-      duelStartTs: now - 5,
+      betOpenTs,
+      betCloseTs,
+      duelStartTs,
     });
+
     await proposeDuelResult(fightProgram, authority, market.duelKey, {
       winner: marketSideA(),
-      duelEndTs: now + 5,
+      duelEndTs: betCloseTs,
     });
     await challengeDuelResult(fightProgram, authority, market.duelKey);
     await syncMarketFromDuel(clobProgram, market.marketState, market.duelState);
@@ -502,7 +513,7 @@ describe("hyperbet-solana", () => {
       authority.publicKey,
       authority.publicKey,
       authority.publicKey,
-      60,
+      120,
     );
 
     const duelKey = uniqueDuelKey("finalize-dispute-window");
@@ -519,7 +530,13 @@ describe("hyperbet-solana", () => {
     });
 
     try {
-      await finalizeDuelResult(fightProgram, authority, duelKey);
+      await finalizeDuelResult(
+        fightProgram,
+        authority,
+        duelKey,
+        "https://hyperscape.gg/duels/final",
+        { skipDisputeWindowWait: true },
+      );
       assert.fail("finalization during dispute window should fail");
     } catch (error: unknown) {
       assert.ok(
@@ -538,7 +555,7 @@ describe("hyperbet-solana", () => {
       authority.publicKey,
       authority.publicKey,
       authority.publicKey,
-      1,
+      60,
     );
 
     const duelKey = uniqueDuelKey("late-challenge-window");
@@ -554,7 +571,7 @@ describe("hyperbet-solana", () => {
       duelEndTs: now + 5,
     });
 
-    await new Promise((resolve) => setTimeout(resolve, 1_500));
+    await new Promise((resolve) => setTimeout(resolve, 61_500));
 
     try {
       await challengeDuelResult(fightProgram, authority, duelKey);

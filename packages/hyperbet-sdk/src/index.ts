@@ -16,15 +16,14 @@ export class HyperbetClient {
   public static readonly DEFAULT_BSC_RPC = "https://bsc-dataseed.binance.org/";
   public static readonly DEFAULT_AVAX_RPC = "https://api.avax.network/ext/bc/C/rpc";
   public static readonly DEFAULT_SOLANA_RPC = "https://api.mainnet-beta.solana.com";
-  public static readonly DEFAULT_STREAM_URL = "wss://api.hyperbet.gg/ws";
+  public static readonly DEFAULT_STREAM_URL = "wss://api.hyperbet.win/ws";
 
-  // TODO: Insert real deployed addresses
-  public static readonly BSC_CLOB_ADDRESS = "0x123...";
-  public static readonly BSC_ORACLE_ADDRESS = "0x456...";
+  public static readonly BSC_CLOB_ADDRESS = "0x443C09B1E7bb7bA3392b02500772B185654A6F33";
+  public static readonly BSC_ORACLE_ADDRESS = "0x8F582bc1D34Ca6dA12ac46B7c7Fdec02f2465961";
   public static readonly AVAX_CLOB_ADDRESS = "0x123...";
   public static readonly AVAX_ORACLE_ADDRESS = "0x456...";
-  public static readonly SOLANA_CLOB_PROGRAM_ID = "C1obMarket11111111111111111111111111111111";
-  public static readonly SOLANA_ORACLE_PROGRAM_ID = "F1ghtOrac1e11111111111111111111111111111111";
+  public static readonly SOLANA_CLOB_PROGRAM_ID = "DYtd7AoyTX2tbmZ8vpC3mxZgqTpyaDei4TFXZukWBJEf";
+  public static readonly SOLANA_ORACLE_PROGRAM_ID = "B5mRCRDJk9BrnH7regMWW5mpTQ8QG1CcCGSnDxMt8hmo";
 
   constructor(config: SdkConfig) {
     if (config.evmPrivateKey) {

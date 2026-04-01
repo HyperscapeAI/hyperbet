@@ -1,5 +1,7 @@
 # PM Confidence Soak
 
+> **TL;DR:** This soak runbook covers the phase-1 launch product on `Solana devnet`, `BSC testnet`, and `AVAX Fuji`. Local soak is the fastest debug path. Staged soak is the authoritative off-mainnet signoff lane. As of 2026-03-25, the staged soak workflow is blocked on staged environment provisioning, not missing soak code.
+
 Use this runbook to exercise prediction-market duel cadence, keeper ingestion,
 market lifecycle, and market-maker behavior in two lanes:
 
@@ -21,6 +23,11 @@ The local lane is the fastest way to debug the real game-to-keeper-to-UI
 integration path because it keeps Hyperscapes, the keeper service, and both UIs
 under direct operator control.
 
+For full stack coverage in a single local run, `run-hyperscapes-pm-local.sh`
+can also launch the `scripts/soak-harness.ts` workload when
+`PM_E2E_FULL_SOAK=true`, which drives PM-AMM + perps action paths on local
+BSC while the monitor checks stream/keeper synchronization.
+
 The staged lane is the authoritative betting/MM soak because it exercises the
 deployed contracts/programs and the staged writer authority without copying
 privileged reporter/operator/finalizer keys onto a laptop.
@@ -29,18 +36,16 @@ privileged reporter/operator/finalizer keys onto a laptop.
 
 ### Prerequisites
 
-- PM worktree:
-  - [/Users/mac/Desktop/hyperbet/.claude/worktrees/blissful-golick](/Users/mac/Desktop/hyperbet/.claude/worktrees/blissful-golick)
-- sibling game repo:
-  - `/Users/mac/Desktop/hyperscapes-mono`
+- Hyperbet repo root: `<repo-root>`
+- sibling game repo: sibling `hyperscapes-mono`
 - optional funded local trader wallets:
-  - [local-smoke-wallets.json](/Users/mac/Desktop/hyperbet/.claude/worktrees/blissful-golick/docs/release/evidence/local-smoke-wallets.json)
-  - [fund-local-smoke-wallets.yml](/Users/mac/Desktop/hyperbet/.claude/worktrees/blissful-golick/.github/workflows/fund-local-smoke-wallets.yml)
+  - [local-smoke-wallets.json](../release/evidence/local-smoke-wallets.json)
+  - [fund-local-smoke-wallets.yml](../../.github/workflows/fund-local-smoke-wallets.yml)
 
 ### Start The Integrated Stack
 
 ```bash
-cd /Users/mac/Desktop/hyperbet/.claude/worktrees/blissful-golick
+cd <repo-root>
 bash scripts/run-hyperscapes-pm-local.sh
 ```
 
@@ -81,8 +86,8 @@ curl http://127.0.0.1:5555/api/agents/<agent-id>/start -X POST
 ### Run The Local Confidence Soak
 
 ```bash
-cd /Users/mac/Desktop/hyperbet/.claude/worktrees/blissful-golick
-node --import tsx scripts/pm-soak-monitor.ts --mode=local --follow --duration-min=25
+cd <repo-root>
+RUN_SCOPE=LOCALNET node --import tsx scripts/pm-soak-monitor.ts --mode=local --follow --duration-min=25
 ```
 
 Defaults:
@@ -109,6 +114,30 @@ Local pass bar:
 - both local UIs remain reachable
 - the evidence bundle contains initial, phase-change, and final screenshots
 
+For a full e2e PM stack run (prediction markets + monitor + AMM/perps
+workload), run monitor and harness explicitly:
+
+```bash
+cd <repo-root>
+PM_E2E_MONITOR=true \
+PM_SOAK_LOCAL_DURATION_MIN=25 \
+PM_E2E_FULL_SOAK=true \
+PM_E2E_HARNESS_DURATION_MIN=25 \
+OPEN_LOCAL_UI=false \
+bash scripts/run-hyperscapes-pm-local.sh
+```
+
+If you want harness-only execution (no monitor), keep `PM_E2E_MONITOR=false`:
+
+```bash
+cd <repo-root>
+PM_E2E_MONITOR=false \
+PM_E2E_FULL_SOAK=true \
+PM_E2E_HARNESS_DURATION_MIN=25 \
+OPEN_LOCAL_UI=false \
+bash scripts/run-hyperscapes-pm-local.sh
+```
+
 ## Staged Lane
 
 ### Preconditions
@@ -121,11 +150,16 @@ Local pass bar:
   `staging` GitHub environment
 - canary trader wallets are funded
 
+Current blocker:
+
+- the repo and workflow support this lane, but the `staging` GitHub environment
+  and its `HYPERBET_*_STAGING_*` vars and secrets are not provisioned yet
+
 ### GitHub Workflow
 
 Manual workflow:
 
-- [pm-soak.yml](/Users/mac/Desktop/hyperbet/.claude/worktrees/blissful-golick/.github/workflows/pm-soak.yml)
+- [pm-soak.yml](../../.github/workflows/pm-soak.yml)
 
 Inputs:
 
@@ -151,8 +185,8 @@ not spin up the sibling Hyperscapes repo or the local desktop UIs.
 ### Direct CLI Entry
 
 ```bash
-cd /Users/mac/Desktop/hyperbet/.claude/worktrees/blissful-golick
-node --import tsx scripts/pm-soak-monitor.ts \
+cd <repo-root>
+RUN_SCOPE=LIVE_INDICATOR node --import tsx scripts/pm-soak-monitor.ts \
   --mode=staged \
   --chains=solana,bsc,avax \
   --duration-min=120

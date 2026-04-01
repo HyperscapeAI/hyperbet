@@ -11,22 +11,21 @@ import type { PredictionMarketLifecycleRecord } from "@hyperbet/chain-registry";
 import { resolveUiLocale, type UiLocale } from "@hyperbet/ui/i18n";
 import { useAccount, useWalletClient } from "wagmi";
 import {
-  createWalletClient,
   formatUnits,
   hexToBytes,
-  http,
+  keccak256,
   parseUnits,
+  serializeTransaction,
   toHex,
   type Address,
+  type Hex,
+  type Signature,
 } from "viem";
 import {
   publicKeyToAddress,
-  sign,
-  signAuthorization,
-  signMessage,
-  signTransaction,
-  signTypedData,
+  serializeSignature,
   toAccount,
+  type LocalAccount,
 } from "viem/accounts";
 import { secp256k1 } from "@noble/curves/secp256k1.js";
 
@@ -34,7 +33,9 @@ import { useChain } from "../lib/ChainContext";
 import { getEvmChainConfig } from "../lib/chainConfig";
 import {
   claimWinnings,
+  type ContractWriteAccount,
   createEvmPublicClient,
+  createSignedRpcWalletClient,
   createUnlockedRpcWalletClient,
   getFeeBps,
   getMarketMeta,
@@ -77,29 +78,61 @@ type BetSide = "YES" | "NO";
 
 const MARKET_KIND_DUEL_WINNER = 0;
 
-function createStrictPrivateKeyAccount(privateKey: `0x${string}`) {
-  const privateKeyBytes = hexToBytes(privateKey, { size: 32 });
-  const publicKey = toHex(secp256k1.getPublicKey(privateKeyBytes, false));
-  const address = publicKeyToAddress(publicKey);
+function createStrictPrivateKeyAccount(
+  address: Address,
+  privateKey: `0x${string}`,
+): LocalAccount & { publicKey: Hex; source: "privateKey" } {
+  const publicKey = toHex(secp256k1.getPublicKey(hexToBytes(privateKey), false));
+  const derivedAddress = publicKeyToAddress(publicKey);
+  if (derivedAddress.toLowerCase() !== address.toLowerCase()) {
+    throw new Error("configured e2e address/private key mismatch");
+  }
+  const signDigestObject = (hash: Hex): Signature => {
+    const recoveredSignature = secp256k1.sign(
+      hexToBytes(hash),
+      hexToBytes(privateKey),
+      { lowS: true, prehash: false, format: "recovered" },
+    );
+    if (recoveredSignature.length !== 65) {
+      throw new Error("unexpected recovered signature size");
+    }
+    const recovery = recoveredSignature[0] ?? 0;
+    const signature = {
+      r: toHex(recoveredSignature.subarray(1, 33)),
+      s: toHex(recoveredSignature.subarray(33, 65)),
+      v: recovery ? 28n : 27n,
+      yParity: (recovery ? 1 : 0) as 0 | 1,
+    };
+    return signature;
+  };
+  const signDigestHex = (hash: Hex): Hex =>
+    serializeSignature({ ...signDigestObject(hash), to: "hex" });
   const account = toAccount({
-    address,
+    address: derivedAddress,
     async sign({ hash }) {
-      return sign({ hash, privateKey, to: "hex" });
+      return signDigestHex(hash);
     },
-    async signAuthorization(authorization) {
-      return signAuthorization({ ...authorization, privateKey });
-    },
-    async signMessage({ message }) {
-      return signMessage({ message, privateKey });
+    async signMessage() {
+      throw new Error("signMessage is not implemented for the e2e signer");
     },
     async signTransaction(transaction, { serializer } = {}) {
-      return signTransaction({ privateKey, transaction, serializer });
+      const serialize = serializer ?? serializeTransaction;
+      const signableTransaction =
+        transaction.type === "eip4844"
+          ? {
+              ...transaction,
+              sidecars: false,
+            }
+          : transaction;
+      return serialize(
+        transaction,
+        signDigestObject(keccak256(await serialize(signableTransaction))),
+      );
     },
-    async signTypedData(typedData) {
-      return signTypedData({ ...typedData, privateKey });
+    async signTypedData() {
+      throw new Error("signTypedData is not implemented for the e2e signer");
     },
-  });
-
+  }) as LocalAccount;
   return {
     ...account,
     publicKey,
@@ -111,6 +144,30 @@ function normalizeAddress(value: string): Address | null {
   const trimmed = value.trim();
   if (!/^0x[0-9a-fA-F]{40}$/.test(trimmed)) return null;
   return trimmed as Address;
+}
+
+function readE2eRuntimeOverride(): {
+  duelKey: string | null;
+  duelId: string | null;
+} {
+  if (typeof window === "undefined") {
+    return { duelKey: null, duelId: null };
+  }
+
+  const searchParams = new URLSearchParams(window.location.search);
+  const duelKey = normalizePredictionMarketDuelKeyHex(
+    searchParams.get("e2eEvmDuelKey") ??
+      searchParams.get("e2eDuelKey") ??
+      window.localStorage.getItem("hyperbet.e2e.evmDuelKey") ??
+      "",
+  );
+  const duelId =
+    searchParams.get("e2eEvmDuelId") ??
+    searchParams.get("e2eDuelId") ??
+    window.localStorage.getItem("hyperbet.e2e.evmDuelId") ??
+    null;
+
+  return { duelKey, duelId: duelId?.trim() || null };
 }
 
 interface EvmBettingPanelProps {
@@ -381,16 +438,25 @@ export function EvmBettingPanel({
   const configuredE2eDuelId = (
     (import.meta.env.VITE_E2E_EVM_DUEL_ID as string | undefined) ?? ""
   ).trim() || null;
+  const runtimeE2eOverride = useMemo(
+    () => (isE2eMode ? readE2eRuntimeOverride() : { duelKey: null, duelId: null }),
+    [isE2eMode],
+  );
 
   const e2eAccountResult = useMemo(() => {
-    if (isE2eMode && configuredHeadlessAddress) {
-      return { account: configuredHeadlessAddress, error: null };
-    }
-
     if (configuredHeadlessPrivateKey) {
+      if (!configuredHeadlessAddress) {
+        return {
+          account: null,
+          error: "missing configured e2e address",
+        };
+      }
       try {
         return {
-          account: createStrictPrivateKeyAccount(configuredHeadlessPrivateKey),
+          account: createStrictPrivateKeyAccount(
+            configuredHeadlessAddress,
+            configuredHeadlessPrivateKey,
+          ),
           error: null,
         };
       } catch (error) {
@@ -404,6 +470,10 @@ export function EvmBettingPanel({
       }
     }
 
+    if (isE2eMode && configuredHeadlessAddress) {
+      return { account: configuredHeadlessAddress, error: null };
+    }
+
     return { account: null, error: "missing private key" };
   }, [configuredHeadlessAddress, configuredHeadlessPrivateKey, isE2eMode]);
 
@@ -413,21 +483,21 @@ export function EvmBettingPanel({
     if (typeof e2eAccount === "string") {
       return createUnlockedRpcWalletClient(chainConfig, e2eAccount);
     }
-    return createWalletClient({
-      account: e2eAccount,
-      chain: chainConfig.wagmiChain,
-      transport: http(chainConfig.rpcUrl),
-    });
+    return createSignedRpcWalletClient(chainConfig, e2eAccount);
   }, [chainConfig, e2eAccount]);
 
   const headlessAccountAddress =
     typeof e2eAccount === "string" ? e2eAccount : e2eAccount?.address;
-  const effectiveWalletClient = isE2eMode
-    ? (e2eWalletClient ?? walletClient)
-    : (walletClient ?? e2eWalletClient);
   const effectiveAddress = (address ?? headlessAccountAddress) as
     | Address
     | undefined;
+  const effectiveWriteAccount: ContractWriteAccount | undefined =
+    isE2eMode && e2eAccount && typeof e2eAccount !== "string"
+      ? e2eAccount
+      : effectiveAddress;
+  const effectiveWalletClient = isE2eMode
+    ? (e2eWalletClient ?? walletClient)
+    : (walletClient ?? e2eWalletClient);
   const walletConnected = Boolean(effectiveWalletClient && effectiveAddress);
 
   const [status, setStatus] = useState(copy.waitingForLiveDuel);
@@ -450,6 +520,9 @@ export function EvmBettingPanel({
   const [lastOrderTx, setLastOrderTx] = useState("-");
   const [lastClaimTx, setLastClaimTx] = useState("-");
   const [lastRefreshError, setLastRefreshError] = useState<string | null>(null);
+  const [lastOrderErrorDetail, setLastOrderErrorDetail] = useState<string | null>(
+    null,
+  );
 
   const lastSnapshotRef = useRef<{ a: bigint; b: bigint }>({ a: 0n, b: 0n });
 
@@ -476,36 +549,48 @@ export function EvmBettingPanel({
     });
   const effectiveLifecycleDuel = lifecycleDuelOverride ?? lifecycleDuel;
   const effectiveLifecycleMarket = lifecycleMarketOverride ?? lifecycleMarket;
-  const liveLifecycleDuelKey = useMemo(
+  const pinnedE2eDuelKey =
+    isE2eMode
+      ? runtimeE2eOverride.duelKey ?? configuredE2eDuelKey
+      : null;
+  const lifecycleDuelKey = useMemo(
     () =>
       normalizePredictionMarketDuelKeyHex(
-        effectiveLifecycleMarket?.duelKey ??
-          effectiveLifecycleDuel?.duelKey ??
-          (isE2eMode ? configuredE2eDuelKey : null),
+        effectiveLifecycleMarket?.duelKey ?? effectiveLifecycleDuel?.duelKey,
       ),
-    [
-      configuredE2eDuelKey,
-      effectiveLifecycleDuel?.duelKey,
-      effectiveLifecycleMarket?.duelKey,
-      isE2eMode,
-    ],
+    [effectiveLifecycleDuel?.duelKey, effectiveLifecycleMarket?.duelKey],
+  );
+  const liveLifecycleDuelKey = useMemo(
+    () => pinnedE2eDuelKey ?? lifecycleDuelKey,
+    [lifecycleDuelKey, pinnedE2eDuelKey],
   );
   const streamedDuelKey = useMemo(
     () => normalizePredictionMarketDuelKeyHex(streamedDuelKeyHex),
     [streamedDuelKeyHex],
   );
+  const lifecycleMatchesActiveDuel =
+    lifecycleDuelKey == null || lifecycleDuelKey === liveLifecycleDuelKey;
+  const activeLifecycleDuel = lifecycleMatchesActiveDuel
+    ? effectiveLifecycleDuel
+    : null;
+  const activeLifecycleMarket = lifecycleMatchesActiveDuel
+    ? effectiveLifecycleMarket
+    : null;
   const streamDriftDetected =
     Boolean(liveLifecycleDuelKey) &&
+    pinnedE2eDuelKey == null &&
     (streamedDuelKey == null || streamedDuelKey !== liveLifecycleDuelKey);
   const nativeDecimals = chainConfig?.nativeCurrency.decimals ?? 18;
   const chainNativeSymbol: Record<string, string> = { bsc: "BNB", base: "ETH", avax: "AVAX" };
   const nativeSymbol = chainConfig?.nativeCurrency.symbol ?? chainNativeSymbol[activeChain] ?? "ETH";
   const duelKeyHex = liveLifecycleDuelKey;
   const duelId =
-    effectiveLifecycleMarket?.duelId ??
-    effectiveLifecycleDuel?.duelId ??
-    streamedDuelId ??
-    (isE2eMode ? configuredE2eDuelId : null);
+    activeLifecycleMarket?.duelId ??
+    activeLifecycleDuel?.duelId ??
+    (isE2eMode
+      ? runtimeE2eOverride.duelId ?? configuredE2eDuelId
+      : null) ??
+    streamedDuelId;
   const effectivePosition = useMemo(
     () => mergePositionSnapshots(position, optimisticPosition),
     [optimisticPosition, position],
@@ -524,7 +609,7 @@ export function EvmBettingPanel({
   const uiState = useMemo(
     () =>
       derivePredictionMarketUiState(
-        effectiveLifecycleMarket,
+        activeLifecycleMarket,
         walletSnapshot,
         marketMeta
           ? {
@@ -533,7 +618,7 @@ export function EvmBettingPanel({
             }
           : null,
       ),
-    [effectiveLifecycleMarket, marketMeta, walletSnapshot],
+    [activeLifecycleMarket, marketMeta, walletSnapshot],
   );
   const lifecycleStatusLabel = useMemo(
     () =>
@@ -681,7 +766,7 @@ export function EvmBettingPanel({
         });
         setNativeBalance(balance);
         const nextUiState = derivePredictionMarketUiState(
-          effectiveLifecycleMarket,
+          activeLifecycleMarket,
           {
             aShares: userPosition.aShares,
             bShares: userPosition.bShares,
@@ -707,7 +792,7 @@ export function EvmBettingPanel({
         setPosition(null);
         setNativeBalance(0n);
         const nextUiState = derivePredictionMarketUiState(
-          effectiveLifecycleMarket,
+          activeLifecycleMarket,
           EMPTY_PREDICTION_MARKET_WALLET_SNAPSHOT,
           {
             lifecycleStatus: getFallbackLifecycleStatus(market.status),
@@ -781,7 +866,7 @@ export function EvmBettingPanel({
     cycleAgent2,
     duelKeyHex,
     effectiveAddress,
-    effectiveLifecycleMarket,
+    activeLifecycleMarket,
     lifecycleStatusLabel,
     nativeDecimals,
     publicClient,
@@ -832,7 +917,7 @@ export function EvmBettingPanel({
       effectiveWalletClientReady: Boolean(effectiveWalletClient),
       walletConnected,
       duelKeyHex,
-      lifecycleStatus: effectiveLifecycleMarket?.lifecycleStatus ?? null,
+      lifecycleStatus: activeLifecycleMarket?.lifecycleStatus ?? null,
       marketStatus: marketMeta?.status ?? null,
     };
   }, [
@@ -846,7 +931,7 @@ export function EvmBettingPanel({
     e2eAccountResult.error,
     e2eWalletClient,
     effectiveAddress,
-    effectiveLifecycleMarket?.lifecycleStatus,
+    activeLifecycleMarket?.lifecycleStatus,
     effectiveWalletClient,
     marketMeta?.status,
     walletClient,
@@ -860,6 +945,7 @@ export function EvmBettingPanel({
     if (
       !effectiveWalletClient ||
       !effectiveAddress ||
+      !effectiveWriteAccount ||
       !chainConfig ||
       !duelKeyHex
     ) {
@@ -867,6 +953,7 @@ export function EvmBettingPanel({
       return;
     }
     setIsSubmitting(true);
+    setLastOrderErrorDetail(null);
     try {
       const amount = parseUnits(amountInput, nativeDecimals);
       if (amount <= 0n) {
@@ -908,7 +995,7 @@ export function EvmBettingPanel({
         price,
         amount,
         ORDER_FLAG_GTC,
-        effectiveAddress,
+        effectiveWriteAccount,
         totalValue,
       );
       setLastOrderTx(tx);
@@ -922,7 +1009,7 @@ export function EvmBettingPanel({
         feeBps: tradeFeeBps,
         txSignature: tx,
         marketRef:
-          effectiveLifecycleMarket?.marketRef ?? marketMeta?.marketKey ?? duelKey,
+          activeLifecycleMarket?.marketRef ?? marketMeta?.marketKey ?? duelKey,
         duelKey: duelKeyHex,
         duelId,
       } as const;
@@ -937,6 +1024,9 @@ export function EvmBettingPanel({
       void recordPredictionMarketTrade(trackingInput);
       void refreshData();
     } catch (error) {
+      setLastOrderErrorDetail(
+        error instanceof Error ? error.stack ?? error.message : String(error),
+      );
       setStatus(copy.orderFailed((error as Error).message));
     } finally {
       setIsSubmitting(false);
@@ -948,6 +1038,7 @@ export function EvmBettingPanel({
     copy,
     duelKeyHex,
     effectiveAddress,
+    effectiveWriteAccount,
     effectiveWalletClient,
     nativeDecimals,
     nativeSymbol,
@@ -957,7 +1048,7 @@ export function EvmBettingPanel({
     refreshData,
     side,
     tradeFeeBps,
-    effectiveLifecycleMarket?.marketRef,
+    activeLifecycleMarket?.marketRef,
     marketMeta?.marketKey,
     duelId,
   ]);
@@ -968,6 +1059,7 @@ export function EvmBettingPanel({
     if (
       !effectiveWalletClient ||
       !effectiveAddress ||
+      !effectiveWriteAccount ||
       !chainConfig ||
       !duelKeyHex
     ) {
@@ -983,7 +1075,7 @@ export function EvmBettingPanel({
         chainConfig.goldClobAddress as Address,
         duelKey,
         MARKET_KIND_DUEL_WINNER,
-        effectiveAddress,
+        effectiveWriteAccount,
       );
       setLastClaimTx(tx);
       await publicClient?.waitForTransactionReceipt({ hash: tx });
@@ -998,6 +1090,7 @@ export function EvmBettingPanel({
     copy,
     duelKeyHex,
     effectiveAddress,
+    effectiveWriteAccount,
     effectiveWalletClient,
     publicClient,
     refreshData,
@@ -1066,14 +1159,15 @@ export function EvmBettingPanel({
     ? [
       `duel=${duelKeyHex ?? "-"}`,
       `duelId=${duelId ?? "-"}`,
-      `life=${effectiveLifecycleMarket?.lifecycleStatus ?? "-"}`,
-      `winner=${effectiveLifecycleMarket?.winner ?? "-"}`,
-      `ref=${effectiveLifecycleMarket?.marketRef ?? "-"}`,
+      `life=${activeLifecycleMarket?.lifecycleStatus ?? "-"}`,
+      `winner=${activeLifecycleMarket?.winner ?? "-"}`,
+      `ref=${activeLifecycleMarket?.marketRef ?? "-"}`,
       `meta=${marketMeta ? "yes" : "no"}`,
       `metaStatus=${marketMeta?.status ?? "-"}`,
       `metaWinner=${marketMeta?.winner ?? "-"}`,
       `metaKey=${marketMeta?.marketKey ?? "-"}`,
       `streamAligned=${streamDriftDetected ? "no" : "yes"}`,
+      `pinned=${pinnedE2eDuelKey ?? "-"}`,
       `aShares=${effectivePosition?.aShares?.toString() ?? "0"}`,
       `bShares=${effectivePosition?.bShares?.toString() ?? "0"}`,
       `aStake=${effectivePosition?.aStake?.toString() ?? "0"}`,
@@ -1081,6 +1175,7 @@ export function EvmBettingPanel({
       `claim=${uiState.canClaim ? "yes" : "no"}`,
       `claimKind=${uiState.claimKind}`,
       `balance=${nativeBalance.toString()}`,
+      `orderErr=${lastOrderErrorDetail ?? "-"}`,
       `refreshErr=${lastRefreshError ?? "-"}`,
     ].join(" ")
     : "";
@@ -1514,6 +1609,13 @@ export function EvmBettingPanel({
             style={debugPreStyle()}
           >
             {lastOrderTx}
+          </pre>
+          <pre
+            data-testid="evm-status"
+            className="gm-debug-block"
+            style={debugPreStyle()}
+          >
+            {status}
           </pre>
           <pre
             data-testid="evm-last-claim-tx"

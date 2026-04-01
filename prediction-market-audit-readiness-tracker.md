@@ -1,6 +1,6 @@
 # Prediction Market Audit Readiness Tracker
 
-> **TL;DR:** PM16 (resolution truth), PM17A/B (order semantics), PM20 (governance), PM21 (guardrails) are code-complete with all audit remediations applied. AVAX canonicalization and audit packet assembly (Gates 6 + 22) remain open. All EVM tests pass (46 Foundry + 106 Hardhat). Solana initializer bootstrap fallback removed. Config freeze + pause added on both chains.
+> **TL;DR:** Historical audit-readiness tracker from the old sprint-base and `avax/prod-proofing` branch model. Status: closed. Keep it as record of the earlier PM-core closeout sequence, not as the current launch tracker. The current source of truth is [`docs/release/prediction-market-launch-freeze-tracker.md`](docs/release/prediction-market-launch-freeze-tracker.md) plus [`docs/release/pm-launch-execution-plan.md`](docs/release/pm-launch-execution-plan.md).
 
 _Last updated: 2026-03-18_
 

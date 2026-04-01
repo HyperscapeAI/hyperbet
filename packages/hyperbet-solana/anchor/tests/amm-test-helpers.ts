@@ -285,7 +285,7 @@ export async function upsertDuel(
   const oracleConfig = deriveOracleConfigPda(program.programId);
   const duelState = deriveDuelStatePda(program.programId, duelKey);
 
-  await program.methods
+  const builder: any = (program as any).methods
     .upsertDuel(
       [...duelKey],
       [
@@ -301,7 +301,8 @@ export async function upsertDuel(
       toBn(options.duelStartTs ?? options.betCloseTs),
       options.metadataUri ?? "https://hyperscape.gg/duels/test",
       options.status,
-    )
+    );
+  await builder
     .accountsPartial({
       reporter: reporter.publicKey,
       oracleConfig,
@@ -405,7 +406,14 @@ export async function initializeCanonicalMarket(
   const expirationAt = new BN(Date.now() / 1000 + 3600);
 
   await program.methods
-    .createBetAccount(betId, initialLiq, isDynamic, [...duelKey], description, expirationAt)
+    .createBetAccount(
+      betId,
+      initialLiq,
+      isDynamic,
+      description,
+      expirationAt,
+      [...duelKey],
+    )
     .accountsPartial({
       signer: operator.publicKey,
       ammConfig,

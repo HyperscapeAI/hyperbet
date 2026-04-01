@@ -483,7 +483,9 @@ vi.mock("@coral-xyz/anchor", async () => {
 });
 
 async function loadMarketMaker(stateStore?: any) {
-  vi.resetModules();
+  if (typeof vi.resetModules === "function") {
+    vi.resetModules();
+  }
   const { CrossChainMarketMaker } = await import("./index.ts");
   const { createTestMarketMakerStateStore } = await import("./storage/index.ts");
   return new CrossChainMarketMaker({

@@ -731,8 +731,10 @@ export class CrossChainMarketMaker {
   private readonly evmAmmRuntimes: EvmAmmRuntime[];
   private readonly solanaAmmRuntime: SolanaAmmRuntime | null;
   private readonly ammPositions = new Map<string, AmmPosition>();
-  private ammEnabled = readEnvBoolean("MM_ENABLE_AMM", true);
-  private ammSolanaEnabled = readEnvBoolean("MM_ENABLE_AMM_SOLANA", true);
+  // AMM is opt-in: shared validation should not spin up internal market-making
+  // runtimes unless the operator explicitly enables them.
+  private ammEnabled = readEnvBoolean("MM_ENABLE_AMM", false);
+  private ammSolanaEnabled = readEnvBoolean("MM_ENABLE_AMM_SOLANA", false);
   private readonly ammConfig: AmmMarketMakerConfig;
 
   constructor(options: CrossChainMarketMakerOptions = {}) {

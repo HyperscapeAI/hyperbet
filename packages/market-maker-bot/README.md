@@ -1,6 +1,11 @@
 # Hyperbet Market Maker Bot
 
-Real quote-lifecycle bot for BSC, Base, AVAX, and Solana. The bot discovers active prediction markets from the lifecycle API and feeds both EVM and Solana execution through the shared `@hyperbet/mm-core` quote planner.
+> **TL;DR:** This is the internal MM and adversarial-simulation package for the phase-1 launch product. The launch-critical chains are `Solana`, `BSC`, and `AVAX`; `Base` remains an optional add-chain lane. The bot is part of the internal AMM and liquidity stack, not a retail UI surface.
+
+Real quote-lifecycle bot for Solana, BSC, and AVAX, with optional Base
+add-chain support. The bot discovers active markets from the lifecycle API and
+feeds both EVM and Solana execution through the shared `@hyperbet/mm-core`
+quote planner.
 
 ## Single instance
 

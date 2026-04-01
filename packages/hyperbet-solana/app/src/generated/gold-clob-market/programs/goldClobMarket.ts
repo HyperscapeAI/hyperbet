@@ -9,7 +9,7 @@
 import { assertIsInstructionWithAccounts, containsBytes, fixEncoderSize, getBytesEncoder, type Address, type Instruction, type InstructionWithData, type ReadonlyUint8Array } from '@solana/kit';
 import { parseCancelOrderInstruction, parseClaimInstruction, parseContinueOrderInstruction, parseFreezeConfigInstruction, parseInitializeConfigInstruction, parseInitializeMarketInstruction, parsePlaceOrderInstruction, parseReclaimRestingOrderInstruction, parseSetMarketPausedInstruction, parseSyncMarketFromDuelInstruction, parseUpdateConfigInstruction, type ParsedCancelOrderInstruction, type ParsedClaimInstruction, type ParsedContinueOrderInstruction, type ParsedFreezeConfigInstruction, type ParsedInitializeConfigInstruction, type ParsedInitializeMarketInstruction, type ParsedPlaceOrderInstruction, type ParsedReclaimRestingOrderInstruction, type ParsedSetMarketPausedInstruction, type ParsedSyncMarketFromDuelInstruction, type ParsedUpdateConfigInstruction } from '../instructions/index.js';
 
-export const GOLD_CLOB_MARKET_PROGRAM_ADDRESS = 'DYtd7AoyTX2tbmZ8vpC3mxZgqTpyaDei4TFXZukWBJEf' as Address<'DYtd7AoyTX2tbmZ8vpC3mxZgqTpyaDei4TFXZukWBJEf'>;
+export const GOLD_CLOB_MARKET_PROGRAM_ADDRESS = '3QUVoaKJqo1rg9eXe7vyFewJrY75NWdtH8JZfvTb79Uy' as Address<'3QUVoaKJqo1rg9eXe7vyFewJrY75NWdtH8JZfvTb79Uy'>;
 
 export enum GoldClobMarketAccount { DuelState, MarketConfig, MarketState, Order, PriceLevel, UserBalance }
 
@@ -42,7 +42,7 @@ if (containsBytes(data, fixEncoderSize(getBytesEncoder(), 8).encode(new Uint8Arr
 throw new Error("The provided instruction could not be identified as a goldClobMarket instruction.")
 }
 
-export type ParsedGoldClobMarketInstruction<TProgram extends string = 'DYtd7AoyTX2tbmZ8vpC3mxZgqTpyaDei4TFXZukWBJEf'> =
+export type ParsedGoldClobMarketInstruction<TProgram extends string = '3QUVoaKJqo1rg9eXe7vyFewJrY75NWdtH8JZfvTb79Uy'> =
 | { instructionType: GoldClobMarketInstruction.CancelOrder } & ParsedCancelOrderInstruction<TProgram>
 | { instructionType: GoldClobMarketInstruction.Claim } & ParsedClaimInstruction<TProgram>
 | { instructionType: GoldClobMarketInstruction.ContinueOrder } & ParsedContinueOrderInstruction<TProgram>

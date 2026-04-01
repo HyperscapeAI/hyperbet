@@ -289,7 +289,7 @@ export interface EnvConfig {
 const DEFAULT_STREAM_URL = "https://www.twitch.tv/hyperscapeai";
 const DEFAULT_STREAM_FALLBACK_URL = "";
 const DEFAULT_GAME_API_URL = "http://127.0.0.1:5555";
-const DEFAULT_PRODUCTION_GAME_API_URL = "https://gold-betting-keeper-production.up.railway.app";
+const DEFAULT_PRODUCTION_GAME_API_URL = "https://api.hyperbet.win";
 const DEFAULT_LOCAL_STREAM_URL =
   "http://127.0.0.1:3333/stream.html?disableBridgeCapture=1";
 
@@ -702,27 +702,39 @@ function resolvedEvmNetworkKey(
   return chainId === 43114 ? "avax" : "avaxFuji";
 }
 
-export function getEvmRpcUrl(chain: BettingEvmChain): string {
-  if (shouldUseGameEvmRpcProxy()) {
-    return `${GAME_API_URL}/api/proxy/evm/rpc?chain=${encodeURIComponent(chain)}`;
-  }
+function getDirectEvmRpcUrl(chain: BettingEvmChain): string {
   return CONFIG.evmChains[chain]?.rpcUrl ?? defaultRpcUrlForEvmNetwork(
     resolveBettingEvmDefaults(asDeploymentEnvironment(RUNTIME_ENV))[chain]
       .networkKey,
   );
 }
 
-export const BSC_RPC_URL: string = getEvmRpcUrl("bsc");
+export function getEvmReadRpcUrl(chain: BettingEvmChain): string {
+  if (shouldUseGameEvmRpcProxy()) {
+    return `${GAME_API_URL}/api/proxy/evm/rpc?chain=${encodeURIComponent(chain)}`;
+  }
+  return getDirectEvmRpcUrl(chain);
+}
+
+export function getEvmSubmitRpcUrl(chain: BettingEvmChain): string {
+  return getDirectEvmRpcUrl(chain);
+}
+
+export function getEvmRpcUrl(chain: BettingEvmChain): string {
+  return getEvmReadRpcUrl(chain);
+}
+
+export const BSC_RPC_URL: string = getEvmReadRpcUrl("bsc");
 export const BSC_CHAIN_ID: number = CONFIG.bscChainId;
 export const BSC_GOLD_CLOB_ADDRESS: string = CONFIG.bscGoldClobAddress;
 export const BSC_GOLD_TOKEN_ADDRESS: string = CONFIG.bscGoldTokenAddress;
 
-export const BASE_RPC_URL: string = getEvmRpcUrl("base");
+export const BASE_RPC_URL: string = getEvmReadRpcUrl("base");
 export const BASE_CHAIN_ID: number = CONFIG.baseChainId;
 export const BASE_GOLD_CLOB_ADDRESS: string = CONFIG.baseGoldClobAddress;
 export const BASE_GOLD_TOKEN_ADDRESS: string = CONFIG.baseGoldTokenAddress;
 
-export const AVAX_RPC_URL: string = getEvmRpcUrl("avax");
+export const AVAX_RPC_URL: string = getEvmReadRpcUrl("avax");
 export const AVAX_CHAIN_ID: number = CONFIG.avaxChainId;
 export const AVAX_GOLD_CLOB_ADDRESS: string = CONFIG.avaxGoldClobAddress;
 export const AVAX_GOLD_TOKEN_ADDRESS: string = CONFIG.avaxGoldTokenAddress;

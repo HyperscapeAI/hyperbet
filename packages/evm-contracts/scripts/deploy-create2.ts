@@ -22,8 +22,6 @@
  * 6. Writes deployment receipt to deployments/{networkName}.json
  */
 
-import fs from "node:fs";
-import path from "node:path";
 import { ethers, network } from "hardhat";
 import {
   ARACHNID_PROXY,
@@ -31,16 +29,7 @@ import {
   CLOB_SALT,
   predictAddresses,
 } from "./predict-create2-addresses";
-
-// ── Deployment Receipt ───────────────────────────────────────────────
-
-function resolveDeploymentOutputPath(networkName: string): string {
-  return path.resolve(__dirname, "..", "deployments", `${networkName}.json`);
-}
-
-function ensureDir(filepath: string): void {
-  fs.mkdirSync(path.dirname(filepath), { recursive: true });
-}
+import { writeDeploymentReceipt as writeCanonicalDeploymentReceipt } from "./deployment-receipt";
 
 interface DeploymentReceipt {
   networkName: string;
@@ -62,10 +51,24 @@ interface DeploymentReceipt {
 }
 
 function writeDeploymentReceipt(receipt: DeploymentReceipt): void {
-  const outputPath = resolveDeploymentOutputPath(receipt.networkName);
-  ensureDir(outputPath);
-  fs.writeFileSync(outputPath, JSON.stringify(receipt, null, 2));
-  console.log("\n📝 Deployment receipt written to:", outputPath);
+  const goldTokenAddress = process.env.GOLD_TOKEN_ADDRESS?.trim() || undefined;
+  writeCanonicalDeploymentReceipt(receipt.networkName, {
+    ...receipt,
+    network: receipt.networkName,
+    duelOracleAddress: receipt.duelOracleAddress,
+    goldClobAddress: receipt.goldClobAddress,
+    adminAddress: String(receipt.constructorArgs.admin),
+    marketOperatorAddress: String(receipt.constructorArgs.marketOperator),
+    reporterAddress: String(receipt.constructorArgs.reporter),
+    finalizerAddress: String(receipt.constructorArgs.finalizer),
+    challengerAddress: String(receipt.constructorArgs.challenger),
+    treasuryAddress: String(receipt.constructorArgs.treasury),
+    marketMakerAddress: String(receipt.constructorArgs.marketMaker),
+    emergencyCouncilAddress: String(receipt.constructorArgs.pauser),
+    goldTokenAddress,
+    deployedAt: receipt.timestamp,
+  });
+  console.log("\n📝 Deployment receipt merged into canonical manifest");
 }
 
 function sleep(ms: number): Promise<void> {

@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { ethers, network } from "hardhat";
+import { writeDeploymentReceipt } from "./deployment-receipt";
 
 const PRODUCTION_CHAIN_IDS = new Set([56, 8453, 43114]);
 const MANIFEST_NETWORK_KEYS = new Map<string, string>([
@@ -15,24 +16,6 @@ const MANIFEST_NETWORK_KEYS = new Map<string, string>([
 
 function isValidAddress(value: string): boolean {
   return ethers.isAddress(value);
-}
-
-function resolveDeploymentOutputPath(networkName: string): string {
-  return path.resolve(__dirname, "..", "deployments", `${networkName}.json`);
-}
-
-function ensureDir(filepath: string): void {
-  fs.mkdirSync(path.dirname(filepath), { recursive: true });
-}
-
-function writeDeploymentReceipt(
-  networkName: string,
-  payload: Record<string, string | number | null>,
-): void {
-  const outputPath = resolveDeploymentOutputPath(networkName);
-  ensureDir(outputPath);
-  fs.writeFileSync(`${outputPath}`, JSON.stringify(payload, null, 2));
-  console.log("Deployment receipt written to:", outputPath);
 }
 
 function resolveManifestPaths(): string[] {

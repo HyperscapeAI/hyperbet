@@ -53,11 +53,38 @@ on:
       - "bun.lock"
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
+  repo-artifact-policy:
+    name: Repo Artifact Policy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Hyperbet toolchain
+        uses: ./.github/actions/setup-hyperbet
+
+      - name: Install root dependencies
+        run: bash scripts/ci-install-verified.sh root
+
+      - name: Enforce tracked artifact policy
+        run: bun run ci:policy:artifacts
+
+      - name: Upload artifact policy report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: repo-artifact-policy
+          path: .ci-artifacts/repo-artifact-policy
+          if-no-files-found: ignore
+
   evm-contract-validation:
     name: EVM Contract Validation
     runs-on: ubuntu-latest
@@ -84,8 +111,8 @@ jobs:
           path: .ci-artifacts/evm-contract-validation
           if-no-files-found: ignore
 
-  perps-contract-tests:
-    name: Perps Contract Tests
+  slither-analysis:
+    name: Slither Static Analysis
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -99,9 +126,48 @@ jobs:
       - name: Install root dependencies
         run: bash scripts/ci-install-verified.sh root
 
-      - name: Run perps Forge tests (fuzz 512)
+      - name: Install Slither
+        run: pip3 install slither-analyzer
+
+      - name: Run Slither
         working-directory: packages/evm-contracts
-        run: forge test --match-path "test/perps/*" -vvv --summary
+        run: |
+          slither . \
+            --exclude-dependencies \
+            --filter-paths 'node_modules|out|cache|lib' \
+            --exclude timestamp,pragma,solc-version,cyclomatic-complexity,dangerous-strict-equalities,unused-return \
+            --json slither-report.json || true
+
+      - name: Upload Slither report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: slither-report
+          path: packages/evm-contracts/slither-report.json
+          if-no-files-found: ignore
+
+  perps-contract-tests:
+    name: Forge Tests (All Suites)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Hyperbet toolchain
+        uses: ./.github/actions/setup-hyperbet
+        with:
+          install-foundry: "true"
+
+      - name: Install root dependencies
+        run: bash scripts/ci-install-verified.sh root
+
+      - name: Run all Forge tests (fuzz 10k, invariant 256 runs)
+        working-directory: packages/evm-contracts
+        run: forge test --summary
+
+      - name: Gas snapshot check
+        working-directory: packages/evm-contracts
+        run: forge snapshot --no-match-path "test/invariant/*" --diff .gas-snapshot || echo "Gas snapshot baseline missing or changed — run 'forge snapshot' locally to update"
 
       - name: Upload perps test artifacts
         if: always()
@@ -160,6 +226,10 @@ jobs:
             audit_target: pages:solana
             build_mode: mainnet-beta
             solana_cluster: mainnet-beta
+            keeper_url_var: HYPERBET_SOLANA_KEEPER_URL
+            keeper_ws_url_var: HYPERBET_SOLANA_KEEPER_WS_URL
+            keeper_fallback_url: "https://api.hyperbet.win"
+            keeper_fallback_ws_url: "wss://api.hyperbet.win/ws"
             avax_chain_id: ""
             avax_gold_clob_address: ""
           - package: hyperbet-bsc
@@ -167,6 +237,10 @@ jobs:
             audit_target: pages:bsc
             build_mode: mainnet-beta
             solana_cluster: mainnet-beta
+            keeper_url_var: HYPERBET_BSC_KEEPER_URL
+            keeper_ws_url_var: HYPERBET_BSC_KEEPER_WS_URL
+            keeper_fallback_url: "https://bsc-api.hyperbet.win"
+            keeper_fallback_ws_url: "wss://bsc-api.hyperbet.win/ws"
             avax_chain_id: ""
             avax_gold_clob_address: ""
           - package: hyperbet-avax
@@ -174,12 +248,16 @@ jobs:
             audit_target: app:avax
             build_mode: testnet
             solana_cluster: testnet
+            keeper_url_var: HYPERBET_AVAX_KEEPER_URL
+            keeper_ws_url_var: HYPERBET_AVAX_KEEPER_WS_URL
+            keeper_fallback_url: "https://avax-api.hyperbet.win"
+            keeper_fallback_ws_url: "wss://avax-api.hyperbet.win/ws"
             avax_chain_id: ""
             avax_gold_clob_address: ""
     env:
       CF_PAGES_COMMIT_SHA: ${{ github.sha }}
-      VITE_GAME_API_URL: https://api.hyperbet.win
-      VITE_GAME_WS_URL: wss://api.hyperbet.win/ws
+      VITE_GAME_API_URL: ${{ vars[matrix.keeper_url_var] || matrix.keeper_fallback_url }}
+      VITE_GAME_WS_URL: ${{ vars[matrix.keeper_ws_url_var] || matrix.keeper_fallback_ws_url }}
       VITE_SOLANA_CLUSTER: ${{ matrix.solana_cluster }}
       VITE_USE_GAME_RPC_PROXY: "true"
       VITE_USE_GAME_EVM_RPC_PROXY: "true"
@@ -269,8 +347,8 @@ jobs:
     needs: shared-validation
     env:
       CF_PAGES_COMMIT_SHA: ${{ github.sha }}
-      VITE_GAME_API_URL: https://api.hyperbet.win
-      VITE_GAME_WS_URL: wss://api.hyperbet.win/ws
+      VITE_GAME_API_URL: ${{ vars.HYPERBET_BSC_KEEPER_URL || 'https://bsc-api.hyperbet.win' }}
+      VITE_GAME_WS_URL: ${{ vars.HYPERBET_BSC_KEEPER_WS_URL || 'wss://bsc-api.hyperbet.win/ws' }}
       VITE_SOLANA_CLUSTER: mainnet-beta
       VITE_USE_GAME_RPC_PROXY: "true"
       VITE_USE_GAME_EVM_RPC_PROXY: "true"

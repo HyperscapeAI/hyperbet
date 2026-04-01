@@ -406,7 +406,11 @@ contract AgentPerpEngineNative is AccessControl, ReentrancyGuard {
         _modifyPosition(agentId, sizeDelta, 0);
     }
 
-    function modifyPosition(bytes32 agentId, int256 sizeDelta, uint256 acceptablePrice) external payable nonReentrant {
+    function modifyPositionWithAcceptablePrice(bytes32 agentId, int256 sizeDelta, uint256 acceptablePrice)
+        external
+        payable
+        nonReentrant
+    {
         _modifyPosition(agentId, sizeDelta, acceptablePrice);
     }
 
