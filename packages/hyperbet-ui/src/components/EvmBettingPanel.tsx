@@ -37,14 +37,13 @@ import {
   createEvmPublicClient,
   createSignedRpcWalletClient,
   createUnlockedRpcWalletClient,
-  getFeeBps,
   getMarketMeta,
+  getMarketReadSnapshot,
   getNativeBalance,
-  getOrderBook,
-  getPosition,
   getRecentTrades,
   ORDER_FLAG_GTC,
   placeOrder,
+  RateLimitError,
   toDuelKeyHex,
   type MarketMeta,
   type MarketStatus,
@@ -77,6 +76,7 @@ import { type Trade } from "./RecentTrades";
 type BetSide = "YES" | "NO";
 
 const MARKET_KIND_DUEL_WINNER = 0;
+const MIN_RPC_BACKOFF_MS = 15_000;
 
 function createStrictPrivateKeyAccount(
   address: Address,
@@ -392,6 +392,14 @@ function getLifecycleStatusLabel(
   }
 }
 
+function toRateLimitError(error: unknown): RateLimitError | null {
+  return error instanceof RateLimitError ? error : null;
+}
+
+function describeRefreshError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 export function EvmBettingPanel({
   agent1Name,
   agent2Name,
@@ -525,6 +533,9 @@ export function EvmBettingPanel({
   );
 
   const lastSnapshotRef = useRef<{ a: bigint; b: bigint }>({ a: 0n, b: 0n });
+  const refreshDataRef = useRef<() => Promise<void>>(async () => {});
+  const refreshDataInFlightRef = useRef<Promise<void> | null>(null);
+  const rpcBackoffUntilRef = useRef(0);
 
   const cycle = streamingState?.cycle ?? null;
   const streamedDuelKeyHex =
@@ -696,6 +707,45 @@ export function EvmBettingPanel({
   const refreshData = useCallback(async () => {
     if (!publicClient || !chainConfig) return;
 
+    const applyRateLimitBackoff = (error: unknown): boolean => {
+      const rateLimitError = toRateLimitError(error);
+      if (!rateLimitError) return false;
+      rpcBackoffUntilRef.current = Math.max(
+        rpcBackoffUntilRef.current,
+        Date.now() + Math.max(rateLimitError.retryAfterMs, MIN_RPC_BACKOFF_MS),
+      );
+      setLastRefreshError(rateLimitError.message);
+      return true;
+    };
+
+    const updateStatusFromMarket = (market: MarketMeta, nextPosition: Position | null) => {
+      const nextUiState = derivePredictionMarketUiState(
+        activeLifecycleMarket,
+        nextPosition
+          ? {
+              aShares: nextPosition.aShares,
+              bShares: nextPosition.bShares,
+              aStake: nextPosition.aStake,
+              bStake: nextPosition.bStake,
+              refundableAmount: nextPosition.aStake + nextPosition.bStake,
+            }
+          : EMPTY_PREDICTION_MARKET_WALLET_SNAPSHOT,
+        {
+          lifecycleStatus: getFallbackLifecycleStatus(market.status),
+          winner: getFallbackWinner(market.winner),
+        },
+      );
+      setStatus(
+        getLifecycleStatusLabel(
+          nextUiState.lifecycleStatus,
+          nextUiState.winner,
+          cycleAgent1,
+          cycleAgent2,
+          copy,
+        ) ?? copy.waitingForMarketOperator,
+      );
+    };
+
     try {
       if (!duelKeyHex) {
         setLastRefreshError("missing-duel-key");
@@ -730,115 +780,75 @@ export function EvmBettingPanel({
       setMarketMeta(market);
       setLastRefreshError(null);
       updateChartAndTrades(market.totalAShares, market.totalBShares);
-      const feeBpsPromise = getFeeBps(publicClient, contractAddr);
-      const orderBookPromise = getOrderBook(
-        publicClient,
+
+      if (!effectiveAddress) {
+        setPosition(null);
+        setNativeBalance(0n);
+        updateStatusFromMarket(market, null);
+      } else {
+        updateStatusFromMarket(market, effectivePosition);
+      }
+
+      if (Date.now() < rpcBackoffUntilRef.current) {
+        return;
+      }
+
+      const marketReadPromise = getMarketReadSnapshot(
+        chainConfig,
         contractAddr,
         duelKey,
         MARKET_KIND_DUEL_WINNER,
         market,
+        effectiveAddress,
       );
       const tradesPromise = getRecentTrades(
         publicClient,
         contractAddr,
         market.marketKey,
       );
+      const balancePromise = effectiveAddress
+        ? getNativeBalance(publicClient, effectiveAddress)
+        : Promise.resolve(0n);
 
-      if (effectiveAddress) {
-        const [userPosition, balance] = await Promise.all([
-          getPosition(
-            publicClient,
-            contractAddr,
-            market.marketKey,
-            effectiveAddress,
-          ),
-          getNativeBalance(publicClient, effectiveAddress),
-        ]);
-        setPosition(userPosition);
-        setOptimisticPosition((current) => {
-          if (!current) return null;
-          const hasCaughtUp =
-            userPosition.aShares >= current.aShares &&
-            userPosition.bShares >= current.bShares &&
-            userPosition.aStake >= current.aStake &&
-            userPosition.bStake >= current.bStake;
-          return hasCaughtUp ? null : current;
-        });
-        setNativeBalance(balance);
-        const nextUiState = derivePredictionMarketUiState(
-          activeLifecycleMarket,
-          {
-            aShares: userPosition.aShares,
-            bShares: userPosition.bShares,
-            aStake: userPosition.aStake,
-            bStake: userPosition.bStake,
-            refundableAmount: userPosition.aStake + userPosition.bStake,
-          },
-          {
-            lifecycleStatus: getFallbackLifecycleStatus(market.status),
-            winner: getFallbackWinner(market.winner),
-          },
-        );
-        setStatus(
-          getLifecycleStatusLabel(
-            nextUiState.lifecycleStatus,
-            nextUiState.winner,
-            cycleAgent1,
-            cycleAgent2,
-            copy,
-          ) ?? copy.waitingForMarketOperator,
-        );
-      } else {
-        setPosition(null);
-        setNativeBalance(0n);
-        const nextUiState = derivePredictionMarketUiState(
-          activeLifecycleMarket,
-          EMPTY_PREDICTION_MARKET_WALLET_SNAPSHOT,
-          {
-            lifecycleStatus: getFallbackLifecycleStatus(market.status),
-            winner: getFallbackWinner(market.winner),
-          },
-        );
-        setStatus(
-          getLifecycleStatusLabel(
-            nextUiState.lifecycleStatus,
-            nextUiState.winner,
-            cycleAgent1,
-            cycleAgent2,
-            copy,
-          ) ?? copy.waitingForMarketOperator,
-        );
-      }
-
-      const [feeBpsResult, orderBookResult, tradesResult] =
+      const [marketReadResult, tradesResult, balanceResult] =
         await Promise.allSettled([
-          feeBpsPromise,
-          orderBookPromise,
+          marketReadPromise,
           tradesPromise,
+          balancePromise,
         ]);
 
-      if (feeBpsResult.status === "fulfilled") {
-        setTradeFeeBps(feeBpsResult.value);
-      }
-
-      if (orderBookResult.status === "fulfilled") {
+      if (marketReadResult.status === "fulfilled") {
+        setTradeFeeBps(marketReadResult.value.feeBps);
         setBids(
-          orderBookResult.value.bids.map((entry) => ({
+          marketReadResult.value.orderBook.bids.map((entry) => ({
             price: entry.price,
             amount: Number(formatUnits(entry.amount, nativeDecimals)),
             total: Number(formatUnits(entry.total, nativeDecimals)),
           })),
         );
         setAsks(
-          orderBookResult.value.asks.map((entry) => ({
+          marketReadResult.value.orderBook.asks.map((entry) => ({
             price: entry.price,
             amount: Number(formatUnits(entry.amount, nativeDecimals)),
             total: Number(formatUnits(entry.total, nativeDecimals)),
           })),
         );
-      } else {
-        setBids([]);
-        setAsks([]);
+        if (effectiveAddress && marketReadResult.value.position) {
+          const userPosition = marketReadResult.value.position;
+          setPosition(userPosition);
+          setOptimisticPosition((current) => {
+            if (!current) return null;
+            const hasCaughtUp =
+              userPosition.aShares >= current.aShares &&
+              userPosition.bShares >= current.bShares &&
+              userPosition.aStake >= current.aStake &&
+              userPosition.bStake >= current.bStake;
+            return hasCaughtUp ? null : current;
+          });
+          updateStatusFromMarket(market, userPosition);
+        }
+      } else if (!applyRateLimitBackoff(marketReadResult.reason)) {
+        setLastRefreshError(describeRefreshError(marketReadResult.reason));
       }
 
       if (tradesResult.status === "fulfilled") {
@@ -851,10 +861,19 @@ export function EvmBettingPanel({
             time: trade.time,
           })),
         );
-      } else {
-        setRecentTrades([]);
+      } else if (!applyRateLimitBackoff(tradesResult.reason)) {
+        setLastRefreshError(describeRefreshError(tradesResult.reason));
+      }
+
+      if (balanceResult.status === "fulfilled") {
+        setNativeBalance(balanceResult.value);
+      } else if (!applyRateLimitBackoff(balanceResult.reason)) {
+        setLastRefreshError(describeRefreshError(balanceResult.reason));
       }
     } catch (error) {
+      if (applyRateLimitBackoff(error)) {
+        return;
+      }
       const message = (error as Error).message;
       setLastRefreshError(message);
       setStatus(copy.refreshFailed(message));
@@ -866,6 +885,7 @@ export function EvmBettingPanel({
     cycleAgent2,
     duelKeyHex,
     effectiveAddress,
+    effectivePosition,
     activeLifecycleMarket,
     lifecycleStatusLabel,
     nativeDecimals,
