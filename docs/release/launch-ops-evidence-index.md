@@ -1,9 +1,15 @@
 # Launch Ops Evidence Index
 
-> **TL;DR:** The repo now contains the full phase-1 non-mainnet proving rails for `PM + perps + internal AMM`, but the evidence bundle is still incomplete. The remaining gaps are real staged environment provisioning, recorded Stage-A receipts, truthful launch-chain mainnet registry values, governance transfer/freeze receipts, and the final audit freeze packet.
+> **TL;DR:** The repo now contains the full phase-1 non-mainnet proving rails for `PM + perps + internal AMM` plus the surrounding app-shell and account surfaces, but the evidence bundle is still incomplete. The active production-readiness path is `Solana + BSC`; AVAX evidence is preserved but isolated and non-blocking. The remaining gaps are real staged environment provisioning, recorded Stage-A receipts, truthful active-scope registry values, frozen app-shell/account-surface evidence, governance transfer/freeze receipts, and the final audit freeze packet.
 
 This index ties the current launch closeout work to concrete repo artifacts and
 records what still needs live evidence before release signoff.
+
+Detailed implementation work is tracked in:
+
+- [GitHub Project Production Backlog](github-project-production-backlog.md)
+- [Runtime Integration Readiness Matrix](runtime-integration-readiness-matrix.md)
+- [Tracking Document Map](tracking-document-map.md)
 
 ## Phase-1 Non-Mainnet Proving
 
@@ -32,7 +38,8 @@ Canonical launch truth is still missing for:
 
 - `solana`: `goldAmmMarketProgramId`
 - `bsc`: AMM and perps canonical fields
-- `avax`: PM-core plus AMM and perps canonical fields
+- `avax`: PM-core plus AMM and perps canonical fields remain preserved
+  follow-on work and are not blocking the active scope
 
 ## Governance And Operational Control
 
@@ -51,9 +58,14 @@ Remaining live evidence:
 
 ## Current Operational Blockers
 
+These are blocker summaries only. Detailed owner tickets live in the canonical
+backlog.
+
 - no GitHub `staging` environment exists yet
 - no `HYPERBET_*_STAGING_*` vars or secrets are provisioned yet
-- local BSC and AVAX AMM/perps bring-up still needs shared token addresses
+- local BSC AMM/perps bring-up still needs shared token addresses
 - no real staged proof artifact bundle exists yet
 - no real staged soak artifact bundle exists yet
+- no frozen full-app acceptance bundle exists yet for wallet/account,
+  claims/positions, and points/referral surfaces
 - no truthful launch-chain mainnet registry population exists yet

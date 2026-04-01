@@ -1,5 +1,7 @@
 # Stage-A Browser Acceptance Matrix
 
+> **Historical snapshot:** This document preserves browser-to-chain and real-Hyperscapes acceptance evidence for the Stage-A branch effort. Current open-work ownership lives in [tracking-document-map.md](tracking-document-map.md) and [github-project-production-backlog.md](github-project-production-backlog.md). Use this matrix as evidence, not as the canonical blocker list.
+
 This matrix tracks the browser-to-chain acceptance bar for the current Hyperbet branch against the deployed Stage-A chains:
 
 - Solana `devnet`

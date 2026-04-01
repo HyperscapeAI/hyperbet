@@ -1,6 +1,6 @@
 # Release Memo: Phase-1 RC Candidate
 
-> **TL;DR:** This memo tracks the current release-candidate posture for the `Solana + BSC + AVAX` phase-1 launch product. The repo now has full-product non-mainnet rails for `PM/CLOB duels + perps/models + internal AMM`, but launch is still blocked on canonical mainnet registry truth, staged environment provisioning, governance/evidence receipts, and the external audit/remediation cycle.
+> **TL;DR:** This memo tracks the current release-candidate posture for the active `Solana + BSC` production-readiness gate, with `AVAX` preserved as an isolated follow-on lane. The repo now has full-product non-mainnet rails for `PM/CLOB duels + perps/models + internal AMM`, but launch is still blocked on canonical active-scope truth, staged environment provisioning, governance/evidence receipts, coordinated full-product smoke, and the external audit/remediation cycle.
 
 ## Release Candidate
 
@@ -12,7 +12,8 @@
 
 ## Product Scope
 
-- Launch chains: `Solana`, `BSC`, `AVAX`
+- Active production-readiness chains: `Solana`, `BSC`
+- Preserved but isolated follow-on lane: `AVAX`
 - Non-blocking add-chain lane: `Base`
 - User-facing launch surfaces:
   - `PM/CLOB duels`
@@ -23,7 +24,8 @@
 ## Repo Snapshot
 
 - PM-core hardening is merged.
-- AMM settlement is oracle-only on EVM and Solana.
+- AMM settlement implementation is materially stronger than before, but the
+  production settlement model still needs an explicit freeze.
 - Solana perps pause survives config freeze.
 - Solana full-product deploy, init, freeze, and verify paths include `lvr_amm`.
 - EVM deploy receipts and verification now cover PM, AMM, and perps.
@@ -32,11 +34,13 @@
 
 ## Blocking Items
 
-- launch-chain canonical mainnet registry fields are still incomplete
+- active-scope launch constants, feature truth, and canonical registry fields
+  are still incomplete
 - GitHub staged environment vars and secrets are not provisioned yet
-- shared BSC and AVAX testnet token addresses are still missing for local
-  AMM/perps rehearsal
+- shared BSC testnet token addresses are still missing for local AMM/perps
+  rehearsal
 - governance transfer and freeze receipts are still pending
+- coordinated full-product staged smoke and evidence bundle are still pending
 - final audit packet, external audit, and remediation are still pending
 
 ## Evidence Links
