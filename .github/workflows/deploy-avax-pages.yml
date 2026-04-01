@@ -24,9 +24,6 @@ on:
           - staging
           - preview
 
-permissions:
-  contents: read
-
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -46,7 +43,7 @@ jobs:
           deploy_target="production"
           pages_project_name="${{ vars.HYPERBET_AVAX_PAGES_PROJECT_NAME != '' && vars.HYPERBET_AVAX_PAGES_PROJECT_NAME || 'hyperbet-avax' }}"
           pages_expected_url="${{ vars.HYPERBET_AVAX_PAGES_PRODUCTION_URL }}"
-          api_url="${{ vars.HYPERBET_AVAX_KEEPER_URL != '' && vars.HYPERBET_AVAX_KEEPER_URL || 'https://avax-api.hyperbet.win' }}"
+          api_url="${{ vars.HYPERBET_AVAX_KEEPER_URL != '' && vars.HYPERBET_AVAX_KEEPER_URL || vars.HYPERBET_PRODUCTION_KEEPER_URL }}"
           ws_url="${{ vars.HYPERBET_AVAX_KEEPER_WS_URL }}"
           avax_clob_address="${{ vars.HYPERBET_AVAX_GOLD_CLOB_ADDRESS }}"
           avax_chain_id="43114"
