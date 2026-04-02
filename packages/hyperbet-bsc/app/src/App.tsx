@@ -720,9 +720,38 @@ export function App() {
   >("leaderboard");
   const appRootRef = useRef<HTMLDivElement | null>(null);
   const bettingDockInnerRef = useRef<HTMLDivElement | null>(null);
+  const chartContainerRef = useRef<HTMLDivElement | null>(null);
+  const [chartReady, setChartReady] = useState(false);
 
   const { state: streamingState } = useStreamingState();
   const { context: duelContext } = useDuelContext();
+
+  useEffect(() => {
+    const container = chartContainerRef.current;
+    if (!container) return;
+
+    const updateChartReady = () => {
+      const nextReady =
+        container.clientWidth > 0 && container.clientHeight > 0;
+      setChartReady((prevReady) =>
+        prevReady === nextReady ? prevReady : nextReady,
+      );
+    };
+
+    updateChartReady();
+
+    const resizeObserver =
+      typeof ResizeObserver !== "undefined"
+        ? new ResizeObserver(updateChartReady)
+        : null;
+    resizeObserver?.observe(container);
+
+    window.addEventListener("resize", updateChartReady);
+    return () => {
+      resizeObserver?.disconnect();
+      window.removeEventListener("resize", updateChartReady);
+    };
+  }, []);
   const liveCycle = streamingState?.cycle ?? null;
   const lifecycleChainKey =
     activeChain === "bsc" || activeChain === "base" || activeChain === "avax"
@@ -1751,51 +1780,59 @@ export function App() {
                         {(effYesPercent / 100).toFixed(1)}
                       </span>
                     </div>
-                    <div className="hm-chart-container">
-                      <ResponsiveContainer width="100%" height="100%">
-                        <LineChart data={effChartData}>
-                          <XAxis
-                            dataKey="time"
-                            tick={{ fill: "rgba(255,255,255,0.3)", fontSize: 11 }}
-                            tickLine={false}
-                            axisLine={{ stroke: "rgba(255,255,255,0.08)" }}
-                            tickFormatter={(v: number) => {
-                              const d = new Date(v);
-                              return `${d.getHours()}:${String(d.getMinutes()).padStart(2, "0")}`;
-                            }}
-                          />
-                          <YAxis
-                            domain={[0, 100]}
-                            tick={{ fill: "rgba(255,255,255,0.3)", fontSize: 11 }}
-                            tickLine={false}
-                            axisLine={{ stroke: "rgba(255,255,255,0.08)" }}
-                            width={40}
-                            tickFormatter={(v: number) => `${v}%`}
-                          />
-                          <Tooltip
-                            content={({ active, payload }) =>
-                              active && payload?.length ? (
-                                <div className="hm-chart-tooltip">
-                                  <span>{payload[0].value}%</span>
-                                </div>
-                              ) : null
-                            }
-                          />
-                          <ReferenceLine
-                            y={50}
-                            stroke="rgba(255,255,255,0.06)"
-                            strokeDasharray="4 4"
-                          />
-                          <Line
-                            type="monotone"
-                            dataKey="pct"
-                            stroke="#e5b84a"
-                            strokeWidth={2}
-                            dot={false}
-                            isAnimationActive
-                          />
-                        </LineChart>
-                      </ResponsiveContainer>
+                    <div className="hm-chart-container" ref={chartContainerRef}>
+                      {chartReady ? (
+                        <ResponsiveContainer width="100%" height="100%">
+                          <LineChart data={effChartData}>
+                            <XAxis
+                              dataKey="time"
+                              tick={{
+                                fill: "rgba(255,255,255,0.3)",
+                                fontSize: 11,
+                              }}
+                              tickLine={false}
+                              axisLine={{ stroke: "rgba(255,255,255,0.08)" }}
+                              tickFormatter={(v: number) => {
+                                const d = new Date(v);
+                                return `${d.getHours()}:${String(d.getMinutes()).padStart(2, "0")}`;
+                              }}
+                            />
+                            <YAxis
+                              domain={[0, 100]}
+                              tick={{
+                                fill: "rgba(255,255,255,0.3)",
+                                fontSize: 11,
+                              }}
+                              tickLine={false}
+                              axisLine={{ stroke: "rgba(255,255,255,0.08)" }}
+                              width={40}
+                              tickFormatter={(v: number) => `${v}%`}
+                            />
+                            <Tooltip
+                              content={({ active, payload }) =>
+                                active && payload?.length ? (
+                                  <div className="hm-chart-tooltip">
+                                    <span>{payload[0].value}%</span>
+                                  </div>
+                                ) : null
+                              }
+                            />
+                            <ReferenceLine
+                              y={50}
+                              stroke="rgba(255,255,255,0.06)"
+                              strokeDasharray="4 4"
+                            />
+                            <Line
+                              type="monotone"
+                              dataKey="pct"
+                              stroke="#e5b84a"
+                              strokeWidth={2}
+                              dot={false}
+                              isAnimationActive
+                            />
+                          </LineChart>
+                        </ResponsiveContainer>
+                      ) : null}
                     </div>
                   </div>
                 )}
