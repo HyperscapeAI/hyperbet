@@ -77,6 +77,53 @@ function uniqueList(values: string[]): string[] {
   return unique;
 }
 
+function parseStreamSourceUrl(value: string): URL | null {
+  try {
+    return new URL(value);
+  } catch {
+    return null;
+  }
+}
+
+function isHyperscapeStreamSource(value: string): boolean {
+  const parsed = parseStreamSourceUrl(value);
+  if (!parsed) return false;
+
+  const pathname = parsed.pathname.toLowerCase();
+  const page = (parsed.searchParams.get("page") || "").trim().toLowerCase();
+  const isStreamRoute =
+    pathname.endsWith("/stream") ||
+    pathname === "/stream" ||
+    pathname.endsWith("/stream.html") ||
+    pathname === "/stream.html" ||
+    page === "stream";
+
+  return (
+    isStreamRoute &&
+    (parsed.searchParams.has("streamToken") ||
+      parsed.hostname.toLowerCase().includes("hyperscape"))
+  );
+}
+
+function sanitizeResolvedStreamSources(values: string[]): string[] {
+  const uniqueSources = uniqueList(values);
+  if (!uniqueSources.some(isHyperscapeStreamSource)) {
+    return uniqueSources;
+  }
+
+  const retainedSources = uniqueSources.filter(isHyperscapeStreamSource);
+  const droppedSources = uniqueSources.filter(
+    (source) => !isHyperscapeStreamSource(source),
+  );
+  if (droppedSources.length > 0 && typeof console !== "undefined") {
+    console.warn(
+      "[config] dropping non-Hyperscapes fallback streams while a tokenized Hyperscapes stream is configured",
+      droppedSources,
+    );
+  }
+  return retainedSources;
+}
+
 function resolveEnvironment(): Environment {
   const explicitCluster = readEnvString("VITE_SOLANA_CLUSTER")?.toLowerCase();
   if (explicitCluster && ENVIRONMENT_ALIASES[explicitCluster]) {
@@ -276,7 +323,7 @@ interface EnvConfig {
 const DEFAULT_STREAM_URL = "https://www.twitch.tv/hyperscapeai";
 const DEFAULT_STREAM_FALLBACK_URL = "";
 const DEFAULT_GAME_API_URL = "http://127.0.0.1:5555";
-const DEFAULT_PRODUCTION_GAME_API_URL = "https://bsc-api.hyperbet.win";
+const DEFAULT_PRODUCTION_GAME_API_URL = "https://gold-betting-keeper-production.up.railway.app";
 
 const baseConfig: Partial<EnvConfig> = {
   betWindowSeconds: 300,
@@ -399,19 +446,29 @@ const resolvedGameApiUrl = envGameApiUrl ?? baseEnvConfig.gameApiUrl;
 const envGameWsUrl = readEnvString("VITE_GAME_WS_URL");
 const resolvedGameWsUrl =
   envGameWsUrl ?? `${resolvedGameApiUrl.replace(/^http/, "ws")}/ws`;
+const envStreamUrl = readEnvString("VITE_STREAM_URL");
+const envStreamSources = parseEnvList(readEnvString("VITE_STREAM_SOURCES"));
+const suppressDefaultStreamFallback =
+  envStreamUrl == null &&
+  envStreamSources.length === 0 &&
+  envGameApiUrl != null &&
+  envGameApiUrl !== baseEnvConfig.gameApiUrl;
 const defaultPrimaryStreamUrl =
-  readEnvString("VITE_STREAM_URL") ?? baseEnvConfig.streamUrl;
+  envStreamUrl ?? (suppressDefaultStreamFallback ? "" : baseEnvConfig.streamUrl);
 const resolvedStreamSources = (() => {
-  const fromListVar = parseEnvList(readEnvString("VITE_STREAM_SOURCES"));
-  if (fromListVar.length > 0) {
-    return uniqueList(fromListVar);
+  if (envStreamSources.length > 0) {
+    return sanitizeResolvedStreamSources(envStreamSources);
   }
   const envFallbackUrl = readEnvString("VITE_STREAM_FALLBACK_URL");
   const fallbackUrl =
     envFallbackUrl ??
-    (defaultPrimaryStreamUrl ? DEFAULT_STREAM_FALLBACK_URL : "");
-  return uniqueList([defaultPrimaryStreamUrl, fallbackUrl ?? ""]).filter(
-    (value) => value.length > 0,
+    (defaultPrimaryStreamUrl && !suppressDefaultStreamFallback
+      ? DEFAULT_STREAM_FALLBACK_URL
+      : "");
+  return sanitizeResolvedStreamSources(
+    uniqueList([defaultPrimaryStreamUrl, fallbackUrl ?? ""]).filter(
+      (value) => value.length > 0,
+    ),
   );
 })();
 const resolvedStreamUrl = resolvedStreamSources[0] ?? "";

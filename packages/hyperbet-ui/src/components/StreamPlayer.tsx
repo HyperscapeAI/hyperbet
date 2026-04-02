@@ -1,4 +1,10 @@
-import React, { useCallback, useEffect, useMemo, useRef } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import Hls from "hls.js";
 
 interface StreamPlayerProps {
@@ -27,22 +33,88 @@ export const StreamPlayer: React.FC<StreamPlayerProps> = ({
     () => resolveEmbedUrl(streamUrl, autoPlay, muted),
     [autoPlay, muted, streamUrl],
   );
+  const embedKind = useMemo(() => classifyEmbedKind(embedUrl), [embedUrl]);
   const unavailableNotifiedRef = useRef(false);
+  const readyNotifiedRef = useRef(false);
+  const [embedFailure, setEmbedFailure] = useState<string | null>(null);
 
-  const markUnavailable = useCallback(() => {
-    if (unavailableNotifiedRef.current) return;
-    unavailableNotifiedRef.current = true;
-    onStreamUnavailable?.();
-  }, [onStreamUnavailable]);
+  const markUnavailable = useCallback(
+    (reason = "Live stream unavailable.") => {
+      setEmbedFailure((current) => current ?? reason);
+      if (unavailableNotifiedRef.current) return;
+      unavailableNotifiedRef.current = true;
+      onStreamUnavailable?.();
+    },
+    [onStreamUnavailable],
+  );
+
+  const markReady = useCallback(() => {
+    setEmbedFailure(null);
+    if (readyNotifiedRef.current) return;
+    readyNotifiedRef.current = true;
+    onStreamReady?.();
+  }, [onStreamReady]);
 
   useEffect(() => {
     unavailableNotifiedRef.current = false;
+    readyNotifiedRef.current = false;
+    setEmbedFailure(null);
   }, [streamUrl]);
 
   useEffect(() => {
     if (embedUrl) return;
     markUnavailable();
   }, [embedUrl, markUnavailable]);
+
+  useEffect(() => {
+    if (!embedUrl || embedKind !== "hyperscape" || typeof window === "undefined") {
+      return;
+    }
+
+    const embedOrigin = getEmbedOrigin(embedUrl);
+    if (!embedOrigin) {
+      return;
+    }
+
+    let seenStatusMessage = false;
+    const bootstrapTimeout = window.setTimeout(() => {
+      if (!seenStatusMessage) {
+        markUnavailable("Failed to initialize the embedded Hyperscapes stream.");
+      }
+    }, 10_000);
+
+    const handleMessage = (event: MessageEvent) => {
+      if (event.origin !== embedOrigin) return;
+      if (!event.data || typeof event.data !== "object") return;
+
+      const payload = event.data as {
+        type?: string;
+        ready?: boolean;
+        status?: string | null;
+      };
+      if (payload.type !== "HYPERSCAPE_STREAM_STATUS") {
+        return;
+      }
+
+      seenStatusMessage = true;
+      window.clearTimeout(bootstrapTimeout);
+
+      if (payload.ready === true) {
+        markReady();
+        return;
+      }
+
+      if (typeof payload.status === "string" && payload.status.startsWith("error:")) {
+        markUnavailable(describeHyperscapeEmbedError(payload.status));
+      }
+    };
+
+    window.addEventListener("message", handleMessage);
+    return () => {
+      window.clearTimeout(bootstrapTimeout);
+      window.removeEventListener("message", handleMessage);
+    };
+  }, [embedKind, embedUrl, markReady, markUnavailable]);
 
   useEffect(() => {
     // External embeddable URLs render through iframe mode below.
@@ -220,7 +292,7 @@ export const StreamPlayer: React.FC<StreamPlayerProps> = ({
 
         hls.on(Hls.Events.MANIFEST_PARSED, () => {
           console.log("[StreamPlayer] Manifest parsed, starting playback");
-          onStreamReady?.();
+          markReady();
           void video.play().catch(() => {});
         });
 
@@ -269,7 +341,7 @@ export const StreamPlayer: React.FC<StreamPlayerProps> = ({
 
     const onWaiting = () => nudgeToLiveEdge();
     const onStalled = () => nudgeToLiveEdge();
-    const onLoadedMetadata = () => onStreamReady?.();
+    const onLoadedMetadata = () => markReady();
     const onVideoError = () => scheduleRebuild("video element error", 1000);
 
     video.addEventListener("waiting", onWaiting);
@@ -296,7 +368,7 @@ export const StreamPlayer: React.FC<StreamPlayerProps> = ({
         hls = null;
       }
     };
-  }, [embedUrl, streamUrl, autoPlay, muted]);
+  }, [embedUrl, streamUrl, autoPlay, muted, markReady]);
 
   if (!embedUrl) {
     return (
@@ -350,9 +422,9 @@ export const StreamPlayer: React.FC<StreamPlayerProps> = ({
         allow="autoplay; encrypted-media; picture-in-picture; clipboard-write"
         allowFullScreen
         loading="eager"
-        onLoad={onStreamReady}
+        onLoad={embedKind === "hyperscape" ? undefined : markReady}
         referrerPolicy="strict-origin-when-cross-origin"
-        onError={markUnavailable}
+        onError={() => markUnavailable()}
         style={{
           width: "100%",
           height: "100%",
@@ -361,6 +433,39 @@ export const StreamPlayer: React.FC<StreamPlayerProps> = ({
           backgroundColor: "#000",
         }}
       />
+      {embedFailure ? (
+        <div
+          style={{
+            position: "absolute",
+            inset: 0,
+            zIndex: 1,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: "24px",
+            textAlign: "center",
+            color: "#f3e4ba",
+            fontFamily: "system-ui, sans-serif",
+            fontSize: "0.95rem",
+            lineHeight: 1.5,
+            background:
+              "linear-gradient(180deg, rgba(2,4,10,0.76), rgba(2,4,10,0.88))",
+          }}
+        >
+          <div
+            style={{
+              maxWidth: "28rem",
+              padding: "1rem 1.25rem",
+              border: "1px solid rgba(243, 228, 186, 0.28)",
+              borderRadius: "0.9rem",
+              backgroundColor: "rgba(8, 11, 20, 0.72)",
+              boxShadow: "0 16px 48px rgba(0, 0, 0, 0.28)",
+            }}
+          >
+            {embedFailure}
+          </div>
+        </div>
+      ) : null}
       <div
         style={{
           position: "absolute",
@@ -465,6 +570,47 @@ function toTwitchEmbedUrl(
   embed.searchParams.set("autoplay", autoPlay ? "true" : "false");
   embed.searchParams.set("muted", muted ? "true" : "false");
   return embed.toString();
+}
+
+function classifyEmbedKind(embedUrl: string | null): "generic" | "hyperscape" {
+  if (!embedUrl) return "generic";
+
+  const parsed = parseUrl(embedUrl);
+  if (!parsed) return "generic";
+
+  const pathname = parsed.pathname.toLowerCase();
+  const page = (parsed.searchParams.get("page") || "").trim().toLowerCase();
+  const isStreamRoute =
+    pathname.endsWith("/stream") ||
+    pathname === "/stream" ||
+    pathname.endsWith("/stream.html") ||
+    pathname === "/stream.html" ||
+    page === "stream";
+
+  if (!isStreamRoute) return "generic";
+  if (parsed.searchParams.has("streamToken")) return "hyperscape";
+  if (parsed.hostname.toLowerCase().includes("hyperscape")) return "hyperscape";
+  return "generic";
+}
+
+function getEmbedOrigin(embedUrl: string): string | null {
+  const parsed = parseUrl(embedUrl);
+  return parsed?.origin ?? null;
+}
+
+function describeHyperscapeEmbedError(status: string): string {
+  switch (status) {
+    case "error:viewer_access_denied":
+      return "Live stream access is currently restricted for this page.";
+    case "error:webgpu_required":
+      return "This browser cannot render the live 3D stream.";
+    case "error:http":
+      return "The live stream is temporarily unavailable.";
+    case "error:init_failed":
+      return "Failed to initialize the live 3D stream.";
+    default:
+      return "Live stream unavailable.";
+  }
 }
 
 function parseUrl(rawValue: string): URL | null {
