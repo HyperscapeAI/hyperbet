@@ -720,6 +720,9 @@ export function ModelsMarketView({
   const [oracleHistoryError, setOracleHistoryError] = React.useState<
     string | null
   >(null);
+  const oracleHistoryChartRef = React.useRef<HTMLDivElement | null>(null);
+  const [oracleHistoryChartReady, setOracleHistoryChartReady] =
+    React.useState(false);
   const effectiveLeverage = Math.min(
     configuredMaxLeverage,
     Math.max(1, Math.round(leverage)),
@@ -736,6 +739,33 @@ export function ModelsMarketView({
   );
   const openCollateralSatisfiesMinMargin =
     estimatedOpenPostFeeMarginLamports >= configuredMinMarginLamports;
+
+  React.useEffect(() => {
+    const container = oracleHistoryChartRef.current;
+    if (!container) return;
+
+    const updateChartReady = () => {
+      const nextReady =
+        container.clientWidth > 0 && container.clientHeight > 0;
+      setOracleHistoryChartReady((prevReady) =>
+        prevReady === nextReady ? prevReady : nextReady,
+      );
+    };
+
+    updateChartReady();
+
+    const resizeObserver =
+      typeof ResizeObserver !== "undefined"
+        ? new ResizeObserver(updateChartReady)
+        : null;
+    resizeObserver?.observe(container);
+
+    window.addEventListener("resize", updateChartReady);
+    return () => {
+      resizeObserver?.disconnect();
+      window.removeEventListener("resize", updateChartReady);
+    };
+  }, []);
 
   React.useEffect(() => {
     if (E2E_MODEL_ENTRY) {
@@ -1756,7 +1786,10 @@ export function ModelsMarketView({
                   </span>
                 </div>
 
-                <div className="models-market-history-chart">
+                <div
+                  className="models-market-history-chart"
+                  ref={oracleHistoryChartRef}
+                >
                   {oracleHistoryError ? (
                     <div className="models-market-empty">
                       {copy.oracleHistoryError(oracleHistoryError)}
@@ -1769,7 +1802,7 @@ export function ModelsMarketView({
                     <div className="models-market-empty">
                       {copy.waitingForSnapshots}
                     </div>
-                  ) : (
+                  ) : oracleHistoryChartReady ? (
                     <ResponsiveContainer width="100%" height="100%">
                       <LineChart data={oracleHistory}>
                         <XAxis
@@ -1843,7 +1876,7 @@ export function ModelsMarketView({
                         />
                       </LineChart>
                     </ResponsiveContainer>
-                  )}
+                  ) : null}
                 </div>
               </div>
 
