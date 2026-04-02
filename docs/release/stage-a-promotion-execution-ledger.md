@@ -1,5 +1,7 @@
 # Stage-A Promotion Execution Ledger
 
+> **Historical snapshot:** This is an append-only execution ledger for the Stage-A promotion run. Current open-work ownership lives in [tracking-document-map.md](tracking-document-map.md) and [github-project-production-backlog.md](github-project-production-backlog.md). Use this file for evidence and transaction history, not as the canonical blocker list.
+
 > **TL;DR:** This is the live execution log for the current non-mainnet promotion run. The Stage-A wallet set under `keys/stage-a/` is live, all three Stage-A deployments are on-chain on `Solana devnet`, `BSC testnet`, and `AVAX Fuji`, and direct protocol canaries are green on all three chains. Synthetic browser-to-chain acceptance is green on BSC and AVAX and green on the default Solana browser lanes. The explicit Solana matured-winner-claim lane is proven separately in-browser on the recorded `real_hyperscapes` fixture after `finalizableAt`. The real Hyperscapes browser lane is green for the targeted BSC PM, AVAX PM, Solana PM, Solana CLOB, keeper-restart recovery, Hyperscapes-restart recovery, and the bounded observe-only soak. The recorded real Solana proposal-stage fixture is now also finalized and claimed on-chain in-browser. Stage-A browser-to-chain signoff on this branch is complete. AMM is not part of browser-surface signoff.
 
 This document records the exact commands, balances, transaction hashes, and blockers for the current Stage-A promotion run. It is intentionally operational and append-only for this execution cycle.

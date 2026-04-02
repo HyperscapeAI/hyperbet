@@ -1,8 +1,14 @@
 # Hyperbet Production Deploy (Cloudflare + Railway)
 
-> **TL;DR:** This is the production and staged topology for the phase-1 launch product. Launch-blocking chains are `Solana`, `BSC`, and `AVAX`; `Base` remains a non-blocking add-chain lane. The deployment topology is in place, but as of 2026-03-25 real staged proof and soak remain blocked because GitHub does not yet have a provisioned `staging` environment or the required `HYPERBET_*_STAGING_*` vars and secrets.
+> **TL;DR:** This is the production and staged topology for the phase-1 launch product. The active production-readiness chains are `Solana` and `BSC`; AVAX remains a preserved but isolated follow-on lane, and `Base` remains a non-blocking add-chain lane. The deployment topology is in place, but as of 2026-03-25 real staged proof and soak remain blocked because GitHub does not yet have a provisioned `staging` environment or the required `HYPERBET_*_STAGING_*` vars and secrets. This topology also serves the wallet/account and rewards APIs, so their durability claims are only as strong as the configured keeper persistence and reconciliation model.
 
 This is the recommended production topology for the Hyperbet stack in this repo.
+
+Detailed implementation work is tracked in:
+
+- [GitHub Project Production Backlog](release/github-project-production-backlog.md)
+- [Runtime Integration Readiness Matrix](release/runtime-integration-readiness-matrix.md)
+- [Tracking Document Map](release/tracking-document-map.md)
 
 Operator runbooks are in [docs/runbooks/README.md](runbooks/README.md).
 
@@ -14,19 +20,24 @@ Operator runbooks are in [docs/runbooks/README.md](runbooks/README.md).
 - DDoS/WAF/edge cache: Cloudflare proxy in front of the betting API
 - Contracts/state: Solana + EVM (configured by env vars below, proxied server-side)
 
-Production rollout is still blocked until canonical launch-chain deployment
-truth exists in the shared chain registry for `Solana`, `BSC`, and `AVAX`,
-staged proof artifacts are captured for the target environment, and the real
-governance and operator wallets are provisioned.
+Production rollout is still blocked until canonical active-scope deployment
+truth exists in the shared chain registry for `Solana` and `BSC`, staged proof
+artifacts are captured for the target environment, and the real governance and
+operator wallets are provisioned. AVAX deployment topology remains preserved
+for follow-on use but is not a blocker for the current path.
+
+This document owns the deployment topology and environment contract. It does not
+own the execution backlog.
 
 ## Staging Rail
 
-The repo also supports a manual staging rail for Solana, BSC, and AVAX without
-changing the production topology:
+The repo also supports a manual staging rail for Solana and BSC without
+changing the production topology. AVAX staging remains preserved as follow-on
+scope:
 
 - staged Solana Pages + staged Solana keeper
 - staged BSC Pages + staged BSC keeper
-- staged AVAX Pages + staged AVAX keeper
+- optional staged AVAX Pages + staged AVAX keeper when the lane is reactivated
 - external staged duel/stream source
 
 Manual staging deploys use the same workflows as production through
@@ -36,8 +47,9 @@ Manual staging deploys use the same workflows as production through
 - `Deploy Hyperbet Solana Keeper`
 - `Deploy Hyperbet BSC Pages`
 - `Deploy Hyperbet BSC Keeper`
-- `Deploy Hyperbet AVAX Pages`
-- `Deploy Hyperbet AVAX Keeper`
+- optional when AVAX is reactivated:
+  - `Deploy Hyperbet AVAX Pages`
+  - `Deploy Hyperbet AVAX Keeper`
 
 Select `environment=staging` when dispatching the relevant workflow.
 
@@ -67,15 +79,16 @@ Required staging vars are:
 - `HYPERBET_BSC_RAILWAY_STAGING_PROJECT_ID`
 - `HYPERBET_BSC_RAILWAY_STAGING_ENVIRONMENT_ID`
 - `HYPERBET_BSC_RAILWAY_STAGING_KEEPER_SERVICE_ID`
-- `HYPERBET_AVAX_PAGES_STAGING_PROJECT_NAME`
-- `HYPERBET_AVAX_PAGES_STAGING_URL`
-- `HYPERBET_AVAX_KEEPER_STAGING_URL`
-- `HYPERBET_AVAX_KEEPER_STAGING_WS_URL`
-- `HYPERBET_AVAX_RAILWAY_STAGING_PROJECT_ID`
-- `HYPERBET_AVAX_RAILWAY_STAGING_ENVIRONMENT_ID`
-- `HYPERBET_AVAX_RAILWAY_STAGING_KEEPER_SERVICE_ID`
-- `HYPERBET_AVAX_STAGING_CHAIN_ID`
-- `HYPERBET_AVAX_STAGING_GOLD_CLOB_ADDRESS`
+- optional follow-on AVAX staged vars when that lane is reactivated:
+  - `HYPERBET_AVAX_PAGES_STAGING_PROJECT_NAME`
+  - `HYPERBET_AVAX_PAGES_STAGING_URL`
+  - `HYPERBET_AVAX_KEEPER_STAGING_URL`
+  - `HYPERBET_AVAX_KEEPER_STAGING_WS_URL`
+  - `HYPERBET_AVAX_RAILWAY_STAGING_PROJECT_ID`
+  - `HYPERBET_AVAX_RAILWAY_STAGING_ENVIRONMENT_ID`
+  - `HYPERBET_AVAX_RAILWAY_STAGING_KEEPER_SERVICE_ID`
+  - `HYPERBET_AVAX_STAGING_CHAIN_ID`
+  - `HYPERBET_AVAX_STAGING_GOLD_CLOB_ADDRESS`
 
 Required staged proof vars/secrets used by the launch-scope proof rail:
 
@@ -102,24 +115,29 @@ Required staged proof vars/secrets used by the launch-scope proof rail:
 - `HYPERBET_BSC_STAGING_SKILL_ORACLE_ADDRESS`
 - `HYPERBET_BSC_STAGING_PERP_ENGINE_ADDRESS`
 - `HYPERBET_BSC_STAGING_STREAM_PUBLISH_KEY`
-- `HYPERBET_AVAX_STAGING_RPC_URL`
-- `HYPERBET_AVAX_STAGING_REPORTER_PRIVATE_KEY`
-- `HYPERBET_AVAX_STAGING_CANARY_PRIVATE_KEY`
-- `HYPERBET_AVAX_STAGING_ADMIN_PRIVATE_KEY`
-- `HYPERBET_AVAX_STAGING_MARKET_OPERATOR_PRIVATE_KEY`
-- `HYPERBET_AVAX_STAGING_DUEL_ORACLE_ADDRESS`
-- `HYPERBET_AVAX_STAGING_GOLD_CLOB_ADDRESS`
-- `HYPERBET_AVAX_STAGING_GOLD_AMM_ROUTER_ADDRESS`
-- `HYPERBET_AVAX_STAGING_MUSD_TOKEN_ADDRESS`
-- `HYPERBET_AVAX_STAGING_GOLD_TOKEN_ADDRESS`
-- `HYPERBET_AVAX_STAGING_SKILL_ORACLE_ADDRESS`
-- `HYPERBET_AVAX_STAGING_PERP_ENGINE_ADDRESS`
-- `HYPERBET_AVAX_STAGING_STREAM_PUBLISH_KEY`
-- `HYPERBET_AVAX_RAILWAY_STAGING_PROJECT_ID`
-- `HYPERBET_AVAX_RAILWAY_STAGING_ENVIRONMENT_ID`
-- `HYPERBET_AVAX_RAILWAY_STAGING_KEEPER_SERVICE_ID`
+- optional follow-on AVAX proof vars when that lane is reactivated:
+  - `HYPERBET_AVAX_STAGING_RPC_URL`
+  - `HYPERBET_AVAX_STAGING_REPORTER_PRIVATE_KEY`
+  - `HYPERBET_AVAX_STAGING_CANARY_PRIVATE_KEY`
+  - `HYPERBET_AVAX_STAGING_ADMIN_PRIVATE_KEY`
+  - `HYPERBET_AVAX_STAGING_MARKET_OPERATOR_PRIVATE_KEY`
+  - `HYPERBET_AVAX_STAGING_DUEL_ORACLE_ADDRESS`
+  - `HYPERBET_AVAX_STAGING_GOLD_CLOB_ADDRESS`
+  - `HYPERBET_AVAX_STAGING_GOLD_AMM_ROUTER_ADDRESS`
+  - `HYPERBET_AVAX_STAGING_MUSD_TOKEN_ADDRESS`
+  - `HYPERBET_AVAX_STAGING_GOLD_TOKEN_ADDRESS`
+  - `HYPERBET_AVAX_STAGING_SKILL_ORACLE_ADDRESS`
+  - `HYPERBET_AVAX_STAGING_PERP_ENGINE_ADDRESS`
+  - `HYPERBET_AVAX_STAGING_STREAM_PUBLISH_KEY`
+  - `HYPERBET_AVAX_RAILWAY_STAGING_PROJECT_ID`
+  - `HYPERBET_AVAX_RAILWAY_STAGING_ENVIRONMENT_ID`
+  - `HYPERBET_AVAX_RAILWAY_STAGING_KEEPER_SERVICE_ID`
 
-AVAX rollout remains blocked until canonical deployment truth exists in the shared chain registry and the effective AVAX wallet/signer set is in place. The staging/prod rail is present so proof and release packaging can use one consistent contract once those addresses are committed.
+AVAX rollout remains preserved as an isolated follow-on lane until canonical
+deployment truth exists in the shared chain registry and the effective AVAX
+wallet/signer set is in place. The staging/prod rail remains documented so
+proof and release packaging can use one consistent contract if that lane is
+reactivated later.
 
 ## 1) Deploy the keeper to Railway
 
@@ -248,6 +266,7 @@ Use the manual `Staged Live Proof` workflow or the repo wrapper:
 bun run staged:proof -- --mode=read-only --target=all
 bun run staged:proof -- --mode=canary-write --target=solana
 bun run staged:proof -- --mode=canary-write --target=bsc
+# optional follow-on lane when AVAX is explicitly reactivated
 bun run staged:proof -- --mode=canary-write --target=avax
 ```
 
@@ -259,9 +278,12 @@ The proof wrapper captures:
 - `/api/keeper/bot-health`
 - stream-state and duel-context payloads
 - Solana and BSC proxy proof
-- Solana, BSC, and AVAX canary tx hashes/signatures when `mode=canary-write`
+- Solana and BSC canary tx hashes/signatures when `mode=canary-write`
+- optional AVAX canary tx hashes/signatures when that lane is explicitly
+  reactivated
 - `verify:chains` output
-- AVAX staging env-audit output
+- optional AVAX staging env-audit output when that lane is explicitly
+  reactivated
 
 This is a manual operator proof rail. It should not be treated as complete
 until a real staged run passes end to end and the artifacts are reviewed.
