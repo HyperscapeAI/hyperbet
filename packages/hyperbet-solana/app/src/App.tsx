@@ -49,6 +49,7 @@ import { FIGHT_ORACLE_PROGRAM_ID } from "./lib/programIds";
 import { useStreamingState } from "./spectator/useStreamingState";
 import { useDuelContext } from "@hyperbet/ui/spectator/useDuelContext";
 import type { LeaderboardEntry } from "./spectator/types";
+import { useMeasuredContentBox } from "@hyperbet/ui/lib/useMeasuredContentBox";
 import { useResizePanel, useIsMobile } from "@hyperbet/ui/lib/useResizePanel";
 import { ResizeHandle } from "@hyperbet/ui/components/ResizeHandle";
 import {
@@ -57,7 +58,6 @@ import {
   XAxis,
   YAxis,
   Tooltip,
-  ResponsiveContainer,
   ReferenceLine,
 } from "recharts";
 
@@ -745,6 +745,8 @@ export function App() {
   >("leaderboard");
   const appRootRef = useRef<HTMLDivElement | null>(null);
   const bettingDockInnerRef = useRef<HTMLDivElement | null>(null);
+  const chartContainerRef = useRef<HTMLDivElement | null>(null);
+  const chartSize = useMeasuredContentBox(chartContainerRef, !isMobile, 2);
 
   const { state: streamingState } = useStreamingState();
   const { context: duelContext } = useDuelContext();
@@ -1757,70 +1759,76 @@ export function App() {
                 </div>
 
                 {/* Odds Chart */}
-                <div className="hm-chart-panel">
-                  <div className="hm-chart-toolbar">
-                    <button className="hm-chart-tool-btn" type="button">
-                      +
-                    </button>
-                    <button className="hm-chart-tool-btn" type="button">
-                      &#9881;
-                    </button>
-                    <button className="hm-chart-tool-btn" type="button">
-                      &#9634;
-                    </button>
+                {!isMobile && (
+                  <div className="hm-chart-panel">
+                    <div className="hm-chart-toolbar">
+                      <button className="hm-chart-tool-btn" type="button">
+                        +
+                      </button>
+                      <button className="hm-chart-tool-btn" type="button">
+                        &#9881;
+                      </button>
+                      <button className="hm-chart-tool-btn" type="button">
+                        &#9634;
+                      </button>
+                    </div>
+                    <div className="hm-chart-price-label">
+                      <span className="hm-chart-price-current">
+                        {(effYesPercent / 100).toFixed(1)}
+                      </span>
+                    </div>
+                    <div className="hm-chart-container" ref={chartContainerRef}>
+                      {chartSize ? (
+                        <LineChart
+                          data={effChartData}
+                          width={chartSize.width}
+                          height={chartSize.height}
+                        >
+                          <XAxis
+                            dataKey="time"
+                            tick={{ fill: "rgba(255,255,255,0.3)", fontSize: 11 }}
+                            tickLine={false}
+                            axisLine={{ stroke: "rgba(255,255,255,0.08)" }}
+                            tickFormatter={(v: number) => {
+                              const d = new Date(v);
+                              return `${d.getHours()}:${String(d.getMinutes()).padStart(2, "0")}`;
+                            }}
+                          />
+                          <YAxis
+                            domain={[0, 100]}
+                            tick={{ fill: "rgba(255,255,255,0.3)", fontSize: 11 }}
+                            tickLine={false}
+                            axisLine={{ stroke: "rgba(255,255,255,0.08)" }}
+                            width={40}
+                            tickFormatter={(v: number) => `${v}%`}
+                          />
+                          <Tooltip
+                            content={({ active, payload }) =>
+                              active && payload?.length ? (
+                                <div className="hm-chart-tooltip">
+                                  <span>{payload[0].value}%</span>
+                                </div>
+                              ) : null
+                            }
+                          />
+                          <ReferenceLine
+                            y={50}
+                            stroke="rgba(255,255,255,0.06)"
+                            strokeDasharray="4 4"
+                          />
+                          <Line
+                            type="monotone"
+                            dataKey="pct"
+                            stroke="#e5b84a"
+                            strokeWidth={2}
+                            dot={false}
+                            isAnimationActive
+                          />
+                        </LineChart>
+                      ) : null}
+                    </div>
                   </div>
-                  <div className="hm-chart-price-label">
-                    <span className="hm-chart-price-current">
-                      {(effYesPercent / 100).toFixed(1)}
-                    </span>
-                  </div>
-                  <div className="hm-chart-container">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <LineChart data={effChartData}>
-                        <XAxis
-                          dataKey="time"
-                          tick={{ fill: "rgba(255,255,255,0.3)", fontSize: 11 }}
-                          tickLine={false}
-                          axisLine={{ stroke: "rgba(255,255,255,0.08)" }}
-                          tickFormatter={(v: number) => {
-                            const d = new Date(v);
-                            return `${d.getHours()}:${String(d.getMinutes()).padStart(2, "0")}`;
-                          }}
-                        />
-                        <YAxis
-                          domain={[0, 100]}
-                          tick={{ fill: "rgba(255,255,255,0.3)", fontSize: 11 }}
-                          tickLine={false}
-                          axisLine={{ stroke: "rgba(255,255,255,0.08)" }}
-                          width={40}
-                          tickFormatter={(v: number) => `${v}%`}
-                        />
-                        <Tooltip
-                          content={({ active, payload }) =>
-                            active && payload?.length ? (
-                              <div className="hm-chart-tooltip">
-                                <span>{payload[0].value}%</span>
-                              </div>
-                            ) : null
-                          }
-                        />
-                        <ReferenceLine
-                          y={50}
-                          stroke="rgba(255,255,255,0.06)"
-                          strokeDasharray="4 4"
-                        />
-                        <Line
-                          type="monotone"
-                          dataKey="pct"
-                          stroke="#e5b84a"
-                          strokeWidth={2}
-                          dot={false}
-                          isAnimationActive
-                        />
-                      </LineChart>
-                    </ResponsiveContainer>
-                  </div>
-                </div>
+                )}
               </div>
 
               <ResizeHandle

@@ -36,6 +36,7 @@ import { PointsDisplay } from "@hyperbet/ui/components/PointsDisplay";
 import { useChain } from "./lib/ChainContext";
 import { useStreamingState } from "@hyperbet/ui/spectator/useStreamingState";
 import { useDuelContext } from "@hyperbet/ui/spectator/useDuelContext";
+import { useMeasuredContentBox } from "@hyperbet/ui/lib/useMeasuredContentBox";
 import { useResizePanel, useIsMobile } from "@hyperbet/ui/lib/useResizePanel";
 import { ResizeHandle } from "@hyperbet/ui/components/ResizeHandle";
 import {
@@ -44,7 +45,6 @@ import {
   XAxis,
   YAxis,
   Tooltip,
-  ResponsiveContainer,
   ReferenceLine,
 } from "recharts";
 
@@ -721,37 +721,10 @@ export function App() {
   const appRootRef = useRef<HTMLDivElement | null>(null);
   const bettingDockInnerRef = useRef<HTMLDivElement | null>(null);
   const chartContainerRef = useRef<HTMLDivElement | null>(null);
-  const [chartReady, setChartReady] = useState(false);
+  const chartSize = useMeasuredContentBox(chartContainerRef, !isMobile, 2);
 
   const { state: streamingState } = useStreamingState();
   const { context: duelContext } = useDuelContext();
-
-  useEffect(() => {
-    const container = chartContainerRef.current;
-    if (!container) return;
-
-    const updateChartReady = () => {
-      const nextReady =
-        container.clientWidth > 0 && container.clientHeight > 0;
-      setChartReady((prevReady) =>
-        prevReady === nextReady ? prevReady : nextReady,
-      );
-    };
-
-    updateChartReady();
-
-    const resizeObserver =
-      typeof ResizeObserver !== "undefined"
-        ? new ResizeObserver(updateChartReady)
-        : null;
-    resizeObserver?.observe(container);
-
-    window.addEventListener("resize", updateChartReady);
-    return () => {
-      resizeObserver?.disconnect();
-      window.removeEventListener("resize", updateChartReady);
-    };
-  }, []);
   const liveCycle = streamingState?.cycle ?? null;
   const lifecycleChainKey =
     activeChain === "bsc" || activeChain === "base" || activeChain === "avax"
@@ -1785,57 +1758,59 @@ export function App() {
                       </span>
                     </div>
                     <div className="hm-chart-container" ref={chartContainerRef}>
-                      {chartReady ? (
-                        <ResponsiveContainer width="100%" height="100%">
-                          <LineChart data={effChartData}>
-                            <XAxis
-                              dataKey="time"
-                              tick={{
-                                fill: "rgba(255,255,255,0.3)",
-                                fontSize: 11,
-                              }}
-                              tickLine={false}
-                              axisLine={{ stroke: "rgba(255,255,255,0.08)" }}
-                              tickFormatter={(v: number) => {
-                                const d = new Date(v);
-                                return `${d.getHours()}:${String(d.getMinutes()).padStart(2, "0")}`;
-                              }}
-                            />
-                            <YAxis
-                              domain={[0, 100]}
-                              tick={{
-                                fill: "rgba(255,255,255,0.3)",
-                                fontSize: 11,
-                              }}
-                              tickLine={false}
-                              axisLine={{ stroke: "rgba(255,255,255,0.08)" }}
-                              width={40}
-                              tickFormatter={(v: number) => `${v}%`}
-                            />
-                            <Tooltip
-                              content={({ active, payload }) =>
-                                active && payload?.length ? (
-                                  <div className="hm-chart-tooltip">
-                                    <span>{payload[0].value}%</span>
-                                  </div>
-                                ) : null
-                              }
-                            />
-                            <ReferenceLine
-                              y={50}
-                              stroke="rgba(255,255,255,0.06)"
-                              strokeDasharray="4 4"
-                            />
-                            <Line
-                              type="monotone"
-                              dataKey="pct"
-                              stroke="#e5b84a"
-                              strokeWidth={2}
-                              dot={false}
-                              isAnimationActive
-                            />
-                          </LineChart>
-                        </ResponsiveContainer>
+                      {chartSize ? (
+                        <LineChart
+                          data={effChartData}
+                          width={chartSize.width}
+                          height={chartSize.height}
+                        >
+                          <XAxis
+                            dataKey="time"
+                            tick={{
+                              fill: "rgba(255,255,255,0.3)",
+                              fontSize: 11,
+                            }}
+                            tickLine={false}
+                            axisLine={{ stroke: "rgba(255,255,255,0.08)" }}
+                            tickFormatter={(v: number) => {
+                              const d = new Date(v);
+                              return `${d.getHours()}:${String(d.getMinutes()).padStart(2, "0")}`;
+                            }}
+                          />
+                          <YAxis
+                            domain={[0, 100]}
+                            tick={{
+                              fill: "rgba(255,255,255,0.3)",
+                              fontSize: 11,
+                            }}
+                            tickLine={false}
+                            axisLine={{ stroke: "rgba(255,255,255,0.08)" }}
+                            width={40}
+                            tickFormatter={(v: number) => `${v}%`}
+                          />
+                          <Tooltip
+                            content={({ active, payload }) =>
+                              active && payload?.length ? (
+                                <div className="hm-chart-tooltip">
+                                  <span>{payload[0].value}%</span>
+                                </div>
+                              ) : null
+                            }
+                          />
+                          <ReferenceLine
+                            y={50}
+                            stroke="rgba(255,255,255,0.06)"
+                            strokeDasharray="4 4"
+                          />
+                          <Line
+                            type="monotone"
+                            dataKey="pct"
+                            stroke="#e5b84a"
+                            strokeWidth={2}
+                            dot={false}
+                            isAnimationActive
+                          />
+                        </LineChart>
                       ) : null}
                     </div>
                   </div>
