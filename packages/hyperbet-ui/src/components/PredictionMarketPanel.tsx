@@ -1,4 +1,4 @@
-import { useState, ReactNode } from "react";
+import { useEffect, useRef, useState, ReactNode } from "react";
 import { getUiCopy, resolveUiLocale, type UiLocale } from "@hyperbet/ui/i18n";
 import {
   LineChart,
@@ -88,6 +88,8 @@ export function PredictionMarketPanel({
   const resolvedLocale = resolveUiLocale(locale);
   const copy = getUiCopy(resolvedLocale);
   const [activeTab, setActiveTab] = useState<"buy" | "sell">("buy");
+  const chartContainerRef = useRef<HTMLDivElement | null>(null);
+  const [chartReady, setChartReady] = useState(false);
 
   const yesSelected = side === "YES";
   const noSelected = side === "NO";
@@ -118,6 +120,33 @@ export function PredictionMarketPanel({
   const C_YES_BAR = compact
     ? "linear-gradient(90deg, var(--hm-buy-soft, rgba(34,197,94,0.2)), var(--hm-buy), var(--hm-buy-soft, rgba(34,197,94,0.2)))"
     : "linear-gradient(90deg, var(--hm-buy-soft, rgba(34,197,94,0.2)), var(--hm-buy), var(--hm-buy-soft, rgba(34,197,94,0.2)))";
+
+  useEffect(() => {
+    const container = chartContainerRef.current;
+    if (!container) return;
+
+    const updateChartReady = () => {
+      const nextReady =
+        container.clientWidth > 0 && container.clientHeight > 0;
+      setChartReady((prevReady) =>
+        prevReady === nextReady ? prevReady : nextReady,
+      );
+    };
+
+    updateChartReady();
+
+    const resizeObserver =
+      typeof ResizeObserver !== "undefined"
+        ? new ResizeObserver(updateChartReady)
+        : null;
+    resizeObserver?.observe(container);
+
+    window.addEventListener("resize", updateChartReady);
+    return () => {
+      resizeObserver?.disconnect();
+      window.removeEventListener("resize", updateChartReady);
+    };
+  }, []);
   const C_YES_BAR_SHADOW = compact
     ? "0 0 8px var(--hm-buy-glow-strong, rgba(34,197,94,0.5))"
     : "0 0 8px var(--hm-buy-glow-strong, rgba(34,197,94,0.5))";
@@ -893,6 +922,7 @@ export function PredictionMarketPanel({
                 />
               </div>
               <div
+                ref={chartContainerRef}
                 style={{
                   flex: 1,
                   minHeight: 0,
@@ -900,71 +930,74 @@ export function PredictionMarketPanel({
                   zIndex: 1,
                 }}
               >
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={chartData}>
-                    <defs>
-                      <filter
-                        id="glow"
-                        x="-20%"
-                        y="-20%"
-                        width="140%"
-                        height="140%"
-                      >
-                        <feGaussianBlur stdDeviation="3" result="blur" />
-                        <feComposite
-                          in="SourceGraphic"
-                          in2="blur"
-                          operator="over"
-                        />
-                      </filter>
-                    </defs>
-                    <XAxis dataKey="time" hide />
-                    <YAxis domain={[0, 100]} hide />
-                    <Tooltip
-                      content={({ active, payload }) => {
-                        if (active && payload && payload.length) {
-                          return (
-                            <div
-                              style={{
-                                background: "rgba(10,12,18,0.7)",
-                                backdropFilter: "blur(20px)",
-                                WebkitBackdropFilter: "blur(20px)",
-                                padding: "6px 12px",
-                                borderRadius: 8,
-                                border: "1px solid var(--hm-chip-border, rgba(232,65,66,0.3))",
-                                fontSize: 13,
-                                fontFamily: "var(--hm-font-mono)",
-                                fontWeight: 900,
-                                color: "#fff",
-                                boxShadow:
-                                  "0 4px 20px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.08)",
-                              }}
-                            >
-                              <span style={{ color: "var(--hm-accent-gold)" }}>
-                                {payload[0].value}%
-                              </span>
-                            </div>
-                          );
-                        }
-                        return null;
-                      }}
-                    />
-                    <ReferenceLine
-                      y={50}
-                      stroke="rgba(255,255,255,0.1)"
-                      strokeDasharray="4 4"
-                    />
-                    <Line
-                      type="monotone"
-                      dataKey="pct"
-                      stroke="var(--hm-buy)"
-                      strokeWidth={3}
-                      dot={false}
-                      isAnimationActive={true}
-                      filter="url(#glow)"
-                    />
-                  </LineChart>
-                </ResponsiveContainer>
+                {chartReady ? (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={chartData}>
+                      <defs>
+                        <filter
+                          id="glow"
+                          x="-20%"
+                          y="-20%"
+                          width="140%"
+                          height="140%"
+                        >
+                          <feGaussianBlur stdDeviation="3" result="blur" />
+                          <feComposite
+                            in="SourceGraphic"
+                            in2="blur"
+                            operator="over"
+                          />
+                        </filter>
+                      </defs>
+                      <XAxis dataKey="time" hide />
+                      <YAxis domain={[0, 100]} hide />
+                      <Tooltip
+                        content={({ active, payload }) => {
+                          if (active && payload && payload.length) {
+                            return (
+                              <div
+                                style={{
+                                  background: "rgba(10,12,18,0.7)",
+                                  backdropFilter: "blur(20px)",
+                                  WebkitBackdropFilter: "blur(20px)",
+                                  padding: "6px 12px",
+                                  borderRadius: 8,
+                                  border:
+                                    "1px solid var(--hm-chip-border, rgba(232,65,66,0.3))",
+                                  fontSize: 13,
+                                  fontFamily: "var(--hm-font-mono)",
+                                  fontWeight: 900,
+                                  color: "#fff",
+                                  boxShadow:
+                                    "0 4px 20px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.08)",
+                                }}
+                              >
+                                <span style={{ color: "var(--hm-accent-gold)" }}>
+                                  {payload[0].value}%
+                                </span>
+                              </div>
+                            );
+                          }
+                          return null;
+                        }}
+                      />
+                      <ReferenceLine
+                        y={50}
+                        stroke="rgba(255,255,255,0.1)"
+                        strokeDasharray="4 4"
+                      />
+                      <Line
+                        type="monotone"
+                        dataKey="pct"
+                        stroke="var(--hm-buy)"
+                        strokeWidth={3}
+                        dot={false}
+                        isAnimationActive={true}
+                        filter="url(#glow)"
+                      />
+                    </LineChart>
+                  </ResponsiveContainer>
+                ) : null}
               </div>
             </div>
 
