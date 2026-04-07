@@ -37,6 +37,7 @@
     "./lib/programs": "./src/lib/programs.ts",
     "./lib/solanaCompat": "./src/lib/solanaCompat.ts",
     "./lib/solanaRpc": "./src/lib/solanaRpc.ts",
+    "./lib/streamSession": "./src/lib/streamSession.ts",
     "./lib/token": "./src/lib/token.ts",
     "./lib/useMockStreamingEngine": "./src/lib/useMockStreamingEngine.ts",
     "./lib/useResizePanel": "./src/lib/useResizePanel.ts",
@@ -69,6 +70,7 @@
     "./spectator/Leaderboard": "./src/spectator/Leaderboard.tsx",
     "./spectator/SpectatorPanel": "./src/spectator/SpectatorPanel.tsx",
     "./spectator/types": "./src/spectator/types.ts",
+    "./spectator/useCanonicalStreamSession": "./src/spectator/useCanonicalStreamSession.ts",
     "./spectator/useDuelContext": "./src/spectator/useDuelContext.ts",
     "./spectator/useStreamingState": "./src/spectator/useStreamingState.ts"
   },

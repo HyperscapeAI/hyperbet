@@ -6,6 +6,7 @@ import {
   resolveBettingEvmDefaults,
   resolveBettingSolanaDeployment,
 } from "../../../deployments";
+import { sanitizeResolvedStreamSources } from "@hyperbet/ui/lib/streamSession";
 
 export type SolanaCluster = "localnet" | "devnet" | "testnet" | "mainnet-beta";
 
@@ -41,6 +42,12 @@ function readEnvString(name: string): string | undefined {
   if (typeof rawValue !== "string") return undefined;
   const trimmed = rawValue.trim();
   return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function readEnvStringOverride(name: string): string | undefined {
+  const rawValue = import.meta.env[name];
+  if (typeof rawValue !== "string") return undefined;
+  return rawValue.trim();
 }
 
 function readEnvNumber(name: string, fallback: number): number {
@@ -410,7 +417,7 @@ const defaultPrimaryStreamUrl =
   envStreamUrl ?? (suppressDefaultStreamFallback ? "" : baseEnvConfig.streamUrl);
 const resolvedStreamSources = (() => {
   if (envStreamSources.length > 0) {
-    return uniqueList(envStreamSources);
+    return sanitizeResolvedStreamSources(envStreamSources);
   }
   const envFallbackUrl = readEnvString("VITE_STREAM_FALLBACK_URL");
   const fallbackUrl =
@@ -418,8 +425,10 @@ const resolvedStreamSources = (() => {
     (defaultPrimaryStreamUrl && !suppressDefaultStreamFallback
       ? DEFAULT_STREAM_FALLBACK_URL
       : "");
-  return uniqueList([defaultPrimaryStreamUrl, fallbackUrl ?? ""]).filter(
-    (value) => value.length > 0,
+  return sanitizeResolvedStreamSources(
+    uniqueList([defaultPrimaryStreamUrl, fallbackUrl ?? ""]).filter(
+      (value) => value.length > 0,
+    ),
   );
 })();
 const resolvedStreamUrl = resolvedStreamSources[0] ?? "";
@@ -495,29 +504,32 @@ export const CONFIG: EnvConfig = {
     readEnvString("VITE_HEADLESS_WALLETS") ?? baseEnvConfig.headlessWalletsJson,
   jupiterBaseUrl:
     readEnvString("VITE_JUPITER_BASE_URL") ?? baseEnvConfig.jupiterBaseUrl,
-  bscRpcUrl: readEnvString("VITE_BSC_RPC_URL") ?? baseEnvConfig.bscRpcUrl,
+  bscRpcUrl:
+    readEnvStringOverride("VITE_BSC_RPC_URL") ?? baseEnvConfig.bscRpcUrl,
   bscChainId: readEnvNumber("VITE_BSC_CHAIN_ID", baseEnvConfig.bscChainId),
   bscGoldClobAddress:
-    readEnvString("VITE_BSC_GOLD_CLOB_ADDRESS") ??
+    readEnvStringOverride("VITE_BSC_GOLD_CLOB_ADDRESS") ??
     baseEnvConfig.bscGoldClobAddress,
   bscGoldTokenAddress:
-    readEnvString("VITE_BSC_GOLD_TOKEN_ADDRESS") ??
+    readEnvStringOverride("VITE_BSC_GOLD_TOKEN_ADDRESS") ??
     baseEnvConfig.bscGoldTokenAddress,
-  baseRpcUrl: readEnvString("VITE_BASE_RPC_URL") ?? baseEnvConfig.baseRpcUrl,
+  baseRpcUrl:
+    readEnvStringOverride("VITE_BASE_RPC_URL") ?? baseEnvConfig.baseRpcUrl,
   baseChainId: readEnvNumber("VITE_BASE_CHAIN_ID", baseEnvConfig.baseChainId),
   baseGoldClobAddress:
-    readEnvString("VITE_BASE_GOLD_CLOB_ADDRESS") ??
+    readEnvStringOverride("VITE_BASE_GOLD_CLOB_ADDRESS") ??
     baseEnvConfig.baseGoldClobAddress,
   baseGoldTokenAddress:
-    readEnvString("VITE_BASE_GOLD_TOKEN_ADDRESS") ??
+    readEnvStringOverride("VITE_BASE_GOLD_TOKEN_ADDRESS") ??
     baseEnvConfig.baseGoldTokenAddress,
-  avaxRpcUrl: readEnvString("VITE_AVAX_RPC_URL") ?? baseEnvConfig.avaxRpcUrl,
+  avaxRpcUrl:
+    readEnvStringOverride("VITE_AVAX_RPC_URL") ?? baseEnvConfig.avaxRpcUrl,
   avaxChainId: readEnvNumber("VITE_AVAX_CHAIN_ID", baseEnvConfig.avaxChainId),
   avaxGoldClobAddress:
-    readEnvString("VITE_AVAX_GOLD_CLOB_ADDRESS") ??
+    readEnvStringOverride("VITE_AVAX_GOLD_CLOB_ADDRESS") ??
     baseEnvConfig.avaxGoldClobAddress,
   avaxGoldTokenAddress:
-    readEnvString("VITE_AVAX_GOLD_TOKEN_ADDRESS") ??
+    readEnvStringOverride("VITE_AVAX_GOLD_TOKEN_ADDRESS") ??
     baseEnvConfig.avaxGoldTokenAddress,
   walletConnectProjectId:
     readEnvString("VITE_WALLETCONNECT_PROJECT_ID") ??

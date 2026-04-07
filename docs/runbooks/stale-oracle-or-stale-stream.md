@@ -1,51 +1,60 @@
 # Stale Oracle Or Stale Stream
 
-## Symptoms
+## Goal
 
-- duel phase or HP data stops updating
-- quotes remain open around lock/resolve boundaries
-- lifecycle status lags real duel outcomes
+Separate four failure planes before taking action:
+
+1. source render
+2. capture and encode
+3. manifest and delivery freshness
+4. player live-edge drift
+
+Do not treat all stale-stream incidents as one class of outage.
 
 ## Detection
 
+Check Hyperscapes first:
+
 ```bash
-curl -fsSL "$KEEPER_URL/status" | jq '.parsers, .stream'
+curl -fsSL "$HYPERSCAPES_URL/api/streaming/capture/status" | jq
+curl -fsSL "$HYPERSCAPES_URL/api/streaming/state" | jq
+curl -fsSL "$HLS_URL" | head
+```
+
+Then check the keeper:
+
+```bash
 curl -fsSL "$KEEPER_URL/api/streaming/state" | jq
-curl -fsSL "$KEEPER_URL/api/arena/prediction-markets/active" | jq
+curl -fsSL "$KEEPER_URL/status" | jq '.stream'
 curl -fsSL "$KEEPER_URL/api/keeper/bot-health" | jq
 ```
 
-## Immediate Containment
+## Interpretation
 
-1. Halt quoting on affected chains.
-2. Treat stale oracle or stale stream as higher priority than preserving uptime.
-3. Do not resolve markets manually unless lifecycle state is confirmed from authoritative chain state.
+- `render_tick_stale`
+  - source page is not advancing
+- `visual_change_stale`
+  - render loop is alive but duel visuals are not changing
+- `capture_fps_low`
+  - capture path is overloaded
+- `encoder_fps_low`
+  - encode path is overloaded or misconfigured
+- `manifest_stale`
+  - delivery path is stale
+- `player_drifted`
+  - viewer was too far behind the live edge
 
-## Recovery Steps
+## Recovery Order
 
-1. Confirm whether the failure is upstream stream data or chain/oracle freshness.
-2. Restore stream/oracle input first.
-3. Restart the keeper if it does not reconcile automatically.
-4. Re-check canonical lifecycle state and bot-health freshness timestamps.
-5. Re-enable quoting only after stale markers clear and lifecycle state matches chain state.
+1. restore source render truth
+2. restore capture and encode cadence
+3. restore manifest and delivery freshness
+4. force player rebuild only if the source and delivery are already healthy
+5. restart the keeper only if it failed to ingest a now-healthy upstream state
 
 ## Success Criteria
 
-- stream state updates again
-- lifecycle records move out of stale or unknown state
-- quote state remains disabled during stale input and resumes only after recovery
-
-## Escalation
-
-Escalate if:
-
-- stale input persists beyond the expected upstream recovery window
-- markets remain open through lock or resolve boundaries
-- settlement occurs from stale data
-
-## Evidence To Capture
-
-- latest stream payload
-- `/status` parser and stream fields
-- `/api/keeper/bot-health` freshness fields
-- exact timestamps of last good update
+- Hyperscapes capture status reports fresh `rendererHealth`
+- capture metrics and encode metrics recover
+- keepers expose the same delivery mode and renderer truth
+- viewers return to live-edge playback without repeated rebuild loops

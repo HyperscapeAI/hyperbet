@@ -1,6 +1,7 @@
 import type { Address } from "@solana/kit";
 
 import { resolveBettingSolanaDeployment } from "../../../deployments";
+import { sanitizeResolvedStreamSources } from "@hyperbet/ui/lib/streamSession";
 
 export type SolanaCluster = "localnet" | "devnet" | "testnet" | "mainnet-beta";
 
@@ -306,7 +307,7 @@ const defaultPrimaryStreamUrl =
   envStreamUrl ?? (suppressDefaultStreamFallback ? "" : baseEnvConfig.streamUrl);
 const resolvedStreamSources = (() => {
   if (envStreamSources.length > 0) {
-    return uniqueList(envStreamSources);
+    return sanitizeResolvedStreamSources(envStreamSources);
   }
   const envFallbackUrl = readEnvString("VITE_STREAM_FALLBACK_URL");
   const fallbackUrl =
@@ -314,8 +315,10 @@ const resolvedStreamSources = (() => {
     (defaultPrimaryStreamUrl && !suppressDefaultStreamFallback
       ? DEFAULT_STREAM_FALLBACK_URL
       : "");
-  return uniqueList([defaultPrimaryStreamUrl, fallbackUrl ?? ""]).filter(
-    (value) => value.length > 0,
+  return sanitizeResolvedStreamSources(
+    uniqueList([defaultPrimaryStreamUrl, fallbackUrl ?? ""]).filter(
+      (value) => value.length > 0,
+    ),
   );
 })();
 const resolvedStreamUrl = resolvedStreamSources[0] ?? "";
