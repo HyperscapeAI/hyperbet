@@ -89,6 +89,32 @@ export function sanitizeResolvedStreamSources(values: string[]): string[] {
   );
 }
 
+function isHlsPlaybackUrl(value: string): boolean {
+  const parsed = parseStreamSourceUrl(value);
+  return parsed?.pathname.toLowerCase().endsWith(".m3u8") ?? false;
+}
+
+export function isNonBlockingCanonicalRendererFailure(params: {
+  degradedReason: string | null | undefined;
+  playbackUrl: string | null | undefined;
+}): boolean {
+  const reason = (params.degradedReason ?? "").trim().toLowerCase();
+  const playbackUrl = params.playbackUrl?.trim() ?? "";
+  return reason.startsWith("probe_failed:") && isHlsPlaybackUrl(playbackUrl);
+}
+
+export function isCanonicalRendererPlaybackReady(params: {
+  rendererReady: boolean | null | undefined;
+  degradedReason: string | null | undefined;
+  playbackUrl: string | null | undefined;
+}): boolean {
+  if (params.rendererReady !== false) {
+    return true;
+  }
+
+  return isNonBlockingCanonicalRendererFailure(params);
+}
+
 type SelectBetSurfaceStreamUrlInput = {
   allowFallbackWhenSessionUnavailable?: boolean;
   authorityHealth?: CanonicalStreamHealth | null;
@@ -145,12 +171,21 @@ export function selectBetSurfaceStreamUrl({
     session?.status.renderer?.ready ??
     rendererReady ??
     true;
+  const canonicalRendererDegradedReason =
+    session?.rendererHealth?.degradedReason ??
+    session?.status.renderer?.degradedReason ??
+    null;
+  const canonicalRendererPlaybackReady = isCanonicalRendererPlaybackReady({
+    rendererReady: canonicalRendererReady,
+    degradedReason: canonicalRendererDegradedReason,
+    playbackUrl: canonicalPlaybackUrl,
+  });
 
   const canUseCanonicalPlayback =
     !isE2eMode &&
     canonicalPlaybackUrl.length > 0 &&
     authorityReady &&
-    canonicalRendererReady &&
+    canonicalRendererPlaybackReady &&
     canonicalSessionMatchesLifecycle;
   const preloadStreamUrl =
     !isE2eMode && canonicalPlaybackUrl.length > 0 && authorityReady
@@ -176,7 +211,9 @@ export function describeCanonicalRendererDegradedReason(
   reason: string | null | undefined,
   fallback = "Waiting for stream...",
 ): string {
-  switch ((reason ?? "").trim().toLowerCase()) {
+  const normalizedReason = (reason ?? "").trim().toLowerCase();
+
+  switch (normalizedReason) {
     case "capture_client_disconnected":
       return "Renderer offline. Waiting for capture client.";
     case "ffmpeg_not_running":
@@ -200,6 +237,9 @@ export function describeCanonicalRendererDegradedReason(
     case "player_drifted":
       return "Playback drifted from the live edge.";
     default:
+      if (normalizedReason.startsWith("probe_failed:")) {
+        return "Renderer probe degraded. Waiting for source confirmation.";
+      }
       return reason && reason.trim().length > 0
         ? `Renderer unavailable: ${reason.replace(/_/g, " ")}`
         : fallback;

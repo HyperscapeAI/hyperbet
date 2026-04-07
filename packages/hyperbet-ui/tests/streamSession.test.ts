@@ -4,6 +4,7 @@ import { describe, expect, it } from "bun:test";
 import { LIVE_EDGE_HLS_CONFIG } from "../src/components/StreamPlayer";
 import {
   describeCanonicalRendererDegradedReason,
+  isCanonicalRendererPlaybackReady,
   selectBetSurfaceStreamUrl,
 } from "../src/lib/streamSession";
 import { normalizeCanonicalStreamSession } from "../src/spectator/useCanonicalStreamSession";
@@ -110,6 +111,53 @@ describe("selectBetSurfaceStreamUrl", () => {
     expect(selection.activeStreamUrl).toContain("protocol=llhls");
     expect(selection.canUseCanonicalPlayback).toBe(true);
   });
+
+  it("keeps canonical self-hls playback active when only the renderer probe fails", () => {
+    const session = normalizeCanonicalStreamSession({
+      seq: 1,
+      emittedAt: 1,
+      cycle: {
+        cycleId: "cycle-1",
+        phase: "FIGHTING",
+        duelId: "duel-1",
+        duelKeyHex: "deadbeef",
+        rendererHealth: {
+          ready: false,
+          degradedReason:
+            "probe_failed:evaluate: Target page, context or browser has been closed",
+          updatedAt: 1,
+        },
+      },
+      rendererHealth: {
+        ready: false,
+        degradedReason:
+          "probe_failed:evaluate: Target page, context or browser has been closed",
+        updatedAt: 1,
+      },
+      authorityHealth: {
+        ready: true,
+        degradedReason: null,
+        updatedAt: 1,
+      },
+      playback: {
+        url: "https://video.example/live/stream.m3u8",
+        kind: "hls",
+        renderSessionId: "render-1",
+        presentationDelayMs: 0,
+      },
+    });
+
+    const selection = selectBetSurfaceStreamUrl({
+      fallbackStreamIndex: 0,
+      fallbackStreamSources: ["https://fallback.example/live/stream.m3u8"],
+      authorityHealth: session?.authorityHealth,
+      rendererReady: session?.rendererHealth?.ready,
+      session,
+    });
+
+    expect(selection.activeStreamUrl).toBe("https://video.example/live/stream.m3u8");
+    expect(selection.canUseCanonicalPlayback).toBe(true);
+  });
 });
 
 describe("describeCanonicalRendererDegradedReason", () => {
@@ -123,6 +171,27 @@ describe("describeCanonicalRendererDegradedReason", () => {
     expect(describeCanonicalRendererDegradedReason("player_drifted")).toContain(
       "Playback drifted",
     );
+  });
+
+  it("treats renderer probe failures as degraded but not fatal messaging", () => {
+    expect(
+      describeCanonicalRendererDegradedReason(
+        "probe_failed:evaluate: Target page, context or browser has been closed",
+      ),
+    ).toContain("probe degraded");
+  });
+});
+
+describe("isCanonicalRendererPlaybackReady", () => {
+  it("allows self-hls playback to continue through transient renderer probe failures", () => {
+    expect(
+      isCanonicalRendererPlaybackReady({
+        rendererReady: false,
+        degradedReason:
+          "probe_failed:evaluate: Target page, context or browser has been closed",
+        playbackUrl: "https://video.example/live/stream.m3u8",
+      }),
+    ).toBe(true);
   });
 });
 

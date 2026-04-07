@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { CONFIG } from "../lib/config";
+import { isCanonicalRendererPlaybackReady } from "../lib/streamSession";
 import type {
   CanonicalStreamHealth,
   HlsManifestInfo,
@@ -453,12 +454,26 @@ export function useCanonicalStreamSession(
   const phase = session?.phase ?? session?.cycle.phase ?? null;
   const duelId = session?.duelId ?? session?.cycle.duelId ?? null;
   const presentationDelayMs = sessionPlaybackDelayMs(session);
+  const rendererPlaybackReady = useMemo(
+    () =>
+      isCanonicalRendererPlaybackReady({
+        rendererReady: rendererHealth?.ready,
+        degradedReason: rendererHealth?.degradedReason,
+        playbackUrl: playback?.url ?? session?.delivery?.playbackUrl ?? null,
+      }),
+    [
+      playback?.url,
+      rendererHealth?.degradedReason,
+      rendererHealth?.ready,
+      session?.delivery?.playbackUrl,
+    ],
+  );
   const isLive = useMemo(
     () =>
       Boolean(playback?.url) &&
       (authorityHealth?.ready ?? true) &&
-      (rendererHealth?.ready ?? true),
-    [authorityHealth?.ready, playback?.url, rendererHealth?.ready],
+      rendererPlaybackReady,
+    [authorityHealth?.ready, playback?.url, rendererPlaybackReady],
   );
 
   return {
