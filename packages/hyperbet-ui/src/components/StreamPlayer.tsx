@@ -44,7 +44,14 @@ type EmbedStatusPayload = {
   } | null;
 };
 
-export const LIVE_EDGE_HLS_CONFIG = {
+type HlsPlaybackProfile = {
+  config: Record<string, unknown>;
+  driftThresholdMs: number;
+  waitingGraceMs: number;
+  reloadOnBufferStall: boolean;
+};
+
+const LOW_LATENCY_HLS_CONFIG = {
   enableWorker: true,
   lowLatencyMode: true,
   liveSyncDurationCount: 2,
@@ -62,7 +69,25 @@ export const LIVE_EDGE_HLS_CONFIG = {
   fragLoadingRetryDelay: 800,
 } as const;
 
-const PLAYER_DRIFT_THRESHOLD_MS = 8_000;
+export const LIVE_EDGE_HLS_CONFIG = LOW_LATENCY_HLS_CONFIG;
+
+const STABLE_LIVE_HLS_CONFIG = {
+  enableWorker: true,
+  lowLatencyMode: false,
+  liveSyncDurationCount: 4,
+  liveMaxLatencyDurationCount: 8,
+  liveBackBufferLength: 16,
+  maxBufferLength: 12,
+  maxMaxBufferLength: 20,
+  maxLiveSyncPlaybackRate: 1.25,
+  startFragPrefetch: false,
+  manifestLoadingMaxRetry: 6,
+  manifestLoadingRetryDelay: 800,
+  levelLoadingMaxRetry: 6,
+  levelLoadingRetryDelay: 800,
+  fragLoadingMaxRetry: 6,
+  fragLoadingRetryDelay: 800,
+} as const;
 
 export const StreamPlayer: React.FC<StreamPlayerProps> = ({
   streamUrl,
@@ -258,10 +283,12 @@ export const StreamPlayer: React.FC<StreamPlayerProps> = ({
     let hls: Hls | null = null;
     let retryTimeout: ReturnType<typeof setTimeout> | null = null;
     let latencyInterval: ReturnType<typeof setInterval> | null = null;
+    let waitingTimeout: ReturnType<typeof setTimeout> | null = null;
     let recoveryCooldownUntil = 0;
     let fatalErrorCount = 0;
     let disposed = false;
     const sourceUrl = streamUrl.trim();
+    const playbackProfile = resolveHlsPlaybackProfile(sourceUrl);
 
     const updateTelemetry = (
       next:
@@ -290,6 +317,12 @@ export const StreamPlayer: React.FC<StreamPlayerProps> = ({
       latencyInterval = null;
     };
 
+    const clearWaitingTimeout = () => {
+      if (!waitingTimeout) return;
+      clearTimeout(waitingTimeout);
+      waitingTimeout = null;
+    };
+
     const syncLatencyTelemetry = () => {
       const latencyMs = readLiveEdgeLatencyMs(hls, video);
       updateTelemetry({
@@ -297,7 +330,7 @@ export const StreamPlayer: React.FC<StreamPlayerProps> = ({
         playbackUrl: sourceUrl,
         deliveryMode: inferDeliveryMode(sourceUrl),
       });
-      if (latencyMs != null && latencyMs > PLAYER_DRIFT_THRESHOLD_MS) {
+      if (latencyMs != null && latencyMs > playbackProfile.driftThresholdMs) {
         markDegraded(
           describeCanonicalRendererDegradedReason("player_drifted"),
         );
@@ -376,6 +409,7 @@ export const StreamPlayer: React.FC<StreamPlayerProps> = ({
         hls = null;
       }
       clearLatencyInterval();
+      clearWaitingTimeout();
       updateTelemetry((current) => ({
         ...current,
         liveEdgeLatencyMs: null,
@@ -404,7 +438,7 @@ export const StreamPlayer: React.FC<StreamPlayerProps> = ({
         return;
       }
 
-      hls = new Hls({ ...LIVE_EDGE_HLS_CONFIG });
+      hls = new Hls({ ...playbackProfile.config });
 
       hls.loadSource(sourceUrl);
       hls.attachMedia(video);
@@ -418,6 +452,7 @@ export const StreamPlayer: React.FC<StreamPlayerProps> = ({
       });
 
       hls.on(Hls.Events.FRAG_BUFFERED, () => {
+        clearWaitingTimeout();
         updateTelemetry({
           lastBufferedFragmentAt: Date.now(),
         });
@@ -439,11 +474,7 @@ export const StreamPlayer: React.FC<StreamPlayerProps> = ({
         );
 
         if (!data.fatal) {
-          if (
-            data.details === Hls.ErrorDetails.BUFFER_STALLED_ERROR ||
-            data.details === Hls.ErrorDetails.FRAG_LOAD_TIMEOUT ||
-            data.details === Hls.ErrorDetails.LEVEL_LOAD_TIMEOUT
-          ) {
+          if (data.details === Hls.ErrorDetails.BUFFER_STALLED_ERROR) {
             updateTelemetry((current) => ({
               ...current,
               stallCount: current.stallCount + 1,
@@ -451,7 +482,24 @@ export const StreamPlayer: React.FC<StreamPlayerProps> = ({
             markDegraded(
               describeCanonicalRendererDegradedReason("player_drifted"),
             );
-            recoverPlayback("non-fatal buffering/loading issue", {
+            if (playbackProfile.reloadOnBufferStall) {
+              recoverPlayback("buffer stalled near live edge", {
+                reloadSource: true,
+              });
+            } else {
+              syncLatencyTelemetry();
+              void video.play().catch(() => {});
+            }
+          } else if (
+            data.details === Hls.ErrorDetails.FRAG_LOAD_TIMEOUT ||
+            data.details === Hls.ErrorDetails.LEVEL_LOAD_TIMEOUT
+          ) {
+            updateTelemetry((current) => ({
+              ...current,
+              stallCount: current.stallCount + 1,
+            }));
+            markDegraded("Reconnecting to the live stream.");
+            recoverPlayback("fragment/level load timeout", {
               reloadSource: true,
             });
           } else if (data.details === Hls.ErrorDetails.BUFFER_APPEND_ERROR) {
@@ -509,18 +557,23 @@ export const StreamPlayer: React.FC<StreamPlayerProps> = ({
     const onLoadedData = () => markReady();
     const onCanPlay = () => markReady();
     const onPlaying = () => {
+      clearWaitingTimeout();
       markDegraded(null);
       syncLatencyTelemetry();
       markReady();
     };
     const onWaiting = () => {
-      updateTelemetry((current) => ({
-        ...current,
-        stallCount: current.stallCount + 1,
-      }));
-      markDegraded(describeCanonicalRendererDegradedReason("player_drifted"));
+      clearWaitingTimeout();
+      waitingTimeout = setTimeout(() => {
+        updateTelemetry((current) => ({
+          ...current,
+          stallCount: current.stallCount + 1,
+        }));
+        markDegraded("Player buffering near the live edge.");
+      }, playbackProfile.waitingGraceMs);
     };
     const onStalled = () => {
+      clearWaitingTimeout();
       updateTelemetry((current) => ({
         ...current,
         stallCount: current.stallCount + 1,
@@ -556,6 +609,7 @@ export const StreamPlayer: React.FC<StreamPlayerProps> = ({
       video.removeEventListener("error", onVideoError);
       clearRetry();
       clearLatencyInterval();
+      clearWaitingTimeout();
       disposed = true;
       if (hls) {
         hls.destroy();
@@ -896,12 +950,47 @@ function inferDeliveryMode(streamUrl: string): string | null {
   return null;
 }
 
+function resolveHlsPlaybackProfile(streamUrl: string): HlsPlaybackProfile {
+  const deliveryMode = inferDeliveryMode(streamUrl);
+  if (deliveryMode === "external_hls/llhls") {
+    return {
+      config: LOW_LATENCY_HLS_CONFIG,
+      driftThresholdMs: 8_000,
+      waitingGraceMs: 450,
+      reloadOnBufferStall: true,
+    };
+  }
+
+  return {
+    config: STABLE_LIVE_HLS_CONFIG,
+    driftThresholdMs: 14_000,
+    waitingGraceMs: 1_500,
+    reloadOnBufferStall: false,
+  };
+}
+
 function readLiveEdgeLatencyMs(
   hls: Hls | null,
   video: HTMLVideoElement,
 ): number | null {
   if (hls && typeof hls.latency === "number" && Number.isFinite(hls.latency)) {
     return Math.max(0, Math.round(hls.latency * 1000));
+  }
+
+  if (video.seekable.length > 0) {
+    const liveEdge = video.seekable.end(video.seekable.length - 1);
+    const remaining = liveEdge - video.currentTime;
+    if (Number.isFinite(remaining) && remaining >= 0) {
+      return Math.round(remaining * 1000);
+    }
+  }
+
+  if (video.buffered.length > 0) {
+    const bufferedEnd = video.buffered.end(video.buffered.length - 1);
+    const remaining = bufferedEnd - video.currentTime;
+    if (Number.isFinite(remaining) && remaining >= 0) {
+      return Math.round(remaining * 1000);
+    }
   }
 
   if (!Number.isFinite(video.duration) || video.duration <= 0) {
