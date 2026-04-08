@@ -151,6 +151,10 @@ function requireEnv(findings: Finding[], key: string, message?: string): string 
   return value;
 }
 
+function optionalEnv(key: string): string {
+  return process.env[key]?.trim() ?? "";
+}
+
 function canonicalMainnetStatus(chain: BettingEvmChain): {
   deployment: ReturnType<typeof resolveBettingEvmDeploymentForChain>;
   missingFields: ReturnType<typeof getMissingBettingEvmCanonicalFields>;
@@ -276,9 +280,11 @@ function auditPagesTarget(
   }
 
   const bscChainId = requireEnv(findings, "VITE_BSC_CHAIN_ID");
-  const baseChainId = requireEnv(findings, "VITE_BASE_CHAIN_ID");
   const bscClob = requireEnv(findings, "VITE_BSC_GOLD_CLOB_ADDRESS");
-  const baseClob = requireEnv(findings, "VITE_BASE_GOLD_CLOB_ADDRESS");
+  const baseChainId = optionalEnv("VITE_BASE_CHAIN_ID");
+  const baseClob = optionalEnv("VITE_BASE_GOLD_CLOB_ADDRESS");
+  const baseRpcUrl = optionalEnv("VITE_BASE_RPC_URL");
+  const baseEnabled = Boolean(baseChainId || baseClob || baseRpcUrl);
 
   if (deployment === "production") {
     const bsc = assertCanonicalMainnetReady(findings, "bsc", target).deployment;
@@ -322,23 +328,25 @@ function auditPagesTarget(
       message: `${target} staging must provide a real VITE_BSC_CHAIN_ID`,
     });
   }
-  if (!baseChainId || Number.isNaN(Number(baseChainId)) || Number(baseChainId) <= 0) {
-    findings.push({
-      level: "error",
-      message: `${target} staging must provide a real VITE_BASE_CHAIN_ID`,
-    });
-  }
   if (bscClob && (!HEX_ADDRESS_RE.test(bscClob) || PLACEHOLDER_ADDRESS_RE.test(bscClob))) {
     findings.push({
       level: "error",
       message: `${target} staging must provide a real VITE_BSC_GOLD_CLOB_ADDRESS`,
     });
   }
-  if (baseClob && (!HEX_ADDRESS_RE.test(baseClob) || PLACEHOLDER_ADDRESS_RE.test(baseClob))) {
-    findings.push({
-      level: "error",
-      message: `${target} staging must provide a real VITE_BASE_GOLD_CLOB_ADDRESS`,
-    });
+  if (baseEnabled) {
+    if (!baseChainId || Number.isNaN(Number(baseChainId)) || Number(baseChainId) <= 0) {
+      findings.push({
+        level: "error",
+        message: `${target} staging must provide a real VITE_BASE_CHAIN_ID when Base is enabled`,
+      });
+    }
+    if (!baseClob || !HEX_ADDRESS_RE.test(baseClob) || PLACEHOLDER_ADDRESS_RE.test(baseClob)) {
+      findings.push({
+        level: "error",
+        message: `${target} staging must provide a real VITE_BASE_GOLD_CLOB_ADDRESS when Base is enabled`,
+      });
+    }
   }
 }
 
@@ -505,12 +513,24 @@ function auditKeeperTarget(
       "BSC_GOLD_CLOB_ADDRESS",
       `${target} staging requires BSC_GOLD_CLOB_ADDRESS when audited locally`,
     );
-    requireExactAddress(
-      findings,
-      target,
-      "BASE_GOLD_CLOB_ADDRESS",
-      `${target} staging requires BASE_GOLD_CLOB_ADDRESS when audited locally`,
-    );
+    const enabledChains = optionalEnv("EVM_KEEPER_CHAINS")
+      .split(",")
+      .map((value) => value.trim())
+      .filter(Boolean);
+    if (enabledChains.includes("base")) {
+      requireExactAddress(
+        findings,
+        target,
+        "BASE_GOLD_CLOB_ADDRESS",
+        `${target} staging requires BASE_GOLD_CLOB_ADDRESS when Base is enabled`,
+      );
+      requireExactAddress(
+        findings,
+        target,
+        "BASE_DUEL_ORACLE_ADDRESS",
+        `${target} staging requires BASE_DUEL_ORACLE_ADDRESS when Base is enabled`,
+      );
+    }
   }
 
   if (target === "keeper:avax") {

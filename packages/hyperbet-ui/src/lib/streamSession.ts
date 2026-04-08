@@ -1,6 +1,9 @@
 import type {
   CanonicalStreamHealth,
   CanonicalStreamSession,
+  SourceRuntimeInfo,
+  StreamDestinationState,
+  StreamPublicReadiness,
 } from "../spectator/types";
 
 function parseStreamSourceUrl(value: string): URL | null {
@@ -115,6 +118,54 @@ export function isCanonicalRendererPlaybackReady(params: {
   return isNonBlockingCanonicalRendererFailure(params);
 }
 
+export function isCanonicalDeliveryReady(params: {
+  deliveryMode: "self_hls" | "external_hls" | null | undefined;
+  deliveryHealth: CanonicalStreamHealth | null | undefined;
+  publicReadiness?: StreamPublicReadiness | null | undefined;
+  playbackUrl: string | null | undefined;
+}): boolean {
+  const playbackUrl = params.playbackUrl?.trim() ?? "";
+  if (playbackUrl.length === 0) {
+    return false;
+  }
+
+  if (params.publicReadiness != null) {
+    return params.publicReadiness.ready;
+  }
+
+  if (params.deliveryMode !== "external_hls") {
+    return params.deliveryHealth?.ready ?? true;
+  }
+
+  if (params.deliveryHealth == null) {
+    return false;
+  }
+
+  return params.deliveryHealth.ready;
+}
+
+function isCanonicalSourceRuntimeReady(
+  sourceRuntime: SourceRuntimeInfo | null | undefined,
+): boolean {
+  return sourceRuntime?.ready === true;
+}
+
+function findCanonicalDestination(
+  session: CanonicalStreamSession | null,
+): StreamDestinationState | null {
+  if (!session?.channel) {
+    return session?.canonicalDestination ?? null;
+  }
+
+  return (
+    session.channel.destinations.find(
+      (destination) => destination.id === session.channel?.canonicalDestinationId,
+    ) ??
+    session.canonicalDestination ??
+    null
+  );
+}
+
 type SelectBetSurfaceStreamUrlInput = {
   allowFallbackWhenSessionUnavailable?: boolean;
   authorityHealth?: CanonicalStreamHealth | null;
@@ -147,10 +198,15 @@ export function selectBetSurfaceStreamUrl({
   session,
 }: SelectBetSurfaceStreamUrlInput): BetSurfaceStreamSelection {
   const fallbackStreamUrl = fallbackStreamSources[fallbackStreamIndex] ?? "";
+  const canonicalDestination = findCanonicalDestination(session);
   const canonicalPlaybackUrl =
+    session?.channel?.publicPlaybackUrl?.trim() ||
     session?.playback?.url?.trim() ||
+    canonicalDestination?.playbackUrl?.trim() ||
     session?.delivery?.playbackUrl?.trim() ||
     "";
+  const canonicalSourceRuntime =
+    session?.sourceRuntime ?? session?.status.sourceRuntime ?? null;
   const canonicalSessionDuelId = session?.duelId ?? null;
   const canonicalSessionDuelKey =
     session?.duelKey ??
@@ -175,20 +231,43 @@ export function selectBetSurfaceStreamUrl({
     session?.rendererHealth?.degradedReason ??
     session?.status.renderer?.degradedReason ??
     null;
+  const canonicalDeliveryHealth =
+    session?.deliveryHealth ??
+    session?.status.deliveryHealth ??
+    null;
   const canonicalRendererPlaybackReady = isCanonicalRendererPlaybackReady({
     rendererReady: canonicalRendererReady,
     degradedReason: canonicalRendererDegradedReason,
     playbackUrl: canonicalPlaybackUrl,
   });
+  const canonicalDeliveryReady = isCanonicalDeliveryReady({
+    deliveryMode:
+      session?.delivery?.mode ??
+      session?.status.delivery?.mode ??
+      (canonicalDestination?.provider === "self_hls" ? "self_hls" : null),
+    deliveryHealth: canonicalDeliveryHealth,
+    publicReadiness: session?.publicReadiness ?? session?.channel?.publicReadiness,
+    playbackUrl: canonicalPlaybackUrl,
+  });
+  const canonicalSourceReady = isCanonicalSourceRuntimeReady(
+    canonicalSourceRuntime,
+  );
 
   const canUseCanonicalPlayback =
     !isE2eMode &&
     canonicalPlaybackUrl.length > 0 &&
     authorityReady &&
     canonicalRendererPlaybackReady &&
+    canonicalSourceReady &&
+    canonicalDeliveryReady &&
     canonicalSessionMatchesLifecycle;
   const preloadStreamUrl =
-    !isE2eMode && canonicalPlaybackUrl.length > 0 && authorityReady
+    !isE2eMode &&
+    canonicalPlaybackUrl.length > 0 &&
+    authorityReady &&
+    canonicalRendererPlaybackReady &&
+    canonicalSourceReady &&
+    canonicalDeliveryReady
       ? canonicalPlaybackUrl
       : "";
 
@@ -226,12 +305,42 @@ export function describeCanonicalRendererDegradedReason(
       return "Source stale. Waiting for renderer ticks.";
     case "visual_change_stale":
       return "Source stale. The duel scene stopped changing.";
+    case "worker_missing":
+      return "Source offline. Waiting for the capture worker.";
+    case "browser_missing":
+      return "Source offline. Waiting for the capture browser.";
+    case "page_not_ready":
+      return "Source not ready. Waiting for the stream page.";
+    case "unexpected_navigation":
+      return "Source reset. The capture page navigated away.";
+    case "capture_stalled":
+      return "Source stalled. Waiting for capture traffic.";
+    case "encoder_stalled":
+      return "Delivery stalled. Waiting for encoder traffic.";
     case "capture_fps_low":
       return "Source degraded. Capture FPS dropped below target.";
     case "encoder_fps_low":
       return "Delivery degraded. Encoder FPS dropped below target.";
     case "manifest_stale":
-      return "Delivery stale. Waiting for a fresh live manifest.";
+      return "Source or delivery stale. Waiting for a fresh live manifest.";
+    case "destination_disconnected":
+      return "Delivery unavailable. Waiting for the live destination.";
+    case "delivery_status_unavailable":
+      return "Delivery unavailable. Waiting for broadcast status.";
+    case "delivery_status_stale":
+      return "Delivery stale. Waiting for fresh broadcast telemetry.";
+    case "delivery_pipeline_inactive":
+      return "Delivery unavailable. Waiting for the live broadcast pipeline.";
+    case "delivery_destination_missing":
+      return "Delivery unavailable. No live broadcast destination is configured.";
+    case "delivery_disconnected":
+      return "Delivery unavailable. Waiting for the live broadcast connection.";
+    case "delivery_unhealthy":
+      return "Delivery degraded. Waiting for the live broadcast to recover.";
+    case "status_stale":
+      return "Source stale. Waiting for fresh source status.";
+    case "unknown":
+      return "Source unavailable. Waiting for stream status.";
     case "asset_origin_incomplete":
       return "Renderer degraded. Asset CDN is incomplete for the stream page.";
     case "player_drifted":
@@ -244,4 +353,49 @@ export function describeCanonicalRendererDegradedReason(
         ? `Renderer unavailable: ${reason.replace(/_/g, " ")}`
         : fallback;
   }
+}
+
+export function resolveCanonicalPlaybackDeliveryMode(
+  session: CanonicalStreamSession | null,
+): string | null {
+  const canonicalDestination = findCanonicalDestination(session);
+  const playbackUrl =
+    session?.channel?.publicPlaybackUrl?.trim() ||
+    session?.delivery?.playbackUrl?.trim() ||
+    canonicalDestination?.playbackUrl?.trim() ||
+    "";
+  if (playbackUrl.includes("protocol=llhls")) {
+    return "external_hls/llhls";
+  }
+  if (canonicalDestination?.provider === "self_hls") {
+    return "self_hls/hls";
+  }
+  if (canonicalDestination?.transport === "llhls") {
+    return "external_hls/llhls";
+  }
+  if (canonicalDestination?.transport === "hls") {
+    return "external_hls/hls";
+  }
+
+  const deliveryMode = session?.delivery?.mode ?? null;
+  const playbackKind = (session?.playback?.kind ?? "").trim().toLowerCase();
+
+  if (deliveryMode === "external_hls") {
+    if (playbackKind === "llhls" || session?.delivery?.llhlsUrl) {
+      return "external_hls/llhls";
+    }
+    return "external_hls/hls";
+  }
+
+  if (deliveryMode === "self_hls") {
+    return "self_hls/hls";
+  }
+
+  if (playbackKind === "llhls") {
+    return "external_hls/llhls";
+  }
+  if (playbackKind === "hls") {
+    return "self_hls/hls";
+  }
+  return null;
 }

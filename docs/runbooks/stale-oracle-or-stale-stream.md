@@ -17,6 +17,7 @@ Check Hyperscapes first:
 
 ```bash
 curl -fsSL "$HYPERSCAPES_URL/api/streaming/capture/status" | jq
+curl -fsSL "$HYPERSCAPES_URL/api/streaming/capture/smoke" | jq
 curl -fsSL "$HYPERSCAPES_URL/api/streaming/state" | jq
 curl -fsSL "$HLS_URL" | head
 ```
@@ -31,6 +32,18 @@ curl -fsSL "$KEEPER_URL/api/keeper/bot-health" | jq
 
 ## Interpretation
 
+Treat source truth, canonical delivery truth, and player truth as separate
+signals:
+
+- `sourceRuntime`
+  - worker, browser, and capture health only
+- `channel.publicReadiness`
+  - canonical public playback truth
+- `delivery` / `canonicalDestination`
+  - consumer-facing playback metadata derived from canonical channel truth
+- renderer-health polling may enrich playback URLs, but it must not replace
+  canonical ingest transport metadata once a canonical destination exists
+
 - `render_tick_stale`
   - source page is not advancing
 - `visual_change_stale`
@@ -43,6 +56,8 @@ curl -fsSL "$KEEPER_URL/api/keeper/bot-health" | jq
   - delivery path is stale
 - `player_drifted`
   - viewer was too far behind the live edge
+- `player_buffering`
+  - viewer is near the live edge but is temporarily waiting on buffer
 
 ## Recovery Order
 
@@ -55,6 +70,8 @@ curl -fsSL "$KEEPER_URL/api/keeper/bot-health" | jq
 ## Success Criteria
 
 - Hyperscapes capture status reports fresh `rendererHealth`
+- Hyperscapes capture status reports fresh `sourceRuntime`
+- Hyperscapes smoke status reports the expected `/stream` scene URL and bundle
 - capture metrics and encode metrics recover
-- keepers expose the same delivery mode and renderer truth
+- keepers expose the same canonical ingest and playback truth as Hyperscapes
 - viewers return to live-edge playback without repeated rebuild loops

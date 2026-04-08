@@ -65,6 +65,7 @@
     "./components/Tabs": "./src/components/Tabs.tsx",
     "./components/ThemeSelector": "./src/components/ThemeSelector.tsx",
     "./components/WalletLinkCard": "./src/components/WalletLinkCard.tsx",
+    "./player": "./src/player/index.ts",
     "./spectator/AgentCard": "./src/spectator/AgentCard.tsx",
     "./spectator/index": "./src/spectator/index.ts",
     "./spectator/Leaderboard": "./src/spectator/Leaderboard.tsx",

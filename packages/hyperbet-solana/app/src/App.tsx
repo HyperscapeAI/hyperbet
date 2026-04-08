@@ -34,10 +34,14 @@ import {
 } from "@hyperbet/ui/lib/predictionMarkets";
 import {
   describeCanonicalRendererDegradedReason,
+  resolveCanonicalPlaybackDeliveryMode,
   selectBetSurfaceStreamUrl,
 } from "@hyperbet/ui/lib/streamSession";
 import { useAppConnection, useAppWallet, useAppWalletModal } from "./lib/appWallet";
-import { StreamPlayer } from "@hyperbet/ui/components/StreamPlayer";
+import {
+  StreamPlayer,
+  type StreamPlayerStatus,
+} from "@hyperbet/ui/components/StreamPlayer";
 import { PointsDisplay } from "@hyperbet/ui/components/PointsDisplay";
 import { useCanonicalStreamSession } from "@hyperbet/ui/spectator/useCanonicalStreamSession";
 import type { SolanaClobMarketSnapshot } from "@hyperbet/ui/components/SolanaClobPanel";
@@ -758,7 +762,10 @@ export function App() {
     session: canonicalStreamSession,
     playback: canonicalPlayback,
     rendererHealth: canonicalRendererHealth,
+    deliveryHealth: canonicalDeliveryHealth,
+    publicReadiness: canonicalPublicReadiness,
     authorityHealth: canonicalAuthorityHealth,
+    presentationDelayMs: canonicalPresentationDelayMs,
   } = useCanonicalStreamSession();
   const { context: duelContext } = useDuelContext();
   const liveCycle = streamingState?.cycle ?? null;
@@ -789,6 +796,11 @@ export function App() {
     session: canonicalStreamSession,
   });
   const mountedStreamUrl = activeStreamUrl || preloadStreamUrl;
+  const streamDeliveryMode = resolveCanonicalPlaybackDeliveryMode(
+    canonicalStreamSession,
+  );
+  const [streamPlayerStatus, setStreamPlayerStatus] =
+    useState<StreamPlayerStatus | null>(null);
   const streamPlaceholderMessage = useMemo(() => {
     if (streamSources.length === 0) {
       return "Invalid live stream configuration. A tokenized Hyperscapes /stream URL is required.";
@@ -805,8 +817,22 @@ export function App() {
         "Waiting for stream...",
       );
     }
+    if (
+      canonicalPublicReadiness?.ready === false ||
+      canonicalDeliveryHealth?.ready === false
+    ) {
+      return describeCanonicalRendererDegradedReason(
+        canonicalPublicReadiness?.reason ??
+          canonicalDeliveryHealth?.degradedReason,
+        "Waiting for live delivery...",
+      );
+    }
     return "Waiting for stream...";
   }, [
+    canonicalPublicReadiness?.reason,
+    canonicalPublicReadiness?.ready,
+    canonicalDeliveryHealth?.degradedReason,
+    canonicalDeliveryHealth?.ready,
     canonicalAuthorityHealth?.ready,
     canonicalRendererHealth?.degradedReason,
     canonicalRendererHealth?.ready,
@@ -1240,9 +1266,11 @@ export function App() {
     activeLifecycleMarket?.lifecycleStatus ?? solanaClobSnapshot.marketStatus,
     copy,
   );
-  const countdownText = formatCountdown(
-    currentMatch ? Math.max(0, currentMatch.closeTs - nowTs) : 0,
-  );
+  const countdownText = liveCycle
+    ? formatCountdown(Math.max(0, liveCycle.timeRemaining))
+    : formatCountdown(currentMatch ? Math.max(0, currentMatch.closeTs - nowTs) : 0);
+  const displayPhaseLabel = effPhaseLabel;
+  const displayCountdownText = countdownText;
   // Sidebar bet state
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [_hmSide, _setHmSide] = useState<BetSide>("YES");
@@ -1503,7 +1531,7 @@ export function App() {
             YES pool: {goldDisplay(yesPot)} GOLD | NO pool: {goldDisplay(noPot)}{" "}
             GOLD
           </div>
-          <div data-testid="countdown">{countdownText}</div>
+          <div data-testid="countdown">{displayCountdownText}</div>
           <div data-testid="status">{status}</div>
           <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
             <button
@@ -1721,7 +1749,7 @@ export function App() {
                     <span
                       className={`hm-phase-badge hm-phase-badge--${effCycle.phase.toLowerCase()}`}
                     >
-                      {effPhaseLabel}
+                      {displayPhaseLabel}
                     </span>
                     <span className="hm-mob-phase-strip-meta">
                       {effA1.name} vs {effA2.name}
@@ -1735,8 +1763,13 @@ export function App() {
                     <>
                       <StreamPlayer
                         streamUrl={mountedStreamUrl}
+                        deliveryMode={streamDeliveryMode}
+                        presentationDelayMs={canonicalPresentationDelayMs}
+                        syncToleranceMs={1_500}
+                        showDiagnostics={isE2eDebugMode}
                         muted={hmMuted}
                         autoPlay={true}
+                        onStatusChange={setStreamPlayerStatus}
                         onStreamUnavailable={switchToBackupStream}
                         style={{
                           position: "absolute",
@@ -2275,7 +2308,7 @@ export function App() {
                   <span
                     className={`hm-phase-badge hm-phase-badge--${effCycle.phase.toLowerCase()} hm-phase-badge--sm`}
                   >
-                    {effPhaseLabel}
+                    {displayPhaseLabel}
                   </span>
                   <button
                     className="hm-sidebar-close"

@@ -33,3 +33,4 @@ export * from "./components/StreamPlayer";
 export * from "./components/Tabs";
 export * from "./components/ThemeSelector";
 export * from "./components/WalletLinkCard";
+export * from "./player";

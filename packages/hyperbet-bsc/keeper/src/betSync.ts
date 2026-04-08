@@ -70,6 +70,12 @@ export type BetSyncEvent = {
   rendererHealth: BetSyncRendererHealth | null;
   rendererMetrics: BetSyncRendererMetrics | null;
   delivery: BetSyncDelivery | null;
+  sourceRuntime: JsonRecord | null;
+  channel: JsonRecord | null;
+  publicReadiness: JsonRecord | null;
+  canonicalDestination: JsonRecord | null;
+  fallbackDestination: JsonRecord | null;
+  deliveryHealth: JsonRecord | null;
 };
 
 export type BetSyncBootstrapState = {
@@ -86,6 +92,7 @@ export type StreamState = {
   cameraTarget: string | null;
   seq: number;
   emittedAt: number;
+  sourceRuntime?: JsonRecord | null;
 };
 
 export type PredictionMarketsDuelSnapshot = {
@@ -321,6 +328,12 @@ export function parseBetSyncEvent(payload: unknown): BetSyncEvent | null {
     rendererHealth: normalizeRendererHealth(candidate.rendererHealth),
     rendererMetrics: normalizeRendererMetrics(candidate.rendererMetrics),
     delivery: normalizeDelivery(candidate.delivery),
+    sourceRuntime: asRecord(candidate.sourceRuntime),
+    channel: asRecord(candidate.channel),
+    publicReadiness: asRecord(candidate.publicReadiness),
+    canonicalDestination: asRecord(candidate.canonicalDestination),
+    fallbackDestination: asRecord(candidate.fallbackDestination),
+    deliveryHealth: asRecord(candidate.deliveryHealth),
   };
 }
 

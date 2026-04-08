@@ -14,7 +14,6 @@ import {
   Line,
   LineChart,
   ReferenceLine,
-  ResponsiveContainer,
   Tooltip,
   XAxis,
   YAxis,
@@ -45,6 +44,7 @@ import {
   resolveUiLocale,
   type UiLocale,
 } from "@hyperbet/ui/i18n";
+import { useMeasuredContentBox } from "../lib/useMeasuredContentBox";
 
 const PROGRAM_ID = new PublicKey(
   CONFIG.goldPerpsMarketProgramId || goldPerpsIdl.address,
@@ -720,6 +720,12 @@ export function ModelsMarketView({
   const [oracleHistoryError, setOracleHistoryError] = React.useState<
     string | null
   >(null);
+  const oracleHistoryChartRef = React.useRef<HTMLDivElement | null>(null);
+  const oracleHistoryChartSize = useMeasuredContentBox(
+    oracleHistoryChartRef,
+    true,
+    2,
+  );
   const effectiveLeverage = Math.min(
     configuredMaxLeverage,
     Math.max(1, Math.round(leverage)),
@@ -1756,7 +1762,10 @@ export function ModelsMarketView({
                   </span>
                 </div>
 
-                <div className="models-market-history-chart">
+                <div
+                  className="models-market-history-chart"
+                  ref={oracleHistoryChartRef}
+                >
                   {oracleHistoryError ? (
                     <div className="models-market-empty">
                       {copy.oracleHistoryError(oracleHistoryError)}
@@ -1769,81 +1778,82 @@ export function ModelsMarketView({
                     <div className="models-market-empty">
                       {copy.waitingForSnapshots}
                     </div>
-                  ) : (
-                    <ResponsiveContainer width="100%" height="100%">
-                      <LineChart data={oracleHistory}>
-                        <XAxis
-                          dataKey="label"
-                          tick={{
-                            fill: "rgba(255,255,255,0.45)",
-                            fontSize: 11,
-                          }}
-                          tickLine={false}
-                          axisLine={{ stroke: "rgba(255,255,255,0.08)" }}
-                        />
-                        <YAxis
-                          tick={{
-                            fill: "rgba(255,255,255,0.45)",
-                            fontSize: 11,
-                          }}
-                          tickLine={false}
-                          axisLine={{ stroke: "rgba(255,255,255,0.08)" }}
-                          width={48}
-                          tickFormatter={(value: number) =>
-                            formatUsd(value, locale, 0)
-                          }
-                        />
-                        <Tooltip
-                          content={({ active, payload }) => {
-                            if (!active || !payload?.length) return null;
-                            const point = payload[0]
-                              ?.payload as OracleHistoryPoint;
-                            return (
-                              <div className="models-market-tooltip">
-                                <strong>{formatUsd(point.spotIndex, locale)}</strong>
-                                <span>
-                                  {copy.skill}{" "}
-                                  {formatLocaleNumber(
-                                    point.conservativeSkill,
-                                    locale,
-                                    {
-                                      minimumFractionDigits: 2,
-                                      maximumFractionDigits: 2,
-                                    },
-                                  )}{" "}
-                                  · μ{" "}
-                                  {formatLocaleNumber(point.mu, locale, {
+                  ) : oracleHistoryChartSize ? (
+                    <LineChart
+                      data={oracleHistory}
+                      width={oracleHistoryChartSize.width}
+                      height={oracleHistoryChartSize.height}
+                    >
+                      <XAxis
+                        dataKey="label"
+                        tick={{
+                          fill: "rgba(255,255,255,0.45)",
+                          fontSize: 11,
+                        }}
+                        tickLine={false}
+                        axisLine={{ stroke: "rgba(255,255,255,0.08)" }}
+                      />
+                      <YAxis
+                        tick={{
+                          fill: "rgba(255,255,255,0.45)",
+                          fontSize: 11,
+                        }}
+                        tickLine={false}
+                        axisLine={{ stroke: "rgba(255,255,255,0.08)" }}
+                        width={48}
+                        tickFormatter={(value: number) =>
+                          formatUsd(value, locale, 0)
+                        }
+                      />
+                      <Tooltip
+                        content={({ active, payload }) => {
+                          if (!active || !payload?.length) return null;
+                          const point = payload[0]?.payload as OracleHistoryPoint;
+                          return (
+                            <div className="models-market-tooltip">
+                              <strong>{formatUsd(point.spotIndex, locale)}</strong>
+                              <span>
+                                {copy.skill}{" "}
+                                {formatLocaleNumber(
+                                  point.conservativeSkill,
+                                  locale,
+                                  {
                                     minimumFractionDigits: 2,
                                     maximumFractionDigits: 2,
-                                  })}{" "}
-                                  · σ{" "}
-                                  {formatLocaleNumber(point.sigma, locale, {
-                                    minimumFractionDigits: 2,
-                                    maximumFractionDigits: 2,
-                                  })}
-                                </span>
-                              </div>
-                            );
-                          }}
+                                  },
+                                )}{" "}
+                                · μ{" "}
+                                {formatLocaleNumber(point.mu, locale, {
+                                  minimumFractionDigits: 2,
+                                  maximumFractionDigits: 2,
+                                })}{" "}
+                                · σ{" "}
+                                {formatLocaleNumber(point.sigma, locale, {
+                                  minimumFractionDigits: 2,
+                                  maximumFractionDigits: 2,
+                                })}
+                              </span>
+                            </div>
+                          );
+                        }}
+                      />
+                      {selectedMarket?.spotIndex && (
+                        <ReferenceLine
+                          y={selectedMarket.spotIndex}
+                          stroke="rgba(229,184,74,0.2)"
+                          strokeDasharray="4 4"
                         />
-                        {selectedMarket?.spotIndex && (
-                          <ReferenceLine
-                            y={selectedMarket.spotIndex}
-                            stroke="rgba(229,184,74,0.2)"
-                            strokeDasharray="4 4"
-                          />
-                        )}
-                        <Line
-                          type="monotone"
-                          dataKey="spotIndex"
-                          stroke="#e5b84a"
-                          strokeWidth={2}
-                          dot={false}
-                          isAnimationActive={false}
-                        />
-                      </LineChart>
-                    </ResponsiveContainer>
-                  )}
+                      )}
+                      <Line
+                        type="monotone"
+                        dataKey="spotIndex"
+                        stroke="#e5b84a"
+                        strokeWidth={2}
+                        dot={false}
+                        isAnimationActive={false}
+                      />
+                    </LineChart>
+                  ) : null}
                 </div>
               </div>
 

@@ -41,6 +41,14 @@ function copyPackageDir(relativeDir: string, destinationRoot: string) {
   });
 }
 
+function copyPackageDirIfPresent(relativeDir: string, destinationRoot: string) {
+  const sourceDir = path.join(rootDir, relativeDir);
+  if (!existsSync(sourceDir)) {
+    return;
+  }
+  copyPackageDir(relativeDir, destinationRoot);
+}
+
 function buildWorkspaceManifest(workspaces: string[]) {
   const rootPackagePath = path.join(rootDir, "package.json");
   const rootPackage = JSON.parse(readFileSync(rootPackagePath, "utf8"));
@@ -91,6 +99,10 @@ function stageForTarget(target: KeeperTarget) {
   const workspacePackagesRoot = path.join(keeperDir, "workspace-packages");
   ensureCleanDirectory(workspacePackagesRoot);
   stagePackageRootManifest(packageRootByTarget[target], workspacePackagesRoot);
+  copyPackageDirIfPresent(
+    `${packageRootByTarget[target]}/deployments`,
+    workspacePackagesRoot,
+  );
   for (const packageDir of sharedPackagesByTarget[target]) {
     copyPackageDir(packageDir, workspacePackagesRoot);
   }

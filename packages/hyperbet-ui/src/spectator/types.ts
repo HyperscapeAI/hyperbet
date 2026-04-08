@@ -24,6 +24,44 @@ export interface RendererHealthInfo {
   updatedAt: number | null;
 }
 
+export type SourceRuntimeStatusSource =
+  | "external_worker"
+  | "in_process_bridge"
+  | "none";
+
+export type SourceRuntimeCaptureMode =
+  | "cdp"
+  | "webcodecs"
+  | "mediarecorder"
+  | "none";
+
+export type SourceRuntimeDegradedReason =
+  | "worker_missing"
+  | "browser_missing"
+  | "page_not_ready"
+  | "unexpected_navigation"
+  | "capture_stalled"
+  | "encoder_stalled"
+  | "manifest_stale"
+  | "destination_disconnected"
+  | "status_stale"
+  | "unknown";
+
+export interface SourceRuntimeInfo {
+  ready: boolean;
+  statusSource: SourceRuntimeStatusSource;
+  captureMode: SourceRuntimeCaptureMode;
+  degradedReason: SourceRuntimeDegradedReason | string | null;
+  currentSceneUrl: string | null;
+  activeBundle: string | null;
+  lastFrameAt: number | null;
+  lastRenderTickAt: number | null;
+  lastVisualChangeAt: number | null;
+  lastRecoveryAt: number | null;
+  recoveryCount: number;
+  workerHeartbeatAt: number | null;
+}
+
 export interface HlsManifestInfo {
   updatedAt: number | null;
   mediaSequence: number | null;
@@ -50,6 +88,57 @@ export interface StreamDeliveryInfo {
   hlsUrl: string | null;
   llhlsUrl: string | null;
   ingestUrl: string | null;
+}
+
+export type StreamDestinationRole = "canonical" | "fallback" | "mirror";
+export type StreamDestinationProvider =
+  | "cloudflare_stream"
+  | "self_hls"
+  | "twitch"
+  | "kick"
+  | "youtube"
+  | "custom";
+export type StreamDeliveryTransport =
+  | "llhls"
+  | "hls"
+  | "rtmps"
+  | "srt"
+  | "unknown";
+export type StreamManifestStatus = "ok" | "stale" | "missing" | "unknown";
+
+export interface StreamPublicReadiness {
+  ready: boolean;
+  reason: string | null;
+  updatedAt: number | null;
+}
+
+export interface StreamDestinationState {
+  id: string;
+  name: string;
+  role: StreamDestinationRole;
+  provider: StreamDestinationProvider;
+  transport: StreamDeliveryTransport;
+  playbackUrl: string | null;
+  ingestUrl: string | null;
+  connected: boolean;
+  transportHealthy: boolean;
+  playbackReady: boolean;
+  manifestStatus: StreamManifestStatus;
+  lastError: string | null;
+  updatedAt: number | null;
+}
+
+export interface StreamChannelState {
+  id: string;
+  mode: "always_on";
+  presentationDelayMs: number;
+  activeDuelId: string | null;
+  activeDuelKey: string | null;
+  canonicalDestinationId: string;
+  fallbackDestinationId: string | null;
+  publicPlaybackUrl: string | null;
+  publicReadiness: StreamPublicReadiness;
+  destinations: StreamDestinationState[];
 }
 
 export interface LeaderboardEntry {
@@ -113,7 +202,9 @@ export interface CanonicalStreamPlayback {
 export interface CanonicalStreamStatus {
   authority: CanonicalStreamHealth;
   renderer: RendererHealthInfo | null;
+  sourceRuntime?: SourceRuntimeInfo | null;
   delivery: StreamDeliveryInfo | null;
+  deliveryHealth?: CanonicalStreamHealth | null;
 }
 
 export interface CanonicalStreamSession {
@@ -130,6 +221,12 @@ export interface CanonicalStreamSession {
   cameraTarget: string | null;
   playback: CanonicalStreamPlayback | null;
   rendererHealth: RendererHealthInfo | null;
+  sourceRuntime: SourceRuntimeInfo | null;
+  deliveryHealth: CanonicalStreamHealth | null;
+  channel: StreamChannelState | null;
+  publicReadiness: StreamPublicReadiness | null;
+  canonicalDestination: StreamDestinationState | null;
+  fallbackDestination: StreamDestinationState | null;
   rendererMetrics: RendererMetricsInfo | null;
   delivery: StreamDeliveryInfo | null;
   authorityHealth: CanonicalStreamHealth;

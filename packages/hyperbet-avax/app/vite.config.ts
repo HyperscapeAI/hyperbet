@@ -409,6 +409,10 @@ export default defineConfig(async ({ mode }) => {
       sourcemap: env.VITE_BUILD_SOURCEMAP === "true",
       chunkSizeWarningLimit: 3000,
       rollupOptions: {
+        input: {
+          index: path.resolve(__dirname, "index.html"),
+          "hls-player": path.resolve(__dirname, "hls-player.html"),
+        },
         onwarn(warning, warn) {
           if (
             warning.code === "SOURCEMAP_ERROR" ||

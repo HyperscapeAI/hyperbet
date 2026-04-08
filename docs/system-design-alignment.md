@@ -54,6 +54,7 @@ Hyperbet should use:
 ## Delivery Topology
 
 - Pages hosts the public Hyperscapes stream page
+- Hyperscapes `/stream` is a dedicated low-overhead capture preset
 - the GPU host renders and encodes
 - Railway serves the keeper-facing and UI-facing stream session
 - Cloudflare Stream LL-HLS is the target viewer-delivery path once enabled
@@ -74,5 +75,6 @@ Degraded UI should distinguish:
 - source stale
 - delivery stale
 - player drifted
+- player buffering
 
 It should not collapse those conditions into generic stream failure.

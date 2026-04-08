@@ -81,6 +81,7 @@ import {
   type BetSyncEvent,
   type BetSyncReplayMode,
 } from "./betSync";
+import { mergeCanonicalDeliveryOverride } from "./canonicalDelivery";
 import { modelMarketIdFromCharacterId } from "./modelMarkets";
 import {
   isLegacyDerivedPointsWalletKey,
@@ -94,6 +95,13 @@ type StreamState = {
   cameraTarget: string | null;
   seq: number;
   emittedAt: number;
+  channel?: Record<string, unknown> | null;
+  publicReadiness?: Record<string, unknown> | null;
+  canonicalDestination?: Record<string, unknown> | null;
+  fallbackDestination?: Record<string, unknown> | null;
+  sourceRuntime?: Record<string, unknown> | null;
+  deliveryHealth?: Record<string, unknown> | null;
+  delivery?: Record<string, unknown> | null;
 };
 
 type CanonicalStreamHealth = {
@@ -102,11 +110,97 @@ type CanonicalStreamHealth = {
   updatedAt: number | null;
 };
 
+type CanonicalSourceRuntimeStatusSource =
+  | "external_worker"
+  | "in_process_bridge"
+  | "none";
+
+type CanonicalSourceRuntimeCaptureMode =
+  | "cdp"
+  | "webcodecs"
+  | "mediarecorder"
+  | "none";
+
+type CanonicalSourceRuntimeDegradedReason =
+  | "worker_missing"
+  | "browser_missing"
+  | "page_not_ready"
+  | "unexpected_navigation"
+  | "capture_stalled"
+  | "encoder_stalled"
+  | "manifest_stale"
+  | "destination_disconnected"
+  | "status_stale"
+  | "unknown";
+
+type CanonicalSourceRuntime = {
+  ready: boolean;
+  statusSource: CanonicalSourceRuntimeStatusSource;
+  captureMode: CanonicalSourceRuntimeCaptureMode;
+  degradedReason: CanonicalSourceRuntimeDegradedReason | string | null;
+  currentSceneUrl: string | null;
+  activeBundle: string | null;
+  lastFrameAt: number | null;
+  lastRenderTickAt: number | null;
+  lastVisualChangeAt: number | null;
+  lastRecoveryAt: number | null;
+  recoveryCount: number;
+  workerHeartbeatAt: number | null;
+};
+
 type CanonicalStreamPlayback = {
   url: string | null;
   kind: string | null;
   renderSessionId: string | null;
   presentationDelayMs: number;
+};
+
+type CanonicalStreamDestinationRole = "canonical" | "fallback" | "mirror";
+type CanonicalStreamDestinationProvider =
+  | "cloudflare_stream"
+  | "self_hls"
+  | "twitch"
+  | "kick"
+  | "youtube"
+  | "custom";
+type CanonicalStreamDeliveryTransport =
+  | "llhls"
+  | "hls"
+  | "rtmps"
+  | "srt"
+  | "unknown";
+type CanonicalStreamManifestStatus = "ok" | "stale" | "missing" | "unknown";
+type CanonicalStreamPublicReadiness = {
+  ready: boolean;
+  reason: string | null;
+  updatedAt: number | null;
+};
+type CanonicalStreamDestination = {
+  id: string;
+  name: string;
+  role: CanonicalStreamDestinationRole;
+  provider: CanonicalStreamDestinationProvider;
+  transport: CanonicalStreamDeliveryTransport;
+  playbackUrl: string | null;
+  ingestUrl: string | null;
+  connected: boolean;
+  transportHealthy: boolean;
+  playbackReady: boolean;
+  manifestStatus: CanonicalStreamManifestStatus;
+  lastError: string | null;
+  updatedAt: number | null;
+};
+type CanonicalStreamChannel = {
+  id: string;
+  mode: "always_on";
+  presentationDelayMs: number;
+  activeDuelId: string | null;
+  activeDuelKey: string | null;
+  canonicalDestinationId: string;
+  fallbackDestinationId: string | null;
+  publicPlaybackUrl: string | null;
+  publicReadiness: CanonicalStreamPublicReadiness;
+  destinations: CanonicalStreamDestination[];
 };
 
 type CanonicalHlsManifest = {
@@ -151,13 +245,21 @@ type CanonicalStreamSession = {
   cameraTarget: string | null;
   playback: CanonicalStreamPlayback | null;
   rendererHealth: CanonicalStreamHealth | null;
+  sourceRuntime: CanonicalSourceRuntime | null;
+  deliveryHealth: CanonicalStreamHealth | null;
+  channel: CanonicalStreamChannel | null;
+  publicReadiness: CanonicalStreamPublicReadiness | null;
+  canonicalDestination: CanonicalStreamDestination | null;
+  fallbackDestination: CanonicalStreamDestination | null;
   rendererMetrics: CanonicalRendererMetrics | null;
   delivery: CanonicalStreamDelivery | null;
   authorityHealth: CanonicalStreamHealth;
   status: {
     authority: CanonicalStreamHealth;
     renderer: CanonicalStreamHealth | null;
+    sourceRuntime: CanonicalSourceRuntime | null;
     delivery: CanonicalStreamDelivery | null;
+    deliveryHealth: CanonicalStreamHealth | null;
   };
 };
 
@@ -373,26 +475,7 @@ const BET_SYNC_STALE_EVENT_TOLERANCE_MS = Math.max(
   0,
   Number(process.env.BET_SYNC_STALE_EVENT_TOLERANCE_MS || 5_000),
 );
-const STREAM_DELIVERY_MODE = (
-  process.env.STREAM_DELIVERY_MODE?.trim().toLowerCase() || ""
-) as "self_hls" | "external_hls" | "";
-const STREAM_DELIVERY_PROVIDER =
-  process.env.STREAM_DELIVERY_PROVIDER?.trim() || "";
-const STREAM_INGEST_RTMPS_URL =
-  process.env.STREAM_INGEST_RTMPS_URL?.trim() || "";
-const STREAM_PLAYBACK_HLS_URL =
-  process.env.STREAM_PLAYBACK_HLS_URL?.trim() || "";
-const STREAM_PLAYBACK_LLHLS_URL =
-  process.env.STREAM_PLAYBACK_LLHLS_URL?.trim() || "";
-const STREAM_PLAYBACK_KIND =
-  process.env.STREAM_PLAYBACK_KIND?.trim().toLowerCase() || "hls";
-const STREAM_PRESENTATION_DELAY_MS = Math.max(
-  0,
-  Number(process.env.STREAM_PRESENTATION_DELAY_MS || 0),
-);
-const STREAM_PLAYBACK_URL =
-  process.env.STREAM_PLAYBACK_URL?.trim() ||
-  deriveDefaultStreamPlaybackUrl(ACTIVE_STREAM_STATE_SOURCE_URL);
+const DEFAULT_EXTERNAL_PRESENTATION_DELAY_MS = 4_000;
 const STREAM_RENDERER_HEALTH_URL =
   process.env.STREAM_RENDERER_HEALTH_URL?.trim() || "";
 const STREAM_RENDERER_HEALTH_BEARER_TOKEN =
@@ -2030,19 +2113,6 @@ function toStreamState(payload: any): StreamState | null {
   };
 }
 
-function deriveDefaultStreamPlaybackUrl(sourceUrl: string): string {
-  if (!sourceUrl) return "";
-  try {
-    const parsed = new URL(sourceUrl);
-    parsed.pathname = "/live/stream.m3u8";
-    parsed.search = "";
-    parsed.hash = "";
-    return parsed.toString();
-  } catch {
-    return "";
-  }
-}
-
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object"
     ? (value as Record<string, unknown>)
@@ -2057,23 +2127,6 @@ function asNonEmptyString(value: unknown): string | null {
   return typeof value === "string" && value.trim().length > 0
     ? value.trim()
     : null;
-}
-
-function resolveConfiguredDeliveryMode(): "self_hls" | "external_hls" {
-  if (STREAM_DELIVERY_MODE === "self_hls") {
-    return "self_hls";
-  }
-  if (STREAM_DELIVERY_MODE === "external_hls") {
-    return "external_hls";
-  }
-  if (
-    STREAM_PLAYBACK_LLHLS_URL ||
-    STREAM_PLAYBACK_HLS_URL ||
-    STREAM_INGEST_RTMPS_URL
-  ) {
-    return "external_hls";
-  }
-  return "self_hls";
 }
 
 function normalizeCanonicalRendererMetrics(
@@ -2098,7 +2151,50 @@ function normalizeCanonicalRendererMetrics(
           updatedAt: asFiniteNumber(hlsManifest.updatedAt),
           mediaSequence: asFiniteNumber(hlsManifest.mediaSequence),
         }
-      : null,
+    : null,
+  };
+}
+
+function normalizeCanonicalSourceRuntime(
+  value: unknown,
+): CanonicalSourceRuntime | null {
+  const candidate = asRecord(value);
+  if (!candidate) return null;
+
+  const statusSource = asNonEmptyString(candidate.statusSource);
+  const captureMode = asNonEmptyString(candidate.captureMode);
+  if (
+    statusSource !== "external_worker" &&
+    statusSource !== "in_process_bridge" &&
+    statusSource !== "none"
+  ) {
+    return null;
+  }
+  if (
+    captureMode !== "cdp" &&
+    captureMode !== "webcodecs" &&
+    captureMode !== "mediarecorder" &&
+    captureMode !== "none"
+  ) {
+    return null;
+  }
+
+  return {
+    ready: candidate.ready === true,
+    statusSource,
+    captureMode,
+    degradedReason:
+      typeof candidate.degradedReason === "string"
+        ? candidate.degradedReason
+        : null,
+    currentSceneUrl: asNonEmptyString(candidate.currentSceneUrl),
+    activeBundle: asNonEmptyString(candidate.activeBundle),
+    lastFrameAt: asFiniteNumber(candidate.lastFrameAt),
+    lastRenderTickAt: asFiniteNumber(candidate.lastRenderTickAt),
+    lastVisualChangeAt: asFiniteNumber(candidate.lastVisualChangeAt),
+    lastRecoveryAt: asFiniteNumber(candidate.lastRecoveryAt),
+    recoveryCount: Math.max(0, asFiniteNumber(candidate.recoveryCount) ?? 0),
+    workerHeartbeatAt: asFiniteNumber(candidate.workerHeartbeatAt),
   };
 }
 
@@ -2121,37 +2217,192 @@ function normalizeCanonicalDelivery(
   };
 }
 
-function buildCanonicalStreamDelivery(
+function normalizeCanonicalPublicReadiness(
   value: unknown,
-): CanonicalStreamDelivery | null {
-  const configuredMode = resolveConfiguredDeliveryMode();
-  const candidate = normalizeCanonicalDelivery(value);
-  const mode = candidate?.mode ?? configuredMode;
-  const hlsUrl = STREAM_PLAYBACK_HLS_URL || candidate?.hlsUrl || null;
-  const llhlsUrl = STREAM_PLAYBACK_LLHLS_URL || candidate?.llhlsUrl || null;
-  const playbackUrl =
-    mode === "external_hls"
-      ? llhlsUrl || hlsUrl || candidate?.playbackUrl || STREAM_PLAYBACK_URL || null
-      : hlsUrl || llhlsUrl || STREAM_PLAYBACK_URL || candidate?.playbackUrl || null;
+  fallbackUpdatedAt: number,
+): CanonicalStreamPublicReadiness | null {
+  const candidate = asRecord(value);
+  if (!candidate) return null;
+  return {
+    ready: candidate.ready === true,
+    reason: asNonEmptyString(candidate.reason),
+    updatedAt: asFiniteNumber(candidate.updatedAt) ?? fallbackUpdatedAt,
+  };
+}
 
+function normalizeCanonicalDestinationState(
+  value: unknown,
+): CanonicalStreamDestination | null {
+  const candidate = asRecord(value);
+  if (!candidate) return null;
+  const id = asNonEmptyString(candidate.id);
+  const role = asNonEmptyString(candidate.role);
+  const provider = asNonEmptyString(candidate.provider);
+  const transport = asNonEmptyString(candidate.transport);
+  const manifestStatus = asNonEmptyString(candidate.manifestStatus);
+  if (!id) return null;
+  if (role !== "canonical" && role !== "fallback" && role !== "mirror") {
+    return null;
+  }
   if (
-    !playbackUrl &&
-    !STREAM_INGEST_RTMPS_URL &&
-    !candidate?.ingestUrl &&
-    !candidate?.provider &&
-    !STREAM_DELIVERY_PROVIDER
+    provider !== "cloudflare_stream" &&
+    provider !== "self_hls" &&
+    provider !== "twitch" &&
+    provider !== "kick" &&
+    provider !== "youtube" &&
+    provider !== "custom"
   ) {
+    return null;
+  }
+  if (
+    transport !== "llhls" &&
+    transport !== "hls" &&
+    transport !== "rtmps" &&
+    transport !== "srt" &&
+    transport !== "unknown"
+  ) {
+    return null;
+  }
+  if (
+    manifestStatus !== "ok" &&
+    manifestStatus !== "stale" &&
+    manifestStatus !== "missing" &&
+    manifestStatus !== "unknown"
+  ) {
+    return null;
+  }
+  return {
+    id,
+    name: asNonEmptyString(candidate.name) ?? id,
+    role,
+    provider,
+    transport,
+    playbackUrl: asNonEmptyString(candidate.playbackUrl),
+    ingestUrl: asNonEmptyString(candidate.ingestUrl),
+    connected: candidate.connected === true,
+    transportHealthy: candidate.transportHealthy === true,
+    playbackReady: candidate.playbackReady === true,
+    manifestStatus,
+    lastError: asNonEmptyString(candidate.lastError),
+    updatedAt: asFiniteNumber(candidate.updatedAt),
+  };
+}
+
+function normalizeCanonicalChannel(
+  value: unknown,
+  fallbackUpdatedAt: number,
+): CanonicalStreamChannel | null {
+  const candidate = asRecord(value);
+  if (!candidate) return null;
+  const id = asNonEmptyString(candidate.id);
+  const mode = asNonEmptyString(candidate.mode);
+  const canonicalDestinationId = asNonEmptyString(candidate.canonicalDestinationId);
+  if (!id || mode !== "always_on" || !canonicalDestinationId) {
+    return null;
+  }
+
+  const destinations = Array.isArray(candidate.destinations)
+    ? candidate.destinations
+        .map((destination) => normalizeCanonicalDestinationState(destination))
+        .filter((destination): destination is CanonicalStreamDestination => {
+          return destination != null;
+        })
+    : [];
+  const publicReadiness = normalizeCanonicalPublicReadiness(
+    candidate.publicReadiness,
+    fallbackUpdatedAt,
+  );
+  if (!publicReadiness) {
     return null;
   }
 
   return {
-    mode,
-    provider: STREAM_DELIVERY_PROVIDER || candidate?.provider || null,
-    playbackUrl,
-    hlsUrl,
-    llhlsUrl,
-    ingestUrl: STREAM_INGEST_RTMPS_URL || candidate?.ingestUrl || null,
+    id,
+    mode: "always_on",
+    presentationDelayMs: Math.max(
+      0,
+      asFiniteNumber(candidate.presentationDelayMs) ?? 0,
+    ),
+    activeDuelId: asNonEmptyString(candidate.activeDuelId),
+    activeDuelKey: asNonEmptyString(candidate.activeDuelKey),
+    canonicalDestinationId,
+    fallbackDestinationId: asNonEmptyString(candidate.fallbackDestinationId),
+    publicPlaybackUrl: asNonEmptyString(candidate.publicPlaybackUrl),
+    publicReadiness,
+    destinations,
   };
+}
+
+function findCanonicalDestinationInChannel(
+  channel: CanonicalStreamChannel | null,
+): CanonicalStreamDestination | null {
+  if (!channel) return null;
+  return (
+    channel.destinations.find(
+      (destination) => destination.id === channel.canonicalDestinationId,
+    ) ?? null
+  );
+}
+
+function findFallbackDestinationInChannel(
+  channel: CanonicalStreamChannel | null,
+): CanonicalStreamDestination | null {
+  if (!channel?.fallbackDestinationId) return null;
+  return (
+    channel.destinations.find(
+      (destination) => destination.id === channel.fallbackDestinationId,
+    ) ?? null
+  );
+}
+
+function toDeliveryFromDestination(
+  destination: CanonicalStreamDestination | null,
+  channel: CanonicalStreamChannel | null,
+): CanonicalStreamDelivery | null {
+  if (!destination) {
+    return null;
+  }
+
+  const playbackUrl =
+    channel?.publicPlaybackUrl ?? destination.playbackUrl ?? null;
+  const mode =
+    destination.provider === "self_hls" ? "self_hls" : "external_hls";
+  return {
+    mode,
+    provider: destination.provider,
+    playbackUrl,
+    hlsUrl:
+      destination.transport === "hls" &&
+      destination.provider !== "self_hls"
+        ? destination.playbackUrl
+        : null,
+    llhlsUrl:
+      destination.transport === "llhls" ? destination.playbackUrl : null,
+    ingestUrl: destination.ingestUrl,
+  };
+}
+
+function toDeliveryHealthFromPublicReadiness(
+  publicReadiness: CanonicalStreamPublicReadiness | null,
+): CanonicalStreamHealth | null {
+  if (!publicReadiness) {
+    return null;
+  }
+  return {
+    ready: publicReadiness.ready,
+    degradedReason: publicReadiness.reason,
+    updatedAt: publicReadiness.updatedAt,
+  };
+}
+
+function buildCanonicalStreamDelivery(
+  value: unknown,
+  channel: CanonicalStreamChannel | null = null,
+): CanonicalStreamDelivery | null {
+  return (
+    toDeliveryFromDestination(findCanonicalDestinationInChannel(channel), channel) ??
+    normalizeCanonicalDelivery(value)
+  );
 }
 
 function normalizeCanonicalStreamHealth(
@@ -2295,15 +2546,7 @@ function resolveCanonicalRendererHealth(
 ): CanonicalStreamHealth | null {
   return (
     streamRendererHealthOverride ??
-    normalizeCanonicalStreamHealth(
-      value,
-      fallbackUpdatedAt,
-      Boolean(
-        STREAM_PLAYBACK_URL ||
-          STREAM_PLAYBACK_HLS_URL ||
-          STREAM_PLAYBACK_LLHLS_URL,
-      ),
-    )
+    normalizeCanonicalStreamHealth(value, fallbackUpdatedAt, false)
   );
 }
 
@@ -2318,47 +2561,91 @@ function resolveCanonicalRendererMetrics(
 
 function resolveCanonicalDelivery(
   value: unknown,
+  channel: CanonicalStreamChannel | null = null,
 ): CanonicalStreamDelivery | null {
-  return streamDeliveryOverride ?? buildCanonicalStreamDelivery(value);
+  return mergeCanonicalDeliveryOverride({
+    baseDelivery: buildCanonicalStreamDelivery(value, channel),
+    overrideDelivery: streamDeliveryOverride,
+    hasAuthoritativeCanonicalDestination:
+      findCanonicalDestinationInChannel(channel) != null,
+  });
+}
+
+function resolveCanonicalDeliveryHealth(
+  value: unknown,
+  fallbackUpdatedAt: number,
+  channel: CanonicalStreamChannel | null,
+  publicReadiness: CanonicalStreamPublicReadiness | null,
+  delivery: CanonicalStreamDelivery | null,
+): CanonicalStreamHealth | null {
+  if (publicReadiness) {
+    return toDeliveryHealthFromPublicReadiness(publicReadiness);
+  }
+  if (!delivery && (value == null || typeof value !== "object")) {
+    return null;
+  }
+
+  const fallbackReady =
+    channel == null &&
+    delivery?.mode === "self_hls" &&
+    Boolean(delivery.playbackUrl);
+
+  return normalizeCanonicalStreamHealth(
+    value,
+    fallbackUpdatedAt,
+    fallbackReady,
+  );
 }
 
 function buildCanonicalStreamPlayback(
   cycle: Record<string, any>,
   playbackCandidate: Record<string, unknown> | null,
   delivery: CanonicalStreamDelivery | null,
+  channel: CanonicalStreamChannel | null,
   fallbackRenderSessionId: string,
 ): CanonicalStreamPlayback | null {
+  const canonicalDestination = findCanonicalDestinationInChannel(channel);
   const candidateUrl =
     typeof playbackCandidate?.url === "string"
       ? playbackCandidate.url.trim()
       : "";
   const playbackUrl =
-    delivery?.playbackUrl || STREAM_PLAYBACK_URL || candidateUrl;
+    channel?.publicPlaybackUrl ||
+    canonicalDestination?.playbackUrl ||
+    delivery?.playbackUrl ||
+    candidateUrl;
   if (!playbackUrl) return null;
+
+  const presentationDelayMs =
+    typeof playbackCandidate?.presentationDelayMs === "number" &&
+    Number.isFinite(playbackCandidate.presentationDelayMs)
+      ? Math.max(0, playbackCandidate.presentationDelayMs)
+      : channel?.presentationDelayMs ??
+        (delivery?.mode === "external_hls"
+          ? DEFAULT_EXTERNAL_PRESENTATION_DELAY_MS
+          : 0);
 
   return {
     url: playbackUrl,
     kind:
-      delivery?.mode === "external_hls" && delivery.llhlsUrl
+      canonicalDestination?.transport === "llhls"
         ? "llhls"
-        : delivery?.mode === "external_hls" && delivery.hlsUrl
+        : canonicalDestination?.transport === "hls"
           ? "hls"
-          : STREAM_PLAYBACK_URL.length > 0
-            ? STREAM_PLAYBACK_KIND
-            : typeof playbackCandidate?.kind === "string"
-              ? playbackCandidate.kind
-              : STREAM_PLAYBACK_KIND,
+          : delivery?.mode === "external_hls" && delivery.llhlsUrl
+            ? "llhls"
+            : delivery?.mode === "external_hls" && delivery.hlsUrl
+              ? "hls"
+              : typeof playbackCandidate?.kind === "string"
+                ? playbackCandidate.kind
+                : null,
     renderSessionId:
       typeof playbackCandidate?.renderSessionId === "string"
         ? playbackCandidate.renderSessionId
         : ((typeof cycle.duelId === "string" && cycle.duelId) ||
           (typeof cycle.cycleId === "string" && cycle.cycleId) ||
           fallbackRenderSessionId),
-    presentationDelayMs:
-      typeof playbackCandidate?.presentationDelayMs === "number" &&
-      Number.isFinite(playbackCandidate.presentationDelayMs)
-        ? Math.max(0, playbackCandidate.presentationDelayMs)
-        : STREAM_PRESENTATION_DELAY_MS,
+    presentationDelayMs,
   };
 }
 
@@ -2369,15 +2656,50 @@ function buildCanonicalStreamSessionFromStreamState(
     typeof next.emittedAt === "number" && Number.isFinite(next.emittedAt)
       ? next.emittedAt
       : Date.now();
+  const nextRecord = next as Record<string, unknown>;
   const duelKeyHex =
     typeof next.cycle?.duelKeyHex === "string"
       ? next.cycle.duelKeyHex.trim()
       : null;
-  const delivery = resolveCanonicalDelivery(next.cycle?.delivery);
+  const channel = normalizeCanonicalChannel(
+    nextRecord.channel ?? next.cycle?.channel,
+    emittedAt,
+  );
+  const publicReadiness =
+    channel?.publicReadiness ??
+    normalizeCanonicalPublicReadiness(
+      nextRecord.publicReadiness ?? next.cycle?.publicReadiness,
+      emittedAt,
+    );
+  const sourceRuntime =
+    normalizeCanonicalSourceRuntime(
+      nextRecord.sourceRuntime ??
+        next.cycle?.sourceRuntime ??
+        asRecord(nextRecord.status)?.sourceRuntime,
+    ) ?? null;
+  const canonicalDestination =
+    findCanonicalDestinationInChannel(channel) ??
+    normalizeCanonicalDestinationState(
+      nextRecord.canonicalDestination ?? next.cycle?.canonicalDestination,
+    );
+  const fallbackDestination =
+    findFallbackDestinationInChannel(channel) ??
+    normalizeCanonicalDestinationState(
+      nextRecord.fallbackDestination ?? next.cycle?.fallbackDestination,
+    );
+  const delivery = resolveCanonicalDelivery(nextRecord.delivery ?? next.cycle?.delivery, channel);
+  const deliveryHealth = resolveCanonicalDeliveryHealth(
+    nextRecord.deliveryHealth ?? next.cycle?.deliveryHealth,
+    emittedAt,
+    channel,
+    publicReadiness,
+    delivery,
+  );
   const playback = buildCanonicalStreamPlayback(
     next.cycle,
     null,
     delivery,
+    channel,
     `stream-${next.seq}`,
   );
   const rendererHealth = resolveCanonicalRendererHealth(
@@ -2387,16 +2709,17 @@ function buildCanonicalStreamSessionFromStreamState(
   const rendererMetrics = resolveCanonicalRendererMetrics(
     next.cycle?.rendererMetrics,
   );
-  const authorityHealth = normalizeCanonicalStreamHealth(
-    {
-      ready: Boolean(playback?.url),
-      degradedReason:
-        playback?.url ? null : "playback_unconfigured",
-      updatedAt: emittedAt,
-    },
-    emittedAt,
-    Boolean(playback?.url),
-  );
+  const authorityHealth =
+    toDeliveryHealthFromPublicReadiness(publicReadiness) ??
+    normalizeCanonicalStreamHealth(
+      {
+        ready: Boolean(playback?.url),
+        degradedReason: playback?.url ? null : "playback_unconfigured",
+        updatedAt: emittedAt,
+      },
+      emittedAt,
+      Boolean(playback?.url),
+    );
 
   return {
     schemaVersion: 1,
@@ -2421,13 +2744,21 @@ function buildCanonicalStreamSessionFromStreamState(
         : null,
     playback,
     rendererHealth,
+    sourceRuntime,
+    deliveryHealth,
+    channel,
+    publicReadiness,
+    canonicalDestination,
+    fallbackDestination,
     rendererMetrics,
     delivery,
     authorityHealth,
     status: {
       authority: authorityHealth,
       renderer: rendererHealth,
+      sourceRuntime,
       delivery,
+      deliveryHealth,
     },
   };
 }
@@ -2449,6 +2780,20 @@ function toCanonicalStreamSession(payload: unknown): CanonicalStreamSession | nu
     candidate.status && typeof candidate.status === "object"
       ? (candidate.status as Record<string, unknown>)
       : null;
+  const channel = normalizeCanonicalChannel(candidate.channel, emittedAt);
+  const publicReadiness =
+    channel?.publicReadiness ??
+    normalizeCanonicalPublicReadiness(candidate.publicReadiness, emittedAt);
+  const sourceRuntime =
+    normalizeCanonicalSourceRuntime(
+      candidate.sourceRuntime ?? asRecord(statusCandidate?.sourceRuntime),
+    ) ?? null;
+  const canonicalDestination =
+    findCanonicalDestinationInChannel(channel) ??
+    normalizeCanonicalDestinationState(candidate.canonicalDestination);
+  const fallbackDestination =
+    findFallbackDestinationInChannel(channel) ??
+    normalizeCanonicalDestinationState(candidate.fallbackDestination);
   const rendererHealth = resolveCanonicalRendererHealth(
     candidate.rendererHealth ?? statusCandidate?.renderer,
     emittedAt,
@@ -2458,16 +2803,14 @@ function toCanonicalStreamSession(payload: unknown): CanonicalStreamSession | nu
   );
   const delivery = resolveCanonicalDelivery(
     candidate.delivery ?? statusCandidate?.delivery,
+    channel,
   );
-  const authorityHealth = normalizeCanonicalStreamHealth(
-    candidate.authorityHealth ?? statusCandidate?.authority,
+  const deliveryHealth = resolveCanonicalDeliveryHealth(
+    candidate.deliveryHealth ?? statusCandidate?.deliveryHealth,
     emittedAt,
-    Boolean(
-      delivery?.playbackUrl ||
-        STREAM_PLAYBACK_URL ||
-        STREAM_PLAYBACK_HLS_URL ||
-        STREAM_PLAYBACK_LLHLS_URL,
-    ),
+    channel,
+    publicReadiness,
+    delivery,
   );
   const playbackCandidate =
     candidate.playback && typeof candidate.playback === "object"
@@ -2477,8 +2820,16 @@ function toCanonicalStreamSession(payload: unknown): CanonicalStreamSession | nu
     cycle,
     playbackCandidate,
     delivery,
+    channel,
     "",
   );
+  const authorityHealth =
+    toDeliveryHealthFromPublicReadiness(publicReadiness) ??
+    normalizeCanonicalStreamHealth(
+      candidate.authorityHealth ?? statusCandidate?.authority,
+      emittedAt,
+      Boolean(playback?.url),
+    );
 
   return {
     schemaVersion:
@@ -2530,13 +2881,21 @@ function toCanonicalStreamSession(payload: unknown): CanonicalStreamSession | nu
         : null,
     playback,
     rendererHealth,
+    sourceRuntime,
+    deliveryHealth,
+    channel,
+    publicReadiness,
+    canonicalDestination,
+    fallbackDestination,
     rendererMetrics,
     delivery,
     authorityHealth,
     status: {
       authority: authorityHealth,
       renderer: rendererHealth,
+      sourceRuntime,
       delivery,
+      deliveryHealth,
     },
   };
 }
@@ -2549,11 +2908,21 @@ function toStreamStateFromCanonicalSession(
     cycle: {
       ...session.cycle,
       rendererHealth: session.rendererHealth,
+      sourceRuntime: session.sourceRuntime,
+      delivery: session.delivery,
+      deliveryHealth: session.deliveryHealth,
     },
     leaderboard: session.leaderboard,
     cameraTarget: session.cameraTarget,
     seq: session.seq,
     emittedAt: session.emittedAt,
+    channel: session.channel,
+    publicReadiness: session.publicReadiness,
+    canonicalDestination: session.canonicalDestination,
+    fallbackDestination: session.fallbackDestination,
+    sourceRuntime: session.sourceRuntime,
+    deliveryHealth: session.deliveryHealth,
+    delivery: session.delivery,
   };
 }
 
@@ -2606,15 +2975,41 @@ function publishCanonicalStreamSession(
   const resolvedRendererMetrics = resolveCanonicalRendererMetrics(
     next.rendererMetrics,
   );
+  const resolvedChannel = normalizeCanonicalChannel(next.channel, emittedAt);
+  const resolvedPublicReadiness =
+    resolvedChannel?.publicReadiness ??
+    normalizeCanonicalPublicReadiness(next.publicReadiness, emittedAt);
+  const resolvedSourceRuntime =
+    normalizeCanonicalSourceRuntime(
+      next.sourceRuntime ?? next.status?.sourceRuntime,
+    ) ?? null;
+  const resolvedCanonicalDestination =
+    findCanonicalDestinationInChannel(resolvedChannel) ??
+    normalizeCanonicalDestinationState(next.canonicalDestination);
+  const resolvedFallbackDestination =
+    findFallbackDestinationInChannel(resolvedChannel) ??
+    normalizeCanonicalDestinationState(next.fallbackDestination);
   const resolvedDelivery = resolveCanonicalDelivery(
     next.delivery ?? next.status?.delivery,
+    resolvedChannel,
+  );
+  const resolvedDeliveryHealth = resolveCanonicalDeliveryHealth(
+    next.deliveryHealth ?? next.status?.deliveryHealth,
+    emittedAt,
+    resolvedChannel,
+    resolvedPublicReadiness,
+    resolvedDelivery,
   );
   const resolvedPlayback = buildCanonicalStreamPlayback(
     next.cycle,
     next.playback as Record<string, unknown> | null,
     resolvedDelivery,
+    resolvedChannel,
     next.duelId || `stream-${streamSeq + 1}`,
   );
+  const resolvedAuthorityHealth =
+    toDeliveryHealthFromPublicReadiness(resolvedPublicReadiness) ??
+    next.authorityHealth;
   streamSeq = Math.max(streamSeq + 1, next.seq || streamSeq + 1);
   canonicalStreamSession = {
     ...next,
@@ -2626,13 +3021,21 @@ function publishCanonicalStreamSession(
     emittedAt: Date.now(),
     playback: resolvedPlayback,
     rendererHealth: resolvedRendererHealth,
+    sourceRuntime: resolvedSourceRuntime,
+    deliveryHealth: resolvedDeliveryHealth,
+    channel: resolvedChannel,
+    publicReadiness: resolvedPublicReadiness,
+    canonicalDestination: resolvedCanonicalDestination,
+    fallbackDestination: resolvedFallbackDestination,
     rendererMetrics: resolvedRendererMetrics,
     delivery: resolvedDelivery,
-    authorityHealth: next.authorityHealth,
+    authorityHealth: resolvedAuthorityHealth,
     status: {
-      authority: next.authorityHealth,
+      authority: resolvedAuthorityHealth,
       renderer: resolvedRendererHealth,
+      sourceRuntime: resolvedSourceRuntime,
       delivery: resolvedDelivery,
+      deliveryHealth: resolvedDeliveryHealth,
     },
   };
   streamState = toStreamStateFromCanonicalSession(canonicalStreamSession);
@@ -2702,6 +3105,29 @@ function buildCanonicalStreamSessionFromBetSyncEvent(
 ): CanonicalStreamSession {
   const nextState = toStreamStateFromBetSyncEvent(event) as unknown as StreamState;
   const base = buildCanonicalStreamSessionFromStreamState(nextState);
+  const eventRecord = event as unknown as Record<string, unknown>;
+  const channel = normalizeCanonicalChannel(eventRecord.channel, event.emittedAt);
+  const publicReadiness =
+    channel?.publicReadiness ??
+    normalizeCanonicalPublicReadiness(eventRecord.publicReadiness, event.emittedAt);
+  const sourceRuntime =
+    normalizeCanonicalSourceRuntime(
+      eventRecord.sourceRuntime ?? base.sourceRuntime,
+    ) ?? base.sourceRuntime;
+  const canonicalDestination =
+    findCanonicalDestinationInChannel(channel) ??
+    normalizeCanonicalDestinationState(eventRecord.canonicalDestination);
+  const fallbackDestination =
+    findFallbackDestinationInChannel(channel) ??
+    normalizeCanonicalDestinationState(eventRecord.fallbackDestination);
+  const delivery = resolveCanonicalDelivery(event.delivery, channel);
+  const deliveryHealth = resolveCanonicalDeliveryHealth(
+    eventRecord.deliveryHealth,
+    event.emittedAt,
+    channel,
+    publicReadiness,
+    delivery,
+  );
   return {
     ...base,
     schemaVersion: event.schemaVersion,
@@ -2712,8 +3138,24 @@ function buildCanonicalStreamSessionFromBetSyncEvent(
     duelKey: event.duelKey,
     phase: event.phase,
     phaseVersion: event.phaseVersion,
+    channel,
+    publicReadiness,
+    canonicalDestination,
+    fallbackDestination,
+    sourceRuntime,
     rendererMetrics: resolveCanonicalRendererMetrics(event.rendererMetrics),
-    delivery: resolveCanonicalDelivery(event.delivery),
+    delivery,
+    deliveryHealth,
+    authorityHealth:
+      toDeliveryHealthFromPublicReadiness(publicReadiness) ?? base.authorityHealth,
+    status: {
+      authority:
+        toDeliveryHealthFromPublicReadiness(publicReadiness) ?? base.authorityHealth,
+      renderer: base.rendererHealth,
+      sourceRuntime,
+      delivery,
+      deliveryHealth,
+    },
   };
 }
 
@@ -3029,6 +3471,14 @@ async function pollStreamStateSource(): Promise<void> {
         canonicalStreamSession.duelId !== nextSession.duelId ||
         canonicalStreamSession.phase !== nextSession.phase ||
         canonicalStreamSession.playback?.url !== nextSession.playback?.url ||
+        canonicalStreamSession.publicReadiness?.ready !==
+          nextSession.publicReadiness?.ready ||
+        canonicalStreamSession.publicReadiness?.reason !==
+          nextSession.publicReadiness?.reason ||
+        canonicalStreamSession.sourceRuntime?.ready !==
+          nextSession.sourceRuntime?.ready ||
+        canonicalStreamSession.sourceRuntime?.degradedReason !==
+          nextSession.sourceRuntime?.degradedReason ||
         canonicalStreamSession.rendererHealth?.ready !==
           nextSession.rendererHealth?.ready ||
         canonicalStreamSession.rendererHealth?.degradedReason !==
