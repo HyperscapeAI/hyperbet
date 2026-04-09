@@ -195,6 +195,49 @@ describe("normalizeCanonicalStreamSession", () => {
       "external_hls/llhls",
     );
   });
+
+  it("prefers broadcastTimeline timing and phase fields when present", () => {
+    const session = normalizeCanonicalStreamSession({
+      schemaVersion: 3,
+      seq: 9,
+      emittedAt: 1234567890,
+      cycle: {
+        cycleId: "cycle-1",
+        phase: "FIGHTING",
+        betOpenTime: 1000,
+        betCloseTime: 2000,
+        fightStartTime: 3000,
+        duelEndTime: 9000,
+        broadcastTimeline: {
+          phase: "COUNTDOWN",
+          betOpenTime: 5000,
+          betCloseTime: 6000,
+          fightStartTime: 7000,
+          duelEndTime: 13000,
+          presentationDelayMs: 4000,
+          updatedAt: 1234567890,
+        },
+      },
+      channel: makeCanonicalChannel(),
+      sourceRuntime: makeSourceRuntime(),
+    });
+
+    expect(session?.schemaVersion).toBe(3);
+    expect(session?.phase).toBe("COUNTDOWN");
+    expect(session?.cycle.broadcastTimeline).toEqual({
+      phase: "COUNTDOWN",
+      betOpenTime: 5000,
+      betCloseTime: 6000,
+      fightStartTime: 7000,
+      duelEndTime: 13000,
+      presentationDelayMs: 4000,
+      updatedAt: 1234567890,
+    });
+    expect(session?.cycle.betOpenTime).toBe(5000);
+    expect(session?.cycle.betCloseTime).toBe(6000);
+    expect(session?.cycle.fightStartTime).toBe(7000);
+    expect(session?.cycle.duelEndTime).toBe(13000);
+  });
 });
 
 describe("canonical session delay buffering", () => {
