@@ -41,6 +41,9 @@ signals:
   - canonical public playback truth
 - `delivery` / `canonicalDestination`
   - consumer-facing playback metadata derived from canonical channel truth
+- `fallbackDestination`
+  - provider-specific warm standby state; may fail without making the canonical
+    stream unavailable
 - renderer-health polling may enrich playback URLs, but it must not replace
   canonical ingest transport metadata once a canonical destination exists
 
@@ -66,6 +69,9 @@ signals:
 3. restore manifest and delivery freshness
 4. force player rebuild only if the source and delivery are already healthy
 5. restart the keeper only if it failed to ingest a now-healthy upstream state
+
+Do not page a full-stream outage when the fallback rail alone is red and the
+canonical rail is still green.
 
 ## Success Criteria
 

@@ -36,6 +36,10 @@ For `enoomian` personal staging:
 - Hyperbet keepers poll Hyperscapes renderer health and session state
 - Cloudflare Stream LL-HLS is the target viewer feed when configured
 - self-hosted HLS remains available for smoke and rollback
+- canonical provider selection is now explicit:
+  `STREAM_DELIVERY_MODE=self_hls`,
+  `STREAM_CANONICAL_PROVIDER_PRIORITY=self_hls,cloudflare_stream`,
+  and `STREAM_EXTERNAL_*` carries the Cloudflare fallback rail
 - canonical channel and destination truth own ingest metadata; keeper
   `delivery` may enrich playback URLs but must not override canonical ingest
   transport
@@ -56,6 +60,10 @@ When the stream looks stale:
 
 If the player alone drifted, rebuild the player.
 If render or encode are stale, do not blame the player.
+
+If self-HLS is healthy but Cloudflare fallback is failing, the stream is still
+considered up as long as `channel.publicReadiness.ready=true` on the canonical
+self-HLS rail.
 
 ## Required Checks
 
