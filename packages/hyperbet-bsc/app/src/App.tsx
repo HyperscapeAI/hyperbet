@@ -938,19 +938,18 @@ export function App() {
       return;
     }
 
-    const liveTimeline = liveCycle.broadcastTimeline ?? liveCycle;
     const openTs = normalizeTimestamp(
-      liveTimeline.betOpenTime ?? Math.floor(Date.now() / 1000),
+      liveCycle.betOpenTime ?? Math.floor(Date.now() / 1000),
     );
     const closeTs = normalizeTimestamp(
-      liveTimeline.betCloseTime ??
-        liveTimeline.fightStartTime ??
-        liveTimeline.duelEndTime ??
+      liveCycle.betCloseTime ??
+        liveCycle.fightStartTime ??
+        liveCycle.duelEndTime ??
         Math.floor(Date.now() / 1000),
     );
     const resolvedTs =
-      liveTimeline.phase === "RESOLUTION" && liveTimeline.duelEndTime
-        ? normalizeTimestamp(liveTimeline.duelEndTime)
+      liveCycle.phase === "RESOLUTION" && liveCycle.duelEndTime
+        ? normalizeTimestamp(liveCycle.duelEndTime)
         : null;
     const winner =
       liveCycle.winnerName && liveCycle.agent1?.name === liveCycle.winnerName
@@ -961,7 +960,7 @@ export function App() {
 
     setCurrentMatch({
       matchId: matchId ?? 0,
-      status: liveTimeline.phase === "RESOLUTION" ? "resolved" : "open",
+      status: liveCycle.phase === "RESOLUTION" ? "resolved" : "open",
       openTs,
       closeTs,
       resolvedTs,

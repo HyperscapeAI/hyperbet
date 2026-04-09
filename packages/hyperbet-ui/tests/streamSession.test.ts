@@ -238,6 +238,48 @@ describe("normalizeCanonicalStreamSession", () => {
     expect(session?.cycle.fightStartTime).toBe(7000);
     expect(session?.cycle.duelEndTime).toBe(13000);
   });
+
+  it("preserves legacy timing fields when broadcastTimeline is sparse", () => {
+    const session = normalizeCanonicalStreamSession({
+      schemaVersion: 3,
+      seq: 10,
+      emittedAt: 1234567891,
+      cycle: {
+        cycleId: "cycle-2",
+        phase: "FIGHTING",
+        betOpenTime: 1000,
+        betCloseTime: 2000,
+        fightStartTime: 3000,
+        duelEndTime: 9000,
+        broadcastTimeline: {
+          phase: "COUNTDOWN",
+          betOpenTime: null,
+          betCloseTime: null,
+          fightStartTime: null,
+          duelEndTime: 13000,
+          presentationDelayMs: 4000,
+          updatedAt: 1234567891,
+        },
+      },
+      channel: makeCanonicalChannel(),
+      sourceRuntime: makeSourceRuntime(),
+    });
+
+    expect(session?.phase).toBe("COUNTDOWN");
+    expect(session?.cycle.broadcastTimeline).toEqual({
+      phase: "COUNTDOWN",
+      betOpenTime: null,
+      betCloseTime: null,
+      fightStartTime: null,
+      duelEndTime: 13000,
+      presentationDelayMs: 4000,
+      updatedAt: 1234567891,
+    });
+    expect(session?.cycle.betOpenTime).toBe(1000);
+    expect(session?.cycle.betCloseTime).toBe(2000);
+    expect(session?.cycle.fightStartTime).toBe(3000);
+    expect(session?.cycle.duelEndTime).toBe(13000);
+  });
 });
 
 describe("canonical session delay buffering", () => {
