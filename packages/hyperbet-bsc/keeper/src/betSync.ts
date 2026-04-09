@@ -44,6 +44,16 @@ export type BetSyncDelivery = {
   ingestUrl: string | null;
 };
 
+export type BetSyncBroadcastTimeline = {
+  phase: string | null;
+  betOpenTime: number | null;
+  betCloseTime: number | null;
+  fightStartTime: number | null;
+  duelEndTime: number | null;
+  presentationDelayMs: number;
+  updatedAt: number | null;
+};
+
 export type BetSyncEvent = {
   schemaVersion: number;
   sourceEpoch: number;
@@ -53,6 +63,7 @@ export type BetSyncEvent = {
   duelKey: string | null;
   phase: string | null;
   phaseVersion: number | null;
+  broadcastTimeline: BetSyncBroadcastTimeline | null;
   betOpenTime: number | null;
   betCloseTime: number | null;
   fightStartTime: number | null;
@@ -286,6 +297,23 @@ function normalizeDelivery(value: unknown): BetSyncDelivery | null {
   };
 }
 
+function normalizeBroadcastTimeline(
+  value: unknown,
+): BetSyncBroadcastTimeline | null {
+  const candidate = asRecord(value);
+  if (!candidate) return null;
+
+  return {
+    phase: asString(candidate.phase),
+    betOpenTime: normalizePredictionMarketTimestamp(candidate.betOpenTime),
+    betCloseTime: normalizePredictionMarketTimestamp(candidate.betCloseTime),
+    fightStartTime: normalizePredictionMarketTimestamp(candidate.fightStartTime),
+    duelEndTime: normalizePredictionMarketTimestamp(candidate.duelEndTime),
+    presentationDelayMs: Math.max(0, asFiniteNumber(candidate.presentationDelayMs) ?? 0),
+    updatedAt: normalizePredictionMarketTimestamp(candidate.updatedAt),
+  };
+}
+
 export function parseBetSyncEvent(payload: unknown): BetSyncEvent | null {
   const candidate = asRecord(payload);
   if (!candidate) return null;
@@ -298,6 +326,10 @@ export function parseBetSyncEvent(payload: unknown): BetSyncEvent | null {
     return null;
   }
 
+  const broadcastTimeline = normalizeBroadcastTimeline(
+    candidate.broadcastTimeline,
+  );
+
   return {
     schemaVersion: asFiniteNumber(candidate.schemaVersion) ?? 1,
     sourceEpoch,
@@ -307,6 +339,7 @@ export function parseBetSyncEvent(payload: unknown): BetSyncEvent | null {
     duelKey: normalizeDuelKey(candidate.duelKey),
     phase: asString(candidate.phase),
     phaseVersion: asFiniteNumber(candidate.phaseVersion),
+    broadcastTimeline,
     betOpenTime: normalizePredictionMarketTimestamp(candidate.betOpenTime),
     betCloseTime: normalizePredictionMarketTimestamp(candidate.betCloseTime),
     fightStartTime: normalizePredictionMarketTimestamp(candidate.fightStartTime),
@@ -376,6 +409,7 @@ export function toStreamStateFromBetSyncEvent(event: BetSyncEvent): StreamState 
       duelKeyHex: event.duelKey ? `0x${event.duelKey}` : null,
       phase: event.phase ?? "IDLE",
       phaseVersion: event.phaseVersion,
+      broadcastTimeline: event.broadcastTimeline,
       betOpenTime: event.betOpenTime,
       betCloseTime: event.betCloseTime,
       fightStartTime: event.fightStartTime,

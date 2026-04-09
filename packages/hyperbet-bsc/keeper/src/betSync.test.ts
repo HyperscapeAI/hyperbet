@@ -4,6 +4,7 @@ import {
   parseBetSyncBootstrapState,
   parseBetSyncEvent,
   resolveBetSyncBootstrapCursor,
+  toStreamStateFromBetSyncEvent,
 } from "./betSync";
 
 describe("resolveBetSyncBootstrapCursor", () => {
@@ -113,6 +114,54 @@ describe("parseBetSyncEvent", () => {
       ready: false,
       degradedReason: "manifest_stale",
     });
+  });
+
+  test("parses and republishes broadcastTimeline without disturbing legacy fields", () => {
+    const event = parseBetSyncEvent({
+      schemaVersion: 3,
+      sourceEpoch: 8,
+      seq: 13,
+      emittedAt: 1_712_345_679_000,
+      duelId: "duel-2",
+      duelKey: "22".repeat(32),
+      phase: "FIGHTING",
+      betOpenTime: 1_000,
+      betCloseTime: 2_000,
+      fightStartTime: 3_000,
+      duelEndTime: 9_000,
+      broadcastTimeline: {
+        phase: "COUNTDOWN",
+        betOpenTime: 5_000,
+        betCloseTime: 6_000,
+        fightStartTime: 7_000,
+        duelEndTime: 13_000,
+        presentationDelayMs: 4_000,
+        updatedAt: 1_712_345_679_000,
+      },
+    });
+
+    expect(event?.broadcastTimeline).toEqual({
+      phase: "COUNTDOWN",
+      betOpenTime: 5_000,
+      betCloseTime: 6_000,
+      fightStartTime: 7_000,
+      duelEndTime: 13_000,
+      presentationDelayMs: 4_000,
+      updatedAt: 1_712_345_679_000,
+    });
+    expect(event?.betCloseTime).toBe(2_000);
+
+    const nextState = toStreamStateFromBetSyncEvent(event!);
+    expect(nextState.cycle.broadcastTimeline).toEqual({
+      phase: "COUNTDOWN",
+      betOpenTime: 5_000,
+      betCloseTime: 6_000,
+      fightStartTime: 7_000,
+      duelEndTime: 13_000,
+      presentationDelayMs: 4_000,
+      updatedAt: 1_712_345_679_000,
+    });
+    expect(nextState.cycle.betCloseTime).toBe(2_000);
   });
 });
 
