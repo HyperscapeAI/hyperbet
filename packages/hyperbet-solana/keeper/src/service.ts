@@ -1447,7 +1447,16 @@ function currentDuelId(): string | null {
   return typeof raw === "string" && raw.trim().length > 0 ? raw.trim() : null;
 }
 
+function currentBroadcastTimeline(): Record<string, unknown> | null {
+  return asRecord(streamState.cycle?.broadcastTimeline);
+}
+
 function currentBetCloseTime(): number | null {
+  const projected = currentBroadcastTimeline()?.betCloseTime;
+  if (typeof projected === "number" && Number.isFinite(projected)) {
+    return projected;
+  }
+
   const raw = streamState.cycle?.betCloseTime;
   return typeof raw === "number" && Number.isFinite(raw) ? raw : null;
 }
