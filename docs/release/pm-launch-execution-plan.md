@@ -1,6 +1,8 @@
 # PM Launch Execution Plan
 
-> **TL;DR:** Phase-1 launch scope is `Solana + BSC + AVAX`, with user-facing `PM/CLOB duels` and `perps/models`, plus `AMM` as an internal market-maker/liquidity engine. Testnet/staging still prove the system first, but the active implementation train is now a single branch on `audit/develop-pm-hardening`, not a multi-branch PM-only merge tree.
+> **Historical snapshot:** This document is preserved as the phase-1 superset strategy and checklist history. Current open-work ownership lives in [tracking-document-map.md](tracking-document-map.md) and [github-project-production-backlog.md](github-project-production-backlog.md). Use this file for preserved context, not as the canonical blocker list.
+
+> **TL;DR:** Phase-1 product scope still includes `Solana + BSC + AVAX`, with user-facing `PM/CLOB duels` and `perps/models`, plus `AMM` as an internal market-maker/liquidity engine. The active production-readiness gate, however, is now `Solana + BSC`; AVAX checklist items in this plan are preserved follow-on work and are non-blocking unless the lane is explicitly reactivated.
 
 ---
 
@@ -13,6 +15,15 @@ main
 ```
 
 `audit/develop-pm-hardening` is the only active implementation branch for launch-critical closeout work. Do not split remaining launch scope across side branches unless a later release explicitly chooses to do that again.
+
+## Current Scope Note
+
+Treat this plan as a preserved superset of phase-1 work.
+
+- current blocking scope: `Solana + BSC`
+- preserved but isolated follow-on lane: `AVAX`
+- when a checklist item below mentions AVAX, it is preserved work, not a
+  blocker for the current signoff decision
 
 ---
 
@@ -53,7 +64,9 @@ Everything in Stage A is executed by engineering on testnets with test funds. No
 - [ ] Execute `freeze_config` on Solana devnet for PM, AMM, and perps
 - [ ] Record all testnet tx hashes in evidence bundle
 
-**Acceptance:** Both EVM testnets (BSC + AVAX) + Solana devnet deployed for full phase-1 scope. Base is out of scope for this Stage A lane.
+**Acceptance:** Active-scope testnets (`BSC + Solana`) are deployed and proven
+for the current signoff lane. AVAX checklist items remain preserved follow-on
+work. Base is out of scope for this Stage A lane.
 
 #### WS 0.2A — Testnet Registry Population
 
@@ -65,7 +78,8 @@ Everything in Stage A is executed by engineering on testnets with test funds. No
 - [ ] Verify `bun test` deployment tests pass with new values
 - [ ] Verify `bun x tsc --noEmit` passes for all chain apps
 
-**Acceptance:** Registry is complete for all testnets. No blank fields. Deployment tests pass.
+**Acceptance:** Registry is complete for the active testnet scope. No blank
+active-scope fields. Deployment tests pass.
 
 #### WS 0.3A — Deployment Verification Script
 
@@ -114,15 +128,16 @@ Build a script that validates a deployment is correct. Run it on testnet. Run it
   - [ ] Settlement reflects game result
 - [ ] Capture screenshots/recordings of each flow as evidence
 
-**Acceptance:** Every user-facing flow works end-to-end on testnets against deployed v3 contracts with real game integration.
+**Acceptance:** Every active-scope user-facing flow works end-to-end on
+testnets against deployed v3 contracts with real game integration.
 
 #### WS 0.5A — Scenario Testing and Simulation Evidence
 
 - [ ] Run full CI gate suite against testnet deployments:
   - [ ] Solana Exploit Gate (all 6 scenarios)
   - [ ] EVM Exploit Gate
-  - [ ] Cross-Chain E2E (Solana, BSC, AVAX)
-  - [ ] Launch-chain runtime smoke remains green for BSC and AVAX
+  - [ ] Cross-Chain E2E (Solana, BSC)
+  - [ ] Launch-chain runtime smoke remains green for BSC
   - [ ] EVM Contract Proof Gate (anvil adversarial simulation)
 - [ ] Run market-maker adversarial simulations:
   - [ ] Seed corpus (all chains)
@@ -146,7 +161,8 @@ Build a script that validates a deployment is correct. Run it on testnet. Run it
   - [ ] Verify resting orders can be reclaimed
 - [ ] Capture all scenario results as structured evidence artifacts
 
-**Acceptance:** Every exploit scenario, adversarial simulation, and operational drill passes on testnets. Evidence artifacts captured and indexed.
+**Acceptance:** Every active-scope exploit scenario, adversarial simulation, and
+operational drill passes on testnets. Evidence artifacts captured and indexed.
 
 #### WS 0.6A — Evidence Bundle Assembly
 
