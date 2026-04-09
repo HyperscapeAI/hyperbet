@@ -54,3 +54,4 @@ poetry.lock
 packages/market-maker-bot/simulations/
 docs/plans/
 output/
+tmp/enoomian-staging/
