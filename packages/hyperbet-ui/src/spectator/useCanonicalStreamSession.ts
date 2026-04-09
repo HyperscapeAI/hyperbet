@@ -6,6 +6,7 @@ import {
   isCanonicalRendererPlaybackReady,
 } from "../lib/streamSession";
 import type {
+  BroadcastTimeline,
   CanonicalStreamHealth,
   HlsManifestInfo,
   CanonicalStreamPlayback,
@@ -383,13 +384,35 @@ function normalizePlayback(value: unknown): CanonicalStreamPlayback | null {
   };
 }
 
-function normalizeCycle(value: unknown): StreamingCycle | null {
+function normalizeBroadcastTimeline(value: unknown): BroadcastTimeline | null {
   const candidate = asRecord(value);
   if (!candidate) return null;
 
   return {
+    phase: (asString(candidate.phase) as StreamingPhase | null) ?? null,
+    betOpenTime: asFiniteNumber(candidate.betOpenTime),
+    betCloseTime: asFiniteNumber(candidate.betCloseTime),
+    fightStartTime: asFiniteNumber(candidate.fightStartTime),
+    duelEndTime: asFiniteNumber(candidate.duelEndTime),
+    presentationDelayMs: Math.max(
+      0,
+      asFiniteNumber(candidate.presentationDelayMs) ?? 0,
+    ),
+    updatedAt: asFiniteNumber(candidate.updatedAt),
+  };
+}
+
+function normalizeCycle(value: unknown): StreamingCycle | null {
+  const candidate = asRecord(value);
+  if (!candidate) return null;
+  const broadcastTimeline = normalizeBroadcastTimeline(candidate.broadcastTimeline);
+
+  return {
     cycleId: asString(candidate.cycleId) ?? "cycle-0",
-    phase: (asString(candidate.phase) as StreamingPhase | null) ?? "IDLE",
+    phase:
+      broadcastTimeline?.phase ??
+      (asString(candidate.phase) as StreamingPhase | null) ??
+      "IDLE",
     cycleStartTime: asFiniteNumber(candidate.cycleStartTime) ?? 0,
     phaseStartTime: asFiniteNumber(candidate.phaseStartTime) ?? 0,
     phaseEndTime: asFiniteNumber(candidate.phaseEndTime) ?? 0,
@@ -405,11 +428,17 @@ function normalizeCycle(value: unknown): StreamingCycle | null {
       typeof candidate.duelKeyHex === "string" || candidate.duelKeyHex === null
         ? (candidate.duelKeyHex as string | null)
         : null,
-    betOpenTime: asFiniteNumber(candidate.betOpenTime),
-    betCloseTime: asFiniteNumber(candidate.betCloseTime),
+    broadcastTimeline,
+    betOpenTime:
+      broadcastTimeline?.betOpenTime ?? asFiniteNumber(candidate.betOpenTime),
+    betCloseTime:
+      broadcastTimeline?.betCloseTime ?? asFiniteNumber(candidate.betCloseTime),
     countdown: asFiniteNumber(candidate.countdown),
-    fightStartTime: asFiniteNumber(candidate.fightStartTime),
-    duelEndTime: asFiniteNumber(candidate.duelEndTime),
+    fightStartTime:
+      broadcastTimeline?.fightStartTime ??
+      asFiniteNumber(candidate.fightStartTime),
+    duelEndTime:
+      broadcastTimeline?.duelEndTime ?? asFiniteNumber(candidate.duelEndTime),
     winnerId:
       typeof candidate.winnerId === "string" || candidate.winnerId === null
         ? (candidate.winnerId as string | null)
@@ -540,6 +569,7 @@ export function normalizeCanonicalStreamSession(
       normalizedCycle.duelKeyHex?.replace(/^0x/i, "") ??
       null,
     phase:
+      normalizedCycle.broadcastTimeline?.phase ??
       (asString(candidate.phase) as StreamingPhase | null) ??
       normalizedCycle.phase,
     phaseVersion:

@@ -943,9 +943,9 @@ export function App() {
     );
     const closeTs = normalizeTimestamp(
       liveCycle.betCloseTime ??
-      liveCycle.fightStartTime ??
-      liveCycle.duelEndTime ??
-      Math.floor(Date.now() / 1000),
+        liveCycle.fightStartTime ??
+        liveCycle.duelEndTime ??
+        Math.floor(Date.now() / 1000),
     );
     const resolvedTs =
       liveCycle.phase === "RESOLUTION" && liveCycle.duelEndTime

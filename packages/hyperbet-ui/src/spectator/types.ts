@@ -152,6 +152,16 @@ export interface LeaderboardEntry {
   currentStreak: number;
 }
 
+export interface BroadcastTimeline {
+  phase: StreamingPhase | null;
+  betOpenTime: number | null;
+  betCloseTime: number | null;
+  fightStartTime: number | null;
+  duelEndTime: number | null;
+  presentationDelayMs: number;
+  updatedAt: number | null;
+}
+
 export interface StreamingCycle {
   cycleId: string;
   phase: StreamingPhase;
@@ -164,6 +174,7 @@ export interface StreamingCycle {
   agent2: AgentInfo | null;
   duelId?: string | null;
   duelKeyHex?: string | null;
+  broadcastTimeline?: BroadcastTimeline | null;
   betOpenTime?: number | null;
   betCloseTime?: number | null;
   countdown: number | null;
