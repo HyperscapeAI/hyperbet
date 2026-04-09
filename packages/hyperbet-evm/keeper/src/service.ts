@@ -8,6 +8,8 @@ import path from "node:path";
 import {
   normalizeChainKey,
   type PredictionMarketLifecycleStatus,
+  resolveLifecycleFromSolanaDuelStatus,
+  resolveLifecycleFromSolanaMarketStatus,
   resolveLifecycleFromStreamPhase,
   toRecordedBetChain,
   type PredictionMarketLifecycleRecord,
@@ -1545,22 +1547,15 @@ function enumName(value: unknown): string | null {
   return typeof key === "string" && key.length > 0 ? key : null;
 }
 
-function resolveLifecycleFromSolanaStatus(
-  status: string | null,
+function resolveLifecycleFromSolanaSnapshot(
+  duelStatus: string | null,
+  marketStatus: string | null,
   fallback: PredictionMarketLifecycleStatus,
 ): PredictionMarketLifecycleStatus {
-  switch (status?.toLowerCase()) {
-    case "open":
-      return "OPEN";
-    case "locked":
-      return "LOCKED";
-    case "resolved":
-      return "RESOLVED";
-    case "cancelled":
-      return "CANCELLED";
-    default:
-      return fallback;
-  }
+  const duelLifecycle = resolveLifecycleFromSolanaDuelStatus(duelStatus);
+  if (duelLifecycle !== "UNKNOWN") return duelLifecycle;
+  const marketLifecycle = resolveLifecycleFromSolanaMarketStatus(marketStatus);
+  return marketLifecycle !== "UNKNOWN" ? marketLifecycle : fallback;
 }
 
 function resolveWinnerFromSolanaState(
@@ -1577,6 +1572,85 @@ function resolveWinnerFromSolanaState(
     default:
       return fallback;
   }
+}
+
+function isSyntheticSolanaLifecycleEnabled(): boolean {
+  return Boolean(process.env.STATE_JSON_PATH?.trim());
+}
+
+function syntheticSolanaDuelStatusFromCycle(
+  sourceState: StreamState = streamState,
+): string | null {
+  const phase =
+    typeof sourceState.cycle?.phase === "string"
+      ? sourceState.cycle.phase.trim().toUpperCase()
+      : null;
+  const betCloseTime = currentBetCloseTime(sourceState);
+  const winner = currentWinnerFromCycle(sourceState);
+  const now = Date.now();
+  switch (phase) {
+    case "ANNOUNCEMENT":
+    case "COUNTDOWN":
+    case "FIGHTING":
+      return betCloseTime == null || betCloseTime > now
+        ? "betting_open"
+        : "locked";
+    case "RESOLUTION":
+      return winner === "NONE" ? "proposed" : "resolved";
+    default:
+      return null;
+  }
+}
+
+function syntheticSolanaWinnerFromCycle(
+  sourceState: StreamState = streamState,
+): string {
+  switch (currentWinnerFromCycle(sourceState)) {
+    case "A":
+      return "a";
+    case "B":
+      return "b";
+    default:
+      return "none";
+  }
+}
+
+function buildSyntheticSolanaLifecycleSnapshot(
+  sourceState: StreamState = streamState,
+): JsonRecord | null {
+  if (!isSyntheticSolanaLifecycleEnabled()) return null;
+  const duelKey = currentDuelKey(sourceState);
+  const duelId = currentDuelId(sourceState);
+  if (!duelKey && !duelId) return null;
+
+  let currentMarketPda: string | null = null;
+  if (duelKey != null) {
+    try {
+      currentMarketPda = findMarketPda(
+        GOLD_CLOB_MARKET_PROGRAM_ID,
+        findDuelStatePda(FIGHT_ORACLE_PROGRAM_ID, duelKeyHexToBytes(duelKey)),
+      ).toBase58();
+    } catch {
+      currentMarketPda = null;
+    }
+  }
+
+  return {
+    rpc: "synthetic:e2e",
+    fightOracleProgram: FIGHT_ORACLE_PROGRAM_ID.toBase58(),
+    marketProgram: GOLD_CLOB_MARKET_PROGRAM_ID.toBase58(),
+    fightAccountCount: duelKey != null ? 1 : 0,
+    marketAccountCount: currentMarketPda != null ? 1 : 0,
+    latestFightAccount: null,
+    latestMarketAccount: currentMarketPda,
+    derivedMarketPda: currentMarketPda,
+    currentMarketPda,
+    currentDuelStatus: syntheticSolanaDuelStatusFromCycle(sourceState),
+    currentMarketStatus: null,
+    currentMarketWinner: syntheticSolanaWinnerFromCycle(sourceState),
+    recentSignature: "synthetic-stream-state",
+    syntheticSyncedAt: Date.now(),
+  };
 }
 
 function resolvePhaseFromLifecycleStatus(
@@ -1618,9 +1692,12 @@ function buildPredictionMarketLifecycleRecords(
   );
   const cycleWinner = duelOverride?.winner ?? currentWinnerFromCycle();
   const records: PredictionMarketLifecycleRecord[] = [];
+  const solanaSnapshot =
+    (parsers.solana.snapshot as JsonRecord | null) ??
+    buildSyntheticSolanaLifecycleSnapshot();
 
-  if (parsers.solana.enabled || parsers.solana.snapshot) {
-    const snapshot = parsers.solana.snapshot as JsonRecord | null;
+  if (parsers.solana.enabled || solanaSnapshot) {
+    const snapshot = solanaSnapshot;
     const currentDerivedMarketPda =
       typeof snapshot?.derivedMarketPda === "string"
         ? snapshot.derivedMarketPda
@@ -1644,7 +1721,10 @@ function buildPredictionMarketLifecycleRecords(
           findDuelStatePda(FIGHT_ORACLE_PROGRAM_ID, duelKeyHexToBytes(duelKey)),
         ).toBase58()
         : null;
-    const solanaLifecycle = resolveLifecycleFromSolanaStatus(
+    const solanaLifecycle = resolveLifecycleFromSolanaSnapshot(
+      typeof snapshot?.currentDuelStatus === "string"
+        ? snapshot.currentDuelStatus
+        : null,
       typeof snapshot?.currentMarketStatus === "string"
         ? snapshot.currentMarketStatus
         : null,
@@ -1676,7 +1756,11 @@ function buildPredictionMarketLifecycleRecords(
       contractAddress: null,
       programId: currentMarketProgram,
       txRef: currentRecentSignature,
-      syncedAt: parsers.solana.lastSuccessAt,
+      syncedAt:
+        parsers.solana.lastSuccessAt ??
+        (typeof snapshot?.syntheticSyncedAt === "number"
+          ? snapshot.syntheticSyncedAt
+          : null),
       metadata: {
         fightAccountCount: snapshot?.fightAccountCount ?? null,
         marketAccountCount: snapshot?.marketAccountCount ?? null,
@@ -3002,13 +3086,16 @@ function leaderboardResponse(
   };
 }
 
-function rankResponse(wallet: string): Record<string, unknown> {
+function rankResponse(
+  wallet: string,
+  scope: string | null,
+): Record<string, unknown> {
   const normalized = rememberWalletCase(wallet);
   const canonical = ensureIdentity(normalized);
-  const rows = leaderboardRows("linked", "alltime");
+  const rows = leaderboardRows(scope, "alltime");
   const rank =
     rows.findIndex((entry) => normalizeWallet(entry.wallet) === canonical) + 1;
-  const wallets = identityWallets(normalized, "linked");
+  const wallets = identityWallets(normalized, scope);
 
   return {
     wallet: displayWallet(canonical),
@@ -3022,9 +3109,10 @@ function historyResponse(
   limit: number,
   offset: number,
   eventType: string | null,
+  scope: string | null,
 ): Record<string, unknown> {
   const normalized = rememberWalletCase(wallet);
-  const wallets = new Set(identityWallets(normalized, "linked"));
+  const wallets = new Set(identityWallets(normalized, scope));
   const filtered = pointsEvents.filter((entry) => {
     if (!wallets.has(entry.wallet)) return false;
     if (eventType && entry.eventType !== eventType) return false;
@@ -3056,8 +3144,11 @@ function historyResponse(
   };
 }
 
-function multiplierResponse(wallet: string): Record<string, unknown> {
-  const wallets = identityWallets(wallet, "linked");
+function multiplierResponse(
+  wallet: string,
+  scope: string | null,
+): Record<string, unknown> {
+  const wallets = identityWallets(wallet, scope);
   const detail = multiplierDetailForWallets(wallets);
   return {
     wallet: wallet.trim(),
@@ -4035,7 +4126,7 @@ const server = Bun.serve({
       if (!wallet) {
         return jsonResponse(req, { error: "Wallet is required" }, 400);
       }
-      return jsonResponse(req, rankResponse(wallet), 200, {
+      return jsonResponse(req, rankResponse(wallet, url.searchParams.get("scope")), 200, {
         "cache-control": "no-store",
       });
     }
@@ -4066,6 +4157,7 @@ const server = Bun.serve({
           limit,
           offset,
           url.searchParams.get("eventType"),
+          url.searchParams.get("scope"),
         ),
         200,
         {
@@ -4086,7 +4178,7 @@ const server = Bun.serve({
       if (!wallet) {
         return jsonResponse(req, { error: "Wallet is required" }, 400);
       }
-      return jsonResponse(req, multiplierResponse(wallet), 200, {
+      return jsonResponse(req, multiplierResponse(wallet, url.searchParams.get("scope")), 200, {
         "cache-control": "no-store",
       });
     }

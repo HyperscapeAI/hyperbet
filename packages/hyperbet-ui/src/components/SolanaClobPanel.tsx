@@ -1536,6 +1536,7 @@ export function SolanaClobPanel({
             walletAddress={walletAddress}
             compact={compact}
             locale={resolvedLocale}
+            scope="wallet"
           />
         }
         locale={resolvedLocale}

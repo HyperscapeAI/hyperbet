@@ -2,14 +2,14 @@ import path from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 import { createWriteStream } from "node:fs";
 
-import { resolveBettingEvmDeploymentForChain } from "../packages/hyperbet-chain-registry/src/index";
+import { resolveBettingEvmDeploymentForChain } from "../packages/hyperbet-chain-registry/src/index.js";
 
 import {
   copyIntoArtifacts,
   resolveArtifactRoot,
   rootDir,
   runCommand,
-} from "./ci-lib";
+} from "./ci-lib.js";
 
 const artifactRoot = resolveArtifactRoot("base-add-chain-smoke");
 const anvilLog = path.join(artifactRoot, "anvil.log");
@@ -144,7 +144,7 @@ try {
 
   await runCommand(
     "bash",
-    ["scripts/ci-install-verified.sh", "root", "hyperbet-bsc", "hyperbet-bsc-app"],
+    ["scripts/ci-install-verified.sh", "root", "hyperbet-evm", "hyperbet-evm-app"],
     {
       stdoutFile: path.join(artifactRoot, "base-app-install.out.log"),
       stderrFile: path.join(artifactRoot, "base-app-install.err.log"),
@@ -154,7 +154,7 @@ try {
 
   await runCommand(
     "bun",
-    ["run", "--cwd", "packages/hyperbet-bsc/app", "build", "--mode", "mainnet-beta"],
+    ["run", "--cwd", "packages/hyperbet-evm/app", "build", "--mode", "mainnet-beta"],
     {
       env: {
         CF_PAGES_COMMIT_SHA: process.env.GITHUB_SHA || "local-base-smoke",
@@ -176,7 +176,7 @@ try {
 
   copyIntoArtifacts(
     artifactRoot,
-    path.join(rootDir, "packages/hyperbet-bsc/app/dist/build-info.json"),
+    path.join(rootDir, "packages/hyperbet-evm/app/dist/build-info.json"),
     "build-info.json",
   );
 } finally {

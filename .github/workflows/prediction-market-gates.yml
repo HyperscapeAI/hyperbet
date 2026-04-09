@@ -2,7 +2,7 @@ name: Prediction Market Gates
 
 on:
   push:
-    branches: [main, staging, develop, hackathon]
+    branches: [main, staging, develop, hackathon, enoomian/staging]
     paths:
       - "packages/hyperbet-evm/**"
       - "packages/hyperbet-deployments/**"
@@ -21,7 +21,7 @@ on:
       - "package.json"
       - "bun.lock"
   pull_request:
-    branches: [main, staging, develop, hackathon]
+    branches: [main, staging, develop, hackathon, enoomian/staging]
     paths:
       - "packages/hyperbet-evm/**"
       - "packages/hyperbet-deployments/**"
@@ -234,7 +234,7 @@ jobs:
           if-no-files-found: ignore
 
   cross-chain-e2e:
-    name: Cross-Chain E2E (${{ matrix.chain }})
+    name: Unified Bets E2E (${{ matrix.chain }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -260,6 +260,22 @@ jobs:
       - name: Install Playwright browser
         run: bunx playwright install --with-deps chromium
 
+      - name: Audit unified page env
+        env:
+          ENOOMIAN_HYPERBET_PAGES_URL: ${{ vars.ENOOMIAN_HYPERBET_PAGES_URL }}
+          ENOOMIAN_HYPERBET_KEEPER_URL: ${{ vars.ENOOMIAN_HYPERBET_KEEPER_URL }}
+          ENOOMIAN_HYPERBET_KEEPER_WS_URL: ${{ vars.ENOOMIAN_HYPERBET_KEEPER_WS_URL }}
+          VITE_GAME_API_URL: ${{ vars.ENOOMIAN_HYPERBET_KEEPER_URL }}
+          VITE_GAME_WS_URL: ${{ vars.ENOOMIAN_HYPERBET_KEEPER_WS_URL }}
+          VITE_SOLANA_CLUSTER: mainnet-beta
+          VITE_USE_GAME_RPC_PROXY: "true"
+          VITE_USE_GAME_EVM_RPC_PROXY: "true"
+          VITE_BSC_CHAIN_ID: ${{ vars.ENOOMIAN_BSC_CHAIN_ID != '' && vars.ENOOMIAN_BSC_CHAIN_ID || vars.HYPERBET_BSC_STAGING_CHAIN_ID }}
+          VITE_BSC_GOLD_CLOB_ADDRESS: ${{ vars.ENOOMIAN_BSC_GOLD_CLOB_ADDRESS != '' && vars.ENOOMIAN_BSC_GOLD_CLOB_ADDRESS || vars.HYPERBET_BSC_STAGING_GOLD_CLOB_ADDRESS }}
+          VITE_AVAX_CHAIN_ID: ${{ vars.HYPERBET_AVAX_STAGING_CHAIN_ID }}
+          VITE_AVAX_GOLD_CLOB_ADDRESS: ${{ vars.HYPERBET_AVAX_STAGING_GOLD_CLOB_ADDRESS }}
+        run: bun run ci:env -- --target=pages:unified --deployment=staging
+
       - name: AVAX gate posture note
         if: matrix.chain == 'avax'
         run: |
@@ -268,14 +284,14 @@ jobs:
           echo "Required AVAX staged proof inputs/secrets: HYPERBET_AVAX_STAGING_RPC_URL, HYPERBET_AVAX_STAGING_CHAIN_ID, HYPERBET_AVAX_STAGING_REPORTER_PRIVATE_KEY, HYPERBET_AVAX_STAGING_CANARY_PRIVATE_KEY, HYPERBET_AVAX_STAGING_ADMIN_PRIVATE_KEY, HYPERBET_AVAX_STAGING_MARKET_OPERATOR_PRIVATE_KEY, HYPERBET_AVAX_STAGING_DUEL_ORACLE_ADDRESS, HYPERBET_AVAX_STAGING_GOLD_CLOB_ADDRESS, HYPERBET_AVAX_STAGING_GOLD_AMM_ROUTER_ADDRESS, HYPERBET_AVAX_STAGING_MUSD_TOKEN_ADDRESS, HYPERBET_AVAX_STAGING_GOLD_TOKEN_ADDRESS, HYPERBET_AVAX_STAGING_SKILL_ORACLE_ADDRESS, HYPERBET_AVAX_STAGING_PERP_ENGINE_ADDRESS, HYPERBET_AVAX_STAGING_STREAM_PUBLISH_KEY, HYPERBET_AVAX_RAILWAY_STAGING_PROJECT_ID, HYPERBET_AVAX_RAILWAY_STAGING_ENVIRONMENT_ID, HYPERBET_AVAX_RAILWAY_STAGING_KEEPER_SERVICE_ID"
 
       - name: Run Gate 10 local E2E
-        run: node --import tsx scripts/ci-gate-e2e.ts --chain=${{ matrix.chain }}
+        run: bun run ci:gate:e2e:${{ matrix.chain }}
 
       - name: Upload E2E artifacts
         if: always()
         uses: actions/upload-artifact@v7.0.0
         with:
           name: cross-chain-e2e-${{ matrix.chain }}
-          path: .ci-artifacts/e2e-${{ matrix.chain }}
+          path: .ci-artifacts/e2e-unified-${{ matrix.chain }}
           if-no-files-found: ignore
 
   base-add-chain-smoke:
@@ -294,7 +310,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          bash scripts/ci-install-verified.sh root hyperbet-bsc-app market-maker-bot
+          bash scripts/ci-install-verified.sh root hyperbet-evm-app market-maker-bot
 
       - name: Audit shared env
         run: node --import tsx scripts/ci-env-audit.ts --target=ci-shared

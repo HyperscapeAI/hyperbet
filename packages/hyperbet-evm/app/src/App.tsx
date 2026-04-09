@@ -43,6 +43,11 @@ import { StreamPlayer } from "@hyperbet/ui/components/StreamPlayer";
 import { ChainSelector } from "@hyperbet/ui/components/ChainSelector";
 import { ThemeSelector } from "@hyperbet/ui/components/ThemeSelector";
 import { selectConfiguredEvmPrivateKey } from "@hyperbet/ui/lib/evmPrivateKey";
+import {
+  useAppConnection,
+  useAppWallet,
+  useAppWalletModal,
+} from "@hyperbet/ui/lib/solanaRuntime";
 
 import { useChain } from "./lib/ChainContext";
 import { useStreamingState } from "@hyperbet/ui/spectator/useStreamingState";
@@ -56,12 +61,16 @@ import {
   createEvmPublicClient,
   toDuelKeyHex,
 } from "@hyperbet/ui/lib/evmClient";
-import { getEvmChainConfig } from "@hyperbet/ui/lib/chainConfig";
 import {
   normalizePredictionMarketDuelKeyHex,
   usePredictionMarketOverview,
   usePredictionMarketSyncStatus,
 } from "@hyperbet/ui/lib/predictionMarkets";
+import {
+  CHAIN_DISPLAY,
+  getEvmChainConfig,
+  getEnabledEvmChains,
+} from "@hyperbet/ui/lib/chainConfig";
 
 // ── Shared UI utilities ──────────────────────────────────────────────────────
 function formatGold(v: number, locale: UiLocale): string {
@@ -102,6 +111,12 @@ function deriveAddressFromPrivateKey(
   } catch {
     return null;
   }
+}
+
+function normalizeAddress(value: string | undefined): `0x${string}` | null {
+  const trimmed = value?.trim() ?? "";
+  if (!/^0x[0-9a-fA-F]{40}$/.test(trimmed)) return null;
+  return trimmed as `0x${string}`;
 }
 
 const FOOTER_SOCIALS = [
@@ -209,6 +224,7 @@ function getAppCopy(locale: UiLocale) {
       loadingAgentStats: "正在加载代理数据",
       loadingModelMarkets: "正在加载模型市场",
       loadingEvmMarket: "正在加载 EVM 市场",
+      loadingSolanaMarket: "正在加载 Solana 市场",
       debugTitle: "极简对战下注",
       chain: "链",
       currentMatch: "当前对局",
@@ -217,6 +233,7 @@ function getAppCopy(locale: UiLocale) {
       noPool: "NO 池",
       refresh: "刷新",
       connectEvm: "连接 EVM",
+      connectSolana: "连接 Solana",
       wrongNet: "网络错误",
       duels: "对决",
       models: "模型",
@@ -304,6 +321,7 @@ function getAppCopy(locale: UiLocale) {
     loadingAgentStats: "Loading agent stats",
     loadingModelMarkets: "Loading model markets",
     loadingEvmMarket: "Loading EVM market",
+    loadingSolanaMarket: "Loading Solana market",
     debugTitle: "Ultra Simple Fight Bet",
     chain: "Chain",
     currentMatch: "Current match",
@@ -312,6 +330,7 @@ function getAppCopy(locale: UiLocale) {
     noPool: "NO pool",
     refresh: "Refresh",
     connectEvm: "Connect EVM",
+    connectSolana: "Connect Solana",
     wrongNet: "Wrong Net",
     duels: "Duels",
     models: "Models",
@@ -419,9 +438,19 @@ const EvmBettingPanel = lazy(() =>
     default: module.EvmBettingPanel,
   })),
 );
+const SolanaClobPanel = lazy(() =>
+  import("@hyperbet/ui/components/SolanaClobPanel").then((module) => ({
+    default: module.SolanaClobPanel,
+  })),
+);
 const EvmModelsMarketView = lazy(() =>
   import("@hyperbet/ui/components/EvmModelsMarketView").then((module) => ({
     default: module.EvmModelsMarketView,
+  })),
+);
+const SolanaModelsMarketView = lazy(() =>
+  import("@hyperbet/ui/components/SolanaModelsMarketView").then((module) => ({
+    default: module.SolanaModelsMarketView,
   })),
 );
 const PointsLeaderboard = lazy(() =>
@@ -500,18 +529,29 @@ export function App() {
     () => new URLSearchParams(window.location.search),
     [],
   );
-  const { address: evmWalletAddress } = useAccount();
+  const { address: evmWalletAddress, chainId: evmWalletChainId } = useAccount();
+  const solanaConnection = useAppConnection().connection;
+  const solanaWallet = useAppWallet();
+  const solanaWalletModal = useAppWalletModal();
+  const solanaWalletAddress = solanaWallet.publicKey?.toBase58() ?? null;
   const { activeChain, setActiveChain, availableChains } = useChain();
-  const activeEvmChain =
-    activeChain === "bsc" || activeChain === "base" || activeChain === "avax"
-      ? activeChain
-      : ((availableChains[0] as "bsc" | "base" | "avax" | undefined) ?? "bsc");
-  const activeChainLabel =
-    activeEvmChain === "base"
-      ? "BASE"
-      : activeEvmChain === "bsc"
-        ? "BSC"
-        : "AVAX";
+  const connectedEvmChain = useMemo(() => {
+    if (!evmWalletChainId) return null;
+    return (
+      getEnabledEvmChains().find(
+        (chain) => chain.evmChainId === evmWalletChainId,
+      )?.chainId ?? null
+    );
+  }, [evmWalletChainId]);
+  const activeEvmChain = activeChain === "solana" ? null : activeChain;
+  const activeChainDisplay = CHAIN_DISPLAY[activeChain];
+  const activeChainLabel = activeChainDisplay.shortName;
+  const activeEvmChainLabel =
+    activeEvmChain != null ? CHAIN_DISPLAY[activeEvmChain].shortName : null;
+  const linkedEvmWalletPlatform =
+    connectedEvmChain != null
+      ? (connectedEvmChain.toUpperCase() as "BSC" | "BASE" | "AVAX")
+      : null;
   const [locale, setLocale] = useState<UiLocale>(() => resolveUiLocale());
   const copy = useMemo(() => getAppCopy(locale), [locale]);
   const isE2eMode = import.meta.env.MODE === "e2e";
@@ -524,18 +564,34 @@ export function App() {
     [],
   );
   const configuredHeadlessEvmAddress = useMemo(
+    () =>
+      normalizeAddress(
+        (import.meta.env.VITE_E2E_EVM_ADDRESS as string | undefined) ??
+          (import.meta.env.VITE_HEADLESS_EVM_ADDRESS as string | undefined) ??
+          "",
+      ),
+    [],
+  );
+  const configuredHeadlessDerivedAddress = useMemo(
     () => deriveAddressFromPrivateKey(configuredHeadlessEvmPrivateKey),
     [configuredHeadlessEvmPrivateKey],
   );
   const effectiveEvmWalletAddress =
-    evmWalletAddress ?? configuredHeadlessEvmAddress ?? null;
-  // Only poll chain data when a wallet is connected (saves unnecessary RPC calls for spectators).
+    evmWalletAddress ??
+    configuredHeadlessEvmAddress ??
+    configuredHeadlessDerivedAddress ??
+    null;
+  const activeWalletAddress =
+    activeChain === "solana"
+      ? solanaWalletAddress
+      : effectiveEvmWalletAddress;
+  // Only poll chain data when an active-chain wallet is connected.
   const shouldPollChainData = Boolean(
-    !isStreamUiMode && (isE2eMode || effectiveEvmWalletAddress),
+    !isStreamUiMode && (isE2eMode || activeWalletAddress),
   );
   // In stream-ui mode treat wallet as disconnected so invite/points fetches don't fire.
-  const pointsWalletAddress = isStreamUiMode ? null : effectiveEvmWalletAddress;
-  const invitePlatformQuery = "evm" as const;
+  const pointsWalletAddress = isStreamUiMode ? null : activeWalletAddress;
+  const invitePlatformQuery = activeChain === "solana" ? "solana" : "evm";
 
   const [surfaceMode, setSurfaceMode] = useState<"DUELS" | "MODELS">("DUELS");
   const [status, _setStatus] = useState<string>("");
@@ -550,6 +606,8 @@ export function App() {
   const [isShowingStats, setIsShowingStats] = useState(false);
   const [streamSourceIndex, setStreamSourceIndex] = useState(0);
   const [showPointsDrawer, setShowPointsDrawer] = useState(false);
+  const isSolanaChain = activeChain === "solana";
+  const activePointsScope = isSolanaChain ? "wallet" : "linked";
 
   // ── Market data ──────────────────────────────────────────────────────────
   const [chartData, setChartData] = useState<HmChartPoint[]>([]);
@@ -591,7 +649,7 @@ export function App() {
     liveDuel: liveOverviewDuel,
     refresh: refreshMarketOverview,
     error: marketOverviewError,
-  } = usePredictionMarketOverview(activeEvmChain);
+  } = usePredictionMarketOverview(activeChain);
   const { data: syncStatus } = usePredictionMarketSyncStatus();
   const requestOverviewRefresh = useCallback(async () => {
     await refreshMarketOverview();
@@ -768,9 +826,14 @@ export function App() {
   // ── Market data polling ───────────────────────────────────────────────────
   // Runs independently of wallet connection — spectators see live odds too.
   useEffect(() => {
+    if (activeChain === "solana") {
+      return;
+    }
+
     const duelKeyHex = normalizePredictionMarketDuelKeyHex(
       typeof liveCycle?.duelKeyHex === "string" ? liveCycle.duelKeyHex : null,
     );
+    if (!activeEvmChain) return;
     const chainConfig = getEvmChainConfig(activeEvmChain);
     if (!duelKeyHex || !chainConfig) return;
 
@@ -818,14 +881,14 @@ export function App() {
       cancelled = true;
       clearInterval(id);
     };
-  }, [activeEvmChain, liveCycle?.duelKeyHex]);
+  }, [activeChain, activeEvmChain, liveCycle?.duelKeyHex]);
 
   // Reset chart when duel changes
   useEffect(() => {
     setChartData([]);
     setMarketYesPercent(50);
     lastSharesRef.current = { a: 0n, b: 0n };
-  }, [liveCycle?.cycleId]);
+  }, [activeChain, liveCycle?.cycleId]);
 
   const effYesPot = 0;
   const effNoPot = 0;
@@ -993,18 +1056,121 @@ export function App() {
 
   const bettingPanelBody = (
     <Suspense
-      fallback={<PanelFallback label={copy.loadingEvmMarket} minHeight={360} />}
+      fallback={
+        <PanelFallback
+          label={isSolanaChain ? copy.loadingSolanaMarket : copy.loadingEvmMarket}
+          minHeight={360}
+        />
+      }
     >
-      <EvmBettingPanel
-        agent1Name={effAgent1Name}
-        agent2Name={effAgent2Name}
-        compact
-        locale={locale}
-        lifecycleDuelOverride={liveOverviewDuel}
-        lifecycleMarketOverride={liveOverviewMarket}
-        onLifecycleRefreshRequested={requestOverviewRefresh}
-      />
+      {isSolanaChain ? (
+        <SolanaClobPanel
+          agent1Name={effAgent1Name}
+          agent2Name={effAgent2Name}
+          compact
+          locale={locale}
+          connectionOverride={solanaConnection}
+          walletOverride={solanaWallet as any}
+        />
+      ) : (
+        <EvmBettingPanel
+          agent1Name={effAgent1Name}
+          agent2Name={effAgent2Name}
+          compact
+          locale={locale}
+          lifecycleDuelOverride={liveOverviewDuel}
+          lifecycleMarketOverride={liveOverviewMarket}
+          onLifecycleRefreshRequested={requestOverviewRefresh}
+        />
+      )}
     </Suspense>
+  );
+  const modelsPanelBody = (
+    <Suspense
+      fallback={<PanelFallback label={copy.loadingModelMarkets} minHeight={480} />}
+    >
+      {isSolanaChain ? (
+        <SolanaModelsMarketView
+          activeMatchup={`${effA1.name} vs ${effA2.name}`}
+        />
+      ) : (
+        <EvmModelsMarketView
+          fightingAgentA={effA1.name}
+          fightingAgentB={effA2.name}
+          locale={locale}
+          gameApiUrl={GAME_API_URL}
+          mockData={mockData}
+          collateralSymbol={activeEvmChainLabel ?? ""}
+          chainLabel={activeEvmChainLabel ?? ""}
+        />
+      )}
+    </Suspense>
+  );
+  const walletButton = isSolanaChain ? (
+    <button
+      type="button"
+      className="hm-wallet-btn hm-wallet-btn--linked"
+      title={solanaWalletAddress ?? copy.connectSolana}
+      onClick={() => {
+        if (solanaWallet.connected) {
+          void solanaWallet.disconnect();
+          return;
+        }
+        solanaWalletModal.setVisible(true);
+      }}
+    >
+      ☀️{" "}
+      {solanaWalletAddress ? truncateAddr(solanaWalletAddress) : copy.connectSolana}
+    </button>
+  ) : (
+    <ConnectButton.Custom>
+      {({
+        openConnectModal,
+        openAccountModal,
+        openChainModal,
+        account,
+        chain,
+        mounted,
+      }) => {
+        if (!mounted || !account)
+          return effectiveEvmWalletAddress ? (
+            <button
+              type="button"
+              className="hm-wallet-btn hm-wallet-btn--linked"
+              title={effectiveEvmWalletAddress}
+            >
+              ⬡ {truncateAddr(effectiveEvmWalletAddress)}
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="hm-wallet-btn"
+              onClick={openConnectModal}
+            >
+              {copy.addEvmWallet}
+            </button>
+          );
+        if (chain?.unsupported)
+          return (
+            <button
+              type="button"
+              className="hm-wallet-btn"
+              onClick={openChainModal}
+            >
+              {copy.switchNetwork}
+            </button>
+          );
+        return (
+          <button
+            type="button"
+            className="hm-wallet-btn hm-wallet-btn--linked"
+            onClick={openAccountModal}
+          >
+            {account.displayName}
+          </button>
+        );
+      }}
+    </ConnectButton.Custom>
   );
 
   const tradingSidebar = (
@@ -1337,21 +1503,29 @@ export function App() {
                 <Suspense
                   fallback={<PanelFallback label={copy.loadingLeaderboard} />}
                 >
-                  <PointsLeaderboard locale={locale} />
+                  <PointsLeaderboard
+                    defaultScope={activePointsScope}
+                    locale={locale}
+                  />
                 </Suspense>
               )}
               {pointsDrawerTab === "history" && (
                 <Suspense fallback={<PanelFallback label={copy.loadingHistory} />}>
-                  <PointsHistory walletAddress={pointsWalletAddress} locale={locale} />
+                  <PointsHistory
+                    walletAddress={pointsWalletAddress}
+                    locale={locale}
+                    scope={activePointsScope}
+                  />
                 </Suspense>
               )}
               {pointsDrawerTab === "referral" && (
                 <Suspense fallback={<PanelFallback label={copy.loadingReferral} />}>
                   <ReferralPanel
                     activeChain={activeChain}
-                    evmWallet={evmWalletAddress ?? null}
+                    solanaWallet={solanaWalletAddress}
+                    evmWallet={effectiveEvmWalletAddress}
                     locale={locale}
-                    evmWalletPlatform={activeChainLabel}
+                    evmWalletPlatform={effectiveEvmWalletAddress ? linkedEvmWalletPlatform : null}
                   />
                 </Suspense>
               )}
@@ -1567,54 +1741,72 @@ export function App() {
                 >
                   🏆
                 </button>
-                <ConnectButton.Custom>
-                  {({
-                    openConnectModal,
-                    openAccountModal,
-                    openChainModal,
-                    account,
-                    chain,
-                    mounted,
-                  }) => {
-                    if (!mounted || !account)
-                      return effectiveEvmWalletAddress ? (
-                        <button
-                          type="button"
-                          className="hm-header-mob-wallet-btn hm-header-mob-wallet-btn--linked"
-                          title={effectiveEvmWalletAddress}
-                        >
-                          ⬡ {truncateAddr(effectiveEvmWalletAddress)}
-                        </button>
-                      ) : (
-                        <button
-                          type="button"
-                          className="hm-header-mob-wallet-btn"
-                          onClick={openConnectModal}
-                        >
-                          {copy.connectEvm}
-                        </button>
-                      );
-                    if (chain?.unsupported)
+                {isSolanaChain ? (
+                  <button
+                    type="button"
+                    className="hm-header-mob-wallet-btn hm-header-mob-wallet-btn--linked"
+                    title={solanaWalletAddress ?? copy.connectSolana}
+                    onClick={() => {
+                      if (solanaWallet.connected) {
+                        void solanaWallet.disconnect();
+                        return;
+                      }
+                      solanaWalletModal.setVisible(true);
+                    }}
+                  >
+                    ☀️{" "}
+                    {solanaWalletAddress ? truncateAddr(solanaWalletAddress) : copy.connectSolana}
+                  </button>
+                ) : (
+                  <ConnectButton.Custom>
+                    {({
+                      openConnectModal,
+                      openAccountModal,
+                      openChainModal,
+                      account,
+                      chain,
+                      mounted,
+                    }) => {
+                      if (!mounted || !account)
+                        return effectiveEvmWalletAddress ? (
+                          <button
+                            type="button"
+                            className="hm-header-mob-wallet-btn hm-header-mob-wallet-btn--linked"
+                            title={effectiveEvmWalletAddress}
+                          >
+                            ⬡ {truncateAddr(effectiveEvmWalletAddress)}
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            className="hm-header-mob-wallet-btn"
+                            onClick={openConnectModal}
+                          >
+                            {copy.connectEvm}
+                          </button>
+                        );
+                      if (chain?.unsupported)
+                        return (
+                          <button
+                            type="button"
+                            className="hm-header-mob-wallet-btn"
+                            onClick={openChainModal}
+                          >
+                            ⚠ {copy.wrongNet}
+                          </button>
+                        );
                       return (
                         <button
                           type="button"
-                          className="hm-header-mob-wallet-btn"
-                          onClick={openChainModal}
+                          className="hm-header-mob-wallet-btn hm-header-mob-wallet-btn--linked"
+                          onClick={openAccountModal}
                         >
-                          ⚠ {copy.wrongNet}
+                          ⬡ {account.displayName?.slice(0, 6) ?? activeChainLabel}
                         </button>
                       );
-                    return (
-                      <button
-                        type="button"
-                        className="hm-header-mob-wallet-btn hm-header-mob-wallet-btn--linked"
-                        onClick={openAccountModal}
-                      >
-                        ⬡ {account.displayName?.slice(0, 6) ?? activeChainLabel}
-                      </button>
-                    );
-                  }}
-                </ConnectButton.Custom>
+                    }}
+                  </ConnectButton.Custom>
+                )}
               </div>
             </div>
             {/* Row 2: Match strip — name + agent side-select chips */}
@@ -1675,54 +1867,7 @@ export function App() {
               >
                 🏆
               </button>
-                <ConnectButton.Custom>
-                  {({
-                    openConnectModal,
-                    openAccountModal,
-                    openChainModal,
-                  account,
-                    chain,
-                    mounted,
-                  }) => {
-                    if (!mounted || !account)
-                    return effectiveEvmWalletAddress ? (
-                      <button
-                        type="button"
-                        className="hm-wallet-btn hm-wallet-btn--linked"
-                        title={effectiveEvmWalletAddress}
-                      >
-                        {truncateAddr(effectiveEvmWalletAddress)}
-                      </button>
-                    ) : (
-                      <button
-                        type="button"
-                        className="hm-wallet-btn"
-                        onClick={openConnectModal}
-                      >
-                        {copy.addEvmWallet}
-                      </button>
-                    );
-                  if (chain?.unsupported)
-                    return (
-                      <button
-                        type="button"
-                        className="hm-wallet-btn"
-                        onClick={openChainModal}
-                      >
-                        {copy.switchNetwork}
-                      </button>
-                    );
-                  return (
-                    <button
-                      type="button"
-                      className="hm-wallet-btn hm-wallet-btn--linked"
-                      onClick={openAccountModal}
-                    >
-                      {account.displayName}
-                    </button>
-                  );
-                }}
-              </ConnectButton.Custom>
+              {walletButton}
             </div>
           </>
         )}
@@ -1731,21 +1876,7 @@ export function App() {
       {surfaceMode === "MODELS" ? (
         <div className="hm-main hm-main--models">
           <div className="hm-models-main">
-            <Suspense
-              fallback={
-                <PanelFallback label={copy.loadingModelMarkets} minHeight={480} />
-              }
-            >
-              <EvmModelsMarketView
-                fightingAgentA={effA1.name}
-                fightingAgentB={effA2.name}
-                locale={locale}
-                gameApiUrl={GAME_API_URL}
-                mockData={mockData}
-                collateralSymbol={activeChainLabel}
-                chainLabel={activeChainLabel}
-              />
-            </Suspense>
+            {modelsPanelBody}
           </div>
         </div>
       ) : (

@@ -3782,13 +3782,16 @@ function leaderboardResponse(
   };
 }
 
-function rankResponse(wallet: string): Record<string, unknown> {
+function rankResponse(
+  wallet: string,
+  scope: string | null,
+): Record<string, unknown> {
   const normalized = rememberWalletCase(wallet);
   const canonical = ensureIdentity(normalized);
-  const rows = leaderboardRows("linked", "alltime");
+  const rows = leaderboardRows(scope, "alltime");
   const rank =
     rows.findIndex((entry) => normalizeWallet(entry.wallet) === canonical) + 1;
-  const wallets = identityWallets(normalized, "linked");
+  const wallets = identityWallets(normalized, scope);
 
   return {
     wallet: displayWallet(canonical),
@@ -3802,9 +3805,10 @@ function historyResponse(
   limit: number,
   offset: number,
   eventType: string | null,
+  scope: string | null,
 ): Record<string, unknown> {
   const normalized = rememberWalletCase(wallet);
-  const wallets = new Set(identityWallets(normalized, "linked"));
+  const wallets = new Set(identityWallets(normalized, scope));
   const filtered = pointsEvents.filter((entry) => {
     if (!wallets.has(entry.wallet)) return false;
     if (eventType && entry.eventType !== eventType) return false;
@@ -3836,8 +3840,11 @@ function historyResponse(
   };
 }
 
-function multiplierResponse(wallet: string): Record<string, unknown> {
-  const wallets = identityWallets(wallet, "linked");
+function multiplierResponse(
+  wallet: string,
+  scope: string | null,
+): Record<string, unknown> {
+  const wallets = identityWallets(wallet, scope);
   const detail = multiplierDetailForWallets(wallets);
   return {
     wallet: wallet.trim(),
@@ -4824,7 +4831,7 @@ const server = Bun.serve({
       if (!wallet) {
         return jsonResponse(req, { error: "Wallet is required" }, 400);
       }
-      return jsonResponse(req, rankResponse(wallet), 200, {
+      return jsonResponse(req, rankResponse(wallet, url.searchParams.get("scope")), 200, {
         "cache-control": "no-store",
       });
     }
@@ -4855,6 +4862,7 @@ const server = Bun.serve({
           limit,
           offset,
           url.searchParams.get("eventType"),
+          url.searchParams.get("scope"),
         ),
         200,
         {
@@ -4875,7 +4883,7 @@ const server = Bun.serve({
       if (!wallet) {
         return jsonResponse(req, { error: "Wallet is required" }, 400);
       }
-      return jsonResponse(req, multiplierResponse(wallet), 200, {
+      return jsonResponse(req, multiplierResponse(wallet, url.searchParams.get("scope")), 200, {
         "cache-control": "no-store",
       });
     }

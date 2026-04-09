@@ -389,7 +389,7 @@ describe("useCanonicalStreamSession", () => {
         ),
       ),
     );
-    globalThis.fetch = fetchMock as typeof fetch;
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
 
     class HangingEventSource {
       onopen: (() => void) | null = null;

@@ -7,7 +7,7 @@ import * as solanaWeb3 from "@solana/web3.js";
 import * as viem from "viem";
 import * as viemAccounts from "viem/accounts";
 
-import { resolveBettingEvmDeploymentForChain } from "../packages/hyperbet-chain-registry/src/index";
+import { resolveBettingEvmDeploymentForChain } from "../packages/hyperbet-chain-registry/src/index.js";
 import {
   createPrograms,
   duelKeyHexToBytes,
@@ -22,14 +22,14 @@ import {
   readKeypair,
   SIDE_ASK,
   SIDE_BID,
-} from "../packages/hyperbet-solana/keeper/src/common";
-import { GOLD_CLOB_ABI } from "../packages/hyperbet-ui/src/lib/goldClobAbi";
-import { resolveArtifactRoot, rootDir, writeJsonArtifact } from "./ci-lib";
+} from "../packages/hyperbet-solana/keeper/src/common.js";
+import { GOLD_CLOB_ABI } from "../packages/hyperbet-ui/src/lib/goldClobAbi.js";
+import { resolveArtifactRoot, rootDir, writeJsonArtifact } from "./ci-lib.js";
 import {
   resolveAcceptanceUrls,
   resolveEvmAcceptanceRuntime,
   resolveReachableSolanaAcceptanceRuntime,
-} from "./testnet-acceptance-env";
+} from "./testnet-acceptance-env.js";
 
 const { PublicKey, SystemProgram } = solanaWeb3;
 const { createPublicClient, createWalletClient, http } = viem;
@@ -449,6 +449,7 @@ type MonitorArgs = {
   mode: MonitorMode;
   runScope: RunScope;
   chains: SupportedChain[];
+  requireUnifiedUrls: boolean;
   durationMin: number;
   pollMs: number;
   artifactRoot: string;
@@ -491,8 +492,12 @@ function parseArgs(): MonitorArgs {
   const follow = getBooleanArg(rawArgs, "--follow", false);
 
   const chainsArg = getArg(rawArgs, "--chains", "solana,bsc,avax");
-  const chains = chainsArg
-    .split(",")
+  const requireUnifiedUrls = chainsArg.trim().toLowerCase() === "unified";
+  const normalizedChainValues =
+    requireUnifiedUrls
+      ? ["solana", "bsc", "avax"]
+      : chainsArg.split(",");
+  const chains = normalizedChainValues
     .map((value) => value.trim())
     .filter(Boolean)
     .map((value) => {
@@ -546,6 +551,7 @@ function parseArgs(): MonitorArgs {
     mode,
     runScope,
     chains,
+    requireUnifiedUrls,
     durationMin,
     pollMs,
     artifactRoot,
@@ -1620,11 +1626,21 @@ async function recordLocalContextEvent(
   );
 }
 
-function stagedPagesTarget(chain: SupportedChain): ScreenshotTarget | null {
+function stagedPagesTarget(
+  chain: SupportedChain,
+  requireUnifiedUrls = false,
+): ScreenshotTarget | null {
   try {
-    const { pagesUrl } = resolveAcceptanceUrls(chain, process.env);
+    const { pagesUrl } = resolveAcceptanceUrls(
+      chain,
+      process.env,
+      requireUnifiedUrls ? { requireUnified: true } : {},
+    );
     return { name: `${chain}-pages`, url: normalizeUrl(pagesUrl) };
-  } catch {
+  } catch (error) {
+    if (requireUnifiedUrls) {
+      throw error;
+    }
     return null;
   }
 }
@@ -1732,11 +1748,18 @@ async function fetchLocalSnapshot(): Promise<{
   };
 }
 
-function stagedKeeperUrls(chain: SupportedChain): {
+function stagedKeeperUrls(
+  chain: SupportedChain,
+  requireUnifiedUrls = false,
+): {
   pagesUrl: string;
   keeperUrl: string;
 } {
-  const urls = resolveAcceptanceUrls(chain, process.env);
+  const urls = resolveAcceptanceUrls(
+    chain,
+    process.env,
+    requireUnifiedUrls ? { requireUnified: true } : {},
+  );
   return {
     pagesUrl: normalizeUrl(urls.pagesUrl),
     keeperUrl: normalizeUrl(urls.keeperUrl),
@@ -1745,8 +1768,9 @@ function stagedKeeperUrls(chain: SupportedChain): {
 
 async function fetchStagedChainSnapshot(
   chain: SupportedChain,
+  requireUnifiedUrls = false,
 ): Promise<ChainSnapshot> {
-  const urls = stagedKeeperUrls(chain);
+  const urls = stagedKeeperUrls(chain, requireUnifiedUrls);
   const fetchedAtMs = Date.now();
   const [
     buildInfo,
@@ -2369,10 +2393,14 @@ async function runStagedSoak(args: MonitorArgs): Promise<void> {
       (process.env.PM_SOAK_ENABLE_CANARY_TRADES ?? "true") !== "false",
     chainScreenshots: {
       solana: args.chains.includes("solana")
-        ? stagedPagesTarget("solana")
+        ? stagedPagesTarget("solana", args.requireUnifiedUrls)
         : null,
-      bsc: args.chains.includes("bsc") ? stagedPagesTarget("bsc") : null,
-      avax: args.chains.includes("avax") ? stagedPagesTarget("avax") : null,
+      bsc: args.chains.includes("bsc")
+        ? stagedPagesTarget("bsc", args.requireUnifiedUrls)
+        : null,
+      avax: args.chains.includes("avax")
+        ? stagedPagesTarget("avax", args.requireUnifiedUrls)
+        : null,
     },
   };
 
@@ -2415,7 +2443,7 @@ async function runStagedSoak(args: MonitorArgs): Promise<void> {
   while (Date.now() < deadline) {
     pollIndex += 1;
     const snapshots = await Promise.allSettled(
-      args.chains.map((chain) => fetchStagedChainSnapshot(chain)),
+      args.chains.map((chain) => fetchStagedChainSnapshot(chain, args.requireUnifiedUrls)),
     );
     const pollPayload: Record<string, unknown> = {
       fetchedAt: nowIso(),

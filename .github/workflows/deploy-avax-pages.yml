@@ -1,17 +1,6 @@
 name: Deploy Hyperbet AVAX Pages
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - "packages/hyperbet-avax/app/**"
-      - "packages/hyperbet-ui/**"
-      - "scripts/**"
-      - ".github/actions/setup-hyperbet/**"
-      - ".github/workflows/deploy-avax-pages.yml"
-      - "docs/hyperbet-production-deploy.md"
-      - "package.json"
-      - "bun.lock"
   workflow_dispatch:
     inputs:
       environment:
@@ -154,7 +143,7 @@ jobs:
           if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.environment }}" = "preview" ]; then
             BRANCH="preview-${{ github.run_id }}"
           elif [ "${DEPLOY_TARGET}" = "staging" ]; then
-            BRANCH="staging"
+            BRANCH="enoomian/staging"
           else
             BRANCH="main"
           fi

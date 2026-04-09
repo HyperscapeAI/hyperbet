@@ -1456,7 +1456,7 @@ export function App() {
 
             {/* Non-compact points summary */}
             <div style={{ marginBottom: 16, position: "relative", zIndex: 1 }}>
-              <PointsDisplay walletAddress={pointsWalletAddress} />
+              <PointsDisplay walletAddress={pointsWalletAddress} scope="wallet" />
             </div>
 
             {/* Tab Content */}
@@ -1473,12 +1473,12 @@ export function App() {
                 <Suspense
                   fallback={<PanelFallback label={copy.loadingLeaderboard} />}
                 >
-                  <PointsLeaderboard />
+                  <PointsLeaderboard defaultScope="wallet" />
                 </Suspense>
               )}
               {pointsDrawerTab === "history" && (
                 <Suspense fallback={<PanelFallback label={copy.loadingHistory} />}>
-                  <PointsHistory walletAddress={pointsWalletAddress} />
+                  <PointsHistory walletAddress={pointsWalletAddress} scope="wallet" />
                 </Suspense>
               )}
               {pointsDrawerTab === "referral" && (
@@ -1687,7 +1687,11 @@ export function App() {
                   ? effStatus
                   : `${effLeaderboard.length} models live`}
               </span>
-              <PointsDisplay walletAddress={pointsWalletAddress} compact />
+              <PointsDisplay
+                walletAddress={pointsWalletAddress}
+                compact
+                scope="wallet"
+              />
               <button
                 type="button"
                 className="dock-collapse-btn"

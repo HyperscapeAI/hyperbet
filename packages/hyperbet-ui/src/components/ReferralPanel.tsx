@@ -193,14 +193,13 @@ export function ReferralPanel(props: {
     ) {
       return evmWallet;
     }
-    return solanaWallet ?? evmWallet ?? null;
+    return null;
   }, [activeChain, solanaWallet, evmWallet]);
 
   const platformQuery = useMemo(() => {
-    if (primaryWallet && primaryWallet === solanaWallet) return "solana";
-    if (primaryWallet && primaryWallet === evmWallet) return "evm";
     return activeChain === "solana" ? "solana" : "evm";
-  }, [activeChain, evmWallet, primaryWallet, solanaWallet]);
+  }, [activeChain]);
+  const pointsScope = activeChain === "solana" ? "wallet" : "linked";
   const [points, setPoints] = useState<PointsSnapshot | null>(null);
   const [invite, setInvite] = useState<InviteSummary | null>(null);
   const [loadingStats, setLoadingStats] = useState(false);
@@ -223,7 +222,7 @@ export function ReferralPanel(props: {
       setStatsError("");
       const [pointsRes, inviteRes] = await Promise.all([
         fetch(
-          `${GAME_API_URL}/api/arena/points/${primaryWallet}?scope=linked`,
+          `${GAME_API_URL}/api/arena/points/${primaryWallet}?scope=${pointsScope}`,
           { cache: "no-store" },
         ),
         fetch(
@@ -256,7 +255,7 @@ export function ReferralPanel(props: {
     } finally {
       setLoadingStats(false);
     }
-  }, [copy, platformQuery, primaryWallet]);
+  }, [copy, platformQuery, pointsScope, primaryWallet]);
 
   useEffect(() => {
     void refreshStats();

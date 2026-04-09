@@ -15,6 +15,11 @@ interface LeaderboardEntry {
 type TimeWindow = "alltime" | "daily" | "weekly" | "monthly";
 type Scope = "linked" | "wallet";
 
+type PointsLeaderboardProps = {
+  defaultScope?: Scope;
+  locale?: UiLocale;
+};
+
 function getLeaderboardCopy(locale: UiLocale) {
   if (locale === "zh") {
     return {
@@ -70,7 +75,10 @@ function truncateWallet(wallet: string): string {
   return `${wallet.slice(0, 4)}...${wallet.slice(-4)}`;
 }
 
-export function PointsLeaderboard({ locale }: { locale?: UiLocale } = {}) {
+export function PointsLeaderboard({
+  defaultScope = "linked",
+  locale,
+}: PointsLeaderboardProps = {}) {
   const resolvedLocale = resolveUiLocale(locale);
   const copy = getLeaderboardCopy(resolvedLocale);
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
@@ -78,7 +86,7 @@ export function PointsLeaderboard({ locale }: { locale?: UiLocale } = {}) {
   const [error, setError] = useState<string | null>(null);
   const [page, setPage] = useState(0);
   const [timeWindow, setTimeWindow] = useState<TimeWindow>("alltime");
-  const [scope, setScope] = useState<Scope>("linked");
+  const [scope, setScope] = useState<Scope>(defaultScope);
   const pageSize = 20;
 
   const fetchLeaderboard = useCallback(async () => {
@@ -118,6 +126,10 @@ export function PointsLeaderboard({ locale }: { locale?: UiLocale } = {}) {
   useEffect(() => {
     setPage(0);
   }, [timeWindow, scope]);
+
+  useEffect(() => {
+    setScope(defaultScope);
+  }, [defaultScope]);
 
   const filterBtnStyle = (isActive: boolean): React.CSSProperties => ({
     padding: "4px 10px",

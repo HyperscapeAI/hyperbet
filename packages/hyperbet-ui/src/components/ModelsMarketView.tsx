@@ -74,26 +74,33 @@ function readE2eNumber(value: unknown, fallback: number): number {
 
 type TradeDirection = "LONG" | "SHORT";
 
-interface ModelsMarketViewProps {
+export interface ModelsMarketViewProps {
   activeMatchup: string;
   connectionOverride?: Connection;
   walletOverride?: ModelsWalletLike;
   walletModalOverride?: ModelsWalletModalLike;
 }
 
-type ModelsWalletLike = {
+export type ModelsWalletLike = {
   connected: boolean;
   publicKey: PublicKey | null;
-  signAllTransactions?: <T extends Array<Transaction | VersionedTransaction>>(
-    txs: T,
-  ) => Promise<T>;
-  signTransaction?: <T extends Transaction | VersionedTransaction>(
-    tx: T,
-  ) => Promise<T>;
+  signAllTransactions?: (
+    txs: Array<Transaction | VersionedTransaction>,
+  ) => Promise<Array<Transaction | VersionedTransaction>>;
+  signTransaction?: (
+    tx: Transaction | VersionedTransaction,
+  ) => Promise<Transaction | VersionedTransaction>;
 };
 
-type ModelsWalletModalLike = {
+export type ModelsWalletModalLike = {
   setVisible: (visible: boolean) => void;
+};
+
+type ModelsMarketViewRuntimeProps = {
+  activeMatchup: string;
+  connection: Connection;
+  wallet: ModelsWalletLike;
+  setWalletModalVisible: (visible: boolean) => void;
 };
 
 interface ConfigAccountState {
@@ -663,15 +670,29 @@ export function ModelsMarketView({
   walletOverride,
   walletModalOverride,
 }: ModelsMarketViewProps) {
-  const locale = resolveUiLocale();
-  const copy = getModelsMarketCopy(locale);
   const adapterConnection = useConnection();
   const adapterWallet = useWallet();
   const adapterWalletModal = useWalletModal();
-  const connection = connectionOverride ?? adapterConnection.connection;
-  const wallet = walletOverride ?? adapterWallet;
-  const setWalletModalVisible =
-    walletModalOverride?.setVisible ?? adapterWalletModal.setVisible;
+  return (
+    <ModelsMarketViewRuntime
+      activeMatchup={activeMatchup}
+      connection={connectionOverride ?? adapterConnection.connection}
+      wallet={walletOverride ?? adapterWallet}
+      setWalletModalVisible={
+        walletModalOverride?.setVisible ?? adapterWalletModal.setVisible
+      }
+    />
+  );
+}
+
+export function ModelsMarketViewRuntime({
+  activeMatchup,
+  connection,
+  wallet,
+  setWalletModalVisible,
+}: ModelsMarketViewRuntimeProps) {
+  const locale = resolveUiLocale();
+  const copy = getModelsMarketCopy(locale);
   const { activeChain, setActiveChain } = useChain();
 
   const [data, setData] = React.useState<PerpsMarketsResponse | null>(null);

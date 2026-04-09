@@ -6,22 +6,22 @@ import {
   resolveArtifactRoot,
   rootDir,
   writeJsonArtifact,
-} from "./ci-lib";
+} from "./ci-lib.js";
 import {
   parseAcceptanceDeployment,
   resolveAcceptanceUrls,
   resolveEvmAcceptanceRuntime,
   resolveSolanaAcceptanceRuntime,
   type AcceptanceDeployment,
-} from "./testnet-acceptance-env";
+} from "./testnet-acceptance-env.js";
 import {
   BETTING_DEPLOYMENTS,
   isBettingEvmDeploymentCanonicalReady,
-} from "../packages/hyperbet-chain-registry/src/index";
+} from "../packages/hyperbet-chain-registry/src/index.js";
 
 type ProofMode = "read-only" | "canary-write";
 type RunScope = "LIVE_INDICATOR" | "LIVE_CANARY";
-type ProofTarget = "all" | "solana" | "bsc" | "avax";
+type ProofTarget = "all" | "solana" | "bsc" | "avax" | "unified";
 type SupportedChain = Exclude<ProofTarget, "all">;
 
 type BuildInfo = {
@@ -125,6 +125,10 @@ type ProofSummary = {
     app: AuditResult;
     keeper: AuditResult;
   };
+  unifiedEnvAudit?: {
+    pages: AuditResult;
+    keeper: AuditResult;
+  };
 };
 
 const artifactRoot = resolveArtifactRoot("staged-live-proof");
@@ -183,7 +187,8 @@ function parseArgs(): {
     targetArg !== "all" &&
     targetArg !== "solana" &&
     targetArg !== "bsc" &&
-    targetArg !== "avax"
+    targetArg !== "avax" &&
+    targetArg !== "unified"
   ) {
     throw new Error(`unsupported proof target ${targetArg}`);
   }
@@ -203,12 +208,26 @@ function requireEnv(name: string): string {
   return value;
 }
 
+function requireAnyEnv(names: string[]): string {
+  for (const name of names) {
+    const value = process.env[name]?.trim() ?? "";
+    if (value) {
+      return value;
+    }
+  }
+  throw new Error(`Missing required env; expected one of ${names.join(", ")}`);
+}
+
 function normalizeUrl(value: string): string {
   return value.trim().replace(/\/$/, "");
 }
 
-function chainUrls(chain: SupportedChain): ChainUrls {
-  const urls = resolveAcceptanceUrls(chain, process.env);
+function chainUrls(chain: SupportedChain, requireUnifiedUrls = false): ChainUrls {
+  const urls = resolveAcceptanceUrls(
+    chain,
+    process.env,
+    requireUnifiedUrls ? { requireUnified: true } : {},
+  );
   return {
     pagesUrl: normalizeUrl(urls.pagesUrl),
     keeperUrl: normalizeUrl(urls.keeperUrl),
@@ -271,8 +290,11 @@ function findCanonicalMarket(
   return payload.markets.find((market) => market.chainKey === chainKey) ?? null;
 }
 
-async function runReadOnly(chain: SupportedChain): Promise<ReadOnlyChainResult> {
-  const urls = chainUrls(chain);
+async function runReadOnly(
+  chain: SupportedChain,
+  requireUnifiedUrls = false,
+): Promise<ReadOnlyChainResult> {
+  const urls = chainUrls(chain, requireUnifiedUrls);
   const buildInfo = await requestJson<BuildInfo>(
     `${urls.pagesUrl}/build-info.json`,
     undefined,
@@ -390,7 +412,7 @@ function runJsonCommand<T>(
 
 function runAudit(
   label: string,
-  target: "app:avax" | "keeper:avax",
+  target: "app:avax" | "keeper:avax" | "pages:unified",
   env: Record<string, string>,
   deployment: "production" | "staging" = "staging",
 ): AuditResult {
@@ -497,10 +519,10 @@ function runVerifyChains(
   return results;
 }
 
-function runAvaxEnvAudits(): ProofSummary["avaxEnvAudit"] {
+function runAvaxEnvAudits(requireUnifiedUrls = false): ProofSummary["avaxEnvAudit"] {
   const app = runAudit("avax-app-env-audit", "app:avax", {
-    VITE_GAME_API_URL: chainUrls("avax").keeperUrl,
-    VITE_GAME_WS_URL: chainUrls("avax").wsUrl,
+    VITE_GAME_API_URL: chainUrls("avax", requireUnifiedUrls).keeperUrl,
+    VITE_GAME_WS_URL: chainUrls("avax", requireUnifiedUrls).wsUrl,
     VITE_SOLANA_CLUSTER: "mainnet-beta",
     VITE_USE_GAME_RPC_PROXY: "true",
     VITE_USE_GAME_EVM_RPC_PROXY: "true",
@@ -509,7 +531,7 @@ function runAvaxEnvAudits(): ProofSummary["avaxEnvAudit"] {
   });
   const keeper = runAudit("avax-keeper-env-audit", "keeper:avax", {
     CI_AUDIT_REQUIRE_RUNTIME: "true",
-    HYPERBET_KEEPER_URL: chainUrls("avax").keeperUrl,
+    HYPERBET_KEEPER_URL: chainUrls("avax", requireUnifiedUrls).keeperUrl,
     RAILWAY_PROJECT_ID: requireEnv("HYPERBET_AVAX_RAILWAY_STAGING_PROJECT_ID"),
     RAILWAY_ENVIRONMENT_ID: requireEnv("HYPERBET_AVAX_RAILWAY_STAGING_ENVIRONMENT_ID"),
     RAILWAY_KEEPER_SERVICE_ID: requireEnv("HYPERBET_AVAX_RAILWAY_STAGING_KEEPER_SERVICE_ID"),
@@ -521,6 +543,54 @@ function runAvaxEnvAudits(): ProofSummary["avaxEnvAudit"] {
     keeper,
   });
   return { app, keeper };
+}
+
+function runUnifiedEnvAudit(): {
+  pages: AuditResult;
+  keeper: AuditResult;
+} {
+  const pagesUrl = requireEnv("ENOOMIAN_HYPERBET_PAGES_URL");
+  const keeperUrl = requireEnv("ENOOMIAN_HYPERBET_KEEPER_URL");
+  const keeperWsUrl = requireEnv("ENOOMIAN_HYPERBET_KEEPER_WS_URL");
+  const bscChainId = requireAnyEnv([
+    "ENOOMIAN_BSC_CHAIN_ID",
+    "HYPERBET_BSC_STAGING_CHAIN_ID",
+  ]);
+  const bscClobAddress = requireAnyEnv([
+    "ENOOMIAN_BSC_GOLD_CLOB_ADDRESS",
+    "HYPERBET_BSC_STAGING_GOLD_CLOB_ADDRESS",
+  ]);
+  const pages = runAudit("unified-page-env-audit", "pages:unified", {
+    ENOOMIAN_HYPERBET_PAGES_URL: pagesUrl,
+    ENOOMIAN_HYPERBET_KEEPER_URL: keeperUrl,
+    ENOOMIAN_HYPERBET_KEEPER_WS_URL: keeperWsUrl,
+    VITE_GAME_API_URL: keeperUrl,
+    VITE_GAME_WS_URL: keeperWsUrl,
+    VITE_SOLANA_CLUSTER: "mainnet-beta",
+    VITE_USE_GAME_RPC_PROXY: "true",
+    VITE_USE_GAME_EVM_RPC_PROXY: "true",
+    VITE_BSC_CHAIN_ID: String(bscChainId),
+    VITE_BSC_GOLD_CLOB_ADDRESS: bscClobAddress,
+    VITE_AVAX_CHAIN_ID: String(requireEnv("HYPERBET_AVAX_STAGING_CHAIN_ID")),
+    VITE_AVAX_GOLD_CLOB_ADDRESS: requireEnv("HYPERBET_AVAX_STAGING_GOLD_CLOB_ADDRESS"),
+  });
+  const keeper = runAudit("unified-keeper-env-audit", "keeper:unified", {
+    ENOOMIAN_HYPERBET_PAGES_URL: pagesUrl,
+    ENOOMIAN_HYPERBET_KEEPER_URL: keeperUrl,
+    ENOOMIAN_HYPERBET_KEEPER_WS_URL: keeperWsUrl,
+    CI_AUDIT_REQUIRE_RUNTIME: "true",
+    HYPERBET_KEEPER_URL: keeperUrl,
+    RAILWAY_PROJECT_ID: requireEnv("ENOOMIAN_RAILWAY_PROJECT_ID"),
+    RAILWAY_ENVIRONMENT_ID: requireEnv("ENOOMIAN_RAILWAY_ENVIRONMENT_ID"),
+    RAILWAY_KEEPER_SERVICE_ID: requireEnv("ENOOMIAN_HYPERBET_KEEPER_SERVICE_ID"),
+    SOLANA_RPC_URL: requireEnv("ENOOMIAN_SOLANA_RPC_URL"),
+    BSC_RPC_URL: requireEnv("ENOOMIAN_BSC_RPC_URL"),
+    BSC_GOLD_CLOB_ADDRESS: bscClobAddress,
+    AVAX_RPC_URL: requireEnv("HYPERBET_AVAX_STAGING_RPC_URL"),
+    AVAX_GOLD_CLOB_ADDRESS: requireEnv("HYPERBET_AVAX_STAGING_GOLD_CLOB_ADDRESS"),
+    EVM_KEEPER_CHAINS: "bsc,avax",
+  });
+  return { pages, keeper };
 }
 
 function writeCanaryArtifacts(
@@ -616,6 +686,11 @@ function humanSummary(summary: ProofSummary): string {
       `avax env audit: app=${summary.avaxEnvAudit.app.ok} keeper=${summary.avaxEnvAudit.keeper.ok}`,
     );
   }
+  if (summary.unifiedEnvAudit) {
+    lines.push(
+      `unified env audit: pages=${summary.unifiedEnvAudit.pages.ok} keeper=${summary.unifiedEnvAudit.keeper.ok}`,
+    );
+  }
   return lines.join("\n");
 }
 
@@ -623,9 +698,10 @@ async function main(): Promise<void> {
   const { deployment, mode, target, runScope } = parseArgs();
   mkdirSync(artifactRoot, { recursive: true });
 
-  const includeSolana = target === "all" || target === "solana";
-  const includeBsc = target === "all" || target === "bsc";
-  const includeAvax = target === "all" || target === "avax";
+  const includeSolana =
+    target === "all" || target === "solana" || target === "unified";
+  const includeBsc = target === "all" || target === "bsc" || target === "unified";
+  const includeAvax = target === "all" || target === "avax" || target === "unified";
 
   const summary: ProofSummary = {
     deployment,
@@ -636,18 +712,28 @@ async function main(): Promise<void> {
     gitSha: expectedCommit,
   };
 
+  if (target === "unified" && deployment === "staging") {
+    summary.unifiedEnvAudit = runUnifiedEnvAudit();
+    if (
+      !summary.unifiedEnvAudit.pages.ok ||
+      !summary.unifiedEnvAudit.keeper.ok
+    ) {
+      throw new Error("unified env audit failed");
+    }
+  }
+
   if (includeSolana || includeBsc || includeAvax) {
     summary.readOnly = {};
     if (includeSolana) {
-      summary.readOnly.solana = await runReadOnly("solana");
+      summary.readOnly.solana = await runReadOnly("solana", target === "unified");
     }
     if (includeBsc) {
-      summary.readOnly.bsc = await runReadOnly("bsc");
+      summary.readOnly.bsc = await runReadOnly("bsc", target === "unified");
     }
     if (includeAvax) {
-      summary.readOnly.avax = await runReadOnly("avax");
+      summary.readOnly.avax = await runReadOnly("avax", target === "unified");
       if (deployment === "staging") {
-        summary.avaxEnvAudit = runAvaxEnvAudits();
+        summary.avaxEnvAudit = runAvaxEnvAudits(target === "unified");
         if (!summary.avaxEnvAudit.app.ok || !summary.avaxEnvAudit.keeper.ok) {
           throw new Error(
             `avax env audit failed: app=${summary.avaxEnvAudit.app.ok} keeper=${summary.avaxEnvAudit.keeper.ok}`,

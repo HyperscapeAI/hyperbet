@@ -1,0 +1,221 @@
+name: Deploy Hyperbet Keeper
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "packages/hyperbet-evm/keeper/**"
+      - "packages/hyperbet-evm/deployments/**"
+      - "packages/hyperbet-chain-registry/**"
+      - "packages/hyperbet-mm-core/**"
+      - "packages/hyperbet-evm-keeper-core/**"
+      - "scripts/**"
+      - ".github/actions/setup-hyperbet/**"
+      - ".github/workflows/deploy-hyperbet-keeper.yml"
+      - "docs/hyperbet-production-deploy.md"
+      - "package.json"
+      - "bun.lock"
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Deployment target"
+        required: true
+        default: production
+        type: choice
+        options:
+          - production
+          - staging
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    name: Deploy hyperbet keeper
+    runs-on: ubuntu-latest
+    environment: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'staging' && 'enoomian-staging' || 'production' }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Resolve deployment target
+        run: |
+          deploy_target="production"
+          pages_url="${{ vars.HYPERBET_PAGES_URL }}"
+          keeper_url="${{ vars.HYPERBET_KEEPER_URL }}"
+          keeper_ws_url="${{ vars.HYPERBET_KEEPER_WS_URL }}"
+          railway_project_id="${{ vars.HYPERBET_RAILWAY_PROJECT_ID }}"
+          railway_environment_id="${{ vars.HYPERBET_RAILWAY_PRODUCTION_ENVIRONMENT_ID }}"
+          railway_service_id="${{ vars.HYPERBET_RAILWAY_KEEPER_SERVICE_ID }}"
+
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.environment }}" = "staging" ]; then
+            deploy_target="staging"
+            pages_url="${{ vars.ENOOMIAN_HYPERBET_PAGES_URL }}"
+            keeper_url="${{ vars.ENOOMIAN_HYPERBET_KEEPER_URL }}"
+            keeper_ws_url="${{ vars.ENOOMIAN_HYPERBET_KEEPER_WS_URL }}"
+            railway_project_id="${{ vars.ENOOMIAN_RAILWAY_PROJECT_ID }}"
+            railway_environment_id="${{ vars.ENOOMIAN_RAILWAY_ENVIRONMENT_ID }}"
+            railway_service_id="${{ vars.ENOOMIAN_HYPERBET_KEEPER_SERVICE_ID }}"
+          fi
+
+          if [ -z "${pages_url}" ] || [ -z "${keeper_url}" ] || [ -z "${keeper_ws_url}" ] || [ -z "${railway_project_id}" ] || [ -z "${railway_environment_id}" ] || [ -z "${railway_service_id}" ]; then
+            echo "Missing Hyperbet keeper configuration for ${deploy_target}" >&2
+            exit 1
+          fi
+
+          echo "DEPLOY_TARGET=${deploy_target}" >> "${GITHUB_ENV}"
+          echo "HYPERBET_PAGES_URL=${pages_url}" >> "${GITHUB_ENV}"
+          echo "HYPERBET_KEEPER_URL=${keeper_url}" >> "${GITHUB_ENV}"
+          echo "HYPERBET_KEEPER_WS_URL=${keeper_ws_url}" >> "${GITHUB_ENV}"
+          echo "RAILWAY_PROJECT_ID=${railway_project_id}" >> "${GITHUB_ENV}"
+          echo "RAILWAY_ENVIRONMENT_ID=${railway_environment_id}" >> "${GITHUB_ENV}"
+          echo "RAILWAY_KEEPER_SERVICE_ID=${railway_service_id}" >> "${GITHUB_ENV}"
+
+      - name: Setup Hyperbet toolchain
+        uses: ./.github/actions/setup-hyperbet
+
+      - name: Detect keeper source changes
+        id: keeper_changes
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "Manual dispatch requested; forcing keeper deploy."
+            echo "keeper_source_changed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          base_ref="${{ github.event.before }}"
+          if [ -z "$base_ref" ] || [ "$base_ref" = "0000000000000000000000000000000000000000" ] || ! git cat-file -e "${base_ref}^{commit}" 2>/dev/null; then
+            base_ref="$(git rev-parse HEAD^ 2>/dev/null || true)"
+          fi
+
+          if [ -n "$base_ref" ]; then
+            changed_files="$(git diff --name-only "$base_ref" "${{ github.sha }}")"
+          else
+            changed_files="$(git show --pretty='' --name-only "${{ github.sha }}")"
+          fi
+          printf '%s\n' "$changed_files"
+
+          keeper_change_pattern='^(packages/hyperbet-evm/keeper/|packages/hyperbet-evm/deployments/|packages/hyperbet-chain-registry/|packages/hyperbet-mm-core/|packages/hyperbet-evm-keeper-core/|scripts/|\.github/actions/setup-hyperbet/)'
+          keeper_source_changed=false
+          if printf '%s\n' "$changed_files" | grep -Eq "${keeper_change_pattern}"; then
+            keeper_source_changed=true
+          fi
+
+          echo "keeper_source_changed=${keeper_source_changed}" >> "$GITHUB_OUTPUT"
+
+      - name: Install dependencies
+        run: bash scripts/ci-install-verified.sh root hyperbet-evm-keeper
+
+      - name: Audit deploy env
+        run: node --import tsx scripts/ci-env-audit.ts --target=keeper:unified --deployment=${DEPLOY_TARGET}
+        env:
+          ENOOMIAN_HYPERBET_PAGES_URL: ${{ env.HYPERBET_PAGES_URL }}
+          ENOOMIAN_HYPERBET_KEEPER_URL: ${{ env.HYPERBET_KEEPER_URL }}
+          ENOOMIAN_HYPERBET_KEEPER_WS_URL: ${{ env.HYPERBET_KEEPER_WS_URL }}
+          CI_AUDIT_REQUIRE_RUNTIME: "true"
+          HYPERBET_KEEPER_URL: ${{ env.HYPERBET_KEEPER_URL }}
+          RAILWAY_PROJECT_ID: ${{ env.RAILWAY_PROJECT_ID }}
+          RAILWAY_ENVIRONMENT_ID: ${{ env.RAILWAY_ENVIRONMENT_ID }}
+          RAILWAY_KEEPER_SERVICE_ID: ${{ env.RAILWAY_KEEPER_SERVICE_ID }}
+          SOLANA_RPC_URL: https://api.mainnet-beta.solana.com
+          BSC_RPC_URL: https://bsc-dataseed.binance.org
+          BSC_GOLD_CLOB_ADDRESS: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'staging' && (vars.ENOOMIAN_BSC_GOLD_CLOB_ADDRESS != '' && vars.ENOOMIAN_BSC_GOLD_CLOB_ADDRESS || vars.HYPERBET_BSC_STAGING_GOLD_CLOB_ADDRESS) || vars.HYPERBET_BSC_GOLD_CLOB_ADDRESS }}
+          AVAX_RPC_URL: https://api.avax.network/ext/bc/C/rpc
+          AVAX_GOLD_CLOB_ADDRESS: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'staging' && vars.HYPERBET_AVAX_STAGING_GOLD_CLOB_ADDRESS || vars.HYPERBET_AVAX_GOLD_CLOB_ADDRESS }}
+          EVM_KEEPER_CHAINS: bsc,avax
+
+      - name: Typecheck keeper
+        run: bunx tsc --noEmit -p packages/hyperbet-evm/keeper/tsconfig.json
+
+      - name: Smoke test keeper service
+        run: |
+          PORT=18080 \
+          ENABLE_KEEPER_BOT=false \
+          EVM_KEEPER_CHAINS=bsc,avax \
+          SOLANA_RPC_URL=https://api.mainnet-beta.solana.com \
+          BSC_RPC_URL=https://bsc-dataseed.binance.org \
+          AVAX_RPC_URL=https://api.avax.network/ext/bc/C/rpc \
+          BSC_GOLD_CLOB_ADDRESS=${{ github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'staging' && (vars.ENOOMIAN_BSC_GOLD_CLOB_ADDRESS != '' && vars.ENOOMIAN_BSC_GOLD_CLOB_ADDRESS || vars.HYPERBET_BSC_STAGING_GOLD_CLOB_ADDRESS) || vars.HYPERBET_BSC_GOLD_CLOB_ADDRESS }} \
+          AVAX_GOLD_CLOB_ADDRESS=${{ github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'staging' && vars.HYPERBET_AVAX_STAGING_GOLD_CLOB_ADDRESS || vars.HYPERBET_AVAX_GOLD_CLOB_ADDRESS }} \
+          bun --bun packages/hyperbet-evm/keeper/src/service.ts >/tmp/hyperbet-keeper.log 2>&1 &
+          KEEPER_PID=$!
+          trap 'kill "$KEEPER_PID" >/dev/null 2>&1 || true' EXIT
+
+          for attempt in $(seq 1 20); do
+            if curl -fsSL http://127.0.0.1:18080/status | jq -e '.ok == true and .proxies != null' >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+
+          cat /tmp/hyperbet-keeper.log
+          exit 1
+
+      - name: Install Railway CLI
+        if: steps.keeper_changes.outputs.keeper_source_changed == 'true'
+        run: bun add -g @railway/cli
+
+      - name: Write Railway keeper context
+        if: steps.keeper_changes.outputs.keeper_source_changed == 'true'
+        working-directory: packages/hyperbet-evm/keeper
+        run: |
+          keeper_path="$(pwd)"
+          mkdir -p "${HOME}/.railway"
+          cat > "${HOME}/.railway/config.json" <<EOF
+          {
+            "projects": {
+              "${keeper_path}": {
+                "projectPath": "${keeper_path}",
+                "name": "hyperbet",
+                "project": "${RAILWAY_PROJECT_ID}",
+                "environment": "${RAILWAY_ENVIRONMENT_ID}",
+                "environmentName": "${DEPLOY_TARGET}",
+                "service": "${RAILWAY_KEEPER_SERVICE_ID}"
+              }
+            },
+            "user": {
+              "token": "${RAILWAY_TOKEN}"
+            }
+          }
+          EOF
+        env:
+          RAILWAY_TOKEN: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'staging' && secrets.ENOOMIAN_RAILWAY_TOKEN || secrets.RAILWAY_TOKEN }}
+
+      - name: Stage keeper workspace context
+        if: steps.keeper_changes.outputs.keeper_source_changed == 'true'
+        run: node --import tsx scripts/stage-deploy-workspace.ts --target=keeper:shared
+
+      - name: Deploy keeper
+        if: steps.keeper_changes.outputs.keeper_source_changed == 'true'
+        working-directory: packages/hyperbet-evm/keeper
+        run: |
+          railway up . \
+            --path-as-root \
+            --detach \
+            --service "${RAILWAY_KEEPER_SERVICE_ID}" \
+            --environment "${RAILWAY_ENVIRONMENT_ID}"
+        env:
+          RAILWAY_TOKEN: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'staging' && secrets.ENOOMIAN_RAILWAY_TOKEN || secrets.RAILWAY_TOKEN }}
+          CI: "true"
+
+      - name: Verify keeper endpoints
+        if: steps.keeper_changes.outputs.keeper_source_changed == 'true'
+        run: |
+          for attempt in $(seq 1 20); do
+            status_payload="$(curl -fsSL "${HYPERBET_KEEPER_URL}/status" || true)"
+            if [ -n "$status_payload" ] && echo "$status_payload" | jq -e '.ok == true and .proxies.solanaRpc == true and .proxies.bscRpc == true and .proxies.avaxRpc == true' >/dev/null; then
+              break
+            fi
+            sleep 15
+          done
+
+          curl -fsSL "${HYPERBET_KEEPER_URL}/status" | jq -e '.ok == true'
+          curl -fsSL "${HYPERBET_KEEPER_URL}/api/arena/prediction-markets/active" | jq -e '.duel != null and .markets != null'
+          curl -fsSL "${HYPERBET_KEEPER_URL}/api/arena/prediction-markets/overview" | jq -e '.duel != null and .markets != null'
+          curl -fsSL "${HYPERBET_KEEPER_URL}/api/keeper/bot-health" | jq -e '.ok == true and .markets != null'

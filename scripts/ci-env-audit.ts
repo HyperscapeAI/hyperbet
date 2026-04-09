@@ -6,18 +6,20 @@ import {
   isBettingEvmDeploymentCanonicalReady,
   resolveBettingEvmDeploymentForChain,
   type BettingEvmChain,
-} from "../packages/hyperbet-chain-registry/src/index";
+} from "../packages/hyperbet-chain-registry/src/index.js";
 
-import { rootDir } from "./ci-lib";
+import { rootDir } from "./ci-lib.js";
 
 type AuditTarget =
   | "ci-shared"
   | "pages:solana"
   | "pages:bsc"
+  | "pages:unified"
   | "app:avax"
   | "keeper:solana"
   | "keeper:bsc"
   | "keeper:avax"
+  | "keeper:unified"
   | "bot";
 
 type DeploymentMode = "production" | "staging";
@@ -73,10 +75,12 @@ function parseArgs(): {
     target !== "ci-shared" &&
     target !== "pages:solana" &&
     target !== "pages:bsc" &&
+    target !== "pages:unified" &&
     target !== "app:avax" &&
     target !== "keeper:solana" &&
     target !== "keeper:bsc" &&
     target !== "keeper:avax" &&
+    target !== "keeper:unified" &&
     target !== "bot"
   ) {
     throw new Error(`unsupported audit target: ${targetArg}`);
@@ -254,9 +258,14 @@ function auditPublicRpcUrls(findings: Finding[]): void {
 
 function auditPagesTarget(
   findings: Finding[],
-  target: "pages:solana" | "pages:bsc",
+  target: "pages:solana" | "pages:bsc" | "pages:unified",
   deployment: DeploymentMode,
 ): void {
+  if (target === "pages:unified") {
+    requireEnv(findings, "ENOOMIAN_HYPERBET_PAGES_URL");
+    requireEnv(findings, "ENOOMIAN_HYPERBET_KEEPER_URL");
+    requireEnv(findings, "ENOOMIAN_HYPERBET_KEEPER_WS_URL");
+  }
   requireEnv(findings, "VITE_GAME_API_URL");
   requireEnv(findings, "VITE_GAME_WS_URL");
   const cluster = requireEnv(findings, "VITE_SOLANA_CLUSTER");
@@ -281,6 +290,12 @@ function auditPagesTarget(
 
   const bscChainId = requireEnv(findings, "VITE_BSC_CHAIN_ID");
   const bscClob = requireEnv(findings, "VITE_BSC_GOLD_CLOB_ADDRESS");
+  const avaxChainId =
+    target === "pages:unified" ? requireEnv(findings, "VITE_AVAX_CHAIN_ID") : optionalEnv("VITE_AVAX_CHAIN_ID");
+  const avaxClob =
+    target === "pages:unified"
+      ? requireEnv(findings, "VITE_AVAX_GOLD_CLOB_ADDRESS")
+      : optionalEnv("VITE_AVAX_GOLD_CLOB_ADDRESS");
   const baseChainId = optionalEnv("VITE_BASE_CHAIN_ID");
   const baseClob = optionalEnv("VITE_BASE_GOLD_CLOB_ADDRESS");
   const baseRpcUrl = optionalEnv("VITE_BASE_RPC_URL");
@@ -289,10 +304,17 @@ function auditPagesTarget(
   if (deployment === "production") {
     const bsc = assertCanonicalMainnetReady(findings, "bsc", target).deployment;
     const base = assertCanonicalMainnetReady(findings, "base", target).deployment;
+    const avax = target === "pages:unified" ? assertCanonicalMainnetReady(findings, "avax", target).deployment : null;
     if (bscChainId && Number(bscChainId) !== bsc.chainId) {
       findings.push({
         level: "error",
         message: `${target} must use BSC mainnet chain id ${bsc.chainId}`,
+      });
+    }
+    if (avax && avaxChainId && Number(avaxChainId) !== avax.chainId) {
+      findings.push({
+        level: "error",
+        message: `${target} must use AVAX mainnet chain id ${avax.chainId}`,
       });
     }
     if (baseChainId && Number(baseChainId) !== base.chainId) {
@@ -319,6 +341,16 @@ function auditPagesTarget(
         message: `${target} must use the canonical Base GoldClob address`,
       });
     }
+    if (
+      avax &&
+      avaxClob &&
+      (PLACEHOLDER_ADDRESS_RE.test(avaxClob) || avaxClob.toLowerCase() !== avax.goldClobAddress.toLowerCase())
+    ) {
+      findings.push({
+        level: "error",
+        message: `${target} must use the canonical AVAX GoldClob address`,
+      });
+    }
     return;
   }
 
@@ -333,6 +365,20 @@ function auditPagesTarget(
       level: "error",
       message: `${target} staging must provide a real VITE_BSC_GOLD_CLOB_ADDRESS`,
     });
+  }
+  if (target === "pages:unified") {
+    if (!avaxChainId || Number.isNaN(Number(avaxChainId)) || Number(avaxChainId) <= 0) {
+      findings.push({
+        level: "error",
+        message: `${target} staging must provide a real VITE_AVAX_CHAIN_ID`,
+      });
+    }
+    if (!avaxClob || !HEX_ADDRESS_RE.test(avaxClob) || PLACEHOLDER_ADDRESS_RE.test(avaxClob)) {
+      findings.push({
+        level: "error",
+        message: `${target} staging must provide a real VITE_AVAX_GOLD_CLOB_ADDRESS`,
+      });
+    }
   }
   if (baseEnabled) {
     if (!baseChainId || Number.isNaN(Number(baseChainId)) || Number(baseChainId) <= 0) {
@@ -455,9 +501,14 @@ function auditAvaxAppTarget(
 
 function auditKeeperTarget(
   findings: Finding[],
-  target: "keeper:solana" | "keeper:bsc" | "keeper:avax",
+  target: "keeper:solana" | "keeper:bsc" | "keeper:avax" | "keeper:unified",
   deployment: DeploymentMode,
 ): void {
+  if (target === "keeper:unified") {
+    requireEnv(findings, "ENOOMIAN_HYPERBET_PAGES_URL");
+    requireEnv(findings, "ENOOMIAN_HYPERBET_KEEPER_URL");
+    requireEnv(findings, "ENOOMIAN_HYPERBET_KEEPER_WS_URL");
+  }
   requireEnv(findings, "HYPERBET_KEEPER_URL");
   requireEnv(findings, "RAILWAY_PROJECT_ID");
   const railwayEnvironmentId =
@@ -481,7 +532,103 @@ function auditKeeperTarget(
     return;
   }
 
-  const chainKey = target.endsWith(":bsc") ? "bsc" : "avax";
+  if (target === "keeper:unified") {
+    requireEnv(
+      findings,
+      "SOLANA_RPC_URL",
+      `${target} requires SOLANA_RPC_URL when audited locally`,
+    );
+    requireEnv(
+      findings,
+      "BSC_RPC_URL",
+      `${target} requires BSC_RPC_URL when audited locally`,
+    );
+    requireEnv(
+      findings,
+      "AVAX_RPC_URL",
+      `${target} requires AVAX_RPC_URL when audited locally`,
+    );
+    const enabledChains = optionalEnv("EVM_KEEPER_CHAINS")
+      .split(",")
+      .map((value) => value.trim())
+      .filter(Boolean);
+
+    if (deployment === "production") {
+      const bsc = assertCanonicalMainnetReady(findings, "bsc", target);
+      const avax = assertCanonicalMainnetReady(findings, "avax", target);
+      if (bsc.ready) {
+        validateExactAddress(
+          findings,
+          target,
+          "BSC_GOLD_CLOB_ADDRESS",
+          requireEnv(
+            findings,
+            "BSC_GOLD_CLOB_ADDRESS",
+            `${target} requires BSC_GOLD_CLOB_ADDRESS when audited locally`,
+          ),
+          bsc.deployment.goldClobAddress,
+        );
+      }
+      if (avax.ready) {
+        validateExactAddress(
+          findings,
+          target,
+          "AVAX_GOLD_CLOB_ADDRESS",
+          requireEnv(
+            findings,
+            "AVAX_GOLD_CLOB_ADDRESS",
+            `${target} requires AVAX_GOLD_CLOB_ADDRESS when audited locally`,
+          ),
+          avax.deployment.goldClobAddress,
+        );
+      }
+      if (enabledChains.includes("base")) {
+        requireExactAddress(
+          findings,
+          target,
+          "BASE_GOLD_CLOB_ADDRESS",
+          `${target} production requires BASE_GOLD_CLOB_ADDRESS when Base is enabled`,
+        );
+        requireExactAddress(
+          findings,
+          target,
+          "BASE_DUEL_ORACLE_ADDRESS",
+          `${target} production requires BASE_DUEL_ORACLE_ADDRESS when Base is enabled`,
+        );
+      }
+      return;
+    }
+
+    requireExactAddress(
+      findings,
+      target,
+      "BSC_GOLD_CLOB_ADDRESS",
+      `${target} staging requires BSC_GOLD_CLOB_ADDRESS when audited locally`,
+    );
+    requireExactAddress(
+      findings,
+      target,
+      "AVAX_GOLD_CLOB_ADDRESS",
+      `${target} staging requires AVAX_GOLD_CLOB_ADDRESS when audited locally`,
+    );
+    if (enabledChains.includes("base")) {
+      requireExactAddress(
+        findings,
+        target,
+        "BASE_GOLD_CLOB_ADDRESS",
+        `${target} staging requires BASE_GOLD_CLOB_ADDRESS when Base is enabled`,
+      );
+      requireExactAddress(
+        findings,
+        target,
+        "BASE_DUEL_ORACLE_ADDRESS",
+        `${target} staging requires BASE_DUEL_ORACLE_ADDRESS when Base is enabled`,
+      );
+    }
+    return;
+  }
+
+  const chainKey = target === "keeper:avax" ? "avax" : "bsc";
   const runtimeEnvKey = chainKey === "bsc" ? "BSC_RPC_URL" : "AVAX_RPC_URL";
   requireEnv(findings, runtimeEnvKey, `${target} requires ${runtimeEnvKey} when audited locally`);
 
@@ -591,6 +738,7 @@ function runAudit(
   switch (target) {
     case "pages:solana":
     case "pages:bsc":
+    case "pages:unified":
       auditPagesTarget(findings, target, deployment);
       break;
     case "app:avax":
@@ -599,6 +747,7 @@ function runAudit(
     case "keeper:solana":
     case "keeper:bsc":
     case "keeper:avax":
+    case "keeper:unified":
       auditKeeperTarget(findings, target, deployment);
       break;
     case "bot":
