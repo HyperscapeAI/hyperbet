@@ -294,6 +294,12 @@ let externalSolanaBotHealthState: ExternalHealthSourceState = {
   lastFetchedAt: null,
   lastError: null,
 };
+const enabledEvmKeeperChains = new Set(
+  parseBettingEvmChainList(
+    process.env.EVM_KEEPER_CHAINS,
+    BETTING_EVM_CHAIN_ORDER,
+  ),
+);
 
 function effectiveKeeperBotHealthSnapshot(
   localSnapshot: KeeperBotHealthSnapshot | null = loadKeeperBotHealthSnapshot(),
@@ -910,13 +916,6 @@ const avaxDuelOracleAddress = (
   process.env.ORACLE_CONTRACT_ADDRESS_AVAX ||
   ""
 ).trim();
-const enabledEvmKeeperChains = new Set(
-  parseBettingEvmChainList(
-    process.env.EVM_KEEPER_CHAINS,
-    BETTING_EVM_CHAIN_ORDER,
-  ),
-);
-
 function evmKeeperChainEnabled(chainKey: "bsc" | "base" | "avax"): boolean {
   return enabledEvmKeeperChains.has(chainKey);
 }
