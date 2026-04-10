@@ -484,6 +484,11 @@ function parseJsonStdout<T>(label: string, stdout: string): T {
   if (!trimmed) {
     throw new Error(`${label} produced no JSON output`);
   }
+  try {
+    return JSON.parse(trimmed) as T;
+  } catch {
+    // Fall back to the last parseable line for commands that mix logs and JSON.
+  }
   const lines = trimmed.split(/\r?\n/).filter(Boolean);
   for (let index = lines.length - 1; index >= 0; index -= 1) {
     try {
@@ -500,11 +505,13 @@ function runJsonCommand<T>(
   command: string,
   args: string[],
   env?: Record<string, string>,
+  timeoutMs?: number,
 ): T {
   const result = spawnSync(command, args, {
     cwd: rootDir,
     env: { ...process.env, ...env },
     encoding: "utf8",
+    timeout: timeoutMs,
   });
   const combinedOutput = `${result.stdout ?? ""}${result.stderr ?? ""}`.trim();
   writeJsonArtifact(artifactRoot, `${label}.command.json`, {
@@ -514,6 +521,16 @@ function runJsonCommand<T>(
     stdout: result.stdout ?? "",
     stderr: result.stderr ?? "",
   });
+  if (result.error) {
+    const timedOut =
+      result.error instanceof Error &&
+      "code" in result.error &&
+      result.error.code === "ETIMEDOUT";
+    if (timedOut && (result.stdout ?? "").trim()) {
+      return parseJsonStdout<T>(label, result.stdout ?? "");
+    }
+    throw result.error;
+  }
   if (result.status !== 0) {
     throw new Error(
       `${label} failed with exit ${result.status ?? 1}${combinedOutput ? `\n${combinedOutput}` : ""}`,
@@ -626,6 +643,7 @@ function runVerifyChains(
       `--chains=${chains.join(",")}`,
     ],
     env,
+    25_000,
   );
   writeJsonArtifact(artifactRoot, "verify-chains.json", results);
   return results;
