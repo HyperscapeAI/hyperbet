@@ -66,6 +66,8 @@ type SolanaSurfaceCheck = {
   goldPerpsProgramId: string;
 };
 
+const VERIFY_TIMEOUT_MS = 20_000;
+
 export function validateConfiguredAddress(
   rawAddress: string,
   fieldName: string,
@@ -291,6 +293,22 @@ export const verifySolanaChain = async (
   }
 };
 
+async function withCheckTimeout(
+  chain: BettingEvmChain | "solana",
+  check: Promise<CheckResult>,
+): Promise<CheckResult> {
+  const timeout = new Promise<CheckResult>((resolve) => {
+    setTimeout(() => {
+      resolve({
+        chain,
+        ok: false,
+        details: `verification timed out after ${VERIFY_TIMEOUT_MS}ms`,
+      });
+    }, VERIFY_TIMEOUT_MS);
+  });
+  return Promise.race([check, timeout]);
+}
+
 function expectedChainIdEnvVar(chain: BettingEvmChain): string {
   return `${chain.toUpperCase()}_EXPECTED_CHAIN_ID`;
 }
@@ -511,7 +529,7 @@ async function run() {
     if ("ok" in resolved) {
       return Promise.resolve(resolved);
     }
-    return verifyEvmChain(resolved);
+    return withCheckTimeout(chain, verifyEvmChain(resolved));
   });
 
   const solanaCheck = includeSolana
@@ -523,7 +541,7 @@ async function run() {
         if ("ok" in resolved) {
           return Promise.resolve(resolved);
         }
-        return verifySolanaChain(resolved);
+        return withCheckTimeout("solana", verifySolanaChain(resolved));
       })()
     : null;
 

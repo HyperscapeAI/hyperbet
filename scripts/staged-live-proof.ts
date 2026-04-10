@@ -524,7 +524,7 @@ function runJsonCommand<T>(
 
 function runAudit(
   label: string,
-  target: "app:avax" | "keeper:avax" | "pages:unified",
+  target: "app:avax" | "keeper:avax" | "pages:unified" | "keeper:unified",
   env: Record<string, string>,
   deployment: "production" | "staging" = "staging",
 ): AuditResult {
@@ -701,6 +701,11 @@ function runUnifiedEnvAudit(): {
     BSC_RPC_URL: requireEnv("ENOOMIAN_BSC_RPC_URL"),
     BSC_GOLD_CLOB_ADDRESS: bscClobAddress,
     EVM_KEEPER_CHAINS: "bsc",
+    AVAX_RPC_URL: "",
+    AVAX_GOLD_CLOB_ADDRESS: "",
+    BASE_RPC_URL: "",
+    BASE_GOLD_CLOB_ADDRESS: "",
+    BASE_DUEL_ORACLE_ADDRESS: "",
   });
   return { pages, keeper };
 }
