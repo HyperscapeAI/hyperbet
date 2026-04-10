@@ -1408,7 +1408,12 @@ function jsonResponse(
     ...extraHeaders,
   });
   applyCors(req, headers);
-  return new Response(JSON.stringify(body), { status, headers });
+  return new Response(
+    JSON.stringify(body, (_key, value) =>
+      typeof value === "bigint" ? value.toString() : value,
+    ),
+    { status, headers },
+  );
 }
 
 function textResponse(
