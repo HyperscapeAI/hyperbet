@@ -180,7 +180,8 @@ pub mod gold_clob_market {
             ErrorCode::DuelMismatch
         );
         require!(
-            ctx.accounts.duel_state.status == OracleDuelStatus::BettingOpen
+            ctx.accounts.duel_state.status == OracleDuelStatus::Scheduled
+                || ctx.accounts.duel_state.status == OracleDuelStatus::BettingOpen
                 || ctx.accounts.duel_state.status == OracleDuelStatus::Locked,
             ErrorCode::MarketCreationClosed
         );

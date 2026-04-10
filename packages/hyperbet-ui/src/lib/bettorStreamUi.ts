@@ -65,7 +65,7 @@ export function deriveBettorStreamUiState(
     return playerStatus?.playbackStarted ? "degraded" : "connecting";
   }
   if (rendererHealth?.ready === false) {
-    return playerStatus?.playbackStarted ? "degraded" : "connecting";
+    return "degraded";
   }
   if (!playerStatus) {
     return "connecting";

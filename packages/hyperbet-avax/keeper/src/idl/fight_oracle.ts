@@ -1057,12 +1057,12 @@ export type FightOracle = {
     {
       "code": 6021,
       "name": "participantHashImmutable",
-      "msg": "Participant hashes are immutable after betting opens"
+      "msg": "Participant hashes are immutable after duel prepare"
     },
     {
       "code": 6022,
       "name": "timingImmutable",
-      "msg": "Bet timing is immutable after betting opens"
+      "msg": "Bet timing is immutable after duel prepare"
     },
     {
       "code": 6023,

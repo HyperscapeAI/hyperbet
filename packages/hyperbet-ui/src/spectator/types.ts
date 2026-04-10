@@ -1,3 +1,5 @@
+import type { MarketParityInfo } from "../lib/marketParity";
+
 export type StreamingPhase =
   | "IDLE"
   | "ANNOUNCEMENT"
@@ -258,5 +260,6 @@ export interface CanonicalStreamSession {
   rendererMetrics: RendererMetricsInfo | null;
   delivery: StreamDeliveryInfo | null;
   authorityHealth: CanonicalStreamHealth;
+  marketParity: MarketParityInfo | null;
   status: CanonicalStreamStatus;
 }

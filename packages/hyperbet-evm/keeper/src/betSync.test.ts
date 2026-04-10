@@ -45,14 +45,56 @@ describe("bet-sync helpers", () => {
       arenaPositions: { agent1: [0, 0, 0], agent2: [1, 0, 0] },
       leaderboard: [{ id: "a" }],
       rendererHealth: { ready: true, degradedReason: null, updatedAt: 123 },
+      marketParity: {
+        bundleId: "bundle-12",
+        duelKey: `0x${duelKey}`,
+        duelId: "duel-12",
+        revision: 4,
+        requiredChains: ["solana", "bsc"],
+        confirmedChains: ["solana"],
+        state: "awaiting_confirmations",
+        phase: "ANNOUNCEMENT",
+        safeToBet: false,
+        openedAtMs: null,
+        lockedAtMs: null,
+        resolvedAtMs: null,
+        freezeReason: null,
+        updatedAtMs: 1_700_000_000_001,
+        receipts: [
+          {
+            chainKey: "solana",
+            preparedAtMs: 1_700_000_000_001,
+            openedAtMs: null,
+            lockedAtMs: null,
+            resolvedAtMs: null,
+            cancelledAtMs: null,
+            confirmedAtMs: 1_700_000_000_001,
+            lifecycleStatus: "PENDING",
+            txRef: "sol-tx",
+            note: null,
+          },
+        ],
+      },
     });
 
     expect(parsed).not.toBeNull();
     expect(parsed?.duelKey).toBe(duelKey);
+    expect(parsed?.marketParity).toMatchObject({
+      bundleId: "bundle-12",
+      duelKey,
+      state: "awaiting_confirmations",
+      safeToBet: false,
+    });
 
     expect(toStreamStateFromBetSyncEvent(parsed!)).toMatchObject({
       seq: 12,
       emittedAt: 1_700_000_000_000,
+      marketParity: {
+        bundleId: "bundle-12",
+        duelKey,
+        state: "awaiting_confirmations",
+        safeToBet: false,
+      },
       cycle: {
         cycleId: "raw-cycle-12",
         duelId: "duel-12",

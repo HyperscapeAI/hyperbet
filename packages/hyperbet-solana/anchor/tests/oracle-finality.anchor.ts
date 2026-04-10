@@ -12,10 +12,12 @@ import {
   createOpenMarketFixture,
   challengeDuelResult,
   duelStatusLocked,
+  duelStatusScheduled,
   deriveDuelStatePda,
   deriveOracleConfigPda,
   ensureOracleReady,
   finalizeDuelResult,
+  hashLabel,
   hasProgramError,
   marketSideA,
   placeClobOrder,
@@ -36,6 +38,59 @@ describe("oracle finality truth (solana)", () => {
   const fightProgram = anchor.workspace.FightOracle as Program<FightOracle>;
   const clobProgram = anchor.workspace.GoldClobMarket as Program<GoldClobMarket>;
   const authority = (provider.wallet as anchor.Wallet & { payer: Keypair }).payer;
+
+  it("freezes the scheduled duel manifest after prepare", async () => {
+    const duelKey = uniqueDuelKey("sol-scheduled-immutable");
+    const now = Math.floor(Date.now() / 1000);
+    const participantAHash = hashLabel("sol-agent-a");
+    const participantBHash = hashLabel("sol-agent-b");
+
+    await upsertDuel(fightProgram, authority, duelKey, {
+      status: duelStatusScheduled(),
+      betOpenTs: now + 30,
+      betCloseTs: now + 90,
+      duelStartTs: now + 150,
+      participantAHash,
+      participantBHash,
+      metadataUri: "https://hyperscape.gg/tests/prepare/scheduled",
+    });
+
+    try {
+      await upsertDuel(fightProgram, authority, duelKey, {
+        status: duelStatusScheduled(),
+        betOpenTs: now + 30,
+        betCloseTs: now + 90,
+        duelStartTs: now + 151,
+        participantAHash,
+        participantBHash,
+        metadataUri: "https://hyperscape.gg/tests/prepare/scheduled-shifted",
+      });
+      assert.fail("scheduled duel timing mutated after prepare");
+    } catch (error: unknown) {
+      assert.ok(
+        hasProgramError(error, "TimingImmutable"),
+        `expected TimingImmutable, got ${String(error)}`,
+      );
+    }
+
+    try {
+      await upsertDuel(fightProgram, authority, duelKey, {
+        status: duelStatusScheduled(),
+        betOpenTs: now + 30,
+        betCloseTs: now + 90,
+        duelStartTs: now + 150,
+        participantAHash: hashLabel("sol-agent-a-mutated"),
+        participantBHash,
+        metadataUri: "https://hyperscape.gg/tests/prepare/scheduled-mutated",
+      });
+      assert.fail("scheduled duel participant mutated after prepare");
+    } catch (error: unknown) {
+      assert.ok(
+        hasProgramError(error, "ParticipantHashImmutable"),
+        `expected ParticipantHashImmutable, got ${String(error)}`,
+      );
+    }
+  });
 
   it("rejects settlement before terminal oracle states", async () => {
     const maker = Keypair.generate();

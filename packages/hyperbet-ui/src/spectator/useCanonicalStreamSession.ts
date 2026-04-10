@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { CONFIG } from "../lib/config";
+import { parseMarketParity } from "../lib/marketParity";
 import {
   isCanonicalDeliveryReady,
   isCanonicalRendererPlaybackReady,
@@ -528,6 +529,7 @@ export function normalizeCanonicalStreamSession(
 
   const emittedAt = asFiniteNumber(candidate.emittedAt) ?? Date.now();
   const channel = normalizeChannel(candidate.channel, emittedAt);
+  const marketParity = parseMarketParity(candidate.marketParity);
   const publicReadiness =
     channel?.publicReadiness ??
     normalizePublicReadiness(candidate.publicReadiness, emittedAt);
@@ -662,6 +664,7 @@ export function normalizeCanonicalStreamSession(
     rendererMetrics,
     delivery,
     authorityHealth,
+    marketParity,
     status,
   };
 }

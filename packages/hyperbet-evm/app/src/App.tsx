@@ -37,6 +37,7 @@ import {
   deriveBettorLiveStatus,
   serializeBettorDriftDiagnostic,
 } from "@hyperbet/ui/lib/bettorLiveStatus";
+import { deriveMarketParityLabel } from "@hyperbet/ui/lib/marketParity";
 import { deriveBettorStreamUiState } from "@hyperbet/ui/lib/bettorStreamUi";
 import {
   describeCanonicalRendererDegradedReason,
@@ -252,11 +253,11 @@ function getAppCopy(locale: UiLocale) {
       muteStream: "静音",
       source: "信源",
       waitingForStream: "等待直播流…",
-      refreshingLiveState: "即将开放下注",
+      refreshingLiveState: "正在连接直播流",
       streamReady: "直播流已就绪",
-      reconnectingStream: "即将开放下注",
-      resyncingMarketState: "即将开放下注",
-      outOfSync: "即将开放下注",
+      reconnectingStream: "正在重连直播流",
+      resyncingMarketState: "等待渲染同步",
+      outOfSync: "直播流不同步",
       trades: "成交",
       orderBook: "订单簿",
       matchLog: "对局日志",
@@ -306,6 +307,14 @@ function getAppCopy(locale: UiLocale) {
       phaseResolved: "已结算",
       phaseNextMatch: "下一场",
       phaseIdle: "空闲",
+      parityPreparing: "全链市场准备中",
+      parityAwaitingConfirmations: "等待最终确认",
+      parityBettingOpen: "投注已开启",
+      parityLocked: "已锁定",
+      parityResolved: "已结算",
+      parityFrozen: "已冻结",
+      parityCancelled: "已取消",
+      parityAborted: "启动已中止",
       bettingUnavailable: (cluster: string) =>
         `${cluster} 上的下注暂时不可用。请稍后重试或切换链。`,
       record: (wins: number, losses: number) => `${wins}胜-${losses}负`,
@@ -349,11 +358,11 @@ function getAppCopy(locale: UiLocale) {
     muteStream: "Mute stream",
     source: "Source",
     waitingForStream: "Waiting for stream…",
-    refreshingLiveState: "Betting starts soon",
+    refreshingLiveState: "Connecting to live stream",
     streamReady: "Stream ready",
-    reconnectingStream: "Betting starts soon",
-    resyncingMarketState: "Betting starts soon",
-    outOfSync: "Betting starts soon",
+    reconnectingStream: "Reconnecting to live stream",
+    resyncingMarketState: "Waiting for renderer sync",
+    outOfSync: "Live stream out of sync",
     trades: "Trades",
     orderBook: "Order Book",
     matchLog: "Match Log",
@@ -403,6 +412,14 @@ function getAppCopy(locale: UiLocale) {
     phaseResolved: "RESOLVED",
     phaseNextMatch: "NEXT MATCH",
     phaseIdle: "IDLE",
+    parityPreparing: "Preparing markets on all chains",
+    parityAwaitingConfirmations: "Awaiting final confirmations",
+    parityBettingOpen: "Betting open",
+    parityLocked: "Locked",
+    parityResolved: "Resolved",
+    parityFrozen: "Frozen",
+    parityCancelled: "Cancelled",
+    parityAborted: "Start aborted",
     bettingUnavailable: (cluster: string) =>
       `Betting is temporarily unavailable on ${cluster}. Please try again later or switch chain.`,
     record: (wins: number, losses: number) => `${wins}W-${losses}L`,
@@ -631,6 +648,7 @@ export function App() {
   const {
     live: liveOverviewMarket,
     liveDuel: liveOverviewDuel,
+    liveMarketParity,
     refresh: refreshMarketOverview,
   } = usePredictionMarketOverview(activeChain);
   const {
@@ -658,6 +676,9 @@ export function App() {
   );
   const [streamPlayerStatus, setStreamPlayerStatus] =
     useState<StreamPlayerStatus | null>(null);
+  useEffect(() => {
+    setStreamPlayerStatus(null);
+  }, [mountedStreamUrl]);
   const streamPlaceholderMessage = useMemo(() => {
     if (!canonicalStreamSession) {
       return "Connecting to live session...";
@@ -729,6 +750,12 @@ export function App() {
       liveOverviewMarket?.winner,
     ],
   );
+  const effectiveMarketParity =
+    canonicalStreamSession?.marketParity ?? liveMarketParity ?? null;
+  const marketParityStatusText = useMemo(
+    () => deriveMarketParityLabel(effectiveMarketParity, copy),
+    [copy, effectiveMarketParity],
+  );
   const canonicalPhase = canonicalLiveStatus.livePhase;
   const lastLifecycleMismatchSignatureRef = useRef<string | null>(null);
   const rendererDegradedOverlayMessage = useMemo(() => {
@@ -747,6 +774,10 @@ export function App() {
   ]);
 
   useEffect(() => {
+    if (!import.meta.env.DEV) {
+      lastLifecycleMismatchSignatureRef.current = null;
+      return;
+    }
     const signature = serializeBettorDriftDiagnostic(
       canonicalLiveStatus.driftDiagnostic,
     );
@@ -1082,7 +1113,9 @@ export function App() {
     (typeof effNoPot === "number" ? effNoPot : 0);
   const effPhaseLabel = canonicalLiveStatus.livePhaseLabel;
   const marketStatusText =
-    canonicalLiveStatus.marketSettlementLabel ?? copy.statusPending;
+    marketParityStatusText ??
+    canonicalLiveStatus.marketSettlementLabel ??
+    copy.statusPending;
   const countdownText = liveCycle
     ? formatCountdown(normalizeRemainingSeconds(liveCycle.timeRemaining))
     : "";
@@ -1142,6 +1175,7 @@ export function App() {
           locale={locale}
           lifecycleDuelOverride={liveOverviewDuel}
           lifecycleMarketOverride={liveOverviewMarket}
+          lifecycleMarketParityOverride={effectiveMarketParity}
           onLifecycleRefreshRequested={requestOverviewRefresh}
         />
       )}
@@ -1298,8 +1332,12 @@ export function App() {
           {streamSyncUiState === "degraded" ? (
             <StreamStatusChip
               state="degraded"
-              title={copy.reconnectingStream}
-              detail={copy.refreshingLiveState}
+              title={streamPlaceholderMessage}
+              detail={
+                canonicalRendererHealth?.ready === false
+                  ? null
+                  : copy.refreshingLiveState
+              }
             />
           ) : null}
 

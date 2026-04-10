@@ -242,8 +242,8 @@ contract DuelOutcomeOracle is AccessControl {
         _requireSettleable(duel);
         if (uint8(status) < uint8(duel.status)) revert InvalidTransition();
 
-        // FIX-4: Lock participant identity and bet timing once betting opens
-        if (duel.status >= DuelStatus.BETTING_OPEN) {
+        // FIX-5: Once a duel is prestaged, its manifest becomes immutable.
+        if (duel.status >= DuelStatus.SCHEDULED) {
             if (participantAHash != duel.participantAHash) revert ParticipantHashImmutable();
             if (participantBHash != duel.participantBHash) revert ParticipantHashImmutable();
             if (betOpenTs != duel.betOpenTs) revert TimingImmutable();

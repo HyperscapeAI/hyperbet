@@ -139,6 +139,23 @@ describe("normalizeCanonicalStreamSession", () => {
         renderSessionId: "render-1",
         presentationDelayMs: 0,
       },
+      marketParity: {
+        bundleId: "bundle-1",
+        duelKey: "ab".repeat(32),
+        duelId: "duel-1",
+        revision: 2,
+        requiredChains: ["solana", "bsc"],
+        confirmedChains: ["solana"],
+        state: "awaiting_confirmations",
+        phase: "ANNOUNCEMENT",
+        safeToBet: false,
+        openedAtMs: null,
+        lockedAtMs: null,
+        resolvedAtMs: null,
+        freezeReason: null,
+        updatedAtMs: 1234567890,
+        receipts: [],
+      },
     });
 
     expect(session).not.toBeNull();
@@ -155,6 +172,12 @@ describe("normalizeCanonicalStreamSession", () => {
     expect(session?.delivery?.hlsUrl).toBe("https://video.example/manifest.m3u8");
     expect(session?.status.delivery?.provider).toBe("cloudflare_stream");
     expect(session?.status.deliveryHealth?.ready).toBe(true);
+    expect(session?.marketParity).toMatchObject({
+      bundleId: "bundle-1",
+      duelKey: "ab".repeat(32),
+      state: "awaiting_confirmations",
+      safeToBet: false,
+    });
   });
 
   it("parses canonical authority reconciliation metadata when present", () => {
@@ -874,7 +897,7 @@ describe("selectBetSurfaceStreamUrl", () => {
     expect(selection.preloadStreamUrl).toBe("");
   });
 
-  it("keeps canonical playback mounted when top-level readiness is green despite renderer staleness", () => {
+  it("fails closed when renderer health is stale even if top-level readiness stays green", () => {
     const session = normalizeCanonicalStreamSession({
       seq: 1,
       emittedAt: 1,
@@ -920,8 +943,9 @@ describe("selectBetSurfaceStreamUrl", () => {
 
     expect(session?.publicReadiness?.ready).toBe(true);
     expect(session?.sourceRuntime?.ready).toBe(true);
-    expect(selection.canUseCanonicalPlayback).toBe(true);
-    expect(selection.activeStreamUrl).toContain("protocol=llhls");
+    expect(selection.canUseCanonicalPlayback).toBe(false);
+    expect(selection.activeStreamUrl).toBe("");
+    expect(selection.preloadStreamUrl).toBe("");
   });
 
   it("fails closed when source runtime is missing for an existing session", () => {
@@ -1086,7 +1110,7 @@ describe("isCanonicalRendererPlaybackReady", () => {
     ).toBe(true);
   });
 
-  it("treats renderer staleness as non-blocking when top-level readiness stays green", () => {
+  it("treats renderer staleness as blocking even when top-level readiness stays green", () => {
     expect(
       isCanonicalRendererPlaybackReady({
         rendererReady: false,
@@ -1099,7 +1123,7 @@ describe("isCanonicalRendererPlaybackReady", () => {
         sourceRuntime: makeSourceRuntime(),
         playbackUrl: "https://video.example/manifest.m3u8?protocol=llhls",
       }),
-    ).toBe(true);
+    ).toBe(false);
   });
 });
 
@@ -1163,6 +1187,31 @@ describe("deriveBettorStreamUiState", () => {
         },
       }),
     ).toBe("drifted");
+  });
+
+  it("reports degraded when renderer health is stale even before playback starts", () => {
+    const session = normalizeCanonicalStreamSession({
+      seq: 13,
+      emittedAt: 13,
+      cycle: {
+        cycleId: "cycle-13",
+        phase: "RESOLUTION",
+      },
+      rendererHealth: {
+        ready: false,
+        degradedReason: "render_tick_stale",
+        updatedAt: 13,
+      },
+      channel: makeCanonicalChannel(),
+      sourceRuntime: makeSourceRuntime(),
+    });
+
+    expect(
+      deriveBettorStreamUiState({
+        session,
+        playerStatus: null,
+      }),
+    ).toBe("degraded");
   });
 });
 

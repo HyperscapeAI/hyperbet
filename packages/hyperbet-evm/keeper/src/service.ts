@@ -35,6 +35,7 @@ import {
   PUBLIC_EVM_RPC_READ_METHODS,
   PUBLIC_SOLANA_RPC_READ_METHODS,
   type KeeperBotHealthSnapshot,
+  type KeeperMarketParitySnapshot,
   type KeeperMarketHealthRecord,
 } from "@hyperbet/mm-core";
 import { PublicKey } from "@solana/web3.js";
@@ -94,6 +95,11 @@ import {
   type PredictionMarketsSurface,
   type StreamState as BetSyncStreamState,
 } from "./betSync";
+import {
+  buildRecoveredMarketParitySnapshot,
+  parseRequiredParityChains,
+  redactPendingMarketParity,
+} from "./marketParity";
 import { modelMarketIdFromCharacterId } from "./modelMarkets";
 import {
   adaptLegacySolanaPerpsMarketsPayload,
@@ -299,6 +305,8 @@ function mergeHealthSnapshots(
       ...(externalSnapshot?.recovery ?? []),
     ],
     markets: dedupedMarkets,
+    marketParity:
+      localSnapshot?.marketParity ?? externalSnapshot?.marketParity ?? null,
   };
 }
 
@@ -313,6 +321,9 @@ const enabledEvmKeeperChains = new Set(
     process.env.EVM_KEEPER_CHAINS,
     BETTING_EVM_CHAIN_ORDER,
   ),
+);
+const requiredParityChains = parseRequiredParityChains(
+  process.env.MARKET_PARITY_REQUIRED_CHAINS,
 );
 
 function effectiveKeeperBotHealthSnapshot(
@@ -2209,6 +2220,139 @@ function currentDuelSnapshot(
   };
 }
 
+function isPublicMarketParityState(
+  state: KeeperMarketParitySnapshot["state"] | null | undefined,
+): boolean {
+  return (
+    state === "open" ||
+    state === "locked" ||
+    state === "resolved" ||
+    state === "cancelled" ||
+    state === "frozen"
+  );
+}
+
+function isStreamSafeForBetting(sourceState: StreamState): boolean {
+  const publicReadiness = asJsonRecord(sourceState.publicReadiness);
+  const topLevelRenderer = asJsonRecord(sourceState.rendererHealth);
+  const cycle = asJsonRecord(sourceState.cycle);
+  const cycleRenderer = asJsonRecord(cycle?.rendererHealth);
+  const publicReady =
+    typeof publicReadiness?.ready === "boolean" ? publicReadiness.ready : true;
+  const rendererReady =
+    typeof topLevelRenderer?.ready === "boolean"
+      ? topLevelRenderer.ready
+      : typeof cycleRenderer?.ready === "boolean"
+        ? cycleRenderer.ready
+        : true;
+  return publicReady && rendererReady;
+}
+
+function resolvePublicMarketParity(
+  botHealthSnapshot: KeeperBotHealthSnapshot | null,
+  sourceState: StreamState,
+): KeeperMarketParitySnapshot | null {
+  const rawParity =
+    botHealthSnapshot?.marketParity ??
+    sourceState.marketParity ??
+    buildRecoveredMarketParitySnapshot({
+      duelKey: currentDuelKey(sourceState),
+      duelId: currentDuelId(sourceState),
+      phase:
+        typeof sourceState.cycle?.phase === "string"
+          ? sourceState.cycle.phase
+          : null,
+      requiredChains: requiredParityChains,
+      markets: buildPredictionMarketLifecycleRecords(
+        botHealthSnapshot,
+        currentDuelSnapshot(sourceState),
+      ),
+      updatedAtMs: sourceState.emittedAt,
+      streamSafe: isStreamSafeForBetting(sourceState),
+    });
+  if (!rawParity) return null;
+  const publicParity = redactPendingMarketParity(rawParity);
+  if (!publicParity) return null;
+  return {
+    ...publicParity,
+    safeToBet:
+      publicParity.state === "open" &&
+      publicParity.safeToBet &&
+      isStreamSafeForBetting(sourceState),
+  };
+}
+
+function projectPublicStreamState(
+  sourceState: StreamState,
+  botHealthSnapshot: KeeperBotHealthSnapshot | null,
+): StreamState {
+  const publicMarketParity = resolvePublicMarketParity(
+    botHealthSnapshot,
+    sourceState,
+  );
+  if (isPublicMarketParityState(publicMarketParity?.state)) {
+    return {
+      ...sourceState,
+      marketParity: publicMarketParity,
+    };
+  }
+
+  const cycle = asJsonRecord(sourceState.cycle) ?? {};
+  const existingTimeline =
+    asJsonRecord(cycle.broadcastTimeline) ??
+    asJsonRecord(sourceState.broadcastTimeline);
+  const maskedTimeline = {
+    phase: "ANNOUNCEMENT",
+    betOpenTime: null,
+    betCloseTime: null,
+    fightStartTime: null,
+    duelEndTime: null,
+    presentationDelayMs:
+      typeof existingTimeline?.presentationDelayMs === "number"
+        ? existingTimeline.presentationDelayMs
+        : 0,
+    updatedAt:
+      typeof existingTimeline?.updatedAt === "number"
+        ? existingTimeline.updatedAt
+        : sourceState.emittedAt,
+  };
+
+  return {
+    ...sourceState,
+    cycle: {
+      ...cycle,
+      duelId: null,
+      duelKey: null,
+      duelKeyHex: null,
+      rawCycle: null,
+      phase: "ANNOUNCEMENT",
+      broadcastTimeline: maskedTimeline,
+      betOpenTime: null,
+      betCloseTime: null,
+      fightStartTime: null,
+      duelEndTime: null,
+      winnerId: null,
+      winnerName: null,
+      winReason: null,
+      seed: null,
+      replayHash: null,
+      countdown: null,
+      agent1: null,
+      agent2: null,
+    },
+    phase: "ANNOUNCEMENT",
+    broadcastTimeline: maskedTimeline,
+    marketParity: publicMarketParity,
+  };
+}
+
+function currentPublicStreamState(
+  botHealthSnapshot: KeeperBotHealthSnapshot | null = effectiveKeeperBotHealthSnapshot(),
+  sourceState: StreamState = streamState,
+): StreamState {
+  return projectPublicStreamState(sourceState, botHealthSnapshot);
+}
+
 function filterEnabledPredictionMarkets(
   markets: PredictionMarketLifecycleRecord[],
 ): PredictionMarketLifecycleRecord[] {
@@ -2258,11 +2402,25 @@ function buildLivePredictionMarketsSurface(
 ): PredictionMarketsSurface {
   const effectiveBotHealth =
     botHealthSnapshot ?? effectiveKeeperBotHealthSnapshot();
-  const streamDuel = currentDuelSnapshot(sourceState);
+  const publicStreamState = projectPublicStreamState(
+    sourceState,
+    effectiveBotHealth,
+  );
+  const publicMarketParity = publicStreamState.marketParity ?? null;
+  const streamDuel = currentDuelSnapshot(publicStreamState);
   const streamDuelKey = streamDuel.duelKey;
   const streamDuelId = streamDuel.duelId;
   const cyclePhase = streamDuel.phase;
   const previousLive = previousOverview?.live ?? null;
+
+  if (!isPublicMarketParityState(publicMarketParity?.state)) {
+    return {
+      duel: streamDuel,
+      markets: [],
+      updatedAt: Date.now(),
+      marketParity: publicMarketParity,
+    };
+  }
 
   // Preserve the just-finished duel across the transient source IDLE gap so it
   // can roll into recentSettlement with intact duel identity and timing.
@@ -2279,10 +2437,7 @@ function buildLivePredictionMarketsSurface(
     );
   }
 
-  const markets = buildPredictionMarketLifecycleRecords(
-    effectiveBotHealth,
-    streamDuel,
-  );
+  const markets = buildPredictionMarketLifecycleRecords(effectiveBotHealth, streamDuel);
   const fallbackMarket =
     markets.find((market) => market.duelKey != null || market.duelId != null) ?? null;
   const cycleWinner = streamDuel.winner;
@@ -2308,6 +2463,7 @@ function buildLivePredictionMarketsSurface(
     },
     markets: filterEnabledPredictionMarkets(markets),
     updatedAt: Date.now(),
+    marketParity: publicMarketParity,
   };
 }
 
@@ -2328,6 +2484,7 @@ function buildPredictionMarketsSurfaceForDuel(
       betCloseTime: duel.betCloseTime ?? market.betCloseTime ?? null,
     })),
     updatedAt: Date.now(),
+    marketParity: botHealthSnapshot?.marketParity ?? null,
   };
   const merged = mergePredictionMarketsSurface(previous, nextSurface) ?? nextSurface;
   return {
@@ -2386,16 +2543,18 @@ function refreshPredictionMarketsOverview(
 }
 
 function handlePredictionMarkets(req: Request): Response {
-  const overview =
-    predictionMarketsOverview ?? refreshPredictionMarketsOverview();
+  const overview = refreshPredictionMarketsOverview(
+    effectiveKeeperBotHealthSnapshot(),
+  );
   return jsonResponse(req, overview.live, 200, {
     "cache-control": "no-store",
   });
 }
 
 function handlePredictionMarketsOverview(req: Request): Response {
-  const overview =
-    predictionMarketsOverview ?? refreshPredictionMarketsOverview();
+  const overview = refreshPredictionMarketsOverview(
+    effectiveKeeperBotHealthSnapshot(),
+  );
   return jsonResponse(req, overview, 200, {
     "cache-control": "no-store",
   });
@@ -2661,6 +2820,9 @@ function toStreamState(payload: unknown): StreamState | null {
       | StreamState["canonicalAuthority"]
       | null,
     deliveryHealth: asJsonRecord(candidate.deliveryHealth),
+    marketParity: asJsonRecord(candidate.marketParity) as
+      | StreamState["marketParity"]
+      | null,
   };
 }
 
@@ -2676,9 +2838,13 @@ function sendSse(
 }
 
 function broadcastStreamState(nextState: StreamState, event = "state"): void {
+  const publicState = currentPublicStreamState(
+    effectiveKeeperBotHealthSnapshot(),
+    nextState,
+  );
   for (const controller of sseClients) {
     try {
-      sendSse(controller, event, nextState.seq, nextState);
+      sendSse(controller, event, publicState.seq, publicState);
     } catch {
       sseClients.delete(controller);
     }
@@ -4476,9 +4642,14 @@ const server = Bun.serve({
     }
 
     if (req.method === "GET" && url.pathname === "/api/streaming/state") {
-      return jsonResponse(req, streamState, 200, {
+      return jsonResponse(
+        req,
+        currentPublicStreamState(effectiveKeeperBotHealthSnapshot()),
+        200,
+        {
         "cache-control": "no-store",
-      });
+        },
+      );
     }
 
     if (
@@ -4589,7 +4760,10 @@ const server = Bun.serve({
         start(controller) {
           sseController = controller;
           sseClients.add(controller);
-          sendSse(controller, "reset", streamState.seq, streamState);
+          const publicState = currentPublicStreamState(
+            effectiveKeeperBotHealthSnapshot(),
+          );
+          sendSse(controller, "reset", publicState.seq, publicState);
           controller.enqueue(encoder.encode(": connected\n\n"));
         },
         cancel() {

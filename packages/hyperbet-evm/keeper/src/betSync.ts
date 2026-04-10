@@ -3,6 +3,7 @@ import type {
   PredictionMarketLifecycleStatus,
   PredictionMarketWinner,
 } from "../../../hyperbet-chain-registry/src/index";
+import type { KeeperMarketParitySnapshot } from "../../../hyperbet-mm-core/src/index";
 import {
   normalizePredictionMarketTimestamp,
   normalizePredictionMarketWinner,
@@ -104,6 +105,7 @@ export type BetSyncEvent = {
   fallbackDestination: JsonRecord | null;
   canonicalAuthority: BetSyncCanonicalAuthority | null;
   deliveryHealth: JsonRecord | null;
+  marketParity?: KeeperMarketParitySnapshot | null;
 };
 
 export type BetSyncBootstrapState = {
@@ -133,6 +135,7 @@ export type StreamState = {
   fallbackDestination?: JsonRecord | null;
   canonicalAuthority?: BetSyncCanonicalAuthority | null;
   deliveryHealth?: JsonRecord | null;
+  marketParity?: KeeperMarketParitySnapshot | null;
 };
 
 export type PredictionMarketsDuelSnapshot = {
@@ -149,6 +152,7 @@ export type PredictionMarketsSurface = {
   duel: PredictionMarketsDuelSnapshot;
   markets: PredictionMarketLifecycleRecord[];
   updatedAt: number | null;
+  marketParity?: KeeperMarketParitySnapshot | null;
 };
 
 export type PredictionMarketsOverviewResponse = {
@@ -171,6 +175,82 @@ function asFiniteNumber(value: unknown): number | null {
 
 function asString(value: unknown): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value : null;
+}
+
+function normalizeMarketParity(
+  value: unknown,
+): KeeperMarketParitySnapshot | null {
+  const candidate = asRecord(value);
+  if (!candidate) return null;
+  const bundleId = asString(candidate.bundleId);
+  if (!bundleId) return null;
+  return {
+    bundleId,
+    duelKey: normalizeDuelKey(candidate.duelKey),
+    duelId: asString(candidate.duelId),
+    revision: Math.max(1, asFiniteNumber(candidate.revision) ?? 1),
+    requiredChains: Array.isArray(candidate.requiredChains)
+      ? candidate.requiredChains.filter(
+          (chain): chain is KeeperMarketParitySnapshot["requiredChains"][number] =>
+            typeof chain === "string",
+        )
+      : [],
+    confirmedChains: Array.isArray(candidate.confirmedChains)
+      ? candidate.confirmedChains.filter(
+          (chain): chain is KeeperMarketParitySnapshot["confirmedChains"][number] =>
+            typeof chain === "string",
+        )
+      : [],
+    state: (asString(candidate.state) as KeeperMarketParitySnapshot["state"]) ?? "preparing",
+    phase: asString(candidate.phase),
+    safeToBet: candidate.safeToBet === true,
+    openedAtMs: normalizePredictionMarketTimestamp(candidate.openedAtMs),
+    lockedAtMs: normalizePredictionMarketTimestamp(candidate.lockedAtMs),
+    resolvedAtMs: normalizePredictionMarketTimestamp(candidate.resolvedAtMs),
+    freezeReason: asString(candidate.freezeReason),
+    updatedAtMs: normalizePredictionMarketTimestamp(candidate.updatedAtMs) ?? 0,
+    receipts: Array.isArray(candidate.receipts)
+      ? candidate.receipts
+          .map((receipt) => {
+            const normalized = asRecord(receipt);
+            const chainKey = normalized && typeof normalized.chainKey === "string"
+              ? normalized.chainKey
+              : null;
+            if (!normalized || !chainKey) {
+              return null;
+            }
+            return {
+              chainKey,
+              preparedAtMs: normalizePredictionMarketTimestamp(
+                normalized.preparedAtMs,
+              ),
+              openedAtMs: normalizePredictionMarketTimestamp(normalized.openedAtMs),
+              lockedAtMs: normalizePredictionMarketTimestamp(normalized.lockedAtMs),
+              resolvedAtMs: normalizePredictionMarketTimestamp(
+                normalized.resolvedAtMs,
+              ),
+              cancelledAtMs: normalizePredictionMarketTimestamp(
+                normalized.cancelledAtMs,
+              ),
+              confirmedAtMs: normalizePredictionMarketTimestamp(
+                normalized.confirmedAtMs,
+              ),
+              lifecycleStatus:
+                (asString(normalized.lifecycleStatus) as PredictionMarketLifecycleStatus | null) ??
+                null,
+              txRef: asString(normalized.txRef),
+              note: asString(normalized.note),
+            };
+          })
+          .filter(
+            (
+              receipt,
+            ): receipt is KeeperMarketParitySnapshot["receipts"][number] => {
+              return receipt != null;
+            },
+          )
+      : [],
+  };
 }
 
 function normalizeDuelKey(value: unknown): string | null {
@@ -426,6 +506,7 @@ export function parseBetSyncEvent(payload: unknown): BetSyncEvent | null {
     fallbackDestination: asRecord(candidate.fallbackDestination),
     canonicalAuthority: normalizeCanonicalAuthority(candidate.canonicalAuthority),
     deliveryHealth: asRecord(candidate.deliveryHealth),
+    marketParity: normalizeMarketParity(candidate.marketParity),
   };
 }
 
@@ -505,6 +586,7 @@ export function toStreamStateFromBetSyncEvent(event: BetSyncEvent): StreamState 
     fallbackDestination: event.fallbackDestination,
     canonicalAuthority: event.canonicalAuthority,
     deliveryHealth: event.deliveryHealth,
+    marketParity: event.marketParity ?? null,
   };
 }
 
@@ -532,6 +614,7 @@ export function parsePredictionMarketsSurface(
         Boolean(market) && typeof market === "object",
     ) as PredictionMarketLifecycleRecord[],
     updatedAt: normalizePredictionMarketTimestamp(candidate.updatedAt),
+    marketParity: normalizeMarketParity(candidate.marketParity),
   };
 }
 
@@ -591,6 +674,7 @@ export function mergePredictionMarketsSurface(
     duel: mergeDuelSnapshot(previous.duel, next.duel),
     markets: Array.from(byChain.values()),
     updatedAt: next.updatedAt,
+    marketParity: next.marketParity ?? previous.marketParity ?? null,
   };
 }
 

@@ -71,6 +71,36 @@ describe("prediction market lifecycle helpers", () => {
           },
         },
       ],
+      marketParity: {
+        bundleId: "bundle-1",
+        duelKey: `0x${duelKey}`,
+        duelId: "duel-42",
+        revision: 3,
+        requiredChains: ["solana", "bsc"],
+        confirmedChains: ["solana"],
+        state: "awaiting_confirmations",
+        phase: "ANNOUNCEMENT",
+        safeToBet: false,
+        openedAtMs: null,
+        lockedAtMs: null,
+        resolvedAtMs: null,
+        freezeReason: null,
+        updatedAtMs: 777,
+        receipts: [
+          {
+            chainKey: "solana",
+            preparedAtMs: 700,
+            openedAtMs: null,
+            lockedAtMs: null,
+            resolvedAtMs: null,
+            cancelledAtMs: null,
+            confirmedAtMs: 701,
+            lifecycleStatus: "PENDING",
+            txRef: "sol-tx",
+            note: null,
+          },
+        ],
+      },
       updatedAt: 555,
     });
 
@@ -83,6 +113,18 @@ describe("prediction market lifecycle helpers", () => {
     expect(parsed?.markets[1]?.duelKey).toBeNull();
     expect(parsed?.markets[1]?.lifecycleStatus).toBe("PROPOSED");
     expect(parsed?.markets[1]?.metadata?.proposalId).toBe("proposal-1");
+    expect(parsed?.marketParity).toMatchObject({
+      bundleId: "bundle-1",
+      duelKey,
+      revision: 3,
+      state: "awaiting_confirmations",
+      safeToBet: false,
+    });
+    expect(parsed?.marketParity?.receipts[0]).toMatchObject({
+      chainKey: "solana",
+      lifecycleStatus: "PENDING",
+      txRef: "sol-tx",
+    });
   });
 
   it("selects the lifecycle record for a target chain", () => {
@@ -162,6 +204,23 @@ describe("prediction market lifecycle helpers", () => {
             syncedAt: 1,
           },
         ],
+        marketParity: {
+          bundleId: "bundle-live",
+          duelKey,
+          duelId: "duel-live",
+          revision: 9,
+          requiredChains: ["solana", "bsc"],
+          confirmedChains: ["solana", "bsc"],
+          state: "open",
+          phase: "COUNTDOWN",
+          safeToBet: true,
+          openedAtMs: 101,
+          lockedAtMs: null,
+          resolvedAtMs: null,
+          freezeReason: null,
+          updatedAtMs: 100,
+          receipts: [],
+        },
         updatedAt: 100,
       },
       recentSettlement: {
@@ -185,6 +244,8 @@ describe("prediction market lifecycle helpers", () => {
     expect(parsed?.recentSettlement?.duel.duelId).toBe("duel-previous");
     expect(parsed?.recentSettlement?.duel.agent1Name).toBe("Settled Alpha");
     expect(parsed?.recentSettlement?.duel.agent2Name).toBe("Settled Beta");
+    expect(parsed?.live?.marketParity?.state).toBe("open");
+    expect(parsed?.live?.marketParity?.safeToBet).toBe(true);
     expect(selectPredictionMarketOverviewRecord(parsed, "bsc", "live")?.marketRef).toBe(
       "market-live",
     );

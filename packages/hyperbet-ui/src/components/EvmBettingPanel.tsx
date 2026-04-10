@@ -56,6 +56,10 @@ import {
   normalizePredictionMarketDuelKeyHex,
   usePredictionMarketLifecycle,
 } from "../lib/predictionMarkets";
+import {
+  deriveMarketParityLabel,
+  type MarketParityInfo,
+} from "../lib/marketParity";
 import { selectConfiguredEvmPrivateKey } from "../lib/evmPrivateKey";
 import {
   derivePredictionMarketUiState,
@@ -177,6 +181,7 @@ interface EvmBettingPanelProps {
   locale?: UiLocale;
   lifecycleDuelOverride?: PredictionMarketsDuelSnapshot | null;
   lifecycleMarketOverride?: PredictionMarketLifecycleRecord | null;
+  lifecycleMarketParityOverride?: MarketParityInfo | null;
   onLifecycleRefreshRequested?: (() => void | Promise<void>) | null;
 }
 
@@ -192,6 +197,14 @@ function getEvmPanelCopy(locale: UiLocale) {
       resolutionProposed: "结果已提交，等待挑战期结束",
       resolutionChallenged: "结果已被挑战，结算已暂停",
       marketOpen: "市场开放中",
+      parityPreparing: "全链市场准备中",
+      parityAwaitingConfirmations: "等待最终确认",
+      parityBettingOpen: "投注已开启",
+      parityLocked: "已锁定",
+      parityResolved: "已结算",
+      parityFrozen: "已冻结",
+      parityCancelled: "已取消",
+      parityAborted: "启动已中止",
       refreshFailed: (message: string) => `刷新失败：${message}`,
       streamDriftDetected: "即将开放下注",
       walletNotConnected: "钱包未连接",
@@ -250,6 +263,14 @@ function getEvmPanelCopy(locale: UiLocale) {
     resolutionProposed: "Result proposed; challenge window active",
     resolutionChallenged: "Result challenged; settlement paused",
     marketOpen: "Market open",
+    parityPreparing: "Preparing markets on all chains",
+    parityAwaitingConfirmations: "Awaiting final confirmations",
+    parityBettingOpen: "Betting open",
+    parityLocked: "Locked",
+    parityResolved: "Resolved",
+    parityFrozen: "Frozen",
+    parityCancelled: "Cancelled",
+    parityAborted: "Start aborted",
     refreshFailed: (message: string) => `Refresh failed: ${message}`,
     streamDriftDetected: "Betting starts soon",
     walletNotConnected: "Wallet not connected",
@@ -407,6 +428,7 @@ export function EvmBettingPanel({
   locale,
   lifecycleDuelOverride = null,
   lifecycleMarketOverride = null,
+  lifecycleMarketParityOverride = null,
   onLifecycleRefreshRequested = null,
 }: EvmBettingPanelProps) {
   const resolvedLocale = resolveUiLocale(locale);
@@ -550,6 +572,7 @@ export function EvmBettingPanel({
   const {
     duel: fetchedLifecycleDuel,
     market: fetchedLifecycleMarket,
+    marketParity: fetchedLifecycleMarketParity,
     refresh: refreshLifecycle,
   } =
     usePredictionMarketLifecycle(lifecycleChainKey, {
@@ -558,6 +581,8 @@ export function EvmBettingPanel({
   const effectiveLifecycleDuel = lifecycleDuelOverride ?? fetchedLifecycleDuel;
   const effectiveLifecycleMarket =
     lifecycleMarketOverride ?? fetchedLifecycleMarket;
+  const effectiveLifecycleMarketParity =
+    lifecycleMarketParityOverride ?? fetchedLifecycleMarketParity;
   const pinnedE2eDuelKey =
     isE2eMode
       ? runtimeE2eOverride.duelKey ?? configuredE2eDuelKey
@@ -659,9 +684,23 @@ export function EvmBettingPanel({
       ),
     [copy, cycleAgent1, cycleAgent2, uiState.lifecycleStatus, uiState.winner],
   );
+  const parityStatusLabel = useMemo(
+    () => deriveMarketParityLabel(effectiveLifecycleMarketParity, copy),
+    [copy, effectiveLifecycleMarketParity],
+  );
   const lastLifecycleMismatchSignatureRef = useRef<string | null>(null);
 
   useEffect(() => {
+    if (parityStatusLabel) {
+      setStatus(parityStatusLabel);
+    }
+  }, [parityStatusLabel]);
+
+  useEffect(() => {
+    if (!import.meta.env.DEV) {
+      lastLifecycleMismatchSignatureRef.current = null;
+      return;
+    }
     if (
       authoritativeLifecycleDuelKey == null ||
       fetchedLifecycleDuelKey == null ||
@@ -793,13 +832,15 @@ export function EvmBettingPanel({
         },
       );
       setStatus(
-        getLifecycleStatusLabel(
+        parityStatusLabel ??
+          getLifecycleStatusLabel(
           nextUiState.lifecycleStatus,
           nextUiState.winner,
           cycleAgent1,
           cycleAgent2,
           copy,
-        ) ?? copy.waitingForMarketOperator,
+        ) ??
+          copy.waitingForMarketOperator,
       );
     };
 
@@ -810,7 +851,11 @@ export function EvmBettingPanel({
         setPosition(null);
         setBids([]);
         setAsks([]);
-        setStatus(lifecycleStatusLabel ?? copy.waitingForLiveDuel);
+        setStatus(
+          parityStatusLabel ??
+            lifecycleStatusLabel ??
+            copy.waitingForLiveDuel,
+        );
         return;
       }
 
@@ -830,7 +875,11 @@ export function EvmBettingPanel({
         setPosition(null);
         setBids([]);
         setAsks([]);
-        setStatus(lifecycleStatusLabel ?? copy.waitingForMarketOperator);
+        setStatus(
+          parityStatusLabel ??
+            lifecycleStatusLabel ??
+            copy.waitingForMarketOperator,
+        );
         return;
       }
 
@@ -945,6 +994,7 @@ export function EvmBettingPanel({
     effectivePosition,
     activeLifecycleMarket,
     lifecycleStatusLabel,
+    parityStatusLabel,
     nativeDecimals,
     publicClient,
     updateChartAndTrades,
