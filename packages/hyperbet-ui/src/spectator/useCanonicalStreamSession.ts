@@ -642,9 +642,18 @@ export function normalizeCanonicalStreamSession(
 export function canonicalSessionToStreamingState(
   session: CanonicalStreamSession,
 ): StreamingStateUpdate {
+  const normalizedCycle: StreamingStateUpdate["cycle"] = {
+    ...session.cycle,
+    phase: session.phase ?? session.cycle.phase,
+    phaseVersion: session.phaseVersion ?? session.cycle.phaseVersion ?? null,
+    broadcastTimeline: session.cycle.broadcastTimeline ?? null,
+    rendererHealth:
+      session.rendererHealth ?? session.cycle.rendererHealth ?? null,
+  };
+
   return {
     type: "STREAMING_STATE_UPDATE",
-    cycle: session.cycle,
+    cycle: normalizedCycle,
     leaderboard: session.leaderboard,
     cameraTarget: session.cameraTarget,
     seq: session.seq,

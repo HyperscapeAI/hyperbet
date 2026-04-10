@@ -2500,6 +2500,21 @@ function toStreamState(payload: unknown): StreamState | null {
       Number.isFinite(candidate.emittedAt)
         ? candidate.emittedAt
         : Date.now(),
+    phase:
+      typeof candidate.phase === "string" || candidate.phase === null
+        ? candidate.phase
+        : null,
+    phaseVersion:
+      typeof candidate.phaseVersion === "number" &&
+      Number.isFinite(candidate.phaseVersion)
+        ? candidate.phaseVersion
+        : null,
+    broadcastTimeline: asJsonRecord(candidate.broadcastTimeline) as
+      | StreamState["broadcastTimeline"]
+      | null,
+    rendererHealth: asJsonRecord(candidate.rendererHealth) as
+      | StreamState["rendererHealth"]
+      | null,
     rendererMetrics: asJsonRecord(candidate.rendererMetrics) as
       | StreamState["rendererMetrics"]
       | null,

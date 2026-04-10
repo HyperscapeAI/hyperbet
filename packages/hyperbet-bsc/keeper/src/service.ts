@@ -2135,6 +2135,19 @@ function toStreamState(payload: any): StreamState | null {
       Number.isFinite(candidate.emittedAt)
         ? candidate.emittedAt
         : Date.now(),
+    phase:
+      typeof candidate.phase === "string" || candidate.phase === null
+        ? candidate.phase
+        : null,
+    phaseVersion:
+      typeof candidate.phaseVersion === "number" &&
+      Number.isFinite(candidate.phaseVersion)
+        ? candidate.phaseVersion
+        : null,
+    broadcastTimeline: asRecord(candidate.broadcastTimeline),
+    rendererHealth: asRecord(candidate.rendererHealth),
+    canonicalAuthority: asRecord(candidate.canonicalAuthority),
+    sourceRuntime: asRecord(candidate.sourceRuntime),
   };
 }
 

@@ -11,6 +11,7 @@ import {
   selectBetSurfaceStreamUrl,
 } from "../src/lib/streamSession";
 import {
+  canonicalSessionToStreamingState,
   consumeDueCanonicalStreamSession,
   normalizeCanonicalStreamSession,
   queueCanonicalStreamSession,
@@ -352,6 +353,55 @@ describe("normalizeCanonicalStreamSession", () => {
     expect(session?.cycle.betCloseTime).toBe(2000);
     expect(session?.cycle.fightStartTime).toBe(3000);
     expect(session?.cycle.duelEndTime).toBe(13000);
+  });
+
+  it("projects top-level phase and renderer health back into streaming updates", () => {
+    const session = normalizeCanonicalStreamSession({
+      schemaVersion: 3,
+      seq: 11,
+      emittedAt: 1234567892,
+      phase: "COUNTDOWN",
+      phaseVersion: 19,
+      cycle: {
+        cycleId: "cycle-3",
+        phase: "FIGHTING",
+        phaseVersion: 3,
+        rendererHealth: {
+          ready: true,
+          degradedReason: null,
+          updatedAt: 1234567892,
+        },
+        broadcastTimeline: {
+          phase: "COUNTDOWN",
+          betOpenTime: 5000,
+          betCloseTime: 6000,
+          fightStartTime: 7000,
+          duelEndTime: 13000,
+          presentationDelayMs: 4000,
+          updatedAt: 1234567892,
+        },
+      },
+      rendererHealth: {
+        ready: false,
+        degradedReason: "visual_change_stale",
+        updatedAt: 1234567892,
+      },
+    });
+
+    expect(session).not.toBeNull();
+    expect(canonicalSessionToStreamingState(session!)).toMatchObject({
+      cycle: {
+        phase: "COUNTDOWN",
+        phaseVersion: 19,
+        broadcastTimeline: {
+          phase: "COUNTDOWN",
+        },
+        rendererHealth: {
+          ready: false,
+          degradedReason: "visual_change_stale",
+        },
+      },
+    });
   });
 });
 
@@ -886,6 +936,55 @@ describe("selectBetSurfaceStreamUrl", () => {
     expect(selection.activeStreamUrl).toBe(
       "https://fallback.example/live/stream.m3u8",
     );
+  });
+});
+
+describe("deriveBettorStreamUiState", () => {
+  it("treats stale renderer health as degraded while playback stays mounted", () => {
+    const session = normalizeCanonicalStreamSession({
+      seq: 33,
+      emittedAt: 1,
+      cycle: {
+        cycleId: "cycle-1",
+        phase: "FIGHTING",
+        duelId: "duel-1",
+        duelKeyHex: "deadbeef",
+      },
+      rendererHealth: {
+        ready: false,
+        degradedReason: "visual_change_stale",
+        updatedAt: 1,
+      },
+      authorityHealth: {
+        ready: true,
+        degradedReason: null,
+        updatedAt: 1,
+      },
+      sourceRuntime: makeSourceRuntime(),
+      channel: makeCanonicalChannel(),
+      playback: {
+        url: "https://video.example/manifest.m3u8?protocol=llhls",
+        kind: "llhls",
+        renderSessionId: "render-33",
+        presentationDelayMs: 4000,
+      },
+    });
+
+    const state = deriveBettorStreamUiState({
+      session,
+      playerStatus: {
+        ready: true,
+        status: "playing",
+        playbackStarted: true,
+        syncState: "buffering",
+        syncDeltaMs: 1800,
+      },
+      authorityHealth: session?.authorityHealth ?? null,
+      publicReadiness: session?.publicReadiness ?? null,
+      sourceRuntime: session?.sourceRuntime ?? null,
+    });
+
+    expect(state).toBe("degraded");
   });
 });
 

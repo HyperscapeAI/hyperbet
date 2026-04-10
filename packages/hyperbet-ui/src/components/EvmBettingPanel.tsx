@@ -553,13 +553,10 @@ export function EvmBettingPanel({
     refresh: refreshLifecycle,
   } =
     usePredictionMarketLifecycle(lifecycleChainKey, {
-      disabled:
-        !chainConfig ||
-        lifecycleDuelOverride != null ||
-        lifecycleMarketOverride != null,
+      disabled: !chainConfig,
     });
-  const effectiveLifecycleDuel = lifecycleDuelOverride ?? lifecycleDuel;
-  const effectiveLifecycleMarket = lifecycleMarketOverride ?? lifecycleMarket;
+  const effectiveLifecycleDuel = lifecycleDuel ?? lifecycleDuelOverride;
+  const effectiveLifecycleMarket = lifecycleMarket ?? lifecycleMarketOverride;
   const pinnedE2eDuelKey =
     isE2eMode
       ? runtimeE2eOverride.duelKey ?? configuredE2eDuelKey
@@ -579,6 +576,18 @@ export function EvmBettingPanel({
     () => normalizePredictionMarketDuelKeyHex(streamedDuelKeyHex),
     [streamedDuelKeyHex],
   );
+  const authoritativeLifecycleDuelKey = useMemo(
+    () =>
+      pinnedE2eDuelKey ??
+      normalizePredictionMarketDuelKeyHex(
+        lifecycleMarket?.duelKey ?? lifecycleDuel?.duelKey,
+      ),
+    [
+      lifecycleDuel?.duelKey,
+      lifecycleMarket?.duelKey,
+      pinnedE2eDuelKey,
+    ],
+  );
   const lifecycleMatchesActiveDuel =
     lifecycleDuelKey == null || lifecycleDuelKey === liveLifecycleDuelKey;
   const activeLifecycleDuel = lifecycleMatchesActiveDuel
@@ -588,9 +597,9 @@ export function EvmBettingPanel({
     ? effectiveLifecycleMarket
     : null;
   const streamDriftDetected =
-    Boolean(liveLifecycleDuelKey) &&
+    Boolean(authoritativeLifecycleDuelKey) &&
     pinnedE2eDuelKey == null &&
-    (streamedDuelKey == null || streamedDuelKey !== liveLifecycleDuelKey);
+    (streamedDuelKey == null || streamedDuelKey !== authoritativeLifecycleDuelKey);
   const nativeDecimals = chainConfig?.nativeCurrency.decimals ?? 18;
   const chainNativeSymbol: Record<string, string> = { bsc: "BNB", base: "ETH", avax: "AVAX" };
   const nativeSymbol = chainConfig?.nativeCurrency.symbol ?? chainNativeSymbol[activeChain] ?? "ETH";

@@ -48,6 +48,8 @@ export function deriveBettorStreamUiState(
     input.session?.sourceRuntime ??
     input.session?.status.sourceRuntime ??
     null;
+  const rendererHealth =
+    input.session?.rendererHealth ?? input.session?.status.renderer ?? null;
   const playerStatus = input.playerStatus;
 
   if (!input.session) {
@@ -60,6 +62,9 @@ export function deriveBettorStreamUiState(
     return playerStatus?.playbackStarted ? "degraded" : "connecting";
   }
   if (publicReadiness?.ready === false) {
+    return playerStatus?.playbackStarted ? "degraded" : "connecting";
+  }
+  if (rendererHealth?.ready === false) {
     return playerStatus?.playbackStarted ? "degraded" : "connecting";
   }
   if (!playerStatus) {

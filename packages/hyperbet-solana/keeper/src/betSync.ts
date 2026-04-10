@@ -119,6 +119,10 @@ export type StreamState = {
   cameraTarget: string | null;
   seq: number;
   emittedAt: number;
+  phase?: string | null;
+  phaseVersion?: number | null;
+  broadcastTimeline?: BetSyncBroadcastTimeline | null;
+  rendererHealth?: BetSyncRendererHealth | null;
   canonicalAuthority?: BetSyncCanonicalAuthority | null;
   sourceRuntime?: JsonRecord | null;
 };
@@ -468,7 +472,12 @@ export function toStreamStateFromBetSyncEvent(event: BetSyncEvent): StreamState 
     cameraTarget: event.cameraTarget,
     seq: event.seq,
     emittedAt: event.emittedAt,
+    phase: event.phase,
+    phaseVersion: event.phaseVersion,
+    broadcastTimeline: event.broadcastTimeline,
+    rendererHealth: event.rendererHealth,
     canonicalAuthority: event.canonicalAuthority,
+    sourceRuntime: event.sourceRuntime,
   };
 }
 

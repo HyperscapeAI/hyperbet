@@ -214,6 +214,17 @@ describe("bet-sync helpers", () => {
       updatedAt: 1_712_345_679_000,
     });
     expect(nextState.cycle.betCloseTime).toBe(2_000);
+    expect(nextState.phase).toBe("FIGHTING");
+    expect(nextState.phaseVersion).toBeNull();
+    expect(nextState.broadcastTimeline).toEqual({
+      phase: "COUNTDOWN",
+      betOpenTime: 5_000,
+      betCloseTime: 6_000,
+      fightStartTime: 7_000,
+      duelEndTime: 13_000,
+      presentationDelayMs: 4_000,
+      updatedAt: 1_712_345_679_000,
+    });
   });
 
   test("parses bootstrap state with latest event", () => {

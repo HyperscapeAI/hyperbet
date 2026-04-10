@@ -549,8 +549,12 @@ export function App() {
   const activeEvmChain = activeChain === "solana" ? null : activeChain;
   const activeChainDisplay = CHAIN_DISPLAY[activeChain];
   const activeChainLabel = activeChainDisplay.shortName;
+  const activeEvmChainConfig =
+    activeEvmChain != null ? getEvmChainConfig(activeEvmChain) : null;
   const activeEvmChainLabel =
     activeEvmChain != null ? CHAIN_DISPLAY[activeEvmChain].shortName : null;
+  const activeEvmCollateralSymbol =
+    activeEvmChainConfig?.nativeCurrency.symbol ?? activeEvmChainLabel ?? null;
   const linkedEvmWalletPlatform =
     connectedEvmChain != null
       ? (connectedEvmChain.toUpperCase() as "BSC" | "BASE" | "AVAX")
@@ -663,15 +667,10 @@ export function App() {
     await refreshMarketOverview();
   }, [refreshMarketOverview]);
   const liveCycle = streamingState?.cycle ?? null;
-  const lifecycleDuelKey = normalizePredictionMarketDuelKeyHex(
-    liveOverviewDuel?.duelKey ?? null,
-  );
   const { activeStreamUrl, preloadStreamUrl } = selectBetSurfaceStreamUrl({
     authorityHealth: canonicalAuthorityHealth,
     fallbackStreamIndex: 0,
     fallbackStreamSources: [],
-    lifecycleDuelId: liveOverviewDuel?.duelId ?? null,
-    lifecycleDuelKey,
     rendererReady: canonicalRendererHealth?.ready ?? null,
     session: canonicalStreamSession,
   });
@@ -715,6 +714,43 @@ export function App() {
     canonicalRendererHealth?.ready,
     canonicalStreamSession,
     copy.waitingForStream,
+  ]);
+  const canonicalPhase =
+    canonicalStreamSession?.phase ?? liveCycle?.phase ?? null;
+  const rendererDegradedOverlayMessage = useMemo(() => {
+    if (activeStreamUrl.length === 0 || canonicalRendererHealth?.ready !== false) {
+      return null;
+    }
+    return describeCanonicalRendererDegradedReason(
+      canonicalRendererHealth.degradedReason,
+      copy.waitingForStream,
+    );
+  }, [
+    activeStreamUrl,
+    canonicalRendererHealth?.degradedReason,
+    canonicalRendererHealth?.ready,
+    copy.waitingForStream,
+  ]);
+
+  useEffect(() => {
+    const overviewPhase = liveOverviewDuel?.phase?.trim() || null;
+    if (!canonicalPhase || !overviewPhase || canonicalPhase === overviewPhase) {
+      return;
+    }
+    console.warn("[hyperbet] lifecycle_mismatch", {
+      chain: activeChain,
+      canonicalPhase,
+      overviewPhase,
+      canonicalDuelId: canonicalStreamSession?.duelId ?? liveCycle?.duelId ?? null,
+      overviewDuelId: liveOverviewDuel?.duelId ?? null,
+    });
+  }, [
+    activeChain,
+    canonicalPhase,
+    canonicalStreamSession?.duelId,
+    liveCycle?.duelId,
+    liveOverviewDuel?.duelId,
+    liveOverviewDuel?.phase,
   ]);
 
   const handleLocaleChange = useCallback((nextLocale: UiLocale) => {
@@ -1018,7 +1054,7 @@ export function App() {
   };
   const effCycle = {
     cycleId: liveCycle?.cycleId ?? "cycle-0",
-    phase: liveCycle?.phase ?? "IDLE",
+    phase: canonicalPhase ?? liveCycle?.phase ?? "IDLE",
     countdown: liveCycle?.countdown ?? null,
     winnerName: liveCycle?.winnerName ?? null,
     winReason: liveCycle?.winReason ?? null,
@@ -1030,9 +1066,9 @@ export function App() {
     (typeof effNoPot === "number" ? effNoPot : 0);
   const effPhaseLabel = getPhaseLabel(effCycle.phase, effCycle.countdown, copy);
 
-  const streamPhaseText = liveCycle?.phase ?? null;
+  const streamPhaseText = canonicalPhase;
   const marketStatusText = getMarketStatusLabel(
-    streamPhaseText ?? currentMatch?.status ?? copy.phaseLive,
+    streamPhaseText ?? copy.phaseIdle,
     copy,
   );
   const countdownText = liveCycle
@@ -1114,7 +1150,7 @@ export function App() {
           locale={locale}
           gameApiUrl={GAME_API_URL}
           mockData={mockData}
-          collateralSymbol={activeEvmChainLabel ?? ""}
+          collateralSymbol={activeEvmCollateralSymbol ?? ""}
           chainLabel={activeEvmChainLabel ?? ""}
         />
       )}
@@ -1968,6 +2004,14 @@ export function App() {
                               </svg>
                             )}
                           </button>
+                        </div>
+                      ) : null}
+                      {rendererDegradedOverlayMessage ? (
+                        <div className="hm-stream-degraded-overlay" role="status">
+                          <div className="hm-stream-degraded-backdrop" />
+                          <span className="hm-stream-degraded-message">
+                            {rendererDegradedOverlayMessage}
+                          </span>
                         </div>
                       ) : null}
                       {!activeStreamUrl ? (
