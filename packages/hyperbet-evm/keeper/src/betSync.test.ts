@@ -58,6 +58,164 @@ describe("bet-sync helpers", () => {
     });
   });
 
+  test("preserves canonical delivery and authority contract fields", () => {
+    const parsed = parseBetSyncEvent({
+      sourceEpoch: 7,
+      seq: 12,
+      emittedAt: 1_712_345_678_000,
+      channel: {
+        id: "main",
+        mode: "always_on",
+      },
+      publicReadiness: {
+        ready: false,
+        reason: "manifest_stale",
+      },
+      canonicalDestination: {
+        id: "canonical-cloudflare",
+        playbackReady: false,
+      },
+      fallbackDestination: {
+        id: "fallback-self-hls",
+        playbackReady: true,
+      },
+      delivery: {
+        mode: "self_hls",
+        provider: "self_hls",
+        playbackUrl: "https://example.com/live/stream.m3u8",
+        hlsUrl: "https://example.com/live/stream.m3u8",
+        llhlsUrl: null,
+        ingestUrl: null,
+      },
+      canonicalAuthority: {
+        providerLive: true,
+        playbackProbeReady: false,
+        decision: "blocked",
+        reason: "probe_unready",
+        revision: 9,
+        updatedAt: 1_712_345_678_100,
+        liveInputId: "live-input-123",
+        videoUid: "video-456",
+        lifecycleStatus: "connected",
+        playbackUrl: "https://video.example/live.m3u8?protocol=llhls",
+        playbackProbeStatusCode: 503,
+        playbackManifestStatus: "stale",
+      },
+      sourceRuntime: {
+        ready: false,
+        statusSource: "external_worker",
+        captureMode: "cdp",
+        degradedReason: "worker_missing",
+      },
+      deliveryHealth: {
+        ready: false,
+        degradedReason: "manifest_stale",
+      },
+    });
+
+    expect(parsed).not.toBeNull();
+    expect(parsed?.delivery).toEqual({
+      mode: "self_hls",
+      provider: "self_hls",
+      playbackUrl: "https://example.com/live/stream.m3u8",
+      hlsUrl: "https://example.com/live/stream.m3u8",
+      llhlsUrl: null,
+      ingestUrl: null,
+    });
+    expect(parsed?.publicReadiness).toEqual({
+      ready: false,
+      reason: "manifest_stale",
+    });
+    expect(parsed?.canonicalAuthority).toEqual({
+      providerLive: true,
+      playbackProbeReady: false,
+      decision: "blocked",
+      reason: "probe_unready",
+      revision: 9,
+      updatedAt: 1_712_345_678_100,
+      liveInputId: "live-input-123",
+      videoUid: "video-456",
+      lifecycleStatus: "connected",
+      playbackUrl: "https://video.example/live.m3u8?protocol=llhls",
+      playbackProbeStatusCode: 503,
+      playbackManifestStatus: "stale",
+    });
+
+    expect(toStreamStateFromBetSyncEvent(parsed!)).toMatchObject({
+      delivery: {
+        mode: "self_hls",
+        provider: "self_hls",
+        playbackUrl: "https://example.com/live/stream.m3u8",
+      },
+      publicReadiness: {
+        ready: false,
+        reason: "manifest_stale",
+      },
+      canonicalAuthority: {
+        decision: "blocked",
+        reason: "probe_unready",
+        revision: 9,
+      },
+      sourceRuntime: {
+        ready: false,
+        statusSource: "external_worker",
+        captureMode: "cdp",
+      },
+      deliveryHealth: {
+        ready: false,
+        degradedReason: "manifest_stale",
+      },
+    });
+  });
+
+  test("preserves broadcastTimeline without disturbing legacy cycle fields", () => {
+    const parsed = parseBetSyncEvent({
+      schemaVersion: 3,
+      sourceEpoch: 8,
+      seq: 13,
+      emittedAt: 1_712_345_679_000,
+      duelId: "duel-2",
+      duelKey: "22".repeat(32),
+      phase: "FIGHTING",
+      betOpenTime: 1_000,
+      betCloseTime: 2_000,
+      fightStartTime: 3_000,
+      duelEndTime: 9_000,
+      broadcastTimeline: {
+        phase: "COUNTDOWN",
+        betOpenTime: 5_000,
+        betCloseTime: 6_000,
+        fightStartTime: 7_000,
+        duelEndTime: 13_000,
+        presentationDelayMs: 4_000,
+        updatedAt: 1_712_345_679_000,
+      },
+    });
+
+    expect(parsed?.broadcastTimeline).toEqual({
+      phase: "COUNTDOWN",
+      betOpenTime: 5_000,
+      betCloseTime: 6_000,
+      fightStartTime: 7_000,
+      duelEndTime: 13_000,
+      presentationDelayMs: 4_000,
+      updatedAt: 1_712_345_679_000,
+    });
+    expect(parsed?.betCloseTime).toBe(2_000);
+
+    const nextState = toStreamStateFromBetSyncEvent(parsed!);
+    expect(nextState.cycle.broadcastTimeline).toEqual({
+      phase: "COUNTDOWN",
+      betOpenTime: 5_000,
+      betCloseTime: 6_000,
+      fightStartTime: 7_000,
+      duelEndTime: 13_000,
+      presentationDelayMs: 4_000,
+      updatedAt: 1_712_345_679_000,
+    });
+    expect(nextState.cycle.betCloseTime).toBe(2_000);
+  });
+
   test("parses bootstrap state with latest event", () => {
     const parsed = parseBetSyncBootstrapState({
       sourceEpoch: 9,
@@ -83,6 +241,71 @@ describe("bet-sync helpers", () => {
         duelId: "duel-88",
         phase: "COUNTDOWN",
       },
+    });
+  });
+
+  test("retains latest event delivery fields during bootstrap", () => {
+    const parsed = parseBetSyncBootstrapState({
+      sourceEpoch: 9,
+      latestSeq: 101,
+      latestEvent: {
+        sourceEpoch: 9,
+        seq: 101,
+        emittedAt: 1_712_345_678_999,
+        delivery: {
+          mode: "self_hls",
+          provider: "self_hls",
+          playbackUrl: "https://example.com/live/stream.m3u8",
+          hlsUrl: "https://example.com/live/stream.m3u8",
+          llhlsUrl: null,
+          ingestUrl: null,
+        },
+        publicReadiness: {
+          ready: true,
+          reason: null,
+        },
+        canonicalAuthority: {
+          providerLive: true,
+          playbackProbeReady: true,
+          decision: "ready",
+          reason: null,
+          revision: 5,
+          updatedAt: 1_712_345_679_111,
+          liveInputId: "live-input-123",
+          videoUid: "video-456",
+          lifecycleStatus: "connected",
+          playbackUrl: "https://video.example/live.m3u8",
+          playbackProbeStatusCode: 200,
+          playbackManifestStatus: "ok",
+        },
+      },
+    });
+
+    expect(parsed?.latestEvent?.delivery).toEqual({
+      mode: "self_hls",
+      provider: "self_hls",
+      playbackUrl: "https://example.com/live/stream.m3u8",
+      hlsUrl: "https://example.com/live/stream.m3u8",
+      llhlsUrl: null,
+      ingestUrl: null,
+    });
+    expect(parsed?.latestEvent?.publicReadiness).toEqual({
+      ready: true,
+      reason: null,
+    });
+    expect(parsed?.latestEvent?.canonicalAuthority).toEqual({
+      providerLive: true,
+      playbackProbeReady: true,
+      decision: "ready",
+      reason: null,
+      revision: 5,
+      updatedAt: 1_712_345_679_111,
+      liveInputId: "live-input-123",
+      videoUid: "video-456",
+      lifecycleStatus: "connected",
+      playbackUrl: "https://video.example/live.m3u8",
+      playbackProbeStatusCode: 200,
+      playbackManifestStatus: "ok",
     });
   });
 

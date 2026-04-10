@@ -217,6 +217,12 @@ type SolanaKeeperContext = {
   marketProgramId: ReturnType<typeof createPrograms>["goldClobMarket"]["programId"];
 };
 
+function asJsonRecord(value: unknown): JsonRecord | null {
+  return value && typeof value === "object"
+    ? (value as JsonRecord)
+    : null;
+}
+
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -2494,6 +2500,19 @@ function toStreamState(payload: unknown): StreamState | null {
       Number.isFinite(candidate.emittedAt)
         ? candidate.emittedAt
         : Date.now(),
+    rendererMetrics: asJsonRecord(candidate.rendererMetrics) as
+      | StreamState["rendererMetrics"]
+      | null,
+    delivery: asJsonRecord(candidate.delivery) as StreamState["delivery"] | null,
+    sourceRuntime: asJsonRecord(candidate.sourceRuntime),
+    channel: asJsonRecord(candidate.channel),
+    publicReadiness: asJsonRecord(candidate.publicReadiness),
+    canonicalDestination: asJsonRecord(candidate.canonicalDestination),
+    fallbackDestination: asJsonRecord(candidate.fallbackDestination),
+    canonicalAuthority: asJsonRecord(candidate.canonicalAuthority) as
+      | StreamState["canonicalAuthority"]
+      | null,
+    deliveryHealth: asJsonRecord(candidate.deliveryHealth),
   };
 }
 

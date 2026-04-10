@@ -16,6 +16,59 @@ export type BetSyncRendererHealth = {
   updatedAt: number | null;
 };
 
+export type BetSyncHlsManifest = {
+  updatedAt: number | null;
+  mediaSequence: number | null;
+};
+
+export type BetSyncRendererMetrics = {
+  captureFps: number | null;
+  encodeFps: number | null;
+  droppedFrames: number | null;
+  renderTick: number | null;
+  duelStateTick: number | null;
+  latestFrameAt: number | null;
+  latestRenderTickAt: number | null;
+  latestDuelStateTickAt: number | null;
+  latestVisualChangeAt: number | null;
+  visualChangeAgeMs: number | null;
+  hlsManifest: BetSyncHlsManifest | null;
+};
+
+export type BetSyncDelivery = {
+  mode: "self_hls" | "external_hls";
+  provider: string | null;
+  playbackUrl: string | null;
+  hlsUrl: string | null;
+  llhlsUrl: string | null;
+  ingestUrl: string | null;
+};
+
+export type BetSyncBroadcastTimeline = {
+  phase: string | null;
+  betOpenTime: number | null;
+  betCloseTime: number | null;
+  fightStartTime: number | null;
+  duelEndTime: number | null;
+  presentationDelayMs: number;
+  updatedAt: number | null;
+};
+
+export type BetSyncCanonicalAuthority = {
+  providerLive: boolean;
+  playbackProbeReady: boolean;
+  decision: string | null;
+  reason: string | null;
+  revision: number | null;
+  updatedAt: number | null;
+  liveInputId: string | null;
+  videoUid: string | null;
+  lifecycleStatus: string | null;
+  playbackUrl: string | null;
+  playbackProbeStatusCode: number | null;
+  playbackManifestStatus: string | null;
+};
+
 export type BetSyncEvent = {
   schemaVersion: number;
   sourceEpoch: number;
@@ -25,6 +78,7 @@ export type BetSyncEvent = {
   duelKey: string | null;
   phase: string | null;
   phaseVersion: number | null;
+  broadcastTimeline: BetSyncBroadcastTimeline | null;
   betOpenTime: number | null;
   betCloseTime: number | null;
   fightStartTime: number | null;
@@ -40,6 +94,15 @@ export type BetSyncEvent = {
   leaderboard: JsonRecord[];
   cameraTarget: string | null;
   rendererHealth: BetSyncRendererHealth | null;
+  rendererMetrics: BetSyncRendererMetrics | null;
+  delivery: BetSyncDelivery | null;
+  sourceRuntime: JsonRecord | null;
+  channel: JsonRecord | null;
+  publicReadiness: JsonRecord | null;
+  canonicalDestination: JsonRecord | null;
+  fallbackDestination: JsonRecord | null;
+  canonicalAuthority: BetSyncCanonicalAuthority | null;
+  deliveryHealth: JsonRecord | null;
 };
 
 export type BetSyncBootstrapState = {
@@ -56,6 +119,15 @@ export type StreamState = {
   cameraTarget: string | null;
   seq: number;
   emittedAt: number;
+  rendererMetrics?: BetSyncRendererMetrics | null;
+  delivery?: BetSyncDelivery | null;
+  sourceRuntime?: JsonRecord | null;
+  channel?: JsonRecord | null;
+  publicReadiness?: JsonRecord | null;
+  canonicalDestination?: JsonRecord | null;
+  fallbackDestination?: JsonRecord | null;
+  canonicalAuthority?: BetSyncCanonicalAuthority | null;
+  deliveryHealth?: JsonRecord | null;
 };
 
 export type PredictionMarketsDuelSnapshot = {
@@ -202,6 +274,98 @@ function normalizeRendererHealth(value: unknown): BetSyncRendererHealth | null {
   };
 }
 
+function normalizeHlsManifest(value: unknown): BetSyncHlsManifest | null {
+  const candidate = asRecord(value);
+  if (!candidate) return null;
+  return {
+    updatedAt: normalizePredictionMarketTimestamp(candidate.updatedAt),
+    mediaSequence: asFiniteNumber(candidate.mediaSequence),
+  };
+}
+
+function normalizeRendererMetrics(
+  value: unknown,
+): BetSyncRendererMetrics | null {
+  const candidate = asRecord(value);
+  if (!candidate) return null;
+  return {
+    captureFps: asFiniteNumber(candidate.captureFps),
+    encodeFps: asFiniteNumber(candidate.encodeFps),
+    droppedFrames: asFiniteNumber(candidate.droppedFrames),
+    renderTick: asFiniteNumber(candidate.renderTick),
+    duelStateTick: asFiniteNumber(candidate.duelStateTick),
+    latestFrameAt: normalizePredictionMarketTimestamp(candidate.latestFrameAt),
+    latestRenderTickAt: normalizePredictionMarketTimestamp(
+      candidate.latestRenderTickAt,
+    ),
+    latestDuelStateTickAt: normalizePredictionMarketTimestamp(
+      candidate.latestDuelStateTickAt,
+    ),
+    latestVisualChangeAt: normalizePredictionMarketTimestamp(
+      candidate.latestVisualChangeAt,
+    ),
+    visualChangeAgeMs: asFiniteNumber(candidate.visualChangeAgeMs),
+    hlsManifest: normalizeHlsManifest(candidate.hlsManifest),
+  };
+}
+
+function normalizeDelivery(value: unknown): BetSyncDelivery | null {
+  const candidate = asRecord(value);
+  if (!candidate) return null;
+  const mode = asString(candidate.mode);
+  if (mode !== "self_hls" && mode !== "external_hls") {
+    return null;
+  }
+  return {
+    mode,
+    provider: asString(candidate.provider),
+    playbackUrl: asString(candidate.playbackUrl),
+    hlsUrl: asString(candidate.hlsUrl),
+    llhlsUrl: asString(candidate.llhlsUrl),
+    ingestUrl: asString(candidate.ingestUrl),
+  };
+}
+
+function normalizeBroadcastTimeline(
+  value: unknown,
+): BetSyncBroadcastTimeline | null {
+  const candidate = asRecord(value);
+  if (!candidate) return null;
+  return {
+    phase: asString(candidate.phase),
+    betOpenTime: normalizePredictionMarketTimestamp(candidate.betOpenTime),
+    betCloseTime: normalizePredictionMarketTimestamp(candidate.betCloseTime),
+    fightStartTime: normalizePredictionMarketTimestamp(candidate.fightStartTime),
+    duelEndTime: normalizePredictionMarketTimestamp(candidate.duelEndTime),
+    presentationDelayMs: Math.max(
+      0,
+      asFiniteNumber(candidate.presentationDelayMs) ?? 0,
+    ),
+    updatedAt: normalizePredictionMarketTimestamp(candidate.updatedAt),
+  };
+}
+
+function normalizeCanonicalAuthority(
+  value: unknown,
+): BetSyncCanonicalAuthority | null {
+  const candidate = asRecord(value);
+  if (!candidate) return null;
+  return {
+    providerLive: candidate.providerLive === true,
+    playbackProbeReady: candidate.playbackProbeReady === true,
+    decision: asString(candidate.decision),
+    reason: asString(candidate.reason),
+    revision: asFiniteNumber(candidate.revision),
+    updatedAt: normalizePredictionMarketTimestamp(candidate.updatedAt),
+    liveInputId: asString(candidate.liveInputId),
+    videoUid: asString(candidate.videoUid),
+    lifecycleStatus: asString(candidate.lifecycleStatus),
+    playbackUrl: asString(candidate.playbackUrl),
+    playbackProbeStatusCode: asFiniteNumber(candidate.playbackProbeStatusCode),
+    playbackManifestStatus: asString(candidate.playbackManifestStatus),
+  };
+}
+
 export function parseBetSyncEvent(payload: unknown): BetSyncEvent | null {
   const candidate = asRecord(payload);
   if (!candidate) return null;
@@ -214,6 +378,10 @@ export function parseBetSyncEvent(payload: unknown): BetSyncEvent | null {
     return null;
   }
 
+  const broadcastTimeline = normalizeBroadcastTimeline(
+    candidate.broadcastTimeline,
+  );
+
   return {
     schemaVersion: asFiniteNumber(candidate.schemaVersion) ?? 1,
     sourceEpoch,
@@ -223,6 +391,7 @@ export function parseBetSyncEvent(payload: unknown): BetSyncEvent | null {
     duelKey: normalizeDuelKey(candidate.duelKey),
     phase: asString(candidate.phase),
     phaseVersion: asFiniteNumber(candidate.phaseVersion),
+    broadcastTimeline,
     betOpenTime: normalizePredictionMarketTimestamp(candidate.betOpenTime),
     betCloseTime: normalizePredictionMarketTimestamp(candidate.betCloseTime),
     fightStartTime: normalizePredictionMarketTimestamp(candidate.fightStartTime),
@@ -242,6 +411,15 @@ export function parseBetSyncEvent(payload: unknown): BetSyncEvent | null {
       : [],
     cameraTarget: asString(candidate.cameraTarget),
     rendererHealth: normalizeRendererHealth(candidate.rendererHealth),
+    rendererMetrics: normalizeRendererMetrics(candidate.rendererMetrics),
+    delivery: normalizeDelivery(candidate.delivery),
+    sourceRuntime: asRecord(candidate.sourceRuntime),
+    channel: asRecord(candidate.channel),
+    publicReadiness: asRecord(candidate.publicReadiness),
+    canonicalDestination: asRecord(candidate.canonicalDestination),
+    fallbackDestination: asRecord(candidate.fallbackDestination),
+    canonicalAuthority: normalizeCanonicalAuthority(candidate.canonicalAuthority),
+    deliveryHealth: asRecord(candidate.deliveryHealth),
   };
 }
 
@@ -284,6 +462,7 @@ export function toStreamStateFromBetSyncEvent(event: BetSyncEvent): StreamState 
       duelKeyHex: event.duelKey ? `0x${event.duelKey}` : null,
       phase: event.phase ?? "IDLE",
       phaseVersion: event.phaseVersion,
+      broadcastTimeline: event.broadcastTimeline,
       betOpenTime: event.betOpenTime,
       betCloseTime: event.betCloseTime,
       fightStartTime: event.fightStartTime,
@@ -302,6 +481,15 @@ export function toStreamStateFromBetSyncEvent(event: BetSyncEvent): StreamState 
     cameraTarget: event.cameraTarget,
     seq: event.seq,
     emittedAt: event.emittedAt,
+    rendererMetrics: event.rendererMetrics,
+    delivery: event.delivery,
+    sourceRuntime: event.sourceRuntime,
+    channel: event.channel,
+    publicReadiness: event.publicReadiness,
+    canonicalDestination: event.canonicalDestination,
+    fallbackDestination: event.fallbackDestination,
+    canonicalAuthority: event.canonicalAuthority,
+    deliveryHealth: event.deliveryHealth,
   };
 }
 
