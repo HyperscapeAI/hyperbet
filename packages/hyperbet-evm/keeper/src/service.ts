@@ -6,7 +6,9 @@ import { request as httpsRequest } from "node:https";
 import path from "node:path";
 
 import {
+  BETTING_EVM_CHAIN_ORDER,
   normalizeChainKey,
+  parseBettingEvmChainList,
   type PredictionMarketLifecycleStatus,
   resolveLifecycleFromSolanaDuelStatus,
   resolveLifecycleFromSolanaMarketStatus,
@@ -901,23 +903,33 @@ const avaxDuelOracleAddress = (
   process.env.ORACLE_CONTRACT_ADDRESS_AVAX ||
   ""
 ).trim();
+const enabledEvmKeeperChains = new Set(
+  parseBettingEvmChainList(
+    process.env.EVM_KEEPER_CHAINS,
+    BETTING_EVM_CHAIN_ORDER,
+  ),
+);
+
+function evmKeeperChainEnabled(chainKey: "bsc" | "base" | "avax"): boolean {
+  return enabledEvmKeeperChains.has(chainKey);
+}
 
 const bscClient =
-  bscRpcUrl && bscContractAddress
+  evmKeeperChainEnabled("bsc") && bscRpcUrl && bscContractAddress
     ? createPublicClient({ transport: http(bscRpcUrl) })
     : null;
 const baseClient =
-  baseRpcUrl && baseContractAddress
+  evmKeeperChainEnabled("base") && baseRpcUrl && baseContractAddress
     ? createPublicClient({ transport: http(baseRpcUrl) })
     : null;
 const avaxClient =
-  avaxRpcUrl && avaxContractAddress
+  evmKeeperChainEnabled("avax") && avaxRpcUrl && avaxContractAddress
     ? createPublicClient({ transport: http(avaxRpcUrl) })
     : null;
 const EVM_RPC_PROXY_TARGETS = {
-  bsc: bscRpcUrl,
-  base: baseRpcUrl,
-  avax: avaxRpcUrl,
+  bsc: evmKeeperChainEnabled("bsc") ? bscRpcUrl : "",
+  base: evmKeeperChainEnabled("base") ? baseRpcUrl : "",
+  avax: evmKeeperChainEnabled("avax") ? avaxRpcUrl : "",
 } as const;
 type SupportedEvmRpcChain = keyof typeof EVM_RPC_PROXY_TARGETS;
 const EXTERNAL_SOLANA_KEEPER_BOT_HEALTH_URL = firstNonEmptyString(
@@ -1972,6 +1984,7 @@ function buildPredictionMarketLifecycleRecords(
   }
 
   for (const chainKey of ["bsc", "base", "avax"] as const) {
+    if (!evmKeeperChainEnabled(chainKey)) continue;
     const parser = parsers[chainKey];
     const fallbackHealth = selectBotHealthMarket(botHealthSnapshot, chainKey);
     if (!parser.enabled && !parser.snapshot && !fallbackHealth) continue;
@@ -2044,6 +2057,17 @@ function currentDuelSnapshot(
     agent1Name: currentAgentNameFromCycle("agent1", sourceState),
     agent2Name: currentAgentNameFromCycle("agent2", sourceState),
   };
+}
+
+function filterEnabledPredictionMarkets(
+  markets: PredictionMarketLifecycleRecord[],
+): PredictionMarketLifecycleRecord[] {
+  return markets.filter((market) => {
+    if (market.chainKey === "solana") return true;
+    return evmKeeperChainEnabled(
+      market.chainKey as "bsc" | "base" | "avax",
+    );
+  });
 }
 
 function filterPredictionMarketsForDuel(
@@ -2132,7 +2156,7 @@ function buildLivePredictionMarketsSurface(
         previousLive?.duel.agent2Name ??
         null,
     },
-    markets,
+    markets: filterEnabledPredictionMarkets(markets),
     updatedAt: Date.now(),
   };
 }
@@ -2155,7 +2179,11 @@ function buildPredictionMarketsSurfaceForDuel(
     })),
     updatedAt: Date.now(),
   };
-  return mergePredictionMarketsSurface(previous, nextSurface) ?? nextSurface;
+  const merged = mergePredictionMarketsSurface(previous, nextSurface) ?? nextSurface;
+  return {
+    ...merged,
+    markets: filterEnabledPredictionMarkets(merged.markets),
+  };
 }
 
 function derivePredictionMarketsOverview(
