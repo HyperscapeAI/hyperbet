@@ -24,11 +24,14 @@ import goldPerpsIdl from "../idl/gold_perps_market.json";
 import { useChain } from "../lib/ChainContext";
 import { CONFIG, GAME_API_URL } from "../lib/config";
 import {
+  buildPerpsMarketsEndpoint,
+  buildPerpsOracleHistoryEndpoint,
   modelMarketIdFromCharacterId,
   sanitizePerpsOracleHistoryResponse,
   sanitizePerpsMarketsResponse,
   toWinRatePercent,
   type PerpsMarketDirectoryEntry,
+  type PerpsChainKey,
   type PerpsOracleHistorySnapshot,
   type PerpsMarketsResponse,
 } from "../lib/modelMarkets";
@@ -60,6 +63,7 @@ const ORACLE_HISTORY_POLL_INTERVAL_MS = 15_000;
 const ORACLE_HISTORY_LIMIT = 120;
 const TOTAL_TRADE_FEE_RATE = 50 / 10_000;
 const IS_E2E_MODE = import.meta.env.MODE === "e2e";
+const SOLANA_PERPS_CHAIN_KEY: PerpsChainKey = "solana";
 
 function readE2eString(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
@@ -785,16 +789,22 @@ export function ModelsMarketViewRuntime({
       inFlight = new AbortController();
 
       try {
-        const response = await fetch(`${GAME_API_URL}/api/perps/markets`, {
-          cache: "no-store",
-          signal: inFlight.signal,
-        });
+        const response = await fetch(
+          buildPerpsMarketsEndpoint(GAME_API_URL, SOLANA_PERPS_CHAIN_KEY),
+          {
+            cache: "no-store",
+            signal: inFlight.signal,
+          },
+        );
 
         if (!response.ok) {
           throw new Error(`HTTP ${response.status}`);
         }
 
-        const payload = sanitizePerpsMarketsResponse(await response.json());
+        const payload = sanitizePerpsMarketsResponse(
+          await response.json(),
+          SOLANA_PERPS_CHAIN_KEY,
+        );
         if (!mounted) return;
 
         setData(payload);
@@ -877,7 +887,12 @@ export function ModelsMarketViewRuntime({
 
       try {
         const response = await fetch(
-          `${GAME_API_URL}/api/perps/oracle-history?characterId=${encodeURIComponent(selectedCharacterId)}&limit=${ORACLE_HISTORY_LIMIT}`,
+          buildPerpsOracleHistoryEndpoint({
+            gameApiUrl: GAME_API_URL,
+            chainKey: SOLANA_PERPS_CHAIN_KEY,
+            characterId: selectedCharacterId,
+            limit: ORACLE_HISTORY_LIMIT,
+          }),
           {
             cache: "no-store",
             signal: inFlight.signal,
@@ -890,6 +905,7 @@ export function ModelsMarketViewRuntime({
         const payload = sanitizePerpsOracleHistoryResponse(
           await response.json(),
           selectedCharacterId,
+          SOLANA_PERPS_CHAIN_KEY,
         );
         if (!mounted) return;
 

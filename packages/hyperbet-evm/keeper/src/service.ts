@@ -96,6 +96,13 @@ import {
 } from "./betSync";
 import { modelMarketIdFromCharacterId } from "./modelMarkets";
 import {
+  adaptLegacySolanaPerpsMarketsPayload,
+  adaptLegacySolanaPerpsOracleHistoryPayload,
+  buildExternalPerpsUrl,
+  normalizePublicPerpsChainKeyParam,
+  type PublicPerpsChainKey,
+} from "./publicPerps";
+import {
   isLegacyDerivedPointsWalletKey,
   normalizePointsWalletInput,
 } from "./walletKeys";
@@ -954,6 +961,10 @@ const EXTERNAL_SOLANA_KEEPER_BOT_HEALTH_URL = firstNonEmptyString(
     ? `${process.env.ENOOMIAN_HYPERBET_SOLANA_KEEPER_URL.replace(/\/$/, "")}/api/keeper/bot-health`
     : "",
 );
+const EXTERNAL_SOLANA_KEEPER_BASE_URL = firstNonEmptyString(
+  process.env.HYPERBET_SOLANA_KEEPER_URL,
+  process.env.ENOOMIAN_HYPERBET_SOLANA_KEEPER_URL,
+);
 const EXTERNAL_SOLANA_KEEPER_BOT_HEALTH_BEARER_TOKEN = (
   process.env.SOLANA_KEEPER_BOT_HEALTH_BEARER_TOKEN ||
   ""
@@ -1647,16 +1658,81 @@ function isSupportedEvmRpcChain(
   return Object.hasOwn(EVM_RPC_PROXY_TARGETS, value);
 }
 
-function normalizePerpsChainKeyParam(value: string | null): EvmPerpsChainKey | null {
-  if (value === "bsc" || value === "base" || value === "avax") {
-    return value;
-  }
-  return null;
+function isSupportedLocalPerpsChainKey(
+  value: PublicPerpsChainKey,
+): value is EvmPerpsChainKey {
+  return value === "bsc" || value === "base" || value === "avax";
 }
 
-function handlePerpsOracleHistory(req: Request, url: URL): Response {
+async function fetchExternalSolanaPerpsPayload(
+  req: Request,
+  url: URL,
+  pathname: "/api/perps/markets" | "/api/perps/oracle-history",
+): Promise<Response> {
+  if (!EXTERNAL_SOLANA_KEEPER_BASE_URL) {
+    return jsonResponse(
+      req,
+      { error: "solana perps source unavailable" },
+      503,
+      { "cache-control": "no-store" },
+    );
+  }
+
+  const upstreamUrl = buildExternalPerpsUrl({
+    baseUrl: EXTERNAL_SOLANA_KEEPER_BASE_URL,
+    pathname,
+    searchParams: url.searchParams,
+  });
+
+  try {
+    const response = await fetch(upstreamUrl, {
+      headers: { Accept: "application/json" },
+      signal: AbortSignal.timeout(10_000),
+    });
+    const payload = await response.json().catch(() => null);
+    if (!response.ok) {
+      return jsonResponse(
+        req,
+        (payload &&
+          typeof payload === "object" &&
+          payload != null &&
+          !Array.isArray(payload)
+          ? payload
+          : { error: `solana perps upstream returned ${response.status}` }) as Record<
+          string,
+          unknown
+        >,
+        response.status,
+        { "cache-control": "no-store" },
+      );
+    }
+
+    return jsonResponse(
+      req,
+      pathname === "/api/perps/markets"
+        ? adaptLegacySolanaPerpsMarketsPayload(payload)
+        : adaptLegacySolanaPerpsOracleHistoryPayload(payload),
+      200,
+      { "cache-control": "no-store" },
+    );
+  } catch (error) {
+    return jsonResponse(
+      req,
+      {
+        error:
+          error instanceof Error
+            ? error.message
+            : "solana perps upstream request failed",
+      },
+      502,
+      { "cache-control": "no-store" },
+    );
+  }
+}
+
+async function handlePerpsOracleHistory(req: Request, url: URL): Promise<Response> {
   const requestedChainKey = url.searchParams.get("chainKey");
-  const chainKey = normalizePerpsChainKeyParam(requestedChainKey);
+  const chainKey = normalizePublicPerpsChainKeyParam(requestedChainKey);
   if (!chainKey) {
     if (typeof console !== "undefined") {
       console.warn("[hyperbet] perps_chain_missing", {
@@ -1665,6 +1741,16 @@ function handlePerpsOracleHistory(req: Request, url: URL): Response {
       });
     }
     return jsonResponse(req, { error: "chainKey is required" }, 400);
+  }
+  if (chainKey === "solana") {
+    return fetchExternalSolanaPerpsPayload(
+      req,
+      url,
+      "/api/perps/oracle-history",
+    );
+  }
+  if (!isSupportedLocalPerpsChainKey(chainKey)) {
+    return jsonResponse(req, { error: "unsupported chainKey" }, 400);
   }
   const characterId = url.searchParams.get("characterId")?.trim() || "";
   if (!characterId) {
@@ -1694,9 +1780,9 @@ function handlePerpsOracleHistory(req: Request, url: URL): Response {
   );
 }
 
-function handlePerpsMarkets(req: Request, url: URL): Response {
+async function handlePerpsMarkets(req: Request, url: URL): Promise<Response> {
   const requestedChainKey = url.searchParams.get("chainKey");
-  const chainKey = normalizePerpsChainKeyParam(requestedChainKey);
+  const chainKey = normalizePublicPerpsChainKeyParam(requestedChainKey);
   if (!chainKey) {
     if (typeof console !== "undefined") {
       console.warn("[hyperbet] perps_chain_missing", {
@@ -1705,6 +1791,12 @@ function handlePerpsMarkets(req: Request, url: URL): Response {
       });
     }
     return jsonResponse(req, { error: "chainKey is required" }, 400);
+  }
+  if (chainKey === "solana") {
+    return fetchExternalSolanaPerpsPayload(req, url, "/api/perps/markets");
+  }
+  if (!isSupportedLocalPerpsChainKey(chainKey)) {
+    return jsonResponse(req, { error: "unsupported chainKey" }, 400);
   }
 
   const markets = loadChainScopedPerpsMarkets(chainKey).map((market) => ({

@@ -33,7 +33,10 @@ import {
   captureInviteCodeFromLocation,
   getStoredInviteCode,
 } from "@hyperbet/ui/lib/invite";
-import { deriveBettorLiveStatus } from "@hyperbet/ui/lib/bettorLiveStatus";
+import {
+  deriveBettorLiveStatus,
+  serializeBettorDriftDiagnostic,
+} from "@hyperbet/ui/lib/bettorLiveStatus";
 import { deriveBettorStreamUiState } from "@hyperbet/ui/lib/bettorStreamUi";
 import {
   describeCanonicalRendererDegradedReason,
@@ -727,6 +730,7 @@ export function App() {
     ],
   );
   const canonicalPhase = canonicalLiveStatus.livePhase;
+  const lastLifecycleMismatchSignatureRef = useRef<string | null>(null);
   const rendererDegradedOverlayMessage = useMemo(() => {
     if (activeStreamUrl.length === 0 || canonicalRendererHealth?.ready !== false) {
       return null;
@@ -743,9 +747,19 @@ export function App() {
   ]);
 
   useEffect(() => {
-    if (!canonicalLiveStatus.driftDiagnostic.detected) {
+    const signature = serializeBettorDriftDiagnostic(
+      canonicalLiveStatus.driftDiagnostic,
+    );
+    const chainScopedSignature =
+      signature == null ? null : `${activeChain}:${signature}`;
+    if (chainScopedSignature == null) {
+      lastLifecycleMismatchSignatureRef.current = null;
       return;
     }
+    if (lastLifecycleMismatchSignatureRef.current === chainScopedSignature) {
+      return;
+    }
+    lastLifecycleMismatchSignatureRef.current = chainScopedSignature;
     console.warn("[hyperbet] lifecycle_mismatch", {
       chain: activeChain,
       diagnostic: canonicalLiveStatus.driftDiagnostic,

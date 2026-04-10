@@ -659,6 +659,7 @@ export function EvmBettingPanel({
       ),
     [copy, cycleAgent1, cycleAgent2, uiState.lifecycleStatus, uiState.winner],
   );
+  const lastLifecycleMismatchSignatureRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (
@@ -666,8 +667,20 @@ export function EvmBettingPanel({
       fetchedLifecycleDuelKey == null ||
       authoritativeLifecycleDuelKey === fetchedLifecycleDuelKey
     ) {
+      lastLifecycleMismatchSignatureRef.current = null;
       return;
     }
+    const mismatchSignature = [
+      activeChain,
+      authoritativeLifecycleDuelKey,
+      fetchedLifecycleDuelKey,
+      effectiveLifecycleMarket?.duelId ?? effectiveLifecycleDuel?.duelId ?? "",
+      fetchedLifecycleMarket?.duelId ?? fetchedLifecycleDuel?.duelId ?? "",
+    ].join("|");
+    if (lastLifecycleMismatchSignatureRef.current === mismatchSignature) {
+      return;
+    }
+    lastLifecycleMismatchSignatureRef.current = mismatchSignature;
     console.warn("[hyperbet] lifecycle_mismatch", {
       chain: activeChain,
       visibleDuelKey: authoritativeLifecycleDuelKey,

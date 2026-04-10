@@ -1,7 +1,9 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { UiLocale } from "../i18n";
 import {
+  buildPerpsMarketsEndpoint,
+  buildPerpsOracleHistoryEndpoint,
   sanitizePerpsOracleHistoryResponse,
   sanitizePerpsMarketsResponse,
   type EvmPerpsChainKey,
@@ -183,6 +185,7 @@ export function EvmModelsMarketView({
   const [loading, setLoading] = useState(!mockData);
   const [error, setError] = useState("");
   const resolvedChainKey = chainKey ?? null;
+  const lastDirectoryWarningKeyRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (mockData) {
@@ -208,7 +211,7 @@ export function EvmModelsMarketView({
       try {
         setLoading(true);
         setError("");
-        const endpoint = `${gameApiUrl}/api/perps/markets?chainKey=${encodeURIComponent(activeChainKey!)}`;
+        const endpoint = buildPerpsMarketsEndpoint(gameApiUrl, activeChainKey!);
         const response = await fetch(endpoint, {
           cache: "no-store",
           headers: { Accept: "application/json" },
@@ -220,13 +223,22 @@ export function EvmModelsMarketView({
         const json = await response.json();
         const sanitized = sanitizePerpsMarketsResponse(json, activeChainKey);
         if (signal?.aborted) return;
-        if (sanitized.markets.length === 0 && typeof console !== "undefined") {
+        const warningKey =
+          sanitized.markets.length === 0
+            ? `empty:${activeChainKey}`
+            : `ready:${activeChainKey}`;
+        if (
+          sanitized.markets.length === 0 &&
+          typeof console !== "undefined" &&
+          lastDirectoryWarningKeyRef.current !== warningKey
+        ) {
           console.warn("[hyperbet] empty_model_directory", {
             chainKey: activeChainKey,
             chain: chainLabel,
             endpoint,
           });
         }
+        lastDirectoryWarningKeyRef.current = warningKey;
         setEntries(toDisplayEntries(sanitized.markets));
         setUpdatedAt(sanitized.updatedAt);
       } catch (nextError) {
@@ -346,9 +358,12 @@ export function EvmModelsMarketView({
       try {
         setOracleLoading(true);
         setOracleError("");
-        const endpoint =
-          `${gameApiUrl}/api/perps/oracle-history?chainKey=${encodeURIComponent(activeChainKey!)}` +
-          `&characterId=${encodeURIComponent(selectedEntry.characterId)}&limit=24`;
+        const endpoint = buildPerpsOracleHistoryEndpoint({
+          gameApiUrl,
+          chainKey: activeChainKey!,
+          characterId: selectedEntry.characterId,
+          limit: 24,
+        });
         const response = await fetch(
           endpoint,
           {

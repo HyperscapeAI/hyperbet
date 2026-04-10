@@ -46,6 +46,35 @@ export interface PerpsMarketsResponse {
   updatedAt: number;
 }
 
+export function buildPerpsMarketsEndpoint(
+  gameApiUrl: string,
+  chainKey: PerpsChainKey,
+): string {
+  const endpoint = new URL("/api/perps/markets", ensureBaseUrl(gameApiUrl));
+  endpoint.searchParams.set("chainKey", chainKey);
+  return endpoint.toString();
+}
+
+export function buildPerpsOracleHistoryEndpoint(params: {
+  gameApiUrl: string;
+  chainKey: PerpsChainKey;
+  characterId: string;
+  limit: number;
+}): string {
+  const endpoint = new URL(
+    "/api/perps/oracle-history",
+    ensureBaseUrl(params.gameApiUrl),
+  );
+  endpoint.searchParams.set("chainKey", params.chainKey);
+  endpoint.searchParams.set("characterId", params.characterId);
+  endpoint.searchParams.set("limit", String(params.limit));
+  return endpoint.toString();
+}
+
+function ensureBaseUrl(gameApiUrl: string): string {
+  return gameApiUrl.endsWith("/") ? gameApiUrl : `${gameApiUrl}/`;
+}
+
 function isFiniteNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
 }
@@ -102,6 +131,26 @@ function isPerpsMarketDirectoryEntry(
   );
 }
 
+function coercePerpsMarketDirectoryEntry(
+  value: unknown,
+  expectedChainKey?: PerpsChainKey | null,
+): PerpsMarketDirectoryEntry | null {
+  if (typeof value !== "object" || value == null) {
+    return null;
+  }
+  const candidate = { ...(value as Record<string, unknown>) };
+  if (expectedChainKey && !isPerpsChainKey(candidate.chainKey)) {
+    candidate.chainKey = expectedChainKey;
+  }
+  if (!isPerpsMarketDirectoryEntry(candidate)) {
+    return null;
+  }
+  if (expectedChainKey && candidate.chainKey !== expectedChainKey) {
+    return null;
+  }
+  return candidate;
+}
+
 export function sanitizePerpsOracleHistoryResponse(
   value: unknown,
   characterId: string,
@@ -152,8 +201,12 @@ export function sanitizePerpsMarketsResponse(
   const chainKey =
     responseChainKey ?? expectedChainKey ?? null;
   const markets = Array.isArray(candidate?.markets)
-    ? candidate.markets.filter(isPerpsMarketDirectoryEntry).filter((market) => {
-        return expectedChainKey == null || market.chainKey === expectedChainKey;
+    ? candidate.markets.flatMap((market) => {
+        const normalized = coercePerpsMarketDirectoryEntry(
+          market,
+          expectedChainKey,
+        );
+        return normalized ? [normalized] : [];
       })
     : [];
   return {

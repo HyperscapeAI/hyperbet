@@ -48,6 +48,21 @@ export type BettorLiveStatus = {
   driftDiagnostic: BettorDriftDiagnostic;
 };
 
+export function serializeBettorDriftDiagnostic(
+  diagnostic: BettorDriftDiagnostic,
+): string | null {
+  if (!diagnostic.detected) {
+    return null;
+  }
+  return [
+    diagnostic.type ?? "",
+    diagnostic.canonicalPhase ?? "",
+    diagnostic.marketPhase ?? "",
+    diagnostic.canonicalDuelId ?? "",
+    diagnostic.marketDuelId ?? "",
+  ].join("|");
+}
+
 export function resolveCanonicalLivePhase(
   session: CanonicalStreamSession | null,
   fallbackPhase: string | null = null,
