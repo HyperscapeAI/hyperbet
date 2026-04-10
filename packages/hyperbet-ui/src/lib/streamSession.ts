@@ -167,6 +167,7 @@ function findCanonicalDestination(
 }
 
 type SelectBetSurfaceStreamUrlInput = {
+  allowFallbackOverride?: boolean;
   allowFallbackWhenSessionUnavailable?: boolean;
   authorityHealth?: CanonicalStreamHealth | null;
   fallbackStreamIndex: number;
@@ -187,7 +188,8 @@ export type BetSurfaceStreamSelection = {
 };
 
 export function selectBetSurfaceStreamUrl({
-  allowFallbackWhenSessionUnavailable = true,
+  allowFallbackOverride,
+  allowFallbackWhenSessionUnavailable = false,
   authorityHealth,
   fallbackStreamIndex,
   fallbackStreamSources,
@@ -197,6 +199,8 @@ export function selectBetSurfaceStreamUrl({
   rendererReady = null,
   session,
 }: SelectBetSurfaceStreamUrlInput): BetSurfaceStreamSelection {
+  const allowFallbackSelection =
+    allowFallbackOverride ?? allowFallbackWhenSessionUnavailable;
   const fallbackStreamUrl = fallbackStreamSources[fallbackStreamIndex] ?? "";
   const canonicalDestination = findCanonicalDestination(session);
   const canonicalPlaybackUrl =
@@ -276,7 +280,7 @@ export function selectBetSurfaceStreamUrl({
       ? ""
       : canUseCanonicalPlayback
         ? canonicalPlaybackUrl
-        : session || !allowFallbackWhenSessionUnavailable
+        : session || !allowFallbackSelection
           ? ""
           : fallbackStreamUrl,
     canUseCanonicalPlayback,

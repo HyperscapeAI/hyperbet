@@ -37,15 +37,19 @@ signals:
 
 - `sourceRuntime`
   - worker, browser, and capture health only
+- `canonicalAuthority`
+  - persisted Cloudflare lifecycle, poll, probe, and reconciliation truth
 - `channel.publicReadiness`
   - canonical public playback truth
 - `delivery` / `canonicalDestination`
   - consumer-facing playback metadata derived from canonical channel truth
 - `fallbackDestination`
-  - provider-specific warm standby state; may fail without making the canonical
-    stream unavailable
+  - provider-specific warm standby state; not the normal bettor rail
 - renderer-health polling may enrich playback URLs, but it must not replace
   canonical ingest transport metadata once a canonical destination exists
+- player sync telemetry
+  - bettor-facing live-edge alignment; separate from authority and delivery
+    availability
 
 - `render_tick_stale`
   - source page is not advancing
@@ -62,6 +66,13 @@ signals:
 - `player_buffering`
   - viewer is near the live edge but is temporarily waiting on buffer
 
+Canonical authority decision ordering is:
+
+1. `source_unready`
+2. `provider_not_live`
+3. `probe_unready`
+4. `authority_stale`
+
 ## Recovery Order
 
 1. restore source render truth
@@ -71,13 +82,18 @@ signals:
 5. restart the keeper only if it failed to ingest a now-healthy upstream state
 
 Do not page a full-stream outage when the fallback rail alone is red and the
-canonical rail is still green.
+canonical Cloudflare rail is still green.
+Do not declare the bettor page "live synced" unless player telemetry is
+aligned as well.
 
 ## Success Criteria
 
 - Hyperscapes capture status reports fresh `rendererHealth`
 - Hyperscapes capture status reports fresh `sourceRuntime`
+- Hyperscapes exposes fresh `canonicalAuthority` and `publicReadiness`
 - Hyperscapes smoke status reports the expected `/stream` scene URL and bundle
 - capture metrics and encode metrics recover
 - keepers expose the same canonical ingest and playback truth as Hyperscapes
 - viewers return to live-edge playback without repeated rebuild loops
+- bettor UI only presents "live synced" when both server readiness and player
+  sync telemetry agree

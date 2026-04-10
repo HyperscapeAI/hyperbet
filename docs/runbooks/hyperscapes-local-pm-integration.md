@@ -20,7 +20,7 @@ Hyperbet provides:
 
 The Hyperbet UI should point at the keeper for canonical session state and use
 the playback URL carried in that session. It should not invent its own stream
-selection rules beyond fallback behavior.
+selection rules beyond explicit debug or operator override behavior.
 
 ## Personal Staging
 
@@ -34,15 +34,18 @@ For `enoomian` personal staging:
   supported fallback/debug modes
 - Railway hosts the Hyperscapes API
 - Hyperbet keepers poll Hyperscapes renderer health and session state
-- Cloudflare Stream LL-HLS is the target viewer feed when configured
-- self-hosted HLS remains available for smoke and rollback
-- canonical provider selection is now explicit:
-  `STREAM_DELIVERY_MODE=self_hls`,
-  `STREAM_CANONICAL_PROVIDER_PRIORITY=self_hls,cloudflare_stream`,
-  and `STREAM_EXTERNAL_*` carries the Cloudflare fallback rail
+- Cloudflare Stream LL-HLS is the canonical bettor viewer rail
+- self-hosted HLS remains available only for smoke, debug, and explicit
+  operator failover
+- automatic provider failover is disabled by default:
+  `STREAM_ENABLE_AUTOMATIC_FAILOVER=false`
 - canonical channel and destination truth own ingest metadata; keeper
   `delivery` may enrich playback URLs but must not override canonical ingest
   transport
+- `publicReadiness` is the final server delivery gate for bettors, derived from
+  source readiness plus persisted Cloudflare authority and playback-probe truth
+- player sync telemetry is a separate client-side betting-safety gate; do not
+  call the page "live synced" from server readiness alone
 - Railway env reconciliation is now a separate action from deploy execution:
   use `scripts/enoomian-staging/deploy.sh hyperscapes-railway-env`,
   `scripts/enoomian-staging/deploy.sh hyperbet-solana-keepers-env`, or
@@ -61,9 +64,8 @@ When the stream looks stale:
 If the player alone drifted, rebuild the player.
 If render or encode are stale, do not blame the player.
 
-If self-HLS is healthy but Cloudflare fallback is failing, the stream is still
-considered up as long as `channel.publicReadiness.ready=true` on the canonical
-self-HLS rail.
+If self-HLS is healthy but Cloudflare is not, the stream is degraded for
+bettors unless an explicit operator failover path has been enabled.
 
 ## Required Checks
 
@@ -76,6 +78,8 @@ curl -fsSL "$KEEPER_URL/api/streaming/state" | jq
 
 Look for:
 
+- `canonicalAuthority`
+- `publicReadiness`
 - `rendererHealth`
 - `rendererMetrics`
 - `sourceRuntime`
@@ -83,6 +87,21 @@ Look for:
 - `playback.url`
 - `currentSceneUrl`
 - `activeBundle`
+
+If DB access is available, inspect the persisted authority record in storage:
+
+- `streaming:cloudflare:lifecycle`
+- `streaming:cloudflare:last-webhook`
+- `streaming:cloudflare:last-lifecycle-poll`
+- `streaming:cloudflare:last-playback-probe`
+- `streaming:cloudflare:reconciliation`
+
+Decision ordering is:
+
+1. `source_unready`
+2. `provider_not_live`
+3. `probe_unready`
+4. `authority_stale`
 
 ## Operator Goal
 

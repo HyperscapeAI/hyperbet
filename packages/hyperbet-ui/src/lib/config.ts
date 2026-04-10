@@ -611,6 +611,10 @@ export function toBaseUnits(amount: number, decimals = GOLD_DECIMALS): bigint {
 
 export const STREAM_URL: string = CONFIG.streamUrl;
 export const STREAM_URLS: string[] = resolvedStreamSources;
+export const ENABLE_STREAM_SOURCE_OVERRIDE = readEnvBoolean(
+  "VITE_ENABLE_STREAM_SOURCE_OVERRIDE",
+  RUNTIME_ENV === "e2e" || !isPublicBrowserRuntime(),
+);
 export const GAME_API_URL: string = CONFIG.gameApiUrl;
 export const GAME_WS_URL: string = CONFIG.gameWsUrl;
 export const PUBLIC_CDN_URL: string = CONFIG.publicCdnUrl;

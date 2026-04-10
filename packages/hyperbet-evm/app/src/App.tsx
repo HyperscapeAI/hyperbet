@@ -31,15 +31,20 @@ import {
 } from "./lib/config";
 import { POINTS_DRAWER_OVERLAY_STYLE } from "./lib/pointsDrawer";
 import {
-  advanceStreamSyncUiState,
-  INITIAL_STREAM_SYNC_UI_SNAPSHOT,
-  type StreamSyncUiState,
-} from "./lib/streamSyncUi";
-import {
   captureInviteCodeFromLocation,
   getStoredInviteCode,
 } from "@hyperbet/ui/lib/invite";
-import { StreamPlayer } from "@hyperbet/ui/components/StreamPlayer";
+import { ENABLE_STREAM_SOURCE_OVERRIDE } from "@hyperbet/ui/lib/config";
+import { deriveBettorStreamUiState } from "@hyperbet/ui/lib/bettorStreamUi";
+import {
+  describeCanonicalRendererDegradedReason,
+  resolveCanonicalPlaybackDeliveryMode,
+  selectBetSurfaceStreamUrl,
+} from "@hyperbet/ui/lib/streamSession";
+import {
+  StreamPlayer,
+  type StreamPlayerStatus,
+} from "@hyperbet/ui/components/StreamPlayer";
 import { ChainSelector } from "@hyperbet/ui/components/ChainSelector";
 import { ThemeSelector } from "@hyperbet/ui/components/ThemeSelector";
 import { selectConfiguredEvmPrivateKey } from "@hyperbet/ui/lib/evmPrivateKey";
@@ -50,6 +55,7 @@ import {
 } from "@hyperbet/ui/lib/solanaRuntime";
 
 import { useChain } from "./lib/ChainContext";
+import { useCanonicalStreamSession } from "@hyperbet/ui/spectator/useCanonicalStreamSession";
 import { useStreamingState } from "@hyperbet/ui/spectator/useStreamingState";
 import { useDuelContext } from "@hyperbet/ui/spectator/useDuelContext";
 import type { StreamingAgentContext } from "@hyperbet/ui/components/AgentStats";
@@ -64,7 +70,6 @@ import {
 import {
   normalizePredictionMarketDuelKeyHex,
   usePredictionMarketOverview,
-  usePredictionMarketSyncStatus,
 } from "@hyperbet/ui/lib/predictionMarkets";
 import {
   CHAIN_DISPLAY,
@@ -509,7 +514,7 @@ function StreamStatusChip({
 }: {
   title: string;
   detail?: string | null;
-  state: Exclude<StreamSyncUiState, "hidden">;
+  state: "refreshing" | "degraded" | "drift";
   loading?: boolean;
 }) {
   return (
@@ -648,20 +653,76 @@ export function App() {
     live: liveOverviewMarket,
     liveDuel: liveOverviewDuel,
     refresh: refreshMarketOverview,
-    error: marketOverviewError,
   } = usePredictionMarketOverview(activeChain);
-  const { data: syncStatus } = usePredictionMarketSyncStatus();
+  const {
+    session: canonicalStreamSession,
+    rendererHealth: canonicalRendererHealth,
+    deliveryHealth: canonicalDeliveryHealth,
+    publicReadiness: canonicalPublicReadiness,
+    authorityHealth: canonicalAuthorityHealth,
+    presentationDelayMs: canonicalPresentationDelayMs,
+  } = useCanonicalStreamSession();
   const requestOverviewRefresh = useCallback(async () => {
     await refreshMarketOverview();
   }, [refreshMarketOverview]);
   const liveCycle = streamingState?.cycle ?? null;
+  const allowStreamSourceOverride =
+    ENABLE_STREAM_SOURCE_OVERRIDE || isE2eDebugMode;
   const streamSources = STREAM_URLS;
-  // Keep the stream visible in e2e/local integration lanes when a real source
-  // URL is configured. Wallet/chain polling stays gated separately above.
-  const activeStreamUrl = streamSources[streamSourceIndex] ?? "";
-  const [streamSurfaceReady, setStreamSurfaceReady] = useState(false);
-  const [streamSurfaceUnavailable, setStreamSurfaceUnavailable] =
-    useState(false);
+  const lifecycleDuelKey = normalizePredictionMarketDuelKeyHex(
+    liveOverviewDuel?.duelKey ?? null,
+  );
+  const { activeStreamUrl, preloadStreamUrl } = selectBetSurfaceStreamUrl({
+    allowFallbackOverride: allowStreamSourceOverride,
+    authorityHealth: canonicalAuthorityHealth,
+    fallbackStreamIndex: streamSourceIndex,
+    fallbackStreamSources: streamSources,
+    lifecycleDuelId: liveOverviewDuel?.duelId ?? null,
+    lifecycleDuelKey,
+    rendererReady: canonicalRendererHealth?.ready ?? null,
+    session: canonicalStreamSession,
+  });
+  const mountedStreamUrl = activeStreamUrl || preloadStreamUrl;
+  const streamDeliveryMode = resolveCanonicalPlaybackDeliveryMode(
+    canonicalStreamSession,
+  );
+  const [streamPlayerStatus, setStreamPlayerStatus] =
+    useState<StreamPlayerStatus | null>(null);
+  const streamPlaceholderMessage = useMemo(() => {
+    if (!canonicalStreamSession) {
+      return "Connecting to live session...";
+    }
+    if (canonicalAuthorityHealth?.ready === false) {
+      return "Stream authority unavailable. Waiting for session state.";
+    }
+    if (canonicalRendererHealth?.ready === false) {
+      return describeCanonicalRendererDegradedReason(
+        canonicalRendererHealth.degradedReason,
+        copy.waitingForStream,
+      );
+    }
+    if (
+      canonicalPublicReadiness?.ready === false ||
+      canonicalDeliveryHealth?.ready === false
+    ) {
+      return describeCanonicalRendererDegradedReason(
+        canonicalPublicReadiness?.reason ??
+          canonicalDeliveryHealth?.degradedReason,
+        copy.waitingForStream,
+      );
+    }
+    return copy.waitingForStream;
+  }, [
+    canonicalAuthorityHealth?.ready,
+    canonicalDeliveryHealth?.degradedReason,
+    canonicalDeliveryHealth?.ready,
+    canonicalPublicReadiness?.ready,
+    canonicalPublicReadiness?.reason,
+    canonicalRendererHealth?.degradedReason,
+    canonicalRendererHealth?.ready,
+    canonicalStreamSession,
+    copy.waitingForStream,
+  ]);
 
   const handleLocaleChange = useCallback((nextLocale: UiLocale) => {
     setStoredUiLocale(nextLocale);
@@ -669,26 +730,27 @@ export function App() {
   }, []);
 
   const switchToBackupStream = useCallback(() => {
+    if (!allowStreamSourceOverride) {
+      return;
+    }
     setStreamSourceIndex((current) =>
       current + 1 < streamSources.length ? current + 1 : current,
     );
-  }, [streamSources.length]);
+  }, [allowStreamSourceOverride, streamSources.length]);
 
   const cycleStreamSource = useCallback(() => {
+    if (!allowStreamSourceOverride) {
+      return;
+    }
     setStreamSourceIndex((current) =>
       streamSources.length > 1 ? (current + 1) % streamSources.length : current,
     );
-  }, [streamSources.length]);
+  }, [allowStreamSourceOverride, streamSources.length]);
 
   useEffect(() => {
     if (streamSourceIndex < streamSources.length) return;
     setStreamSourceIndex(0);
   }, [streamSourceIndex, streamSources.length]);
-
-  useEffect(() => {
-    setStreamSurfaceReady(false);
-    setStreamSurfaceUnavailable(false);
-  }, [activeStreamUrl]);
 
   useEffect(() => {
     captureInviteCodeFromLocation();
@@ -1006,40 +1068,22 @@ export function App() {
   const countdownText = liveCycle
     ? formatCountdown(normalizeRemainingSeconds(liveCycle.timeRemaining))
     : "";
-  const liveOverviewDuelKey = normalizePredictionMarketDuelKeyHex(
-    liveOverviewDuel?.duelKey ?? null,
-  );
-  const streamedDuelKey = normalizePredictionMarketDuelKeyHex(
-    liveCycle?.duelKeyHex ?? null,
-  );
-  const rendererHealth =
-    liveCycle?.rendererHealth ?? syncStatus?.rendererHealth ?? null;
-  const streamMarketAligned = !liveOverviewDuelKey
-    ? true
-    : streamedDuelKey === liveOverviewDuelKey;
-  const [streamSyncUi, setStreamSyncUi] = useState(
-    INITIAL_STREAM_SYNC_UI_SNAPSHOT,
-  );
-
-  useEffect(() => {
-    setStreamSyncUi((previous) =>
-      advanceStreamSyncUiState(previous, {
-        marketAligned: streamMarketAligned,
-        syncStatus,
-        rendererReady: rendererHealth?.ready ?? null,
-        streamSurfaceReady,
-        streamSurfaceUnavailable,
-        marketOverviewErrorPresent: Boolean(marketOverviewError),
+  const streamSyncUiState = useMemo(
+    () =>
+      deriveBettorStreamUiState({
+        session: canonicalStreamSession,
+        playerStatus: streamPlayerStatus,
+        authorityHealth: canonicalAuthorityHealth,
+        publicReadiness: canonicalPublicReadiness,
+        sourceRuntime: canonicalStreamSession?.sourceRuntime ?? null,
       }),
-    );
-  }, [
-    marketOverviewError,
-    rendererHealth?.ready,
-    streamMarketAligned,
-    streamSurfaceReady,
-    streamSurfaceUnavailable,
-    syncStatus,
-  ]);
+    [
+      canonicalAuthorityHealth,
+      canonicalPublicReadiness,
+      canonicalStreamSession,
+      streamPlayerStatus,
+    ],
+  );
 
   // Sidebar bet state
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -1214,9 +1258,9 @@ export function App() {
           ) : null}
         </div>
       </div>
-      {streamSyncUi.state !== "hidden" ? (
+      {streamSyncUiState !== "aligned" ? (
         <div className="hm-stream-status-row">
-          {streamSyncUi.state === "refreshing" ? (
+          {streamSyncUiState === "connecting" ? (
             <StreamStatusChip
               state="refreshing"
               title={copy.refreshingLiveState}
@@ -1224,7 +1268,15 @@ export function App() {
             />
           ) : null}
 
-          {streamSyncUi.state === "degraded" ? (
+          {streamSyncUiState === "recovering" ? (
+            <StreamStatusChip
+              state="refreshing"
+              title={copy.reconnectingStream}
+              loading
+            />
+          ) : null}
+
+          {streamSyncUiState === "degraded" ? (
             <StreamStatusChip
               state="degraded"
               title={copy.reconnectingStream}
@@ -1232,7 +1284,7 @@ export function App() {
             />
           ) : null}
 
-          {streamSyncUi.state === "drift" ? (
+          {streamSyncUiState === "drifted" ? (
             <StreamStatusChip
               state="drift"
               title={copy.outOfSync}
@@ -1889,20 +1941,21 @@ export function App() {
 
                 {/* Game Viewport */}
                 <div className="hm-game-viewport">
-                  {activeStreamUrl ? (
+                  {mountedStreamUrl ? (
                     <>
                       <StreamPlayer
-                        streamUrl={activeStreamUrl}
+                        streamUrl={mountedStreamUrl}
+                        deliveryMode={streamDeliveryMode}
+                        presentationDelayMs={canonicalPresentationDelayMs}
+                        syncToleranceMs={1_500}
                         muted={hmMuted}
                         autoPlay={true}
-                        onStreamReady={() => {
-                          setStreamSurfaceReady(true);
-                          setStreamSurfaceUnavailable(false);
-                        }}
-                        onStreamUnavailable={() => {
-                          setStreamSurfaceUnavailable(true);
-                          switchToBackupStream();
-                        }}
+                        onStatusChange={setStreamPlayerStatus}
+                        onStreamUnavailable={
+                          allowStreamSourceOverride
+                            ? switchToBackupStream
+                            : undefined
+                        }
                         style={{
                           position: "absolute",
                           inset: 0,
@@ -1910,62 +1963,72 @@ export function App() {
                           height: "100%",
                         }}
                       />
-                      <div className="hm-stream-controls">
-                        <button
-                          className="hm-stream-mute-btn"
-                          onClick={() => setHmMuted((m) => !m)}
-                          type="button"
-                          aria-label={hmMuted ? copy.unmuteStream : copy.muteStream}
-                        >
-                          {hmMuted ? (
-                            <svg
-                              width="18"
-                              height="18"
-                              viewBox="0 0 24 24"
-                              fill="none"
-                              stroke="currentColor"
-                              strokeWidth="2"
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                            >
-                              <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
-                              <line x1="23" y1="9" x2="17" y2="15" />
-                              <line x1="17" y1="9" x2="23" y2="15" />
-                            </svg>
-                          ) : (
-                            <svg
-                              width="18"
-                              height="18"
-                              viewBox="0 0 24 24"
-                              fill="none"
-                              stroke="currentColor"
-                              strokeWidth="2"
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                            >
-                              <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
-                              <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
-                              <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
-                            </svg>
-                          )}
-                        </button>
-                        {streamSources.length > 1 && (
+                      {activeStreamUrl ? (
+                        <div className="hm-stream-controls">
                           <button
-                            className="hm-stream-source-btn"
-                            onClick={cycleStreamSource}
+                            className="hm-stream-mute-btn"
+                            onClick={() => setHmMuted((m) => !m)}
                             type="button"
+                            aria-label={hmMuted ? copy.unmuteStream : copy.muteStream}
                           >
-                            {copy.source} {streamSourceIndex + 1}/
-                            {streamSources.length}
+                            {hmMuted ? (
+                              <svg
+                                width="18"
+                                height="18"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="2"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                              >
+                                <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+                                <line x1="23" y1="9" x2="17" y2="15" />
+                                <line x1="17" y1="9" x2="23" y2="15" />
+                              </svg>
+                            ) : (
+                              <svg
+                                width="18"
+                                height="18"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="2"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                              >
+                                <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+                                <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
+                                <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
+                              </svg>
+                            )}
                           </button>
-                        )}
-                      </div>
+                          {allowStreamSourceOverride && streamSources.length > 1 ? (
+                            <button
+                              className="hm-stream-source-btn"
+                              onClick={cycleStreamSource}
+                              type="button"
+                            >
+                              {copy.source} {streamSourceIndex + 1}/
+                              {streamSources.length}
+                            </button>
+                          ) : null}
+                        </div>
+                      ) : null}
+                      {!activeStreamUrl ? (
+                        <div className="hm-game-placeholder hm-game-placeholder--overlay">
+                          <div className="hm-game-bg" />
+                          <span className="hm-game-waiting">
+                            {streamPlaceholderMessage}
+                          </span>
+                        </div>
+                      ) : null}
                     </>
                   ) : (
                     <div className="hm-game-placeholder">
                       <div className="hm-game-bg" />
                       <span className="hm-game-waiting">
-                        {copy.waitingForStream}
+                        {streamPlaceholderMessage}
                       </span>
                     </div>
                   )}

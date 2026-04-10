@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, mock } from "bun:test";
 import { act, createElement } from "react";
 
 import { LIVE_EDGE_HLS_CONFIG } from "../src/components/StreamPlayer";
+import { deriveBettorStreamUiState } from "../src/lib/bettorStreamUi";
 import {
   describeCanonicalRendererDegradedReason,
   isCanonicalRendererPlaybackReady,
@@ -150,6 +151,47 @@ describe("normalizeCanonicalStreamSession", () => {
     expect(session?.delivery?.hlsUrl).toBe("https://video.example/manifest.m3u8");
     expect(session?.status.delivery?.provider).toBe("cloudflare_stream");
     expect(session?.status.deliveryHealth?.ready).toBe(true);
+  });
+
+  it("parses canonical authority reconciliation metadata when present", () => {
+    const session = normalizeCanonicalStreamSession({
+      seq: 8,
+      emittedAt: 1_234_567_890,
+      cycle: {
+        cycleId: "cycle-1",
+        phase: "ANNOUNCEMENT",
+      },
+      canonicalAuthority: {
+        providerLive: true,
+        playbackProbeReady: true,
+        decision: "ready",
+        reason: null,
+        revision: 12,
+        updatedAt: 1_234_567_890,
+        liveInputId: "live-input-123",
+        videoUid: "video-456",
+        lifecycleStatus: "connected",
+        playbackUrl: "https://video.example/manifest.m3u8?protocol=llhls",
+        playbackProbeStatusCode: 200,
+        playbackManifestStatus: "ok",
+      },
+    });
+
+    expect(session?.canonicalAuthority).toEqual({
+      providerLive: true,
+      playbackProbeReady: true,
+      decision: "ready",
+      reason: null,
+      revision: 12,
+      updatedAt: 1_234_567_890,
+      liveInputId: "live-input-123",
+      videoUid: "video-456",
+      lifecycleStatus: "connected",
+      playbackUrl: "https://video.example/manifest.m3u8?protocol=llhls",
+      playbackProbeStatusCode: 200,
+      playbackManifestStatus: "ok",
+    });
+    expect(session?.authorityHealth.ready).toBe(true);
   });
 
   it("preserves llhls playback semantics when canonical ingest transport is srt", () => {
@@ -740,6 +782,30 @@ describe("selectBetSurfaceStreamUrl", () => {
     expect(selection.canUseCanonicalPlayback).toBe(false);
     expect(selection.activeStreamUrl).toBe("");
   });
+
+  it("keeps fallback sources disabled by default when the canonical session is absent", () => {
+    const selection = selectBetSurfaceStreamUrl({
+      fallbackStreamIndex: 0,
+      fallbackStreamSources: ["https://fallback.example/live/stream.m3u8"],
+      session: null,
+    });
+
+    expect(selection.activeStreamUrl).toBe("");
+    expect(selection.preloadStreamUrl).toBe("");
+  });
+
+  it("only activates fallback sources when an explicit override is enabled", () => {
+    const selection = selectBetSurfaceStreamUrl({
+      allowFallbackOverride: true,
+      fallbackStreamIndex: 0,
+      fallbackStreamSources: ["https://fallback.example/live/stream.m3u8"],
+      session: null,
+    });
+
+    expect(selection.activeStreamUrl).toBe(
+      "https://fallback.example/live/stream.m3u8",
+    );
+  });
 });
 
 describe("describeCanonicalRendererDegradedReason", () => {
@@ -780,6 +846,69 @@ describe("isCanonicalRendererPlaybackReady", () => {
         playbackUrl: "https://video.example/live/stream.m3u8",
       }),
     ).toBe(true);
+  });
+});
+
+describe("deriveBettorStreamUiState", () => {
+  it("stays connecting until the canonical session and player telemetry are both live", () => {
+    expect(
+      deriveBettorStreamUiState({
+        session: null,
+        playerStatus: null,
+      }),
+    ).toBe("connecting");
+  });
+
+  it("reports aligned only when server readiness and player sync are both healthy", () => {
+    const session = normalizeCanonicalStreamSession({
+      seq: 11,
+      emittedAt: 11,
+      cycle: {
+        cycleId: "cycle-11",
+        phase: "FIGHTING",
+      },
+      channel: makeCanonicalChannel(),
+      sourceRuntime: makeSourceRuntime(),
+    });
+
+    expect(
+      deriveBettorStreamUiState({
+        session,
+        playerStatus: {
+          ready: true,
+          status: "playing",
+          playbackStarted: true,
+          syncDeltaMs: 250,
+          syncState: "aligned",
+        },
+      }),
+    ).toBe("aligned");
+  });
+
+  it("reports drifted when the player telemetry falls out of sync", () => {
+    const session = normalizeCanonicalStreamSession({
+      seq: 12,
+      emittedAt: 12,
+      cycle: {
+        cycleId: "cycle-12",
+        phase: "FIGHTING",
+      },
+      channel: makeCanonicalChannel(),
+      sourceRuntime: makeSourceRuntime(),
+    });
+
+    expect(
+      deriveBettorStreamUiState({
+        session,
+        playerStatus: {
+          ready: true,
+          status: "playing",
+          playbackStarted: true,
+          syncDeltaMs: 2_400,
+          syncState: "out_of_sync",
+        },
+      }),
+    ).toBe("drifted");
   });
 });
 

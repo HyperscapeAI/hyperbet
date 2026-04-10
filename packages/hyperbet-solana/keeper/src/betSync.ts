@@ -54,6 +54,21 @@ export type BetSyncBroadcastTimeline = {
   updatedAt: number | null;
 };
 
+export type BetSyncCanonicalAuthority = {
+  providerLive: boolean;
+  playbackProbeReady: boolean;
+  decision: string | null;
+  reason: string | null;
+  revision: number | null;
+  updatedAt: number | null;
+  liveInputId: string | null;
+  videoUid: string | null;
+  lifecycleStatus: string | null;
+  playbackUrl: string | null;
+  playbackProbeStatusCode: number | null;
+  playbackManifestStatus: string | null;
+};
+
 export type BetSyncEvent = {
   schemaVersion: number;
   sourceEpoch: number;
@@ -86,6 +101,7 @@ export type BetSyncEvent = {
   publicReadiness: JsonRecord | null;
   canonicalDestination: JsonRecord | null;
   fallbackDestination: JsonRecord | null;
+  canonicalAuthority: BetSyncCanonicalAuthority | null;
   deliveryHealth: JsonRecord | null;
 };
 
@@ -103,6 +119,7 @@ export type StreamState = {
   cameraTarget: string | null;
   seq: number;
   emittedAt: number;
+  canonicalAuthority?: BetSyncCanonicalAuthority | null;
   sourceRuntime?: JsonRecord | null;
 };
 
@@ -314,6 +331,28 @@ function normalizeBroadcastTimeline(
   };
 }
 
+function normalizeCanonicalAuthority(
+  value: unknown,
+): BetSyncCanonicalAuthority | null {
+  const candidate = asRecord(value);
+  if (!candidate) return null;
+
+  return {
+    providerLive: candidate.providerLive === true,
+    playbackProbeReady: candidate.playbackProbeReady === true,
+    decision: asString(candidate.decision),
+    reason: asString(candidate.reason),
+    revision: asFiniteNumber(candidate.revision),
+    updatedAt: normalizePredictionMarketTimestamp(candidate.updatedAt),
+    liveInputId: asString(candidate.liveInputId),
+    videoUid: asString(candidate.videoUid),
+    lifecycleStatus: asString(candidate.lifecycleStatus),
+    playbackUrl: asString(candidate.playbackUrl),
+    playbackProbeStatusCode: asFiniteNumber(candidate.playbackProbeStatusCode),
+    playbackManifestStatus: asString(candidate.playbackManifestStatus),
+  };
+}
+
 export function parseBetSyncEvent(payload: unknown): BetSyncEvent | null {
   const candidate = asRecord(payload);
   if (!candidate) return null;
@@ -366,6 +405,7 @@ export function parseBetSyncEvent(payload: unknown): BetSyncEvent | null {
     publicReadiness: asRecord(candidate.publicReadiness),
     canonicalDestination: asRecord(candidate.canonicalDestination),
     fallbackDestination: asRecord(candidate.fallbackDestination),
+    canonicalAuthority: normalizeCanonicalAuthority(candidate.canonicalAuthority),
     deliveryHealth: asRecord(candidate.deliveryHealth),
   };
 }
@@ -428,6 +468,7 @@ export function toStreamStateFromBetSyncEvent(event: BetSyncEvent): StreamState 
     cameraTarget: event.cameraTarget,
     seq: event.seq,
     emittedAt: event.emittedAt,
+    canonicalAuthority: event.canonicalAuthority,
   };
 }
 

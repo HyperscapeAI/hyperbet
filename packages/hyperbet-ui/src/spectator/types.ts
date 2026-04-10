@@ -203,6 +203,21 @@ export interface CanonicalStreamHealth {
   updatedAt: number | null;
 }
 
+export interface CanonicalAuthorityInfo {
+  providerLive: boolean;
+  playbackProbeReady: boolean;
+  decision: string | null;
+  reason: string | null;
+  revision: number | null;
+  updatedAt: number | null;
+  liveInputId: string | null;
+  videoUid: string | null;
+  lifecycleStatus: string | null;
+  playbackUrl: string | null;
+  playbackProbeStatusCode: number | null;
+  playbackManifestStatus: string | null;
+}
+
 export interface CanonicalStreamPlayback {
   url: string | null;
   kind: string | null;
@@ -238,6 +253,7 @@ export interface CanonicalStreamSession {
   publicReadiness: StreamPublicReadiness | null;
   canonicalDestination: StreamDestinationState | null;
   fallbackDestination: StreamDestinationState | null;
+  canonicalAuthority: CanonicalAuthorityInfo | null;
   rendererMetrics: RendererMetricsInfo | null;
   delivery: StreamDeliveryInfo | null;
   authorityHealth: CanonicalStreamHealth;

@@ -7,6 +7,7 @@ import {
 } from "../lib/streamSession";
 import type {
   BroadcastTimeline,
+  CanonicalAuthorityInfo,
   CanonicalStreamHealth,
   HlsManifestInfo,
   CanonicalStreamPlayback,
@@ -199,6 +200,28 @@ function normalizePublicReadiness(
     ready: candidate.ready === true,
     reason: asString(candidate.reason),
     updatedAt: asFiniteNumber(candidate.updatedAt) ?? fallbackUpdatedAt,
+  };
+}
+
+function normalizeCanonicalAuthority(
+  value: unknown,
+  fallbackUpdatedAt: number | null,
+): CanonicalAuthorityInfo | null {
+  const candidate = asRecord(value);
+  if (!candidate) return null;
+  return {
+    providerLive: candidate.providerLive === true,
+    playbackProbeReady: candidate.playbackProbeReady === true,
+    decision: asString(candidate.decision),
+    reason: asString(candidate.reason),
+    revision: asFiniteNumber(candidate.revision),
+    updatedAt: asFiniteNumber(candidate.updatedAt) ?? fallbackUpdatedAt,
+    liveInputId: asString(candidate.liveInputId),
+    videoUid: asString(candidate.videoUid),
+    lifecycleStatus: asString(candidate.lifecycleStatus),
+    playbackUrl: asString(candidate.playbackUrl),
+    playbackProbeStatusCode: asFiniteNumber(candidate.playbackProbeStatusCode),
+    playbackManifestStatus: asString(candidate.playbackManifestStatus),
   };
 }
 
@@ -481,6 +504,10 @@ export function normalizeCanonicalStreamSession(
   const publicReadiness =
     channel?.publicReadiness ??
     normalizePublicReadiness(candidate.publicReadiness, emittedAt);
+  const canonicalAuthority = normalizeCanonicalAuthority(
+    candidate.canonicalAuthority,
+    emittedAt,
+  );
   const sourceRuntime =
     normalizeSourceRuntime(candidate.sourceRuntime) ??
     normalizeSourceRuntime(asRecord(candidate.status)?.sourceRuntime);
@@ -531,7 +558,13 @@ export function normalizeCanonicalStreamSession(
           delivery?.mode === "self_hls" && Boolean(delivery.playbackUrl),
         );
   const authorityHealth =
-    publicReadiness != null
+    canonicalAuthority != null
+      ? {
+          ready: canonicalAuthority.decision === "ready",
+          degradedReason: canonicalAuthority.reason,
+          updatedAt: canonicalAuthority.updatedAt,
+        }
+      : publicReadiness != null
       ? {
           ready: publicReadiness.ready,
           degradedReason: publicReadiness.reason,
@@ -592,6 +625,7 @@ export function normalizeCanonicalStreamSession(
     publicReadiness,
     canonicalDestination,
     fallbackDestination,
+    canonicalAuthority,
     rendererMetrics,
     delivery,
     authorityHealth,

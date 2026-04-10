@@ -30,6 +30,7 @@ import {
   captureInviteCodeFromLocation,
   getStoredInviteCode,
 } from "@hyperbet/ui/lib/invite";
+import { ENABLE_STREAM_SOURCE_OVERRIDE } from "@hyperbet/ui/lib/config";
 import {
   normalizePredictionMarketDuelKeyHex,
   usePredictionMarketLifecycle,
@@ -758,12 +759,14 @@ export function App() {
   } = usePredictionMarketLifecycle(
     lifecycleChainKey,
   );
+  const allowStreamSourceOverride =
+    ENABLE_STREAM_SOURCE_OVERRIDE || isE2eDebugMode;
   const streamSources = STREAM_URLS;
   const lifecycleDuelKey = normalizePredictionMarketDuelKeyHex(
     lifecycleDuel?.duelKey ?? null,
   );
   const { activeStreamUrl, preloadStreamUrl } = selectBetSurfaceStreamUrl({
-    allowFallbackWhenSessionUnavailable: false,
+    allowFallbackOverride: allowStreamSourceOverride,
     authorityHealth: canonicalAuthorityHealth,
     fallbackStreamIndex: streamSourceIndex,
     fallbackStreamSources: streamSources,
@@ -780,9 +783,6 @@ export function App() {
   const [streamPlayerStatus, setStreamPlayerStatus] =
     useState<StreamPlayerStatus | null>(null);
   const streamPlaceholderMessage = useMemo(() => {
-    if (streamSources.length === 0) {
-      return "Invalid live stream configuration. A tokenized Hyperscapes /stream URL is required.";
-    }
     if (!canonicalStreamSession) {
       return "Connecting to live session...";
     }
@@ -816,7 +816,6 @@ export function App() {
     canonicalRendererHealth?.ready,
     canonicalStreamSession,
     copy.waitingForStream,
-    streamSources.length,
   ]);
 
   const handleLocaleChange = useCallback((nextLocale: UiLocale) => {
@@ -825,16 +824,22 @@ export function App() {
   }, []);
 
   const switchToBackupStream = useCallback(() => {
+    if (!allowStreamSourceOverride) {
+      return;
+    }
     setStreamSourceIndex((current) =>
       current + 1 < streamSources.length ? current + 1 : current,
     );
-  }, [streamSources.length]);
+  }, [allowStreamSourceOverride, streamSources.length]);
 
   const cycleStreamSource = useCallback(() => {
+    if (!allowStreamSourceOverride) {
+      return;
+    }
     setStreamSourceIndex((current) =>
       streamSources.length > 1 ? (current + 1) % streamSources.length : current,
     );
-  }, [streamSources.length]);
+  }, [allowStreamSourceOverride, streamSources.length]);
 
   useEffect(() => {
     if (streamSourceIndex < streamSources.length) return;
@@ -1751,7 +1756,11 @@ export function App() {
                         muted={hmMuted}
                         autoPlay={true}
                         onStatusChange={setStreamPlayerStatus}
-                        onStreamUnavailable={switchToBackupStream}
+                        onStreamUnavailable={
+                          allowStreamSourceOverride
+                            ? switchToBackupStream
+                            : undefined
+                        }
                         style={{
                           position: "absolute",
                           inset: 0,
@@ -1799,7 +1808,7 @@ export function App() {
                               </svg>
                             )}
                           </button>
-                          {streamSources.length > 1 && (
+                          {allowStreamSourceOverride && streamSources.length > 1 && (
                             <button
                               className="hm-stream-source-btn"
                               onClick={cycleStreamSource}

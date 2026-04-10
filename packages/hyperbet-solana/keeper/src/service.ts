@@ -97,6 +97,7 @@ type StreamState = {
   publicReadiness?: Record<string, unknown> | null;
   canonicalDestination?: Record<string, unknown> | null;
   fallbackDestination?: Record<string, unknown> | null;
+  canonicalAuthority?: Record<string, unknown> | null;
   sourceRuntime?: Record<string, unknown> | null;
   deliveryHealth?: Record<string, unknown> | null;
   delivery?: Record<string, unknown> | null;
@@ -172,6 +173,20 @@ type CanonicalStreamPublicReadiness = {
   ready: boolean;
   reason: string | null;
   updatedAt: number | null;
+};
+type CanonicalAuthorityInfo = {
+  providerLive: boolean;
+  playbackProbeReady: boolean;
+  decision: string | null;
+  reason: string | null;
+  revision: number | null;
+  updatedAt: number | null;
+  liveInputId: string | null;
+  videoUid: string | null;
+  lifecycleStatus: string | null;
+  playbackUrl: string | null;
+  playbackProbeStatusCode: number | null;
+  playbackManifestStatus: string | null;
 };
 type CanonicalStreamDestination = {
   id: string;
@@ -249,6 +264,7 @@ type CanonicalStreamSession = {
   publicReadiness: CanonicalStreamPublicReadiness | null;
   canonicalDestination: CanonicalStreamDestination | null;
   fallbackDestination: CanonicalStreamDestination | null;
+  canonicalAuthority: CanonicalAuthorityInfo | null;
   rendererMetrics: CanonicalRendererMetrics | null;
   delivery: CanonicalStreamDelivery | null;
   authorityHealth: CanonicalStreamHealth;
@@ -2159,6 +2175,41 @@ function normalizeCanonicalPublicReadiness(
   };
 }
 
+function normalizeCanonicalAuthority(
+  value: unknown,
+  fallbackUpdatedAt: number,
+): CanonicalAuthorityInfo | null {
+  const candidate = asRecord(value);
+  if (!candidate) return null;
+  return {
+    providerLive: candidate.providerLive === true,
+    playbackProbeReady: candidate.playbackProbeReady === true,
+    decision: asNonEmptyString(candidate.decision),
+    reason: asNonEmptyString(candidate.reason),
+    revision: asFiniteNumber(candidate.revision),
+    updatedAt: asFiniteNumber(candidate.updatedAt) ?? fallbackUpdatedAt,
+    liveInputId: asNonEmptyString(candidate.liveInputId),
+    videoUid: asNonEmptyString(candidate.videoUid),
+    lifecycleStatus: asNonEmptyString(candidate.lifecycleStatus),
+    playbackUrl: asNonEmptyString(candidate.playbackUrl),
+    playbackProbeStatusCode: asFiniteNumber(candidate.playbackProbeStatusCode),
+    playbackManifestStatus: asNonEmptyString(candidate.playbackManifestStatus),
+  };
+}
+
+function toAuthorityHealthFromCanonicalAuthority(
+  authority: CanonicalAuthorityInfo | null,
+): CanonicalStreamHealth | null {
+  if (!authority) {
+    return null;
+  }
+  return {
+    ready: authority.decision === "ready",
+    degradedReason: authority.reason,
+    updatedAt: authority.updatedAt,
+  };
+}
+
 function normalizeCanonicalDestinationState(
   value: unknown,
 ): CanonicalStreamDestination | null {
@@ -2616,6 +2667,10 @@ function buildCanonicalStreamSessionFromStreamState(
     normalizeCanonicalDestinationState(
       nextRecord.fallbackDestination ?? cycle.fallbackDestination,
     );
+  const canonicalAuthority = normalizeCanonicalAuthority(
+    nextRecord.canonicalAuthority ?? cycle.canonicalAuthority,
+    emittedAt,
+  );
   const delivery = resolveCanonicalDelivery(
     nextRecord.delivery ?? cycle.delivery,
     channel,
@@ -2640,6 +2695,7 @@ function buildCanonicalStreamSessionFromStreamState(
   );
   const rendererMetrics = resolveCanonicalRendererMetrics(cycle.rendererMetrics);
   const authorityHealth =
+    toAuthorityHealthFromCanonicalAuthority(canonicalAuthority) ??
     toDeliveryHealthFromPublicReadiness(publicReadiness) ??
     normalizeCanonicalStreamHealth(
       {
@@ -2677,6 +2733,7 @@ function buildCanonicalStreamSessionFromStreamState(
     publicReadiness,
     canonicalDestination,
     fallbackDestination,
+    canonicalAuthority,
     rendererMetrics,
     delivery,
     authorityHealth,
@@ -2721,6 +2778,10 @@ function toCanonicalStreamSession(payload: unknown): CanonicalStreamSession | nu
   const fallbackDestination =
     findFallbackDestinationInChannel(channel) ??
     normalizeCanonicalDestinationState(candidate.fallbackDestination);
+  const canonicalAuthority = normalizeCanonicalAuthority(
+    candidate.canonicalAuthority,
+    emittedAt,
+  );
   const rendererHealth = resolveCanonicalRendererHealth(
     candidate.rendererHealth ?? statusCandidate?.renderer,
     emittedAt,
@@ -2751,6 +2812,7 @@ function toCanonicalStreamSession(payload: unknown): CanonicalStreamSession | nu
     "",
   );
   const authorityHealth =
+    toAuthorityHealthFromCanonicalAuthority(canonicalAuthority) ??
     toDeliveryHealthFromPublicReadiness(publicReadiness) ??
     normalizeCanonicalStreamHealth(
       candidate.authorityHealth ?? statusCandidate?.authority,
@@ -2814,6 +2876,7 @@ function toCanonicalStreamSession(payload: unknown): CanonicalStreamSession | nu
     publicReadiness,
     canonicalDestination,
     fallbackDestination,
+    canonicalAuthority,
     rendererMetrics,
     delivery,
     authorityHealth,
@@ -2847,6 +2910,7 @@ function toStreamStateFromCanonicalSession(
     publicReadiness: session.publicReadiness,
     canonicalDestination: session.canonicalDestination,
     fallbackDestination: session.fallbackDestination,
+    canonicalAuthority: session.canonicalAuthority,
     sourceRuntime: session.sourceRuntime,
     deliveryHealth: session.deliveryHealth,
     delivery: session.delivery,
@@ -2916,6 +2980,10 @@ function publishCanonicalStreamSession(
   const resolvedFallbackDestination =
     findFallbackDestinationInChannel(resolvedChannel) ??
     normalizeCanonicalDestinationState(next.fallbackDestination);
+  const resolvedCanonicalAuthority = normalizeCanonicalAuthority(
+    next.canonicalAuthority,
+    emittedAt,
+  );
   const resolvedDelivery = resolveCanonicalDelivery(
     next.delivery ?? next.status?.delivery,
     resolvedChannel,
@@ -2935,6 +3003,7 @@ function publishCanonicalStreamSession(
     next.duelId || `stream-${streamSeq + 1}`,
   );
   const resolvedAuthorityHealth =
+    toAuthorityHealthFromCanonicalAuthority(resolvedCanonicalAuthority) ??
     toDeliveryHealthFromPublicReadiness(resolvedPublicReadiness) ??
     next.authorityHealth;
   streamSeq = Math.max(streamSeq + 1, next.seq || streamSeq + 1);
@@ -2954,6 +3023,7 @@ function publishCanonicalStreamSession(
     publicReadiness: resolvedPublicReadiness,
     canonicalDestination: resolvedCanonicalDestination,
     fallbackDestination: resolvedFallbackDestination,
+    canonicalAuthority: resolvedCanonicalAuthority,
     rendererMetrics: resolvedRendererMetrics,
     delivery: resolvedDelivery,
     authorityHealth: resolvedAuthorityHealth,
@@ -3047,6 +3117,10 @@ function buildCanonicalStreamSessionFromBetSyncEvent(
   const fallbackDestination =
     findFallbackDestinationInChannel(channel) ??
     normalizeCanonicalDestinationState(eventRecord.fallbackDestination);
+  const canonicalAuthority = normalizeCanonicalAuthority(
+    eventRecord.canonicalAuthority,
+    event.emittedAt,
+  );
   const delivery = resolveCanonicalDelivery(event.delivery, channel);
   const deliveryHealth = resolveCanonicalDeliveryHealth(
     eventRecord.deliveryHealth,
@@ -3069,15 +3143,20 @@ function buildCanonicalStreamSessionFromBetSyncEvent(
     publicReadiness,
     canonicalDestination,
     fallbackDestination,
+    canonicalAuthority,
     sourceRuntime,
     rendererMetrics: resolveCanonicalRendererMetrics(event.rendererMetrics),
     delivery,
     deliveryHealth,
     authorityHealth:
-      toDeliveryHealthFromPublicReadiness(publicReadiness) ?? base.authorityHealth,
+      toAuthorityHealthFromCanonicalAuthority(canonicalAuthority) ??
+      toDeliveryHealthFromPublicReadiness(publicReadiness) ??
+      base.authorityHealth,
     status: {
       authority:
-        toDeliveryHealthFromPublicReadiness(publicReadiness) ?? base.authorityHealth,
+        toAuthorityHealthFromCanonicalAuthority(canonicalAuthority) ??
+        toDeliveryHealthFromPublicReadiness(publicReadiness) ??
+        base.authorityHealth,
       renderer: base.rendererHealth,
       sourceRuntime,
       delivery,
@@ -3398,16 +3477,28 @@ async function pollStreamStateSource(): Promise<void> {
         canonicalStreamSession.duelId !== nextSession.duelId ||
         canonicalStreamSession.phase !== nextSession.phase ||
         canonicalStreamSession.playback?.url !== nextSession.playback?.url ||
-      canonicalStreamSession.publicReadiness?.ready !==
-        nextSession.publicReadiness?.ready ||
-      canonicalStreamSession.publicReadiness?.reason !==
-        nextSession.publicReadiness?.reason ||
-      canonicalStreamSession.sourceRuntime?.ready !==
-        nextSession.sourceRuntime?.ready ||
-      canonicalStreamSession.sourceRuntime?.degradedReason !==
-        nextSession.sourceRuntime?.degradedReason ||
-      canonicalStreamSession.rendererHealth?.ready !==
-        nextSession.rendererHealth?.ready ||
+        canonicalStreamSession.canonicalAuthority?.revision !==
+          nextSession.canonicalAuthority?.revision ||
+        canonicalStreamSession.canonicalAuthority?.decision !==
+          nextSession.canonicalAuthority?.decision ||
+        canonicalStreamSession.canonicalAuthority?.reason !==
+          nextSession.canonicalAuthority?.reason ||
+        canonicalStreamSession.canonicalAuthority?.providerLive !==
+          nextSession.canonicalAuthority?.providerLive ||
+        canonicalStreamSession.canonicalAuthority?.playbackProbeReady !==
+          nextSession.canonicalAuthority?.playbackProbeReady ||
+        canonicalStreamSession.canonicalAuthority?.playbackManifestStatus !==
+          nextSession.canonicalAuthority?.playbackManifestStatus ||
+        canonicalStreamSession.publicReadiness?.ready !==
+          nextSession.publicReadiness?.ready ||
+        canonicalStreamSession.publicReadiness?.reason !==
+          nextSession.publicReadiness?.reason ||
+        canonicalStreamSession.sourceRuntime?.ready !==
+          nextSession.sourceRuntime?.ready ||
+        canonicalStreamSession.sourceRuntime?.degradedReason !==
+          nextSession.sourceRuntime?.degradedReason ||
+        canonicalStreamSession.rendererHealth?.ready !==
+          nextSession.rendererHealth?.ready ||
         canonicalStreamSession.rendererHealth?.degradedReason !==
           nextSession.rendererHealth?.degradedReason;
       if (changed) {

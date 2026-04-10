@@ -59,6 +59,20 @@ describe("parseBetSyncEvent", () => {
         id: "fallback-self-hls",
         playbackReady: true,
       },
+      canonicalAuthority: {
+        providerLive: true,
+        playbackProbeReady: false,
+        decision: "blocked",
+        reason: "probe_unready",
+        revision: 9,
+        updatedAt: 1_712_345_678_100,
+        liveInputId: "live-input-123",
+        videoUid: "video-456",
+        lifecycleStatus: "connected",
+        playbackUrl: "https://video.example/live.m3u8?protocol=llhls",
+        playbackProbeStatusCode: 503,
+        playbackManifestStatus: "stale",
+      },
       sourceRuntime: {
         ready: false,
         statusSource: "external_worker",
@@ -95,6 +109,20 @@ describe("parseBetSyncEvent", () => {
     expect(event?.fallbackDestination).toEqual({
       id: "fallback-self-hls",
       playbackReady: true,
+    });
+    expect(event?.canonicalAuthority).toEqual({
+      providerLive: true,
+      playbackProbeReady: false,
+      decision: "blocked",
+      reason: "probe_unready",
+      revision: 9,
+      updatedAt: 1_712_345_678_100,
+      liveInputId: "live-input-123",
+      videoUid: "video-456",
+      lifecycleStatus: "connected",
+      playbackUrl: "https://video.example/live.m3u8?protocol=llhls",
+      playbackProbeStatusCode: 503,
+      playbackManifestStatus: "stale",
     });
     expect(event?.sourceRuntime).toEqual({
       ready: false,
@@ -182,6 +210,20 @@ describe("parseBetSyncBootstrapState", () => {
           ready: true,
           reason: null,
         },
+        canonicalAuthority: {
+          providerLive: true,
+          playbackProbeReady: true,
+          decision: "ready",
+          reason: null,
+          revision: 5,
+          updatedAt: 1_712_345_679_111,
+          liveInputId: "live-input-123",
+          videoUid: "video-456",
+          lifecycleStatus: "connected",
+          playbackUrl: "https://video.example/live.m3u8?protocol=llhls",
+          playbackProbeStatusCode: 200,
+          playbackManifestStatus: "ok",
+        },
         sourceRuntime: {
           ready: true,
           statusSource: "external_worker",
@@ -207,6 +249,20 @@ describe("parseBetSyncBootstrapState", () => {
     expect(state?.latestEvent?.publicReadiness).toEqual({
       ready: true,
       reason: null,
+    });
+    expect(state?.latestEvent?.canonicalAuthority).toEqual({
+      providerLive: true,
+      playbackProbeReady: true,
+      decision: "ready",
+      reason: null,
+      revision: 5,
+      updatedAt: 1_712_345_679_111,
+      liveInputId: "live-input-123",
+      videoUid: "video-456",
+      lifecycleStatus: "connected",
+      playbackUrl: "https://video.example/live.m3u8?protocol=llhls",
+      playbackProbeStatusCode: 200,
+      playbackManifestStatus: "ok",
     });
     expect(state?.latestEvent?.sourceRuntime).toEqual({
       ready: true,
