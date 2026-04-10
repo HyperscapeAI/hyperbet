@@ -615,6 +615,10 @@ export const ENABLE_STREAM_SOURCE_OVERRIDE = readEnvBoolean(
   "VITE_ENABLE_STREAM_SOURCE_OVERRIDE",
   RUNTIME_ENV === "e2e" || !isPublicBrowserRuntime(),
 );
+export const ENABLE_LIFECYCLE_MISMATCH_CONSOLE = readEnvBoolean(
+  "VITE_ENABLE_LIFECYCLE_MISMATCH_CONSOLE",
+  !isPublicBrowserRuntime() && Boolean(import.meta.env.DEV),
+);
 export const GAME_API_URL: string = CONFIG.gameApiUrl;
 export const GAME_WS_URL: string = CONFIG.gameWsUrl;
 export const PUBLIC_CDN_URL: string = CONFIG.publicCdnUrl;

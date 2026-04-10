@@ -25,6 +25,7 @@ import { NavTabs } from "@hyperbet/ui/components/NavTabs";
 
 import {
   DEFAULT_REFRESH_INTERVAL_MS,
+  ENABLE_LIFECYCLE_MISMATCH_CONSOLE,
   GAME_API_URL,
   getFixedMatchId,
 } from "./lib/config";
@@ -774,7 +775,7 @@ export function App() {
   ]);
 
   useEffect(() => {
-    if (!import.meta.env.DEV) {
+    if (!ENABLE_LIFECYCLE_MISMATCH_CONSOLE) {
       lastLifecycleMismatchSignatureRef.current = null;
       return;
     }
@@ -796,6 +797,7 @@ export function App() {
       diagnostic: canonicalLiveStatus.driftDiagnostic,
     });
   }, [
+    ENABLE_LIFECYCLE_MISMATCH_CONSOLE,
     activeChain,
     canonicalLiveStatus.driftDiagnostic,
   ]);

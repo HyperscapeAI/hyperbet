@@ -31,6 +31,7 @@ import { secp256k1 } from "@noble/curves/secp256k1.js";
 
 import { useChain } from "../lib/ChainContext";
 import { getEvmChainConfig } from "../lib/chainConfig";
+import { ENABLE_LIFECYCLE_MISMATCH_CONSOLE } from "../lib/config";
 import {
   claimWinnings,
   type ContractWriteAccount,
@@ -697,7 +698,7 @@ export function EvmBettingPanel({
   }, [parityStatusLabel]);
 
   useEffect(() => {
-    if (!import.meta.env.DEV) {
+    if (!ENABLE_LIFECYCLE_MISMATCH_CONSOLE) {
       lastLifecycleMismatchSignatureRef.current = null;
       return;
     }
@@ -730,6 +731,7 @@ export function EvmBettingPanel({
         fetchedLifecycleMarket?.duelId ?? fetchedLifecycleDuel?.duelId ?? null,
     });
   }, [
+    ENABLE_LIFECYCLE_MISMATCH_CONSOLE,
     activeChain,
     authoritativeLifecycleDuelKey,
     effectiveLifecycleDuel?.duelId,
