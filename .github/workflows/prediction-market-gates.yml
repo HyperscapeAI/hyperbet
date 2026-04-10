@@ -239,7 +239,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        chain: [solana, bsc, avax]
+        chain: [solana, bsc]
     steps:
       - name: Checkout code
         uses: actions/checkout@v6.0.2
@@ -272,16 +272,7 @@ jobs:
           VITE_USE_GAME_EVM_RPC_PROXY: "true"
           VITE_BSC_CHAIN_ID: ${{ vars.ENOOMIAN_BSC_CHAIN_ID != '' && vars.ENOOMIAN_BSC_CHAIN_ID || vars.HYPERBET_BSC_STAGING_CHAIN_ID }}
           VITE_BSC_GOLD_CLOB_ADDRESS: ${{ vars.ENOOMIAN_BSC_GOLD_CLOB_ADDRESS != '' && vars.ENOOMIAN_BSC_GOLD_CLOB_ADDRESS || vars.HYPERBET_BSC_STAGING_GOLD_CLOB_ADDRESS }}
-          VITE_AVAX_CHAIN_ID: ${{ vars.HYPERBET_AVAX_STAGING_CHAIN_ID }}
-          VITE_AVAX_GOLD_CLOB_ADDRESS: ${{ vars.HYPERBET_AVAX_STAGING_GOLD_CLOB_ADDRESS }}
         run: bun run ci:env -- --target=pages:unified --deployment=staging
-
-      - name: AVAX gate posture note
-        if: matrix.chain == 'avax'
-        run: |
-          echo "::warning title=AVAX Gate posture::AVAX launch gate is not promoted to required status until chain-registry production mainnet fields are canonical and staged read-only/canary-write proof artifacts are reviewed."
-          echo "Evidence requirement for AVAX completion: reviewed proof bundle from both `bun run staged:proof -- --mode=read-only --target=avax` and `bun run staged:proof -- --mode=canary-write --target=avax`."
-          echo "Required AVAX staged proof inputs/secrets: HYPERBET_AVAX_STAGING_RPC_URL, HYPERBET_AVAX_STAGING_CHAIN_ID, HYPERBET_AVAX_STAGING_REPORTER_PRIVATE_KEY, HYPERBET_AVAX_STAGING_CANARY_PRIVATE_KEY, HYPERBET_AVAX_STAGING_ADMIN_PRIVATE_KEY, HYPERBET_AVAX_STAGING_MARKET_OPERATOR_PRIVATE_KEY, HYPERBET_AVAX_STAGING_DUEL_ORACLE_ADDRESS, HYPERBET_AVAX_STAGING_GOLD_CLOB_ADDRESS, HYPERBET_AVAX_STAGING_GOLD_AMM_ROUTER_ADDRESS, HYPERBET_AVAX_STAGING_MUSD_TOKEN_ADDRESS, HYPERBET_AVAX_STAGING_GOLD_TOKEN_ADDRESS, HYPERBET_AVAX_STAGING_SKILL_ORACLE_ADDRESS, HYPERBET_AVAX_STAGING_PERP_ENGINE_ADDRESS, HYPERBET_AVAX_STAGING_STREAM_PUBLISH_KEY, HYPERBET_AVAX_RAILWAY_STAGING_PROJECT_ID, HYPERBET_AVAX_RAILWAY_STAGING_ENVIRONMENT_ID, HYPERBET_AVAX_RAILWAY_STAGING_KEEPER_SERVICE_ID"
 
       - name: Run Gate 10 local E2E
         run: bun run ci:gate:e2e:${{ matrix.chain }}

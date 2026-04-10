@@ -66,10 +66,10 @@ jobs:
             ws_url="${{ vars.ENOOMIAN_HYPERBET_KEEPER_WS_URL }}"
             bsc_chain_id="${{ vars.ENOOMIAN_BSC_CHAIN_ID != '' && vars.ENOOMIAN_BSC_CHAIN_ID || vars.HYPERBET_BSC_STAGING_CHAIN_ID }}"
             bsc_clob_address="${{ vars.ENOOMIAN_BSC_GOLD_CLOB_ADDRESS != '' && vars.ENOOMIAN_BSC_GOLD_CLOB_ADDRESS || vars.HYPERBET_BSC_STAGING_GOLD_CLOB_ADDRESS }}"
-            base_chain_id="${{ vars.HYPERBET_BASE_STAGING_CHAIN_ID }}"
-            base_clob_address="${{ vars.HYPERBET_BASE_STAGING_GOLD_CLOB_ADDRESS }}"
-            avax_chain_id="${{ vars.HYPERBET_AVAX_STAGING_CHAIN_ID }}"
-            avax_clob_address="${{ vars.HYPERBET_AVAX_STAGING_GOLD_CLOB_ADDRESS }}"
+            base_chain_id=""
+            base_clob_address=""
+            avax_chain_id=""
+            avax_clob_address=""
           fi
 
           if [ -z "${pages_project_name}" ]; then

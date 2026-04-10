@@ -96,7 +96,7 @@ async function fetchJson<T>(
 }
 
 async function gotoApp(page: Page): Promise<void> {
-  await page.goto("/", { waitUntil: "domcontentloaded" });
+  await page.goto("/?debug=1", { waitUntil: "domcontentloaded" });
   await expect
     .poll(async () => {
       const bodyText = (await page.locator("body").textContent().catch(() => "")) ?? "";
@@ -106,6 +106,58 @@ async function gotoApp(page: Page): Promise<void> {
   await expect(page.locator("#chain-selector").first()).toBeVisible({
     timeout: 30_000,
   });
+}
+
+async function ensureWalletConnected(page: Page): Promise<void> {
+  const hasConnectedSolanaWallet = async (): Promise<boolean> => {
+    const desktopWalletChip = page
+      .getByRole("button", { name: /^SOL\s+[A-Za-z0-9].*/i })
+      .first();
+    if (await desktopWalletChip.isVisible().catch(() => false)) return true;
+
+    const mobileWalletChip = page
+      .getByRole("button", { name: /^◎\s*[A-Za-z0-9].*/i })
+      .first();
+    if (await mobileWalletChip.isVisible().catch(() => false)) return true;
+
+    return false;
+  };
+
+  const selectHeadlessWallet = async (): Promise<boolean> => {
+    const walletOption = page.getByRole("button", { name: /E2E Trader/i }).first();
+    if (!(await walletOption.isVisible().catch(() => false))) return false;
+    await walletOption.click({ force: true });
+    await expect(
+      page.getByRole("dialog", {
+        name: /Connect a wallet on Solana to continue/i,
+      }),
+    )
+      .toBeHidden({ timeout: 30_000 })
+      .catch(() => undefined);
+    return true;
+  };
+
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    if (await hasConnectedSolanaWallet()) return;
+
+    if (await selectHeadlessWallet()) {
+      await page.waitForTimeout(2_000);
+      continue;
+    }
+
+    const connectButton = page
+      .getByRole("button", {
+        name: /connect wallet|select wallet|connect|add sol wallet|connect sol/i,
+      })
+      .first();
+    if (await connectButton.isVisible().catch(() => false)) {
+      await connectButton.click();
+    }
+    await selectHeadlessWallet();
+    await page.waitForTimeout(2_000);
+  }
+
+  await expect.poll(hasConnectedSolanaWallet, { timeout: 60_000 }).toBe(true);
 }
 
 async function clickVisibleTestId(page: Page, testId: string): Promise<void> {
@@ -161,6 +213,25 @@ async function waitForTxUpdate(
       { timeout: 120_000, intervals: [500, 1_000, 2_000, 5_000] },
     )
     .toMatch(/^0x[0-9a-f]+$/i);
+  return readTestIdText(page, testId);
+}
+
+async function waitForChangedText(
+  page: Page,
+  testId: string,
+  previous: string,
+): Promise<string> {
+  await expect
+    .poll(
+      async () => {
+        const current = await readTestIdText(page, testId);
+        return current !== previous && current.trim() && !current.trim().endsWith("-")
+          ? current
+          : "";
+      },
+      { timeout: 120_000, intervals: [500, 1_000, 2_000, 5_000] },
+    )
+    .not.toBe("");
   return readTestIdText(page, testId);
 }
 
@@ -256,17 +327,14 @@ test.describe("unified bets page coverage", () => {
     );
     expect(optionValues).toContain("solana");
     expect(optionValues).toContain("bsc");
-    expect(optionValues).toContain("avax");
+    expect(optionValues).not.toContain("avax");
+    expect(optionValues).not.toContain("base");
 
     await selectChain(page, "solana");
     await expect(page.getByTestId("solana-clob-panel")).toBeVisible({
       timeout: 60_000,
     });
     await selectChain(page, "bsc");
-    await expect(page.getByTestId("evm-panel").first()).toBeVisible({
-      timeout: 60_000,
-    });
-    await selectChain(page, "avax");
     await expect(page.getByTestId("evm-panel").first()).toBeVisible({
       timeout: 60_000,
     });
@@ -352,5 +420,41 @@ test.describe("unified bets page coverage", () => {
     expect(nextOrderTx).toMatch(/^0x[0-9a-f]+$/i);
     await expect(page.getByTestId("evm-status")).not.toContainText(/order failed/i);
     await expect(evmPanel.getByTestId("prediction-submit")).toBeVisible();
+  });
+
+  test("solana CLOB submit path executes on the unified page", async ({
+    page,
+  }) => {
+    await gotoApp(page);
+    await selectChain(page, "solana");
+    await ensureWalletConnected(page);
+    await page.getByTestId("refresh-market").click();
+
+    await expect(page.getByTestId("current-match-id")).not.toContainText("—", {
+      timeout: 60_000,
+    });
+    await expect(page.getByTestId("solana-clob-panel")).toBeVisible({
+      timeout: 60_000,
+    });
+    await expect(page.getByTestId("prediction-submit")).toBeEnabled({
+      timeout: 60_000,
+    });
+
+    await page.getByTestId("prediction-select-yes").click({ force: true });
+    await page.getByTestId("prediction-amount-input").fill("1");
+    await page.getByTestId("solana-clob-price-input").fill("600");
+
+    const previousOrderTx = await readTestIdText(page, "solana-clob-place-order-tx");
+    await page.getByTestId("prediction-submit").click({ force: true });
+    const nextOrderTx = await waitForChangedText(
+      page,
+      "solana-clob-place-order-tx",
+      previousOrderTx,
+    );
+
+    expect(nextOrderTx).toMatch(/LAST_TX:\s*[1-9A-HJ-NP-Za-km-z]{20,}/);
+    await expect(page.getByTestId("solana-clob-status")).not.toContainText(
+      /order failed/i,
+    );
   });
 });

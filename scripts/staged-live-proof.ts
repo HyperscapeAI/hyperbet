@@ -33,6 +33,10 @@ type KeeperStatus = {
   ok?: boolean;
   proxies?: Record<string, boolean>;
   parsers?: Record<string, boolean>;
+  predictionMarkets?: {
+    marketCount?: number | null;
+    chains?: Array<{ chainKey: string }> | null;
+  };
 };
 
 type LifecycleMarket = {
@@ -86,6 +90,15 @@ type CheckResult = {
   details: string;
 };
 
+type RedirectAuditResult = {
+  sourceUrl: string;
+  finalUrl: string | null;
+  ok: boolean;
+  preservedPath: boolean;
+  preservedQuery: boolean;
+  status: number | null;
+};
+
 type AuditResult = {
   target: string;
   ok: boolean;
@@ -128,6 +141,10 @@ type ProofSummary = {
   unifiedEnvAudit?: {
     pages: AuditResult;
     keeper: AuditResult;
+  };
+  legacyRedirects?: {
+    solana: RedirectAuditResult;
+    bsc: RedirectAuditResult;
   };
 };
 
@@ -220,6 +237,98 @@ function requireAnyEnv(names: string[]): string {
 
 function normalizeUrl(value: string): string {
   return value.trim().replace(/\/$/, "");
+}
+
+function assertUnifiedReadOnlySurface(
+  chain: SupportedChain,
+  status: KeeperStatus,
+  predictionMarkets: PredictionMarketsResponse,
+): void {
+  const marketChains = Array.from(
+    new Set(predictionMarkets.markets.map((market) => market.chainKey)),
+  ).sort();
+  const statusChains = Array.from(
+    new Set((status.predictionMarkets?.chains ?? []).map((market) => market.chainKey)),
+  ).sort();
+  const expectedChains = ["bsc", "solana"];
+  const combinedChains = Array.from(new Set([...marketChains, ...statusChains])).sort();
+
+  if (combinedChains.length !== expectedChains.length) {
+    throw new Error(
+      `${chain} unified surface exposed unexpected chain count: ${combinedChains.join(", ") || "none"}`,
+    );
+  }
+  if (expectedChains.some((expected, index) => combinedChains[index] !== expected)) {
+    throw new Error(
+      `${chain} unified surface exposed unexpected chains: ${combinedChains.join(", ")}`,
+    );
+  }
+
+  const marketCount = status.predictionMarkets?.marketCount ?? predictionMarkets.markets.length;
+  if (marketCount !== 2) {
+    throw new Error(`${chain} unified surface reported marketCount=${marketCount}, expected 2`);
+  }
+}
+
+async function verifyLegacyRedirect(
+  sourceBaseUrl: string,
+  unifiedBaseUrl: string,
+  pathname: string,
+  searchParams: URLSearchParams,
+): Promise<RedirectAuditResult> {
+  const source = new URL(`${normalizeUrl(sourceBaseUrl)}${pathname}`);
+  source.search = searchParams.toString();
+  try {
+    const response = await fetch(source.toString(), { redirect: "follow" });
+    const finalUrl = response.url || null;
+    const final = finalUrl ? new URL(finalUrl) : null;
+    const expectedBase = normalizeUrl(unifiedBaseUrl);
+    return {
+      sourceUrl: source.toString(),
+      finalUrl,
+      ok:
+        response.ok &&
+        finalUrl != null &&
+        normalizeUrl(`${final.protocol}//${final.host}`) === expectedBase,
+      preservedPath: final?.pathname === source.pathname,
+      preservedQuery: final?.search === source.search,
+      status: response.status,
+    };
+  } catch {
+    return {
+      sourceUrl: source.toString(),
+      finalUrl: null,
+      ok: false,
+      preservedPath: false,
+      preservedQuery: false,
+      status: null,
+    };
+  }
+}
+
+async function verifyUnifiedLegacyRedirects(): Promise<{
+  solana: RedirectAuditResult;
+  bsc: RedirectAuditResult;
+}> {
+  const unifiedPagesUrl = requireEnv("ENOOMIAN_HYPERBET_PAGES_URL");
+  const searchParams = new URLSearchParams({
+    proof_redirect: "1",
+    preserved: "true",
+  });
+  return {
+    solana: await verifyLegacyRedirect(
+      requireEnv("ENOOMIAN_HYPERBET_SOLANA_PAGES_URL"),
+      unifiedPagesUrl,
+      "/markets",
+      searchParams,
+    ),
+    bsc: await verifyLegacyRedirect(
+      requireEnv("ENOOMIAN_HYPERBET_BSC_PAGES_URL"),
+      unifiedPagesUrl,
+      "/markets",
+      searchParams,
+    ),
+  };
 }
 
 function chainUrls(chain: SupportedChain, requireUnifiedUrls = false): ChainUrls {
@@ -320,6 +429,9 @@ async function runReadOnly(
     undefined,
     `${chain}/prediction-markets.json`,
   );
+  if (requireUnifiedUrls) {
+    assertUnifiedReadOnlySurface(chain, status, predictionMarkets);
+  }
   const perpsMarkets = await requestJson<unknown>(
     `${urls.keeperUrl}/api/perps/markets`,
     undefined,
@@ -571,8 +683,10 @@ function runUnifiedEnvAudit(): {
     VITE_USE_GAME_EVM_RPC_PROXY: "true",
     VITE_BSC_CHAIN_ID: String(bscChainId),
     VITE_BSC_GOLD_CLOB_ADDRESS: bscClobAddress,
-    VITE_AVAX_CHAIN_ID: String(requireEnv("HYPERBET_AVAX_STAGING_CHAIN_ID")),
-    VITE_AVAX_GOLD_CLOB_ADDRESS: requireEnv("HYPERBET_AVAX_STAGING_GOLD_CLOB_ADDRESS"),
+    VITE_BASE_CHAIN_ID: "",
+    VITE_BASE_GOLD_CLOB_ADDRESS: "",
+    VITE_AVAX_CHAIN_ID: "",
+    VITE_AVAX_GOLD_CLOB_ADDRESS: "",
   });
   const keeper = runAudit("unified-keeper-env-audit", "keeper:unified", {
     ENOOMIAN_HYPERBET_PAGES_URL: pagesUrl,
@@ -586,9 +700,7 @@ function runUnifiedEnvAudit(): {
     SOLANA_RPC_URL: requireEnv("ENOOMIAN_SOLANA_RPC_URL"),
     BSC_RPC_URL: requireEnv("ENOOMIAN_BSC_RPC_URL"),
     BSC_GOLD_CLOB_ADDRESS: bscClobAddress,
-    AVAX_RPC_URL: requireEnv("HYPERBET_AVAX_STAGING_RPC_URL"),
-    AVAX_GOLD_CLOB_ADDRESS: requireEnv("HYPERBET_AVAX_STAGING_GOLD_CLOB_ADDRESS"),
-    EVM_KEEPER_CHAINS: "bsc,avax",
+    EVM_KEEPER_CHAINS: "bsc",
   });
   return { pages, keeper };
 }
@@ -691,6 +803,11 @@ function humanSummary(summary: ProofSummary): string {
       `unified env audit: pages=${summary.unifiedEnvAudit.pages.ok} keeper=${summary.unifiedEnvAudit.keeper.ok}`,
     );
   }
+  if (summary.legacyRedirects) {
+    lines.push(
+      `legacy redirects: solana=${summary.legacyRedirects.solana.ok} bsc=${summary.legacyRedirects.bsc.ok}`,
+    );
+  }
   return lines.join("\n");
 }
 
@@ -701,7 +818,7 @@ async function main(): Promise<void> {
   const includeSolana =
     target === "all" || target === "solana" || target === "unified";
   const includeBsc = target === "all" || target === "bsc" || target === "unified";
-  const includeAvax = target === "all" || target === "avax" || target === "unified";
+  const includeAvax = target === "all" || target === "avax";
 
   const summary: ProofSummary = {
     deployment,
@@ -712,6 +829,10 @@ async function main(): Promise<void> {
     gitSha: expectedCommit,
   };
 
+  if (deployment === "staging" && mode === "canary-write" && target === "unified") {
+    throw new Error("unified staging proof is read-only only; use target=solana or target=bsc");
+  }
+
   if (target === "unified" && deployment === "staging") {
     summary.unifiedEnvAudit = runUnifiedEnvAudit();
     if (
@@ -719,6 +840,17 @@ async function main(): Promise<void> {
       !summary.unifiedEnvAudit.keeper.ok
     ) {
       throw new Error("unified env audit failed");
+    }
+    summary.legacyRedirects = await verifyUnifiedLegacyRedirects();
+    if (
+      !summary.legacyRedirects.solana.ok ||
+      !summary.legacyRedirects.solana.preservedPath ||
+      !summary.legacyRedirects.solana.preservedQuery ||
+      !summary.legacyRedirects.bsc.ok ||
+      !summary.legacyRedirects.bsc.preservedPath ||
+      !summary.legacyRedirects.bsc.preservedQuery
+    ) {
+      throw new Error("legacy unified redirect audit failed");
     }
   }
 

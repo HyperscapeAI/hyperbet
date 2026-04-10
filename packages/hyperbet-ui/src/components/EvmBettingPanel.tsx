@@ -1218,6 +1218,53 @@ export function EvmBettingPanel({
     ].join(" ")
     : "";
 
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    (
+      window as typeof window & {
+        __HYPERBET_EVM_MARKET_EVIDENCE__?: Record<string, unknown> | null;
+      }
+    ).__HYPERBET_EVM_MARKET_EVIDENCE__ =
+      activeChain === "bsc" || activeChain === "base" || activeChain === "avax"
+        ? {
+          activeChain,
+          duelKey: duelKeyHex ?? null,
+          duelId: duelId ?? null,
+          lifecycleStatus: activeLifecycleMarket?.lifecycleStatus ?? null,
+          winner: activeLifecycleMarket?.winner ?? null,
+          marketRef: activeLifecycleMarket?.marketRef ?? null,
+          marketStatus: marketMeta?.status ?? null,
+          marketWinner: marketMeta?.winner ?? null,
+          marketKey: marketMeta?.marketKey ?? null,
+          streamAligned: !streamDriftDetected,
+          canClaim: uiState.canClaim,
+          claimKind: uiState.claimKind,
+        }
+        : null;
+    return () => {
+      (
+        window as typeof window & {
+          __HYPERBET_EVM_MARKET_EVIDENCE__?: Record<string, unknown> | null;
+        }
+      ).__HYPERBET_EVM_MARKET_EVIDENCE__ = null;
+    };
+  }, [
+    activeChain,
+    activeLifecycleMarket?.lifecycleStatus,
+    activeLifecycleMarket?.marketRef,
+    activeLifecycleMarket?.winner,
+    duelId,
+    duelKeyHex,
+    marketMeta?.marketKey,
+    marketMeta?.status,
+    marketMeta?.winner,
+    streamDriftDetected,
+    uiState.canClaim,
+    uiState.claimKind,
+  ]);
+
   return (
     <div data-testid={isE2eMode ? "evm-panel" : undefined}>
       <PredictionMarketPanel

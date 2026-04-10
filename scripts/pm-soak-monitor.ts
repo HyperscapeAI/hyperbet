@@ -248,6 +248,20 @@ type ScreenshotTarget = {
   selector?: string;
   fullPage?: boolean;
   pageKey?: string;
+  forcedChain?: SupportedChain;
+};
+
+type PageEvidence = {
+  href: string;
+  title: string;
+  activeChain: string | null;
+  selectedChain: string | null;
+  storedSelectedChain: string | null;
+  cachedLargestMarketChain: string | null;
+  availableChains: string[];
+  forcedChain: string | null;
+  solanaMarketEvidence: Record<string, JsonValue> | null;
+  evmMarketEvidence: Record<string, JsonValue> | null;
 };
 
 type BrowserLaunchCandidate = {
@@ -390,6 +404,7 @@ type ChainSnapshot = {
   botHealth: BotHealthResponse | null;
   streamState: StreamState | null;
   perps: PerpsEvidence;
+  pageEvidence: PageEvidence | null;
   fetchedAtMs: number;
 };
 
@@ -491,11 +506,11 @@ function parseArgs(): MonitorArgs {
   const runScope = resolveRunScope(rawArgs, mode);
   const follow = getBooleanArg(rawArgs, "--follow", false);
 
-  const chainsArg = getArg(rawArgs, "--chains", "solana,bsc,avax");
+  const chainsArg = getArg(rawArgs, "--chains", "solana,bsc");
   const requireUnifiedUrls = chainsArg.trim().toLowerCase() === "unified";
   const normalizedChainValues =
     requireUnifiedUrls
-      ? ["solana", "bsc", "avax"]
+      ? ["solana", "bsc"]
       : chainsArg.split(",");
   const chains = normalizedChainValues
     .map((value) => value.trim())
@@ -870,6 +885,38 @@ function hasAnyQuote(health: KeeperMarketHealth | null | undefined): boolean {
   );
 }
 
+function numberFromJsonValue(value: JsonValue | null | undefined): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === "string" && value.trim().length > 0) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+function hasSolanaDomQuotes(pageEvidence: PageEvidence | null | undefined): boolean {
+  const evidence = pageEvidence?.solanaMarketEvidence;
+  if (!evidence) {
+    return false;
+  }
+  const bestBid = numberFromJsonValue(evidence.bestBid as JsonValue | null);
+  const bestAsk = numberFromJsonValue(evidence.bestAsk as JsonValue | null);
+  const bidLevels = numberFromJsonValue(evidence.bidLevels as JsonValue | null);
+  const askLevels = numberFromJsonValue(evidence.askLevels as JsonValue | null);
+  return (
+    bestBid != null &&
+    bestAsk != null &&
+    bidLevels != null &&
+    askLevels != null &&
+    bestBid > 0 &&
+    bestAsk < 1000 &&
+    bidLevels > 0 &&
+    askLevels > 0
+  );
+}
+
 let screenshotRuntimePromise: Promise<ScreenshotRuntimeModule> | null = null;
 let screenshotSessionPromise: Promise<ScreenshotSession> | null = null;
 
@@ -1064,6 +1111,155 @@ function normalizeScreenshotUrl(rawUrl: string): string {
   }
 }
 
+async function prepareScreenshotPage(
+  page: Awaited<
+    ReturnType<
+      Awaited<
+        ReturnType<
+          Awaited<ReturnType<ScreenshotRuntimeModule["chromium"]["launch"]>>["newContext"]
+        >
+      >["newPage"]
+    >
+  >,
+  target: ScreenshotTarget,
+): Promise<void> {
+  if (!target.forcedChain) {
+    return;
+  }
+  const timeoutMs = screenshotActionTimeoutMs();
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const state = (await withTimeout(
+      page.evaluate((forcedChain) => {
+        const selectedChainStorageKey = "goldArena_selectedChain";
+        const largestMarketCacheKey = "goldArena_largestMarketChain";
+        try {
+          window.localStorage.removeItem(largestMarketCacheKey);
+          window.localStorage.setItem(selectedChainStorageKey, forcedChain);
+        } catch {
+          // ignore
+        }
+
+        const selector = document.querySelector("#chain-selector");
+        const optionValues =
+          selector instanceof HTMLSelectElement
+            ? Array.from(selector.options).map((option) => option.value)
+            : [];
+        if (
+          selector instanceof HTMLSelectElement &&
+          optionValues.includes(forcedChain) &&
+          selector.value !== forcedChain
+        ) {
+          selector.value = forcedChain;
+          selector.dispatchEvent(new Event("input", { bubbles: true }));
+          selector.dispatchEvent(new Event("change", { bubbles: true }));
+        }
+
+        const activeChain =
+          (
+            window as typeof window & {
+              __HYPERBET_ACTIVE_CHAIN__?: unknown;
+            }
+          ).__HYPERBET_ACTIVE_CHAIN__ ?? null;
+
+        return {
+          activeChain:
+            typeof activeChain === "string" ? activeChain : null,
+          selectedChain:
+            selector instanceof HTMLSelectElement ? selector.value || null : null,
+          storedSelectedChain:
+            window.localStorage.getItem(selectedChainStorageKey) ?? null,
+          availableChains: optionValues,
+        };
+      }, target.forcedChain),
+      timeoutMs,
+      `screenshot chain prepare (${target.name})`,
+    )) as {
+      activeChain: string | null;
+      selectedChain: string | null;
+      storedSelectedChain: string | null;
+      availableChains: string[];
+    };
+    const effectiveSelectedChain =
+      state.activeChain ?? state.selectedChain ?? state.storedSelectedChain;
+    if (effectiveSelectedChain === target.forcedChain) {
+      return;
+    }
+    await withTimeout(
+      page.waitForTimeout(300),
+      timeoutMs,
+      `screenshot chain settle (${target.name})`,
+    ).catch(() => undefined);
+  }
+}
+
+async function collectPageEvidence(
+  page: Awaited<
+    ReturnType<
+      Awaited<
+        ReturnType<
+          Awaited<ReturnType<ScreenshotRuntimeModule["chromium"]["launch"]>>["newContext"]
+        >
+      >["newPage"]
+    >
+  >,
+  target: ScreenshotTarget,
+): Promise<PageEvidence> {
+  const timeoutMs = screenshotActionTimeoutMs();
+  return (await withTimeout(
+    page.evaluate((forcedChain) => {
+      const selector = document.querySelector("#chain-selector");
+      const activeChain =
+        (
+          window as typeof window & {
+            __HYPERBET_ACTIVE_CHAIN__?: unknown;
+          }
+        ).__HYPERBET_ACTIVE_CHAIN__ ?? null;
+      const solanaMarketEvidence =
+        (
+          window as typeof window & {
+            __HYPERBET_SOLANA_MARKET_EVIDENCE__?: unknown;
+          }
+        ).__HYPERBET_SOLANA_MARKET_EVIDENCE__ ?? null;
+      const evmMarketEvidence =
+        (
+          window as typeof window & {
+            __HYPERBET_EVM_MARKET_EVIDENCE__?: unknown;
+          }
+        ).__HYPERBET_EVM_MARKET_EVIDENCE__ ?? null;
+      return {
+        href: window.location.href,
+        title: document.title,
+        activeChain: typeof activeChain === "string" ? activeChain : null,
+        selectedChain:
+          selector instanceof HTMLSelectElement ? selector.value || null : null,
+        storedSelectedChain:
+          window.localStorage.getItem("goldArena_selectedChain") ?? null,
+        cachedLargestMarketChain:
+          window.localStorage.getItem("goldArena_largestMarketChain") ?? null,
+        availableChains:
+          selector instanceof HTMLSelectElement
+            ? Array.from(selector.options).map((option) => option.value)
+            : [],
+        forcedChain,
+        solanaMarketEvidence:
+          solanaMarketEvidence &&
+          typeof solanaMarketEvidence === "object" &&
+          !Array.isArray(solanaMarketEvidence)
+            ? (solanaMarketEvidence as Record<string, JsonValue>)
+            : null,
+        evmMarketEvidence:
+          evmMarketEvidence &&
+          typeof evmMarketEvidence === "object" &&
+          !Array.isArray(evmMarketEvidence)
+            ? (evmMarketEvidence as Record<string, JsonValue>)
+            : null,
+      };
+    }, target.forcedChain ?? null),
+    timeoutMs,
+    `screenshot page evidence (${target.name})`,
+  )) as PageEvidence;
+}
+
 async function resetScreenshotPage(target: ScreenshotTarget): Promise<void> {
   if (!screenshotSessionPromise) {
     return;
@@ -1111,6 +1307,7 @@ async function getScreenshotPage(
         `screenshot settle wait (${target.name})`,
       );
     }
+    await prepareScreenshotPage(existing, target);
     return existing;
   }
 
@@ -1132,6 +1329,7 @@ async function getScreenshotPage(
     timeoutMs,
     `screenshot settle wait (${target.name})`,
   );
+  await prepareScreenshotPage(page, target);
   session.pages.set(pageKey, page);
   return page;
 }
@@ -1287,6 +1485,7 @@ async function takeScreenshot(
     `screenshot page meta (${target.name})`,
   )) as Record<string, JsonValue>;
 
+  meta.pageEvidence = await collectPageEvidence(page, target);
   meta.selectorClip = selectorClip;
   meta.embeddedFrame = embeddedFrameMeta;
 
@@ -1295,6 +1494,21 @@ async function takeScreenshot(
     filePath,
     meta,
   };
+}
+
+async function readPageEvidence(
+  target: ScreenshotTarget,
+): Promise<PageEvidence | null> {
+  try {
+    const page = await getScreenshotPage(target);
+    await prepareScreenshotPage(page, target);
+    return await collectPageEvidence(page, target);
+  } catch (error) {
+    console.warn(
+      `[pm-soak] page evidence capture failed for ${target.name}: ${String(error)}`,
+    );
+    return null;
+  }
 }
 
 async function closeScreenshotSession(): Promise<void> {
@@ -1636,7 +1850,11 @@ function stagedPagesTarget(
       process.env,
       requireUnifiedUrls ? { requireUnified: true } : {},
     );
-    return { name: `${chain}-pages`, url: normalizeUrl(pagesUrl) };
+    return {
+      name: `${chain}-pages`,
+      url: normalizeUrl(pagesUrl),
+      forcedChain: chain,
+    };
   } catch (error) {
     if (requireUnifiedUrls) {
       throw error;
@@ -1744,6 +1962,7 @@ async function fetchLocalSnapshot(): Promise<{
       markets: perpsMarkets,
       oracleHistory: perpsOracleHistory,
     },
+    pageEvidence: null,
     fetchedAtMs,
   };
 }
@@ -1769,6 +1988,7 @@ function stagedKeeperUrls(
 async function fetchStagedChainSnapshot(
   chain: SupportedChain,
   requireUnifiedUrls = false,
+  pageTarget: ScreenshotTarget | null = null,
 ): Promise<ChainSnapshot> {
   const urls = stagedKeeperUrls(chain, requireUnifiedUrls);
   const fetchedAtMs = Date.now();
@@ -1782,6 +2002,7 @@ async function fetchStagedChainSnapshot(
     streamState,
     perpsMarkets,
     perpsOracleHistory,
+    pageEvidence,
   ] = await Promise.all([
       requestJson<BuildInfo>(`${urls.pagesUrl}/build-info.json`),
       requestJson<KeeperStatusResponse>(`${urls.keeperUrl}/status`),
@@ -1796,6 +2017,7 @@ async function fetchStagedChainSnapshot(
       requestJson<StreamState>(`${urls.keeperUrl}/api/streaming/state`),
       requestJsonOrNull<JsonValue>(`${urls.keeperUrl}/api/perps/markets`),
       requestJsonOrNull<JsonValue>(`${urls.keeperUrl}/api/perps/oracle-history`),
+      pageTarget ? readPageEvidence(pageTarget) : Promise.resolve(null),
     ]);
   return {
     chain,
@@ -1812,6 +2034,7 @@ async function fetchStagedChainSnapshot(
       markets: perpsMarkets,
       oracleHistory: perpsOracleHistory,
     },
+    pageEvidence,
     fetchedAtMs,
   };
 }
@@ -2379,6 +2602,7 @@ type StagedRuntimeState = {
   quoteLagIncident: boolean;
   lockLagIncident: boolean;
   proposalLagIncident: boolean;
+  pageChainMismatchIncident: boolean;
 };
 
 async function runStagedSoak(args: MonitorArgs): Promise<void> {
@@ -2418,6 +2642,7 @@ async function runStagedSoak(args: MonitorArgs): Promise<void> {
       quoteLagIncident: false,
       lockLagIncident: false,
       proposalLagIncident: false,
+      pageChainMismatchIncident: false,
     });
   }
 
@@ -2443,7 +2668,13 @@ async function runStagedSoak(args: MonitorArgs): Promise<void> {
   while (Date.now() < deadline) {
     pollIndex += 1;
     const snapshots = await Promise.allSettled(
-      args.chains.map((chain) => fetchStagedChainSnapshot(chain, args.requireUnifiedUrls)),
+      args.chains.map((chain) =>
+        fetchStagedChainSnapshot(
+          chain,
+          args.requireUnifiedUrls,
+          context.chainScreenshots[chain],
+        ),
+      ),
     );
     const pollPayload: Record<string, unknown> = {
       fetchedAt: nowIso(),
@@ -2632,6 +2863,30 @@ async function processStagedSnapshot(
   const lifecycle =
     statusChain?.lifecycleStatus ?? market?.lifecycleStatus ?? "UNKNOWN";
   const nowMs = snapshot.fetchedAtMs;
+  const pageSelectedChain =
+    snapshot.pageEvidence?.activeChain ??
+    snapshot.pageEvidence?.selectedChain ??
+    snapshot.pageEvidence?.storedSelectedChain ??
+    null;
+  const domSolanaQuotesVisible =
+    snapshot.chain === "solana" && hasSolanaDomQuotes(snapshot.pageEvidence);
+
+  if (
+    !state.pageChainMismatchIncident &&
+    snapshot.pageEvidence?.forcedChain === snapshot.chain &&
+    pageSelectedChain != null &&
+    pageSelectedChain !== snapshot.chain
+  ) {
+    state.pageChainMismatchIncident = true;
+    await recordIncident(
+      context,
+      snapshot.chain,
+      "page_chain_selection_mismatch",
+      `page evidence reported ${pageSelectedChain} while soak target forced ${snapshot.chain}`,
+      snapshot,
+      screenshotTargets,
+    );
+  }
 
   if (!state.current || state.current.duelKey !== duelKey) {
     if (state.current) {
@@ -2708,7 +2963,7 @@ async function processStagedSnapshot(
   }
 
   if (
-    hasTwoSidedQuotes(health) &&
+    (hasTwoSidedQuotes(health) || domSolanaQuotesVisible) &&
     current.quotesAtMs == null &&
     lifecycle === "OPEN"
   ) {
