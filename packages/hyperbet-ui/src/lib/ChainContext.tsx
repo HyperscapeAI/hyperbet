@@ -100,6 +100,24 @@ function ChainProviderBase({
     }
   }, [availableChains, activeChain]);
 
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    (
+      window as typeof window & {
+        __HYPERBET_ACTIVE_CHAIN__?: ChainId | null;
+      }
+    ).__HYPERBET_ACTIVE_CHAIN__ = activeChain;
+    return () => {
+      (
+        window as typeof window & {
+          __HYPERBET_ACTIVE_CHAIN__?: ChainId | null;
+        }
+      ).__HYPERBET_ACTIVE_CHAIN__ = null;
+    };
+  }, [activeChain]);
+
   const value = useMemo<ChainContextValue>(
     () => ({
       activeChain,

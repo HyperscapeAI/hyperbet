@@ -53,6 +53,10 @@ jobs:
           railway_project_id="${{ vars.HYPERBET_RAILWAY_PROJECT_ID }}"
           railway_environment_id="${{ vars.HYPERBET_RAILWAY_PRODUCTION_ENVIRONMENT_ID }}"
           railway_service_id="${{ vars.HYPERBET_RAILWAY_KEEPER_SERVICE_ID }}"
+          enabled_evm_chains="bsc,avax"
+          avax_rpc_url="https://api.avax.network/ext/bc/C/rpc"
+          avax_gold_clob_address="${{ vars.HYPERBET_AVAX_GOLD_CLOB_ADDRESS }}"
+          keeper_status_filter='.ok == true and .proxies.solanaRpc == true and .proxies.bscRpc == true and .proxies.avaxRpc == true'
 
           if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.environment }}" = "staging" ]; then
             deploy_target="staging"
@@ -62,6 +66,10 @@ jobs:
             railway_project_id="${{ vars.ENOOMIAN_RAILWAY_PROJECT_ID }}"
             railway_environment_id="${{ vars.ENOOMIAN_RAILWAY_ENVIRONMENT_ID }}"
             railway_service_id="${{ vars.ENOOMIAN_HYPERBET_KEEPER_SERVICE_ID }}"
+            enabled_evm_chains="bsc"
+            avax_rpc_url=""
+            avax_gold_clob_address=""
+            keeper_status_filter='.ok == true and .proxies.solanaRpc == true and .proxies.bscRpc == true'
           fi
 
           if [ -z "${pages_url}" ] || [ -z "${keeper_url}" ] || [ -z "${keeper_ws_url}" ] || [ -z "${railway_project_id}" ] || [ -z "${railway_environment_id}" ] || [ -z "${railway_service_id}" ]; then
@@ -76,6 +84,10 @@ jobs:
           echo "RAILWAY_PROJECT_ID=${railway_project_id}" >> "${GITHUB_ENV}"
           echo "RAILWAY_ENVIRONMENT_ID=${railway_environment_id}" >> "${GITHUB_ENV}"
           echo "RAILWAY_KEEPER_SERVICE_ID=${railway_service_id}" >> "${GITHUB_ENV}"
+          echo "HYPERBET_ENABLED_EVM_CHAINS=${enabled_evm_chains}" >> "${GITHUB_ENV}"
+          echo "HYPERBET_AVAX_RPC_URL=${avax_rpc_url}" >> "${GITHUB_ENV}"
+          echo "HYPERBET_AVAX_GOLD_CLOB_ADDRESS=${avax_gold_clob_address}" >> "${GITHUB_ENV}"
+          echo "KEEPER_STATUS_FILTER=${keeper_status_filter}" >> "${GITHUB_ENV}"
 
       - name: Setup Hyperbet toolchain
         uses: ./.github/actions/setup-hyperbet
@@ -126,9 +138,9 @@ jobs:
           SOLANA_RPC_URL: https://api.mainnet-beta.solana.com
           BSC_RPC_URL: https://bsc-dataseed.binance.org
           BSC_GOLD_CLOB_ADDRESS: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'staging' && (vars.ENOOMIAN_BSC_GOLD_CLOB_ADDRESS != '' && vars.ENOOMIAN_BSC_GOLD_CLOB_ADDRESS || vars.HYPERBET_BSC_STAGING_GOLD_CLOB_ADDRESS) || vars.HYPERBET_BSC_GOLD_CLOB_ADDRESS }}
-          AVAX_RPC_URL: https://api.avax.network/ext/bc/C/rpc
-          AVAX_GOLD_CLOB_ADDRESS: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'staging' && vars.HYPERBET_AVAX_STAGING_GOLD_CLOB_ADDRESS || vars.HYPERBET_AVAX_GOLD_CLOB_ADDRESS }}
-          EVM_KEEPER_CHAINS: bsc,avax
+          AVAX_RPC_URL: ${{ env.HYPERBET_AVAX_RPC_URL }}
+          AVAX_GOLD_CLOB_ADDRESS: ${{ env.HYPERBET_AVAX_GOLD_CLOB_ADDRESS }}
+          EVM_KEEPER_CHAINS: ${{ env.HYPERBET_ENABLED_EVM_CHAINS }}
 
       - name: Typecheck keeper
         run: bunx tsc --noEmit -p packages/hyperbet-evm/keeper/tsconfig.json
@@ -137,12 +149,12 @@ jobs:
         run: |
           PORT=18080 \
           ENABLE_KEEPER_BOT=false \
-          EVM_KEEPER_CHAINS=bsc,avax \
+          EVM_KEEPER_CHAINS="${HYPERBET_ENABLED_EVM_CHAINS}" \
           SOLANA_RPC_URL=https://api.mainnet-beta.solana.com \
           BSC_RPC_URL=https://bsc-dataseed.binance.org \
-          AVAX_RPC_URL=https://api.avax.network/ext/bc/C/rpc \
+          AVAX_RPC_URL="${HYPERBET_AVAX_RPC_URL}" \
           BSC_GOLD_CLOB_ADDRESS=${{ github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'staging' && (vars.ENOOMIAN_BSC_GOLD_CLOB_ADDRESS != '' && vars.ENOOMIAN_BSC_GOLD_CLOB_ADDRESS || vars.HYPERBET_BSC_STAGING_GOLD_CLOB_ADDRESS) || vars.HYPERBET_BSC_GOLD_CLOB_ADDRESS }} \
-          AVAX_GOLD_CLOB_ADDRESS=${{ github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'staging' && vars.HYPERBET_AVAX_STAGING_GOLD_CLOB_ADDRESS || vars.HYPERBET_AVAX_GOLD_CLOB_ADDRESS }} \
+          AVAX_GOLD_CLOB_ADDRESS="${HYPERBET_AVAX_GOLD_CLOB_ADDRESS}" \
           bun --bun packages/hyperbet-evm/keeper/src/service.ts >/tmp/hyperbet-keeper.log 2>&1 &
           KEEPER_PID=$!
           trap 'kill "$KEEPER_PID" >/dev/null 2>&1 || true' EXIT
@@ -209,7 +221,7 @@ jobs:
         run: |
           for attempt in $(seq 1 20); do
             status_payload="$(curl -fsSL "${HYPERBET_KEEPER_URL}/status" || true)"
-            if [ -n "$status_payload" ] && echo "$status_payload" | jq -e '.ok == true and .proxies.solanaRpc == true and .proxies.bscRpc == true and .proxies.avaxRpc == true' >/dev/null; then
+            if [ -n "$status_payload" ] && echo "$status_payload" | jq -e "${KEEPER_STATUS_FILTER}" >/dev/null; then
               break
             fi
             sleep 15

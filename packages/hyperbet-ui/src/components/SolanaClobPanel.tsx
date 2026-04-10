@@ -1490,6 +1490,24 @@ export function SolanaClobPanel({
     `claimableAmount=${uiState.claimableAmount.toString()}`,
     `canClaim=${uiState.canClaim ? "true" : "false"}`,
   ].join("\n");
+  const solanaMarketEvidence = {
+    duelKey:
+      activeLifecycleMarket?.duelKey ?? activeLifecycleDuel?.duelKey ?? duelKeyHex ?? null,
+    duelId:
+      activeLifecycleMarket?.duelId ?? activeLifecycleDuel?.duelId ?? duelId ?? null,
+    marketRef: lifecycleMarketRef ?? activeMarket?.marketState.toBase58() ?? null,
+    lifecycleStatus: uiState.lifecycleStatus,
+    winner: uiState.winner,
+    marketStatus: activeMarket?.marketStatus ?? null,
+    marketWinner: activeMarket?.winner ?? null,
+    bestBid: activeMarket?.bestBid ?? null,
+    bestAsk: activeMarket?.bestAsk ?? null,
+    bidLevels: bids.length,
+    askLevels: asks.length,
+    yesPool: yesPool.toString(),
+    noPool: noPool.toString(),
+    status,
+  };
   const walletDebugText = [
     `wallet=${walletAddress ?? "-"}`,
     `aShares=${position.aShares.toString()}`,
@@ -1506,6 +1524,24 @@ export function SolanaClobPanel({
     `${copy.adminPools} YES ${fmtAmount(yesPool).toFixed(6)} | NO ${fmtAmount(noPool).toFixed(6)}`,
     `${copy.adminLastOrder} ${lastOrderId?.toString() ?? "-"}`,
   ].join("\n");
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    (
+      window as typeof window & {
+        __HYPERBET_SOLANA_MARKET_EVIDENCE__?: Record<string, unknown> | null;
+      }
+    ).__HYPERBET_SOLANA_MARKET_EVIDENCE__ = solanaMarketEvidence;
+    return () => {
+      (
+        window as typeof window & {
+          __HYPERBET_SOLANA_MARKET_EVIDENCE__?: Record<string, unknown> | null;
+        }
+      ).__HYPERBET_SOLANA_MARKET_EVIDENCE__ = null;
+    };
+  }, [solanaMarketEvidence]);
 
   return (
     <div data-testid={isE2eMode ? "solana-clob-panel" : undefined}>

@@ -290,12 +290,8 @@ function auditPagesTarget(
 
   const bscChainId = requireEnv(findings, "VITE_BSC_CHAIN_ID");
   const bscClob = requireEnv(findings, "VITE_BSC_GOLD_CLOB_ADDRESS");
-  const avaxChainId =
-    target === "pages:unified" ? requireEnv(findings, "VITE_AVAX_CHAIN_ID") : optionalEnv("VITE_AVAX_CHAIN_ID");
-  const avaxClob =
-    target === "pages:unified"
-      ? requireEnv(findings, "VITE_AVAX_GOLD_CLOB_ADDRESS")
-      : optionalEnv("VITE_AVAX_GOLD_CLOB_ADDRESS");
+  const avaxChainId = optionalEnv("VITE_AVAX_CHAIN_ID");
+  const avaxClob = optionalEnv("VITE_AVAX_GOLD_CLOB_ADDRESS");
   const baseChainId = optionalEnv("VITE_BASE_CHAIN_ID");
   const baseClob = optionalEnv("VITE_BASE_GOLD_CLOB_ADDRESS");
   const baseRpcUrl = optionalEnv("VITE_BASE_RPC_URL");
@@ -304,7 +300,10 @@ function auditPagesTarget(
   if (deployment === "production") {
     const bsc = assertCanonicalMainnetReady(findings, "bsc", target).deployment;
     const base = assertCanonicalMainnetReady(findings, "base", target).deployment;
-    const avax = target === "pages:unified" ? assertCanonicalMainnetReady(findings, "avax", target).deployment : null;
+    const avax =
+      target === "pages:unified" && avaxChainId && avaxClob
+        ? assertCanonicalMainnetReady(findings, "avax", target).deployment
+        : null;
     if (bscChainId && Number(bscChainId) !== bsc.chainId) {
       findings.push({
         level: "error",
@@ -366,33 +365,17 @@ function auditPagesTarget(
       message: `${target} staging must provide a real VITE_BSC_GOLD_CLOB_ADDRESS`,
     });
   }
-  if (target === "pages:unified") {
-    if (!avaxChainId || Number.isNaN(Number(avaxChainId)) || Number(avaxChainId) <= 0) {
-      findings.push({
-        level: "error",
-        message: `${target} staging must provide a real VITE_AVAX_CHAIN_ID`,
-      });
-    }
-    if (!avaxClob || !HEX_ADDRESS_RE.test(avaxClob) || PLACEHOLDER_ADDRESS_RE.test(avaxClob)) {
-      findings.push({
-        level: "error",
-        message: `${target} staging must provide a real VITE_AVAX_GOLD_CLOB_ADDRESS`,
-      });
-    }
+  if (target === "pages:unified" && (avaxChainId || avaxClob)) {
+    findings.push({
+      level: "error",
+      message: `${target} staging must not expose AVAX on the unified staging surface`,
+    });
   }
   if (baseEnabled) {
-    if (!baseChainId || Number.isNaN(Number(baseChainId)) || Number(baseChainId) <= 0) {
-      findings.push({
-        level: "error",
-        message: `${target} staging must provide a real VITE_BASE_CHAIN_ID when Base is enabled`,
-      });
-    }
-    if (!baseClob || !HEX_ADDRESS_RE.test(baseClob) || PLACEHOLDER_ADDRESS_RE.test(baseClob)) {
-      findings.push({
-        level: "error",
-        message: `${target} staging must provide a real VITE_BASE_GOLD_CLOB_ADDRESS when Base is enabled`,
-      });
-    }
+    findings.push({
+      level: "error",
+      message: `${target} staging must not expose Base on the unified staging surface`,
+    });
   }
 }
 
@@ -543,11 +526,6 @@ function auditKeeperTarget(
       "BSC_RPC_URL",
       `${target} requires BSC_RPC_URL when audited locally`,
     );
-    requireEnv(
-      findings,
-      "AVAX_RPC_URL",
-      `${target} requires AVAX_RPC_URL when audited locally`,
-    );
     const enabledChains = optionalEnv("EVM_KEEPER_CHAINS")
       .split(",")
       .map((value) => value.trim())
@@ -605,25 +583,27 @@ function auditKeeperTarget(
       "BSC_GOLD_CLOB_ADDRESS",
       `${target} staging requires BSC_GOLD_CLOB_ADDRESS when audited locally`,
     );
-    requireExactAddress(
-      findings,
-      target,
-      "AVAX_GOLD_CLOB_ADDRESS",
-      `${target} staging requires AVAX_GOLD_CLOB_ADDRESS when audited locally`,
-    );
-    if (enabledChains.includes("base")) {
-      requireExactAddress(
-        findings,
-        target,
-        "BASE_GOLD_CLOB_ADDRESS",
-        `${target} staging requires BASE_GOLD_CLOB_ADDRESS when Base is enabled`,
-      );
-      requireExactAddress(
-        findings,
-        target,
-        "BASE_DUEL_ORACLE_ADDRESS",
-        `${target} staging requires BASE_DUEL_ORACLE_ADDRESS when Base is enabled`,
-      );
+    if (enabledChains.length === 0 || enabledChains.some((chain) => chain !== "bsc")) {
+      findings.push({
+        level: "error",
+        message: `${target} staging must run with EVM_KEEPER_CHAINS=bsc`,
+      });
+    }
+    if (optionalEnv("AVAX_RPC_URL") || optionalEnv("AVAX_GOLD_CLOB_ADDRESS")) {
+      findings.push({
+        level: "error",
+        message: `${target} staging must not require AVAX runtime env`,
+      });
+    }
+    if (
+      optionalEnv("BASE_RPC_URL") ||
+      optionalEnv("BASE_GOLD_CLOB_ADDRESS") ||
+      optionalEnv("BASE_DUEL_ORACLE_ADDRESS")
+    ) {
+      findings.push({
+        level: "error",
+        message: `${target} staging must not require Base runtime env`,
+      });
     }
     return;
   }

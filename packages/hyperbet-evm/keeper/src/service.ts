@@ -241,6 +241,102 @@ function loadKeeperBotHealthSnapshot(): KeeperBotHealthSnapshot | null {
   }
 }
 
+function mergeHealthSnapshots(
+  localSnapshot: KeeperBotHealthSnapshot | null,
+  externalSnapshot: KeeperBotHealthSnapshot | null,
+): KeeperBotHealthSnapshot | null {
+  if (!localSnapshot && !externalSnapshot) {
+    return null;
+  }
+
+  const markets = [
+    ...(localSnapshot?.markets ?? []),
+    ...(externalSnapshot?.markets ?? []),
+  ];
+  const dedupedMarkets = Array.from(
+    new Map(
+      markets.map((market) => [
+        `${market.chainKey}:${market.marketRef ?? ""}:${market.duelKey ?? ""}`,
+        market,
+      ]),
+    ).values(),
+  );
+
+  return {
+    chainKey: localSnapshot?.chainKey ?? externalSnapshot?.chainKey ?? "solana",
+    updatedAtMs: Math.max(
+      localSnapshot?.updatedAtMs ?? 0,
+      externalSnapshot?.updatedAtMs ?? 0,
+    ),
+    bootedAtMs:
+      localSnapshot?.bootedAtMs ??
+      externalSnapshot?.bootedAtMs ??
+      Date.now(),
+    running: localSnapshot?.running ?? false,
+    processId: localSnapshot?.processId ?? null,
+    lastSuccessfulRpcAtMs: Math.max(
+      localSnapshot?.lastSuccessfulRpcAtMs ?? 0,
+      externalSnapshot?.lastSuccessfulRpcAtMs ?? 0,
+    ) || null,
+    recovery: [
+      ...(localSnapshot?.recovery ?? []),
+      ...(externalSnapshot?.recovery ?? []),
+    ],
+    markets: dedupedMarkets,
+  };
+}
+
+function effectiveKeeperBotHealthSnapshot(
+  localSnapshot: KeeperBotHealthSnapshot | null = loadKeeperBotHealthSnapshot(),
+): KeeperBotHealthSnapshot | null {
+  return mergeHealthSnapshots(localSnapshot, externalSolanaBotHealthState.snapshot);
+}
+
+async function pollExternalSolanaBotHealth(): Promise<void> {
+  if (!EXTERNAL_SOLANA_KEEPER_BOT_HEALTH_URL) {
+    return;
+  }
+
+  try {
+    const response = await fetch(EXTERNAL_SOLANA_KEEPER_BOT_HEALTH_URL, {
+      headers:
+        EXTERNAL_SOLANA_KEEPER_BOT_HEALTH_BEARER_TOKEN.length > 0
+          ? {
+            authorization: `Bearer ${EXTERNAL_SOLANA_KEEPER_BOT_HEALTH_BEARER_TOKEN}`,
+          }
+          : undefined,
+      signal: AbortSignal.timeout(10_000),
+    });
+    const payload = await response.json();
+    const snapshot =
+      response.ok &&
+      payload &&
+      typeof payload === "object" &&
+      "health" in payload &&
+      payload.health &&
+      typeof payload.health === "object"
+        ? (payload.health as KeeperBotHealthSnapshot)
+        : null;
+
+    externalSolanaBotHealthState = {
+      sourceUrl: EXTERNAL_SOLANA_KEEPER_BOT_HEALTH_URL,
+      snapshot,
+      lastFetchedAt: Date.now(),
+      lastError:
+        response.ok && snapshot
+          ? null
+          : `unexpected response ${response.status}`,
+    };
+  } catch (error) {
+    externalSolanaBotHealthState = {
+      ...externalSolanaBotHealthState,
+      sourceUrl: EXTERNAL_SOLANA_KEEPER_BOT_HEALTH_URL,
+      lastFetchedAt: Date.now(),
+      lastError: error instanceof Error ? error.message : "solana bot health fetch failed",
+    };
+  }
+}
+
 function loadStreamStateSnapshotFile(): StreamState | null {
   if (!KEEPER_STREAM_STATE_FILE || !fs_node.existsSync(KEEPER_STREAM_STATE_FILE)) {
     return null;
@@ -527,6 +623,65 @@ const GOLD_CLOB_READ_ABI = [
   },
 ] as const;
 
+const DUEL_OUTCOME_READ_ABI = [
+  {
+    type: "function",
+    name: "getDuel",
+    stateMutability: "view",
+    inputs: [{ type: "bytes32" }],
+    outputs: [
+      {
+        type: "tuple",
+        components: [
+          { name: "duelKey", type: "bytes32" },
+          { name: "participantAHash", type: "bytes32" },
+          { name: "participantBHash", type: "bytes32" },
+          { name: "status", type: "uint8" },
+          { name: "winner", type: "uint8" },
+          { name: "betOpenTs", type: "uint64" },
+          { name: "betCloseTs", type: "uint64" },
+          { name: "duelStartTs", type: "uint64" },
+          { name: "duelEndTs", type: "uint64" },
+          { name: "seed", type: "uint64" },
+          { name: "resultHash", type: "bytes32" },
+          { name: "replayHash", type: "bytes32" },
+          { name: "activeProposalId", type: "bytes32" },
+          { name: "metadataUri", type: "string" },
+        ],
+      },
+    ],
+  },
+  {
+    type: "function",
+    name: "proposals",
+    stateMutability: "view",
+    inputs: [{ type: "bytes32" }],
+    outputs: [
+      {
+        type: "tuple",
+        components: [
+          { name: "id", type: "bytes32" },
+          { name: "resultHash", type: "bytes32" },
+          { name: "replayHash", type: "bytes32" },
+          { name: "winner", type: "uint8" },
+          { name: "seed", type: "uint64" },
+          { name: "duelEndTs", type: "uint64" },
+          { name: "proposedAt", type: "uint64" },
+          { name: "challenged", type: "bool" },
+          { name: "exists", type: "bool" },
+        ],
+      },
+    ],
+  },
+  {
+    type: "function",
+    name: "disputeWindowSeconds",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ type: "uint256" }],
+  },
+] as const;
+
 const defaultAgentA = {
   id: "agent-a",
   name: "Agent A",
@@ -539,6 +694,8 @@ const defaultAgentB = {
   hp: 10,
   maxHp: 10,
 };
+const ZERO_HEX_32 =
+  "0x0000000000000000000000000000000000000000000000000000000000000000";
 
 let streamSeq = 1;
 const persistedStreamStateFile = loadStreamStateSnapshotFile();
@@ -688,7 +845,11 @@ let betSyncReplayUntilSeq: number | null = null;
 
 if (!predictionMarketsOverview) {
   persistPredictionMarketsOverview(
-    derivePredictionMarketsOverview(loadKeeperBotHealthSnapshot(), streamState, null),
+    derivePredictionMarketsOverview(
+      effectiveKeeperBotHealthSnapshot(),
+      streamState,
+      null,
+    ),
   );
 }
 
@@ -702,6 +863,11 @@ const bscRpcUrl = firstNonEmptyString(
 const bscContractAddress = (
   process.env.BSC_GOLD_CLOB_ADDRESS ||
   process.env.CLOB_CONTRACT_ADDRESS_BSC ||
+  ""
+).trim();
+const bscDuelOracleAddress = (
+  process.env.BSC_DUEL_ORACLE_ADDRESS ||
+  process.env.ORACLE_CONTRACT_ADDRESS_BSC ||
   ""
 ).trim();
 const baseRpcUrl = (
@@ -721,8 +887,18 @@ const baseContractAddress = (
   process.env.CLOB_CONTRACT_ADDRESS_BASE ||
   ""
 ).trim();
+const baseDuelOracleAddress = (
+  process.env.BASE_DUEL_ORACLE_ADDRESS ||
+  process.env.ORACLE_CONTRACT_ADDRESS_BASE ||
+  ""
+).trim();
 const avaxContractAddress = (
   process.env.AVAX_GOLD_CLOB_ADDRESS ||
+  ""
+).trim();
+const avaxDuelOracleAddress = (
+  process.env.AVAX_DUEL_ORACLE_ADDRESS ||
+  process.env.ORACLE_CONTRACT_ADDRESS_AVAX ||
   ""
 ).trim();
 
@@ -744,6 +920,33 @@ const EVM_RPC_PROXY_TARGETS = {
   avax: avaxRpcUrl,
 } as const;
 type SupportedEvmRpcChain = keyof typeof EVM_RPC_PROXY_TARGETS;
+const EXTERNAL_SOLANA_KEEPER_BOT_HEALTH_URL = firstNonEmptyString(
+  process.env.SOLANA_KEEPER_BOT_HEALTH_URL,
+  process.env.HYPERBET_SOLANA_KEEPER_URL
+    ? `${process.env.HYPERBET_SOLANA_KEEPER_URL.replace(/\/$/, "")}/api/keeper/bot-health`
+    : "",
+  process.env.ENOOMIAN_HYPERBET_SOLANA_KEEPER_URL
+    ? `${process.env.ENOOMIAN_HYPERBET_SOLANA_KEEPER_URL.replace(/\/$/, "")}/api/keeper/bot-health`
+    : "",
+);
+const EXTERNAL_SOLANA_KEEPER_BOT_HEALTH_BEARER_TOKEN = (
+  process.env.SOLANA_KEEPER_BOT_HEALTH_BEARER_TOKEN ||
+  ""
+).trim();
+
+type ExternalHealthSourceState = {
+  sourceUrl: string | null;
+  snapshot: KeeperBotHealthSnapshot | null;
+  lastFetchedAt: number | null;
+  lastError: string | null;
+};
+
+let externalSolanaBotHealthState: ExternalHealthSourceState = {
+  sourceUrl: EXTERNAL_SOLANA_KEEPER_BOT_HEALTH_URL || null,
+  snapshot: null,
+  lastFetchedAt: null,
+  lastError: null,
+};
 
 const SOLANA_RPC_CACHE_TTL_MS: Record<string, number> = {
   getAccountInfo: 750,
@@ -1773,8 +1976,7 @@ function buildPredictionMarketLifecycleRecords(
     const fallbackHealth = selectBotHealthMarket(botHealthSnapshot, chainKey);
     if (!parser.enabled && !parser.snapshot && !fallbackHealth) continue;
     const snapshot = parser.snapshot as JsonRecord | null;
-    records.push(
-      buildEvmPredictionMarketLifecycleRecord({
+    const record = buildEvmPredictionMarketLifecycleRecord({
         chainKey,
         duelKey,
         duelId,
@@ -1790,8 +1992,40 @@ function buildPredictionMarketLifecycleRecords(
                 : avaxContractAddress
           ) ?? null,
         syncedAt: parser.lastSuccessAt ?? botHealthSnapshot?.updatedAtMs ?? null,
-      }),
-    );
+      });
+    const duelOracleAddress =
+      chainKey === "bsc"
+        ? bscDuelOracleAddress
+        : chainKey === "base"
+          ? baseDuelOracleAddress
+          : avaxDuelOracleAddress;
+    records.push({
+      ...record,
+      metadata: {
+        ...(record.metadata ?? {}),
+        marketStatus:
+          typeof snapshot?.currentMatch === "object" &&
+          snapshot.currentMatch &&
+          "status" in snapshot.currentMatch
+            ? snapshot.currentMatch.status
+            : null,
+        duelOracleStatus:
+          typeof snapshot?.currentDuel === "object" &&
+          snapshot.currentDuel &&
+          "status" in snapshot.currentDuel
+            ? snapshot.currentDuel.status
+            : null,
+        marketKey:
+          typeof snapshot?.marketKey === "string"
+            ? snapshot.marketKey
+            : record.marketRef,
+        duelOracleAddress: duelOracleAddress || null,
+        parserLastSuccessAt: parser.lastSuccessAt,
+        parserLastError: parser.lastError,
+        recoveredFromBotHealth:
+          record.metadata?.recoveredFromBotHealth ?? false,
+      },
+    });
   }
 
   return records;
@@ -1848,7 +2082,8 @@ function buildLivePredictionMarketsSurface(
   sourceState: StreamState = streamState,
   previousOverview: PredictionMarketsOverviewResponse | null = predictionMarketsOverview,
 ): PredictionMarketsSurface {
-  const effectiveBotHealth = botHealthSnapshot ?? loadKeeperBotHealthSnapshot();
+  const effectiveBotHealth =
+    botHealthSnapshot ?? effectiveKeeperBotHealthSnapshot();
   const streamDuel = currentDuelSnapshot(sourceState);
   const streamDuelKey = streamDuel.duelKey;
   const streamDuelId = streamDuel.duelId;
@@ -1928,7 +2163,8 @@ function derivePredictionMarketsOverview(
   sourceState: StreamState = streamState,
   previousOverview: PredictionMarketsOverviewResponse | null = predictionMarketsOverview,
 ): PredictionMarketsOverviewResponse {
-  const effectiveBotHealth = botHealthSnapshot ?? loadKeeperBotHealthSnapshot();
+  const effectiveBotHealth =
+    botHealthSnapshot ?? effectiveKeeperBotHealthSnapshot();
   const live = buildLivePredictionMarketsSurface(
     effectiveBotHealth,
     sourceState,
@@ -2326,7 +2562,7 @@ function commitStreamProjection(params: {
 
 function publishStreamState(next: StreamState, sourceLabel: string): void {
   const nextOverview = derivePredictionMarketsOverview(
-    loadKeeperBotHealthSnapshot(),
+    effectiveKeeperBotHealthSnapshot(),
     next,
     predictionMarketsOverview,
   );
@@ -2561,7 +2797,7 @@ async function applyBetSyncEvent(
   }
 
   const nextStreamState = toStreamStateFromBetSyncEvent(event);
-  const botHealthSnapshot = loadKeeperBotHealthSnapshot();
+  const botHealthSnapshot = effectiveKeeperBotHealthSnapshot();
   const nextOverview = derivePredictionMarketsOverview(
     botHealthSnapshot,
     nextStreamState,
@@ -2937,6 +3173,7 @@ async function pollEvmSnapshot(
   label: "bsc" | "base" | "avax",
   client: ReturnType<typeof createPublicClient> | null,
   contractAddress: string,
+  duelOracleAddress: string,
 ): Promise<void> {
   if (!client || !contractAddress) return;
   const parser = parsers[label];
@@ -2978,12 +3215,63 @@ async function pollEvmSnapshot(
     const winner = Number(market?.winner ?? 0);
     const yesPool = String(market?.totalAShares ?? 0n);
     const noPool = String(market?.totalBShares ?? 0n);
+    let currentDuel: Record<string, unknown> | null = null;
+    if (duelOracleAddress) {
+      try {
+        const duel = await client.readContract({
+          address: duelOracleAddress as Address,
+          abi: DUEL_OUTCOME_READ_ABI,
+          functionName: "getDuel",
+          args: [normalizedDuelKey],
+        });
+        const activeProposalId =
+          typeof duel?.activeProposalId === "string"
+            ? duel.activeProposalId
+            : null;
+        const disputeWindowSeconds = await client.readContract({
+          address: duelOracleAddress as Address,
+          abi: DUEL_OUTCOME_READ_ABI,
+          functionName: "disputeWindowSeconds",
+        });
+        let proposal: unknown = null;
+        if (
+          typeof activeProposalId === "string" &&
+          /^0x[0-9a-fA-F]{64}$/.test(activeProposalId) &&
+          activeProposalId.toLowerCase() !== ZERO_HEX_32
+        ) {
+          proposal = await client.readContract({
+            address: duelOracleAddress as Address,
+            abi: DUEL_OUTCOME_READ_ABI,
+            functionName: "proposals",
+            args: [activeProposalId as `0x${string}`],
+          });
+        }
+        currentDuel = {
+          status: Number(duel?.status ?? 0),
+          activeProposalId,
+          proposalProposedAt:
+            proposal && typeof proposal === "object" && "proposedAt" in proposal
+              ? proposal.proposedAt
+              : null,
+          proposalChallenged:
+            proposal && typeof proposal === "object" && "challenged" in proposal
+              ? proposal.challenged
+              : null,
+          disputeWindowSeconds,
+        };
+      } catch (error) {
+        currentDuel = {
+          readError: error instanceof Error ? error.message : "oracle read failed",
+        };
+      }
+    }
 
     parser.snapshot = {
       contractAddress,
       duelKey,
       duelId,
       marketKey,
+      currentDuel,
       currentMatch: {
         status,
         winner,
@@ -3006,11 +3294,22 @@ async function pollContractParsers(): Promise<void> {
   try {
     await Promise.all([
       pollSolanaSnapshot(),
-      pollEvmSnapshot("bsc", bscClient, bscContractAddress),
-      pollEvmSnapshot("base", baseClient, baseContractAddress),
-      pollEvmSnapshot("avax", avaxClient, avaxContractAddress),
+      pollEvmSnapshot("bsc", bscClient, bscContractAddress, bscDuelOracleAddress),
+      pollEvmSnapshot(
+        "base",
+        baseClient,
+        baseContractAddress,
+        baseDuelOracleAddress,
+      ),
+      pollEvmSnapshot(
+        "avax",
+        avaxClient,
+        avaxContractAddress,
+        avaxDuelOracleAddress,
+      ),
+      pollExternalSolanaBotHealth(),
     ]);
-    refreshPredictionMarketsOverview(loadKeeperBotHealthSnapshot());
+    refreshPredictionMarketsOverview(effectiveKeeperBotHealthSnapshot());
   } finally {
     contractPollInFlight = false;
   }
@@ -3869,9 +4168,11 @@ const server = Bun.serve({
 
     if (url.pathname === "/status") {
       const botHealthSnapshotRaw = loadKeeperBotHealthSnapshot();
+      const effectiveBotHealthSnapshot =
+        effectiveKeeperBotHealthSnapshot(botHealthSnapshotRaw);
       const overview =
         predictionMarketsOverview ??
-        refreshPredictionMarketsOverview(botHealthSnapshotRaw);
+        refreshPredictionMarketsOverview(effectiveBotHealthSnapshot);
       const predictionMarkets = overview.live?.markets ?? [];
       const botHealthSnapshot = botHealthSnapshotRaw
         ? {
@@ -3881,7 +4182,7 @@ const server = Bun.serve({
         : null;
       const marketStatuses = mergePredictionMarketsWithHealth(
         predictionMarkets,
-        botHealthSnapshot,
+        effectiveBotHealthSnapshot,
       );
       return jsonResponse(req, {
         ok: true,
@@ -3911,10 +4212,22 @@ const server = Bun.serve({
         },
         bot: {
           enabled: ENABLE_KEEPER_BOT,
+          scope: "bsc",
           running: Boolean(botSubprocess),
           lastExitCode: botExitCode,
           lastExitAt: botLastExitAt,
           health: botHealthSnapshot,
+          externalSources: {
+            solana: {
+              url: externalSolanaBotHealthState.sourceUrl,
+              lastFetchedAt: externalSolanaBotHealthState.lastFetchedAt,
+              lastError: externalSolanaBotHealthState.lastError,
+              healthUpdatedAt:
+                externalSolanaBotHealthState.snapshot?.updatedAtMs ?? null,
+              marketCount:
+                externalSolanaBotHealthState.snapshot?.markets?.length ?? 0,
+            },
+          },
         },
         stats: {
           trackedBets: bets.length,
@@ -3924,8 +4237,16 @@ const server = Bun.serve({
         predictionMarkets: {
           activeDuelKey: overview.live?.duel.duelKey ?? currentDuelKey(),
           marketCount: predictionMarkets.length,
-          botHealthUpdatedAt: botHealthSnapshot?.updatedAtMs ?? null,
+          botHealthUpdatedAt:
+            effectiveBotHealthSnapshot?.updatedAtMs ?? null,
           overviewUpdatedAt: overview.updatedAt ?? null,
+          solanaHealthSource: {
+            url: externalSolanaBotHealthState.sourceUrl,
+            lastFetchedAt: externalSolanaBotHealthState.lastFetchedAt,
+            lastError: externalSolanaBotHealthState.lastError,
+            healthUpdatedAt:
+              externalSolanaBotHealthState.snapshot?.updatedAtMs ?? null,
+          },
           chains: marketStatuses.map((market) => ({
             chainKey: market.chainKey,
             marketRef: market.marketRef,
@@ -4024,12 +4345,24 @@ const server = Bun.serve({
       return jsonResponse(req, {
         ok: true,
         running: Boolean(botSubprocess),
+        scope: "bsc",
         health: botHealthSnapshotRaw
           ? {
             ...botHealthSnapshotRaw,
             running: Boolean(botSubprocess),
           }
           : null,
+        externalSources: {
+          solana: {
+            url: externalSolanaBotHealthState.sourceUrl,
+            lastFetchedAt: externalSolanaBotHealthState.lastFetchedAt,
+            lastError: externalSolanaBotHealthState.lastError,
+            healthUpdatedAt:
+              externalSolanaBotHealthState.snapshot?.updatedAtMs ?? null,
+            marketCount:
+              externalSolanaBotHealthState.snapshot?.markets?.length ?? 0,
+          },
+        },
       });
     }
 
