@@ -810,7 +810,10 @@ async function main(): Promise<void> {
 
   let lastSnapshot: ProbeSnapshot | null = null;
   try {
-    await page.goto(targetUrl, { waitUntil: "domcontentloaded", timeout: 30_000 });
+    await page.goto(targetUrl, {
+      waitUntil: "domcontentloaded",
+      timeout: Math.max(30_000, args.timeoutMs),
+    });
     const assetAudit = await runAssetAudit(page, targetUrl, assetBaseOverride);
     const assetAuditOk = assetAudit.every((entry) => entry.ok);
     const startedAt = Date.now();
@@ -831,6 +834,12 @@ async function main(): Promise<void> {
         ? "ready"
         : "not-ready";
     const screenshotPath = path.join(artifactRoot, `stream-${status}.png`);
+    let screenshotError: string | null = null;
+    try {
+      await page.screenshot({ path: screenshotPath, fullPage: false });
+    } catch (error) {
+      screenshotError = error instanceof Error ? error.message : String(error);
+    }
     const probeResult = {
       ok: status === "ready",
       checkedAt: new Date().toISOString(),
@@ -844,13 +853,13 @@ async function main(): Promise<void> {
       launchArgs: selectedLaunch?.args ?? [],
       launchErrors,
       screenshotPath,
+      screenshotError,
       snapshot: lastSnapshot,
       failures,
       assetAuditOk,
       assetAudit,
     };
     writeJsonArtifact(artifactRoot, "probe-result.json", probeResult);
-    await page.screenshot({ path: screenshotPath, fullPage: false });
 
     if (status !== "ready") {
       if (failures.length > 0) {

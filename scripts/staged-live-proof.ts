@@ -444,8 +444,12 @@ async function runReadOnly(
   if (requireUnifiedUrls) {
     assertUnifiedReadOnlySurface(chain, status, predictionMarkets);
   }
+  const perpsMarketsUrl = new URL("/api/perps/markets", `${urls.keeperUrl}/`);
+  if (requireUnifiedUrls) {
+    perpsMarketsUrl.searchParams.set("chainKey", chain);
+  }
   const perpsMarkets = await requestJson<unknown>(
-    `${urls.keeperUrl}/api/perps/markets`,
+    perpsMarketsUrl.toString(),
     undefined,
     `${chain}/perps-markets.json`,
   );
@@ -644,6 +648,15 @@ function runVerifyChains(
     env.HYPERBET_AVAX_TESTNET_PERP_ENGINE_ADDRESS = runtime.perpEngineAddress;
   }
 
+  const configuredTimeout = Number.parseInt(
+    process.env.HYPERBET_STAGED_VERIFY_TIMEOUT_MS ?? "",
+    10,
+  );
+  const timeoutMs =
+    Number.isFinite(configuredTimeout) && configuredTimeout > 0
+      ? configuredTimeout
+      : Math.max(60_000, chains.length * 45_000);
+
   const results = runJsonCommand<CheckResult[]>(
     "verify-chains",
     "bun",
@@ -655,7 +668,7 @@ function runVerifyChains(
       `--chains=${chains.join(",")}`,
     ],
     env,
-    25_000,
+    timeoutMs,
   );
   writeJsonArtifact(artifactRoot, "verify-chains.json", results);
   return results;

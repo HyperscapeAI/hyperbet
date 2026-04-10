@@ -134,6 +134,10 @@ type PredictionMarketsResponse = {
   };
   markets: ActiveMarketRecord[];
   updatedAt?: number | null;
+  marketParity?: {
+    state?: string | null;
+    safeToBet?: boolean | null;
+  } | null;
 };
 
 type PredictionMarketsOverviewResponse = {
@@ -2862,6 +2866,15 @@ async function processStagedSnapshot(
     null;
   const lifecycle =
     statusChain?.lifecycleStatus ?? market?.lifecycleStatus ?? "UNKNOWN";
+  const marketParity =
+    snapshot.active?.marketParity ?? snapshot.overview?.live?.marketParity ?? null;
+  const parityState = marketParity?.state ?? null;
+  const parityAdvancedPastOpen =
+    parityState === "locked" ||
+    parityState === "resolved" ||
+    parityState === "cancelled" ||
+    parityState === "frozen" ||
+    parityState === "aborted";
   const nowMs = snapshot.fetchedAtMs;
   const pageSelectedChain =
     snapshot.pageEvidence?.activeChain ??
@@ -3007,7 +3020,11 @@ async function processStagedSnapshot(
   if (
     !state.openLagIncident &&
     nowMs - current.startedAtMs > OPEN_LAG_BUDGET_MS &&
-    current.openAtMs == null
+    current.openAtMs == null &&
+    !terminalLifecycle(lifecycle) &&
+    !proposalLifecycle(lifecycle) &&
+    phase !== "RESOLUTION" &&
+    !parityAdvancedPastOpen
   ) {
     state.openLagIncident = true;
     current.incidents.push("market_missing_after_open_budget");

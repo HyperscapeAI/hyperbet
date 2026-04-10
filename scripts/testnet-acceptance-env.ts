@@ -92,8 +92,8 @@ function evmChainCandidates(
 ): string[] {
   const upper = chain.toUpperCase();
   return [
-    `HYPERBET_${upper}_TESTNET_${suffix}`,
     `HYPERBET_${upper}_STAGING_${suffix}`,
+    `HYPERBET_${upper}_TESTNET_${suffix}`,
     `${upper}_TESTNET_${suffix}`,
     `${upper}_STAGING_${suffix}`,
   ];
@@ -101,8 +101,8 @@ function evmChainCandidates(
 
 function solanaCandidates(suffix: string): string[] {
   return [
-    `HYPERBET_SOLANA_TESTNET_${suffix}`,
     `HYPERBET_SOLANA_STAGING_${suffix}`,
+    `HYPERBET_SOLANA_TESTNET_${suffix}`,
   ];
 }
 
@@ -233,27 +233,27 @@ export function resolveAcceptanceUrls(
             ...unifiedAcceptanceCandidates("PAGES_URL"),
           ],
           keeper: [
-            "HYPERBET_SOLANA_KEEPER_TESTNET_URL",
             "HYPERBET_SOLANA_KEEPER_STAGING_URL",
+            "HYPERBET_SOLANA_KEEPER_TESTNET_URL",
           ],
           ws: [
-            "HYPERBET_SOLANA_KEEPER_TESTNET_WS_URL",
             "HYPERBET_SOLANA_KEEPER_STAGING_WS_URL",
+            "HYPERBET_SOLANA_KEEPER_TESTNET_WS_URL",
           ],
         }
       : {
           pages: [
-            `HYPERBET_${chain.toUpperCase()}_PAGES_TESTNET_URL`,
             `HYPERBET_${chain.toUpperCase()}_PAGES_STAGING_URL`,
+            `HYPERBET_${chain.toUpperCase()}_PAGES_TESTNET_URL`,
             ...unifiedAcceptanceCandidates("PAGES_URL"),
           ],
           keeper: [
-            `HYPERBET_${chain.toUpperCase()}_KEEPER_TESTNET_URL`,
             `HYPERBET_${chain.toUpperCase()}_KEEPER_STAGING_URL`,
+            `HYPERBET_${chain.toUpperCase()}_KEEPER_TESTNET_URL`,
           ],
           ws: [
-            `HYPERBET_${chain.toUpperCase()}_KEEPER_TESTNET_WS_URL`,
             `HYPERBET_${chain.toUpperCase()}_KEEPER_STAGING_WS_URL`,
+            `HYPERBET_${chain.toUpperCase()}_KEEPER_TESTNET_WS_URL`,
           ],
         };
 
@@ -314,15 +314,15 @@ export function resolveEvmAcceptanceRuntime(
     chainId: runtime.deployment.chainId,
     rpcUrl:
       firstNonEmptyValue(
-        alchemyRpcUrl,
         firstNonEmptyEnv(env, [
-          `HYPERBET_${upper}_TESTNET_RPC_URL`,
           `HYPERBET_${upper}_STAGING_RPC_URL`,
+          `HYPERBET_${upper}_TESTNET_RPC_URL`,
           `EVM_${upper}_RPC_URL`,
-          `${upper}_TESTNET_RPC`,
           `${upper}_STAGING_RPC`,
+          `${upper}_TESTNET_RPC`,
           `${upper}_RPC_URL`,
         ]),
+        alchemyRpcUrl,
         runtime.rpcUrl,
       ) ?? runtime.rpcUrl,
     keeperUrl: keeperUrl ?? null,
@@ -442,11 +442,11 @@ export function resolveSolanaAcceptanceRuntime(
     : null;
   const rpcUrl =
     firstNonEmptyValue(
-      alchemyRpcUrl,
       firstNonEmptyEnv(env, [
         ...solanaCandidates("RPC_URL"),
         "SOLANA_RPC_URL",
       ]),
+      alchemyRpcUrl,
     ) ?? solanaDefaultRpc(cluster);
   return {
     cluster,
@@ -455,23 +455,23 @@ export function resolveSolanaAcceptanceRuntime(
     keeperUrl:
       unifiedUrls?.keeperUrl ??
       firstNonEmptyEnv(env, [
-        "HYPERBET_SOLANA_KEEPER_TESTNET_URL",
         "HYPERBET_SOLANA_KEEPER_STAGING_URL",
+        "HYPERBET_SOLANA_KEEPER_TESTNET_URL",
       ]) ??
       null,
     pagesUrl:
       unifiedUrls?.pagesUrl ??
       firstNonEmptyEnv(env, [
-        "HYPERBET_SOLANA_PAGES_TESTNET_URL",
         "HYPERBET_SOLANA_PAGES_STAGING_URL",
+        "HYPERBET_SOLANA_PAGES_TESTNET_URL",
         ...unifiedAcceptanceCandidates("PAGES_URL"),
       ]) ??
       null,
     wsUrl:
       unifiedUrls?.wsUrl ??
       firstNonEmptyEnv(env, [
-        "HYPERBET_SOLANA_KEEPER_TESTNET_WS_URL",
         "HYPERBET_SOLANA_KEEPER_STAGING_WS_URL",
+        "HYPERBET_SOLANA_KEEPER_TESTNET_WS_URL",
       ]) ??
       null,
     streamPublishKey: firstNonEmptyEnv(env, [
