@@ -288,6 +288,13 @@ function mergeHealthSnapshots(
   };
 }
 
+let externalSolanaBotHealthState: ExternalHealthSourceState = {
+  sourceUrl: null,
+  snapshot: null,
+  lastFetchedAt: null,
+  lastError: null,
+};
+
 function effectiveKeeperBotHealthSnapshot(
   localSnapshot: KeeperBotHealthSnapshot | null = loadKeeperBotHealthSnapshot(),
 ): KeeperBotHealthSnapshot | null {
@@ -953,7 +960,7 @@ type ExternalHealthSourceState = {
   lastError: string | null;
 };
 
-let externalSolanaBotHealthState: ExternalHealthSourceState = {
+externalSolanaBotHealthState = {
   sourceUrl: EXTERNAL_SOLANA_KEEPER_BOT_HEALTH_URL || null,
   snapshot: null,
   lastFetchedAt: null,
