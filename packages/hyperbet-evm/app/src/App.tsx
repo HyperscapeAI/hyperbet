@@ -27,14 +27,12 @@ import {
   DEFAULT_REFRESH_INTERVAL_MS,
   GAME_API_URL,
   getFixedMatchId,
-  STREAM_URLS,
 } from "./lib/config";
 import { POINTS_DRAWER_OVERLAY_STYLE } from "./lib/pointsDrawer";
 import {
   captureInviteCodeFromLocation,
   getStoredInviteCode,
 } from "@hyperbet/ui/lib/invite";
-import { ENABLE_STREAM_SOURCE_OVERRIDE } from "@hyperbet/ui/lib/config";
 import { deriveBettorStreamUiState } from "@hyperbet/ui/lib/bettorStreamUi";
 import {
   describeCanonicalRendererDegradedReason,
@@ -609,7 +607,6 @@ export function App() {
   );
   const [selectedAgentForStats, _setSelectedAgentForStats] = useState<StreamingAgentContext | null>(null);
   const [isShowingStats, setIsShowingStats] = useState(false);
-  const [streamSourceIndex, setStreamSourceIndex] = useState(0);
   const [showPointsDrawer, setShowPointsDrawer] = useState(false);
   const isSolanaChain = activeChain === "solana";
   const activePointsScope = isSolanaChain ? "wallet" : "linked";
@@ -666,17 +663,13 @@ export function App() {
     await refreshMarketOverview();
   }, [refreshMarketOverview]);
   const liveCycle = streamingState?.cycle ?? null;
-  const allowStreamSourceOverride =
-    ENABLE_STREAM_SOURCE_OVERRIDE || isE2eDebugMode;
-  const streamSources = STREAM_URLS;
   const lifecycleDuelKey = normalizePredictionMarketDuelKeyHex(
     liveOverviewDuel?.duelKey ?? null,
   );
   const { activeStreamUrl, preloadStreamUrl } = selectBetSurfaceStreamUrl({
-    allowFallbackOverride: allowStreamSourceOverride,
     authorityHealth: canonicalAuthorityHealth,
-    fallbackStreamIndex: streamSourceIndex,
-    fallbackStreamSources: streamSources,
+    fallbackStreamIndex: 0,
+    fallbackStreamSources: [],
     lifecycleDuelId: liveOverviewDuel?.duelId ?? null,
     lifecycleDuelKey,
     rendererReady: canonicalRendererHealth?.ready ?? null,
@@ -728,29 +721,6 @@ export function App() {
     setStoredUiLocale(nextLocale);
     setLocale(nextLocale);
   }, []);
-
-  const switchToBackupStream = useCallback(() => {
-    if (!allowStreamSourceOverride) {
-      return;
-    }
-    setStreamSourceIndex((current) =>
-      current + 1 < streamSources.length ? current + 1 : current,
-    );
-  }, [allowStreamSourceOverride, streamSources.length]);
-
-  const cycleStreamSource = useCallback(() => {
-    if (!allowStreamSourceOverride) {
-      return;
-    }
-    setStreamSourceIndex((current) =>
-      streamSources.length > 1 ? (current + 1) % streamSources.length : current,
-    );
-  }, [allowStreamSourceOverride, streamSources.length]);
-
-  useEffect(() => {
-    if (streamSourceIndex < streamSources.length) return;
-    setStreamSourceIndex(0);
-  }, [streamSourceIndex, streamSources.length]);
 
   useEffect(() => {
     captureInviteCodeFromLocation();
@@ -1951,11 +1921,6 @@ export function App() {
                         muted={hmMuted}
                         autoPlay={true}
                         onStatusChange={setStreamPlayerStatus}
-                        onStreamUnavailable={
-                          allowStreamSourceOverride
-                            ? switchToBackupStream
-                            : undefined
-                        }
                         style={{
                           position: "absolute",
                           inset: 0,
@@ -2003,16 +1968,6 @@ export function App() {
                               </svg>
                             )}
                           </button>
-                          {allowStreamSourceOverride && streamSources.length > 1 ? (
-                            <button
-                              className="hm-stream-source-btn"
-                              onClick={cycleStreamSource}
-                              type="button"
-                            >
-                              {copy.source} {streamSourceIndex + 1}/
-                              {streamSources.length}
-                            </button>
-                          ) : null}
                         </div>
                       ) : null}
                       {!activeStreamUrl ? (

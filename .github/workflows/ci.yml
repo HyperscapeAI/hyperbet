@@ -223,7 +223,7 @@ jobs:
         include:
           - package: hyperbet-solana
             workspace_target: hyperbet-solana
-            audit_target: pages:solana
+            audit_target: pages:legacy
             build_mode: mainnet-beta
             solana_cluster: mainnet-beta
             keeper_url_var: HYPERBET_SOLANA_KEEPER_URL
@@ -234,7 +234,7 @@ jobs:
             avax_gold_clob_address: ""
           - package: hyperbet-bsc
             workspace_target: hyperbet-bsc
-            audit_target: pages:bsc
+            audit_target: pages:legacy
             build_mode: mainnet-beta
             solana_cluster: mainnet-beta
             keeper_url_var: HYPERBET_BSC_KEEPER_URL

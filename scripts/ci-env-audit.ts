@@ -12,6 +12,7 @@ import { rootDir } from "./ci-lib.js";
 
 type AuditTarget =
   | "ci-shared"
+  | "pages:legacy"
   | "pages:solana"
   | "pages:bsc"
   | "pages:unified"
@@ -73,6 +74,7 @@ function parseArgs(): {
   const target = targetArg as AuditTarget;
   if (
     target !== "ci-shared" &&
+    target !== "pages:legacy" &&
     target !== "pages:solana" &&
     target !== "pages:bsc" &&
     target !== "pages:unified" &&
@@ -258,7 +260,7 @@ function auditPublicRpcUrls(findings: Finding[]): void {
 
 function auditPagesTarget(
   findings: Finding[],
-  target: "pages:solana" | "pages:bsc" | "pages:unified",
+  target: "pages:legacy" | "pages:solana" | "pages:bsc" | "pages:unified",
   deployment: DeploymentMode,
 ): void {
   if (target === "pages:unified") {
@@ -718,6 +720,7 @@ function runAudit(
   switch (target) {
     case "pages:solana":
     case "pages:bsc":
+    case "pages:legacy":
     case "pages:unified":
       auditPagesTarget(findings, target, deployment);
       break;

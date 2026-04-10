@@ -227,7 +227,11 @@ export function resolveAcceptanceUrls(
   const candidates =
     chain === "solana"
       ? {
-          pages: ["HYPERBET_SOLANA_PAGES_TESTNET_URL", "HYPERBET_SOLANA_PAGES_STAGING_URL"],
+          pages: [
+            "HYPERBET_SOLANA_PAGES_TESTNET_URL",
+            "HYPERBET_SOLANA_PAGES_STAGING_URL",
+            ...unifiedAcceptanceCandidates("PAGES_URL"),
+          ],
           keeper: [
             "HYPERBET_SOLANA_KEEPER_TESTNET_URL",
             "HYPERBET_SOLANA_KEEPER_STAGING_URL",
@@ -241,6 +245,7 @@ export function resolveAcceptanceUrls(
           pages: [
             `HYPERBET_${chain.toUpperCase()}_PAGES_TESTNET_URL`,
             `HYPERBET_${chain.toUpperCase()}_PAGES_STAGING_URL`,
+            ...unifiedAcceptanceCandidates("PAGES_URL"),
           ],
           keeper: [
             `HYPERBET_${chain.toUpperCase()}_KEEPER_TESTNET_URL`,
@@ -459,6 +464,7 @@ export function resolveSolanaAcceptanceRuntime(
       firstNonEmptyEnv(env, [
         "HYPERBET_SOLANA_PAGES_TESTNET_URL",
         "HYPERBET_SOLANA_PAGES_STAGING_URL",
+        ...unifiedAcceptanceCandidates("PAGES_URL"),
       ]) ??
       null,
     wsUrl:

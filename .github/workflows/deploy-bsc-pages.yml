@@ -113,7 +113,7 @@ jobs:
           bash scripts/ci-install-verified.sh root hyperbet-bsc-app
 
       - name: Audit deploy env
-        run: node --import tsx scripts/ci-env-audit.ts --target=pages:bsc --deployment=${DEPLOY_TARGET}
+        run: node --import tsx scripts/ci-env-audit.ts --target=pages:legacy --deployment=${DEPLOY_TARGET}
         env:
           VITE_GAME_API_URL: ${{ env.HYPERBET_API_URL }}
           VITE_GAME_WS_URL: ${{ env.HYPERBET_WS_URL }}

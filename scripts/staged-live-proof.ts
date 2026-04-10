@@ -143,8 +143,8 @@ type ProofSummary = {
     keeper: AuditResult;
   };
   legacyRedirects?: {
-    solana: RedirectAuditResult;
-    bsc: RedirectAuditResult;
+    solana?: RedirectAuditResult;
+    bsc?: RedirectAuditResult;
   };
 };
 
@@ -306,29 +306,41 @@ async function verifyLegacyRedirect(
   }
 }
 
-async function verifyUnifiedLegacyRedirects(): Promise<{
-  solana: RedirectAuditResult;
-  bsc: RedirectAuditResult;
-}> {
+async function verifyUnifiedLegacyRedirects(): Promise<
+  | {
+      solana?: RedirectAuditResult;
+      bsc?: RedirectAuditResult;
+    }
+  | null
+> {
   const unifiedPagesUrl = requireEnv("ENOOMIAN_HYPERBET_PAGES_URL");
+  const solanaLegacyUrl = process.env.ENOOMIAN_HYPERBET_SOLANA_PAGES_URL?.trim();
+  const bscLegacyUrl = process.env.ENOOMIAN_HYPERBET_BSC_PAGES_URL?.trim();
+  if (!solanaLegacyUrl && !bscLegacyUrl) {
+    return null;
+  }
   const searchParams = new URLSearchParams({
     proof_redirect: "1",
     preserved: "true",
   });
-  return {
-    solana: await verifyLegacyRedirect(
-      requireEnv("ENOOMIAN_HYPERBET_SOLANA_PAGES_URL"),
+  const audits: { solana?: RedirectAuditResult; bsc?: RedirectAuditResult } = {};
+  if (solanaLegacyUrl) {
+    audits.solana = await verifyLegacyRedirect(
+      solanaLegacyUrl,
       unifiedPagesUrl,
       "/markets",
       searchParams,
-    ),
-    bsc: await verifyLegacyRedirect(
-      requireEnv("ENOOMIAN_HYPERBET_BSC_PAGES_URL"),
+    );
+  }
+  if (bscLegacyUrl) {
+    audits.bsc = await verifyLegacyRedirect(
+      bscLegacyUrl,
       unifiedPagesUrl,
       "/markets",
       searchParams,
-    ),
-  };
+    );
+  }
+  return audits;
 }
 
 function chainUrls(chain: SupportedChain, requireUnifiedUrls = false): ChainUrls {
@@ -827,9 +839,17 @@ function humanSummary(summary: ProofSummary): string {
     );
   }
   if (summary.legacyRedirects) {
-    lines.push(
-      `legacy redirects: solana=${summary.legacyRedirects.solana.ok} bsc=${summary.legacyRedirects.bsc.ok}`,
-    );
+    const redirectParts = [
+      summary.legacyRedirects.solana
+        ? `solana=${summary.legacyRedirects.solana.ok}`
+        : null,
+      summary.legacyRedirects.bsc
+        ? `bsc=${summary.legacyRedirects.bsc.ok}`
+        : null,
+    ].filter(Boolean);
+    if (redirectParts.length > 0) {
+      lines.push(`legacy redirects: ${redirectParts.join(" ")}`);
+    }
   }
   return lines.join("\n");
 }
@@ -864,14 +884,17 @@ async function main(): Promise<void> {
     ) {
       throw new Error("unified env audit failed");
     }
-    summary.legacyRedirects = await verifyUnifiedLegacyRedirects();
+    const legacyRedirects = await verifyUnifiedLegacyRedirects();
+    if (legacyRedirects) {
+      summary.legacyRedirects = legacyRedirects;
+    }
+    const redirectAudits = legacyRedirects ? Object.values(legacyRedirects) : [];
     if (
-      !summary.legacyRedirects.solana.ok ||
-      !summary.legacyRedirects.solana.preservedPath ||
-      !summary.legacyRedirects.solana.preservedQuery ||
-      !summary.legacyRedirects.bsc.ok ||
-      !summary.legacyRedirects.bsc.preservedPath ||
-      !summary.legacyRedirects.bsc.preservedQuery
+      redirectAudits.some(
+        (audit) =>
+          audit != null &&
+          (!audit.ok || !audit.preservedPath || !audit.preservedQuery),
+      )
     ) {
       throw new Error("legacy unified redirect audit failed");
     }

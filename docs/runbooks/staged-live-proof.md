@@ -6,11 +6,12 @@ Use this runbook to execute the manual staging proof rail for phase-1 release
 signoff.
 
 This runbook does **not** change production topology. It validates the staged
-Solana, BSC, and AVAX rails using the same deployed shape as production:
+public lane using the same deployed shape as production:
 
-- staged Solana Pages + staged Solana keeper
-- staged BSC Pages + staged BSC keeper
-- staged AVAX Pages + staged AVAX keeper
+- unified Hyperbet Pages for the public bettor surface
+- staged Solana keeper
+- staged BSC keeper
+- staged AVAX app + staged AVAX keeper for the separate AVAX lane
 - external staged duel/stream source
 - keeper-proxied RPC
 - launch-scope canary writes for `PM`, `perps`, and internal `AMM`
@@ -26,16 +27,16 @@ Solana, BSC, and AVAX rails using the same deployed shape as production:
 
 Read-only proof surfaces:
 
-- `https://<solana-pages>/build-info.json`
+- `https://<unified-pages>/build-info.json`
 - `https://<solana-keeper>/status`
 - `https://<solana-keeper>/api/arena/prediction-markets/active`
 - `https://<solana-keeper>/api/keeper/bot-health`
 - `https://<solana-keeper>/api/streaming/state`
 - `https://<solana-keeper>/api/streaming/duel-context`
-- `https://<bsc-pages>/build-info.json`
 - `https://<bsc-keeper>/status`
 - `https://<bsc-keeper>/api/arena/prediction-markets/active`
 - `https://<bsc-keeper>/api/keeper/bot-health`
+- legacy Solana/BSC Pages URLs should redirect to the unified app during the compatibility window
 - `https://<avax-pages>/build-info.json`
 - `https://<avax-keeper>/status`
 - `https://<avax-keeper>/api/arena/prediction-markets/active`
@@ -44,10 +45,10 @@ Read-only proof surfaces:
 Repo-backed staging proof entrypoints:
 
 ```bash
-bun run staged:proof -- --mode=read-only --target=all
+bun run staged:proof -- --mode=read-only --target=unified
+bun run staged:proof -- --mode=read-only --target=avax
 bun run staged:proof -- --mode=canary-write --target=solana
 bun run staged:proof -- --mode=canary-write --target=bsc
-bun run staged:proof -- --mode=canary-write --target=avax
 ```
 
 Each `canary-write` artifact now emits one nested result per chain:
@@ -61,7 +62,7 @@ GitHub manual workflow:
 - workflow: `Staged Live Proof`
 - inputs:
   - `mode=read-only|canary-write`
-  - `target=all|solana|bsc|avax`
+  - `target=unified|solana|bsc`
 
 Current blocker:
 
@@ -82,27 +83,15 @@ Current blocker:
 
 1. Confirm the staging deployments exist and point at the intended URLs.
    Required workflow inputs and vars:
-   - `HYPERBET_SOLANA_PAGES_STAGING_PROJECT_NAME`
-   - `HYPERBET_SOLANA_PAGES_STAGING_URL`
+   - `ENOOMIAN_HYPERBET_PAGES_URL`
+   - `ENOOMIAN_HYPERBET_PAGES_PROJECT_NAME`
    - `HYPERBET_SOLANA_KEEPER_STAGING_URL`
    - `HYPERBET_SOLANA_KEEPER_STAGING_WS_URL`
-   - `HYPERBET_SOLANA_RAILWAY_STAGING_PROJECT_ID`
-   - `HYPERBET_SOLANA_RAILWAY_STAGING_ENVIRONMENT_ID`
-   - `HYPERBET_SOLANA_RAILWAY_STAGING_KEEPER_SERVICE_ID`
-   - `HYPERBET_BSC_PAGES_STAGING_PROJECT_NAME`
-   - `HYPERBET_BSC_PAGES_STAGING_URL`
    - `HYPERBET_BSC_KEEPER_STAGING_URL`
    - `HYPERBET_BSC_KEEPER_STAGING_WS_URL`
-   - `HYPERBET_BSC_RAILWAY_STAGING_PROJECT_ID`
-   - `HYPERBET_BSC_RAILWAY_STAGING_ENVIRONMENT_ID`
-   - `HYPERBET_BSC_RAILWAY_STAGING_KEEPER_SERVICE_ID`
-   - `HYPERBET_AVAX_PAGES_STAGING_PROJECT_NAME`
-   - `HYPERBET_AVAX_PAGES_STAGING_URL`
-   - `HYPERBET_AVAX_KEEPER_STAGING_URL`
-   - `HYPERBET_AVAX_KEEPER_STAGING_WS_URL`
-   - `HYPERBET_AVAX_RAILWAY_STAGING_PROJECT_ID`
-   - `HYPERBET_AVAX_RAILWAY_STAGING_ENVIRONMENT_ID`
-   - `HYPERBET_AVAX_RAILWAY_STAGING_KEEPER_SERVICE_ID`
+   - optional during the redirect window only:
+     - `ENOOMIAN_HYPERBET_SOLANA_PAGES_URL`
+     - `ENOOMIAN_HYPERBET_BSC_PAGES_URL`
 2. Confirm proof vars and secrets are present in the staging environment:
    - `HYPERBET_SOLANA_STAGING_RPC_URL`
    - `HYPERBET_SOLANA_STAGING_CLUSTER` (default `devnet` if omitted)
@@ -147,9 +136,10 @@ Current blocker:
    - BSC canary wallet needs native gas plus `mUSD` and the perps margin token
    - AVAX canary wallet needs native gas plus `mUSD` and the perps margin token
    - BSC/AVAX admin and market-operator wallets need native gas, and the admin wallet must hold enough `mUSD` to seed one AMM canary market
-4. Run `read-only` proof first.
-5. If read-only succeeds, run `canary-write` separately for Solana, BSC, and
-   AVAX.
+4. Run `read-only` proof first:
+   - unified for the public bettor surface
+   - AVAX separately when that lane is in scope
+5. If read-only succeeds, run `canary-write` separately for Solana and BSC.
 6. Inspect the generated artifact bundle:
    - `.ci-artifacts/staged-live-proof/summary.json`
    - `solana/*`
@@ -164,13 +154,12 @@ Current blocker:
 
 ## Success Criteria
 
-- Solana read-only proof passes.
-- BSC read-only proof passes.
+- Unified read-only proof passes.
 - AVAX read-only proof passes.
 - Solana canary write proof completes for `pm`, `perps`, and `amm`.
 - BSC canary write proof completes for `pm`, `perps`, and `amm`.
-- AVAX canary write proof completes for `pm`, `perps`, and `amm`.
-- `verify:chains` passes for Solana, BSC, and AVAX.
+- legacy Solana/BSC Pages URLs redirect cleanly to the unified app during the compatibility window.
+- `verify:chains` passes for Solana, BSC, and AVAX where applicable.
 - AVAX staging app and keeper env audits pass.
 
 ## Escalation Criteria
