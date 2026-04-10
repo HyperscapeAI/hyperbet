@@ -548,7 +548,7 @@ async function run() {
   }
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (import.meta.main) {
   run().catch((error) => {
     console.error(
       `[verify-chains] fatal: ${error instanceof Error ? error.message : String(error)}`,
