@@ -178,6 +178,7 @@ describe("keeper db persistence", () => {
     loadedModules.push(db);
 
     db.savePerpsOracleSnapshot({
+      chainKey: "bsc",
       agentId: "claude-sonnet",
       marketId: 42,
       spotIndex: 118.25,
@@ -189,6 +190,7 @@ describe("keeper db persistence", () => {
 
     expect(db.loadPerpsOracleSnapshots("claude-sonnet", 10)).toEqual([
       {
+        chainKey: "bsc",
         agentId: "claude-sonnet",
         marketId: 42,
         spotIndex: 118.25,
@@ -207,6 +209,7 @@ describe("keeper db persistence", () => {
     loadedModules.push(db);
 
     db.savePerpsMarket({
+      chainKey: "bsc",
       agentId: "gpt-4.1",
       marketId: 42,
       rank: 1,
@@ -226,6 +229,7 @@ describe("keeper db persistence", () => {
 
     expect(db.loadPerpsMarkets()).toEqual([
       {
+        chainKey: "bsc",
         agentId: "gpt-4.1",
         marketId: 42,
         rank: 1,

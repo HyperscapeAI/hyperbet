@@ -551,6 +551,7 @@ const E2E_MODEL_MARKET_ID = E2E_MODEL_CHARACTER_ID
 const E2E_MODEL_ENTRY: PerpsMarketDirectoryEntry | null =
   IS_E2E_MODE && E2E_MODEL_CHARACTER_ID
     ? {
+      chainKey: "solana",
       rank: 1,
       characterId: E2E_MODEL_CHARACTER_ID,
       marketId: E2E_MODEL_MARKET_ID,
@@ -767,6 +768,7 @@ export function ModelsMarketViewRuntime({
   React.useEffect(() => {
     if (E2E_MODEL_ENTRY) {
       setData({
+        chainKey: "solana",
         markets: [E2E_MODEL_ENTRY],
         updatedAt: Date.now(),
       });
@@ -1272,6 +1274,7 @@ export function ModelsMarketViewRuntime({
   const refreshChainState = React.useCallback(async () => {
     if (!data?.markets.length) return;
     const freshResponse = sanitizePerpsMarketsResponse({
+      chainKey: data.chainKey ?? "solana",
       markets: data.markets,
       updatedAt: Date.now(),
     });

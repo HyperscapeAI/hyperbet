@@ -4,6 +4,7 @@ import type { UiLocale } from "../i18n";
 import {
   sanitizePerpsOracleHistoryResponse,
   sanitizePerpsMarketsResponse,
+  type EvmPerpsChainKey,
   type PerpsMarketDirectoryEntry,
   type PerpsOracleHistorySnapshot,
 } from "../lib/modelMarkets";
@@ -34,11 +35,13 @@ interface EvmModelsMarketViewProps {
   gameApiUrl: string;
   mockData?: EvmModelsMarketMockData | null;
   collateralSymbol?: string;
+  chainKey?: EvmPerpsChainKey;
   chainLabel?: string;
   theme?: HyperbetThemeId;
 }
 
 type DisplayEntry = {
+  chainKey: EvmPerpsChainKey;
   characterId: string;
   marketId: number;
   rank: number | null;
@@ -65,6 +68,7 @@ function toDisplayEntries(
   markets: PerpsMarketDirectoryEntry[],
 ): DisplayEntry[] {
   return markets.map((market) => ({
+    chainKey: market.chainKey as EvmPerpsChainKey,
     characterId: market.characterId,
     marketId: market.marketId,
     rank: market.rank,
@@ -82,8 +86,12 @@ function toDisplayEntries(
   }));
 }
 
-function toMockEntries(mockData: EvmModelsMarketMockData): DisplayEntry[] {
+function toMockEntries(
+  mockData: EvmModelsMarketMockData,
+  chainKey: EvmPerpsChainKey,
+): DisplayEntry[] {
   return mockData.leaderboard.map((entry) => ({
+    chainKey,
     characterId: entry.agentName.trim().toLowerCase().replace(/\s+/g, "-"),
     marketId: entry.rank,
     rank: entry.rank,
@@ -142,18 +150,22 @@ function isEntryInCurrentMatch(
   );
 }
 
+const DIRECTORY_POLL_INTERVAL_MS = 5_000;
+const ORACLE_HISTORY_POLL_INTERVAL_MS = 15_000;
+
 export function EvmModelsMarketView({
   fightingAgentA,
   fightingAgentB,
   gameApiUrl,
   mockData,
   collateralSymbol = "USDC",
+  chainKey,
   chainLabel = "EVM",
   theme,
 }: EvmModelsMarketViewProps) {
   const themeDefinition = useResolvedHyperbetTheme(theme);
   const [entries, setEntries] = useState<DisplayEntry[]>(() =>
-    mockData ? toMockEntries(mockData) : [],
+    mockData && chainKey ? toMockEntries(mockData, chainKey) : [],
   );
   const [updatedAt, setUpdatedAt] = useState<number | null>(
     mockData ? Date.now() : null,
@@ -170,59 +182,80 @@ export function EvmModelsMarketView({
   const [oracleError, setOracleError] = useState("");
   const [loading, setLoading] = useState(!mockData);
   const [error, setError] = useState("");
+  const resolvedChainKey = chainKey ?? null;
 
   useEffect(() => {
     if (mockData) {
-      setEntries(toMockEntries(mockData));
+      setEntries(chainKey ? toMockEntries(mockData, chainKey) : []);
       setUpdatedAt(Date.now());
       setLoading(false);
       setError("");
       return;
     }
+    const activeChainKey = resolvedChainKey;
+    if (!activeChainKey) {
+      setEntries([]);
+      setUpdatedAt(null);
+      setLoading(false);
+      setError("missing chain key");
+      return;
+    }
 
-    let cancelled = false;
+    const controller = new AbortController();
+    let activePollController: AbortController | null = null;
 
-    async function loadMarkets() {
+    async function loadMarkets(signal?: AbortSignal) {
       try {
         setLoading(true);
         setError("");
-        const response = await fetch(`${gameApiUrl}/api/perps/markets`, {
+        const endpoint = `${gameApiUrl}/api/perps/markets?chainKey=${encodeURIComponent(activeChainKey!)}`;
+        const response = await fetch(endpoint, {
+          cache: "no-store",
           headers: { Accept: "application/json" },
+          signal,
         });
         if (!response.ok) {
           throw new Error(`HTTP ${response.status}`);
         }
         const json = await response.json();
-        const sanitized = sanitizePerpsMarketsResponse(json);
-        if (cancelled) return;
+        const sanitized = sanitizePerpsMarketsResponse(json, activeChainKey);
+        if (signal?.aborted) return;
         if (sanitized.markets.length === 0 && typeof console !== "undefined") {
           console.warn("[hyperbet] empty_model_directory", {
+            chainKey: activeChainKey,
             chain: chainLabel,
-            endpoint: `${gameApiUrl}/api/perps/markets`,
+            endpoint,
           });
         }
         setEntries(toDisplayEntries(sanitized.markets));
         setUpdatedAt(sanitized.updatedAt);
       } catch (nextError) {
-        if (cancelled) return;
+        if (signal?.aborted) return;
         setError(
           nextError instanceof Error
             ? nextError.message
             : "Failed to load model markets",
         );
       } finally {
-        if (!cancelled) {
+        if (!signal?.aborted) {
           setLoading(false);
         }
       }
     }
 
-    void loadMarkets();
+    void loadMarkets(controller.signal);
+    const intervalId = window.setInterval(() => {
+      activePollController?.abort();
+      activePollController = new AbortController();
+      void loadMarkets(activePollController.signal);
+    }, DIRECTORY_POLL_INTERVAL_MS);
 
     return () => {
-      cancelled = true;
+      controller.abort();
+      activePollController?.abort();
+      window.clearInterval(intervalId);
     };
-  }, [chainLabel, gameApiUrl, mockData]);
+  }, [chainKey, chainLabel, gameApiUrl, mockData, resolvedChainKey]);
 
   const matchup = useMemo(() => {
     const left = findEntry(entries, fightingAgentA);
@@ -297,17 +330,31 @@ export function EvmModelsMarketView({
       setOracleLoading(false);
       return;
     }
+    const activeChainKey = resolvedChainKey;
+    if (!activeChainKey) {
+      setOracleSnapshots([]);
+      setOracleUpdatedAt(null);
+      setOracleError("missing chain key");
+      setOracleLoading(false);
+      return;
+    }
 
-    let cancelled = false;
+    const controller = new AbortController();
+    let activePollController: AbortController | null = null;
 
-    async function loadOracleHistory() {
+    async function loadOracleHistory(signal?: AbortSignal) {
       try {
         setOracleLoading(true);
         setOracleError("");
+        const endpoint =
+          `${gameApiUrl}/api/perps/oracle-history?chainKey=${encodeURIComponent(activeChainKey!)}` +
+          `&characterId=${encodeURIComponent(selectedEntry.characterId)}&limit=24`;
         const response = await fetch(
-          `${gameApiUrl}/api/perps/oracle-history?characterId=${encodeURIComponent(selectedEntry.characterId)}&limit=24`,
+          endpoint,
           {
+            cache: "no-store",
             headers: { Accept: "application/json" },
+            signal,
           },
         );
         if (!response.ok) {
@@ -317,30 +364,38 @@ export function EvmModelsMarketView({
         const sanitized = sanitizePerpsOracleHistoryResponse(
           json,
           selectedEntry.characterId,
+          activeChainKey,
         );
-        if (cancelled) return;
+        if (signal?.aborted) return;
         setOracleSnapshots(sanitized.snapshots);
         setOracleUpdatedAt(sanitized.updatedAt);
       } catch (nextError) {
-        if (cancelled) return;
+        if (signal?.aborted) return;
         setOracleError(
           nextError instanceof Error
             ? nextError.message
             : "Failed to load oracle history",
         );
       } finally {
-        if (!cancelled) {
+        if (!signal?.aborted) {
           setOracleLoading(false);
         }
       }
     }
 
-    void loadOracleHistory();
+    void loadOracleHistory(controller.signal);
+    const intervalId = window.setInterval(() => {
+      activePollController?.abort();
+      activePollController = new AbortController();
+      void loadOracleHistory(activePollController.signal);
+    }, ORACLE_HISTORY_POLL_INTERVAL_MS);
 
     return () => {
-      cancelled = true;
+      controller.abort();
+      activePollController?.abort();
+      window.clearInterval(intervalId);
     };
-  }, [gameApiUrl, mockData, selectedEntry]);
+  }, [gameApiUrl, mockData, resolvedChainKey, selectedEntry]);
 
   const latestOracleSnapshot =
     oracleSnapshots.length > 0 ? oracleSnapshots[oracleSnapshots.length - 1] : null;
@@ -352,6 +407,10 @@ export function EvmModelsMarketView({
     chainLabel.toLowerCase().includes("bnb") || chainLabel.toLowerCase().includes("bsc")
       ? "Trading on BSC is still rolling out. This surface is keeper-backed and read-only for now."
       : `Trading on ${chainLabel} is still rolling out. This surface is keeper-backed and read-only for now.`;
+  const emptyDirectoryMessage =
+    searchValue.trim().length > 0
+      ? "No models matched the current filter."
+      : `No ${chainLabel} models are indexed yet.`;
 
   return (
     <section className="hm-perps-view">
@@ -423,7 +482,7 @@ export function EvmModelsMarketView({
           ) : error ? (
             <div className="hm-perps-error">Directory unavailable: {error}</div>
           ) : filteredEntries.length === 0 ? (
-            <div className="hm-perps-empty">No models matched the current filter.</div>
+            <div className="hm-perps-empty">{emptyDirectoryMessage}</div>
           ) : (
             <div className="hm-perps-table-wrap">
               <table className="hm-perps-table">

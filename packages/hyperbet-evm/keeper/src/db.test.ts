@@ -245,6 +245,135 @@ describe("keeper db persistence", () => {
     ]);
   });
 
+  test("stores chain-scoped public perps rows separately by chain", async () => {
+    const db = (await import(
+      `./db.ts?case=${Date.now()}-chain-scoped-perps`
+    )) as typeof import("./db.ts");
+    loadedModules.push(db);
+
+    db.saveChainScopedPerpsOracleSnapshot({
+      chainKey: "bsc",
+      agentId: "gpt-4.1",
+      marketId: 42,
+      spotIndex: 118.25,
+      conservativeSkill: 1011,
+      mu: 1200,
+      sigma: 63,
+      recordedAt: 1_700_000_000_000,
+    });
+    db.saveChainScopedPerpsOracleSnapshot({
+      chainKey: "base",
+      agentId: "gpt-4.1",
+      marketId: 42,
+      spotIndex: 119.25,
+      conservativeSkill: 1012,
+      mu: 1201,
+      sigma: 62,
+      recordedAt: 1_700_000_000_100,
+    });
+    db.saveChainScopedPerpsMarket({
+      chainKey: "bsc",
+      agentId: "gpt-4.1",
+      marketId: 42,
+      rank: 1,
+      name: "GPT 4.1",
+      provider: "OpenAI",
+      model: "gpt-4.1",
+      wins: 12,
+      losses: 3,
+      winRate: 80,
+      combatLevel: 99,
+      currentStreak: 4,
+      status: "ACTIVE",
+      lastSeenAt: 1_700_000_000_000,
+      deprecatedAt: null,
+      updatedAt: 1_700_000_000_500,
+    });
+    db.saveChainScopedPerpsMarket({
+      chainKey: "base",
+      agentId: "gpt-4.1",
+      marketId: 42,
+      rank: 1,
+      name: "GPT 4.1",
+      provider: "OpenAI",
+      model: "gpt-4.1",
+      wins: 14,
+      losses: 2,
+      winRate: 87.5,
+      combatLevel: 101,
+      currentStreak: 6,
+      status: "ACTIVE",
+      lastSeenAt: 1_700_000_000_250,
+      deprecatedAt: null,
+      updatedAt: 1_700_000_000_750,
+    });
+
+    expect(db.loadChainScopedPerpsOracleSnapshots("bsc", "gpt-4.1", 10)).toEqual([
+      {
+        chainKey: "bsc",
+        agentId: "gpt-4.1",
+        marketId: 42,
+        spotIndex: 118.25,
+        conservativeSkill: 1011,
+        mu: 1200,
+        sigma: 63,
+        recordedAt: 1_700_000_000_000,
+      },
+    ]);
+    expect(db.loadChainScopedPerpsOracleSnapshots("base", "gpt-4.1", 10)).toEqual([
+      {
+        chainKey: "base",
+        agentId: "gpt-4.1",
+        marketId: 42,
+        spotIndex: 119.25,
+        conservativeSkill: 1012,
+        mu: 1201,
+        sigma: 62,
+        recordedAt: 1_700_000_000_100,
+      },
+    ]);
+    expect(db.loadChainScopedPerpsMarkets("bsc")).toEqual([
+      {
+        chainKey: "bsc",
+        agentId: "gpt-4.1",
+        marketId: 42,
+        rank: 1,
+        name: "GPT 4.1",
+        provider: "OpenAI",
+        model: "gpt-4.1",
+        wins: 12,
+        losses: 3,
+        winRate: 80,
+        combatLevel: 99,
+        currentStreak: 4,
+        status: "ACTIVE",
+        lastSeenAt: 1_700_000_000_000,
+        deprecatedAt: null,
+        updatedAt: 1_700_000_000_500,
+      },
+    ]);
+    expect(db.loadChainScopedPerpsMarkets("base")).toEqual([
+      {
+        chainKey: "base",
+        agentId: "gpt-4.1",
+        marketId: 42,
+        rank: 1,
+        name: "GPT 4.1",
+        provider: "OpenAI",
+        model: "gpt-4.1",
+        wins: 14,
+        losses: 2,
+        winRate: 87.5,
+        combatLevel: 101,
+        currentStreak: 6,
+        status: "ACTIVE",
+        lastSeenAt: 1_700_000_000_250,
+        deprecatedAt: null,
+        updatedAt: 1_700_000_000_750,
+      },
+    ]);
+  });
+
   test("quarantines duplicate recorded bets before enforcing uniqueness", async () => {
     seedDuplicateBets(process.env.KEEPER_DB_PATH!);
 

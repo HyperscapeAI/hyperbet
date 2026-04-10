@@ -504,10 +504,13 @@ import { privateKeyToAccount } from "viem/accounts";
 import {
   loadAgentRatings,
   loadPerpsMarkets,
+  saveChainScopedPerpsMarket,
+  saveChainScopedPerpsOracleSnapshot,
   saveAgentRating,
   saveAgentRatings,
   savePerpsMarket,
   savePerpsOracleSnapshot,
+  type EvmPerpsChainKey,
   type DbPerpsMarketRecord,
   type DbPerpsMarketStatus,
 } from "./db";
@@ -1029,11 +1032,13 @@ async function maybeArchiveSettledPerpsMarkets(): Promise<void> {
       continue;
     }
 
-    savePerpsMarket({
+    const nextRecord = {
       ...record,
       status: PERPS_MARKET_STATUS_ARCHIVED,
       updatedAt: now,
-    });
+    };
+    savePerpsMarket(nextRecord);
+    savePublicPerpsMarket(nextRecord);
     console.log(
       `[Keeper] Archived perps market ${record.marketId} for ${record.agentId}`,
     );
@@ -1087,12 +1092,14 @@ async function deprecateMissingPerpsMarkets(
       continue;
     }
 
-    savePerpsMarket({
+    const nextRecord = {
       ...record,
       status: PERPS_MARKET_STATUS_CLOSE_ONLY,
       deprecatedAt: now,
       updatedAt: now,
-    });
+    };
+    savePerpsMarket(nextRecord);
+    savePublicPerpsMarket(nextRecord);
     console.log(
       `[Keeper] Deprecated perps market ${record.marketId} for ${record.agentId}`,
     );
@@ -1160,7 +1167,7 @@ async function updatePerpsOracle(
           .rpc(),
       connection,
     );
-    savePerpsOracleSnapshot({
+    const snapshot = {
       agentId,
       marketId,
       spotIndex,
@@ -1168,7 +1175,9 @@ async function updatePerpsOracle(
       mu: rating.mu,
       sigma: rating.sigma,
       recordedAt: Date.now(),
-    });
+    };
+    savePerpsOracleSnapshot(snapshot);
+    savePublicPerpsOracleSnapshot(snapshot);
     await ensurePerpsMarketBootstrapInsurance(marketId);
     await maybeRecyclePerpsMarketMakerFees(marketId);
     console.log(
@@ -1346,9 +1355,14 @@ async function syncPerpsOracles(
       continue;
     }
 
-    savePerpsMarket(
-      toPerpsMarketRecord(entry, PERPS_MARKET_STATUS_ACTIVE, now, previous),
+    const nextRecord = toPerpsMarketRecord(
+      entry,
+      PERPS_MARKET_STATUS_ACTIVE,
+      now,
+      previous,
     );
+    savePerpsMarket(nextRecord);
+    savePublicPerpsMarket(nextRecord);
     agentIdByMarketId.set(
       modelMarketIdFromCharacterId(entry.characterId),
       entry.characterId,
@@ -1751,6 +1765,39 @@ const configuredEvmKeeperChains = parseBettingEvmChainList(
 const evmKeeperChains = configuredEvmKeeperChains
   .map((chainKey) => buildEvmRuntime(chainKey))
   .filter((chain): chain is EvmKeeperRuntime => chain !== null);
+
+function publicPerpsChains(): EvmPerpsChainKey[] {
+  return configuredEvmKeeperChains.filter(
+    (chainKey): chainKey is EvmPerpsChainKey =>
+      chainKey === "bsc" || chainKey === "base" || chainKey === "avax",
+  );
+}
+
+function savePublicPerpsOracleSnapshot(snapshot: {
+  agentId: string;
+  marketId: number;
+  spotIndex: number;
+  conservativeSkill: number;
+  mu: number;
+  sigma: number;
+  recordedAt: number;
+}): void {
+  for (const chainKey of publicPerpsChains()) {
+    saveChainScopedPerpsOracleSnapshot({
+      ...snapshot,
+      chainKey,
+    });
+  }
+}
+
+function savePublicPerpsMarket(record: DbPerpsMarketRecord): void {
+  for (const chainKey of publicPerpsChains()) {
+    saveChainScopedPerpsMarket({
+      ...record,
+      chainKey,
+    });
+  }
+}
 
 const requiredPrograms = [
   {

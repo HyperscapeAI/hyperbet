@@ -1,3 +1,6 @@
+export type EvmPerpsChainKey = "bsc" | "base" | "avax";
+export type PerpsChainKey = "solana" | EvmPerpsChainKey;
+
 export interface PerpsOracleHistorySnapshot {
   agentId: string;
   marketId: number;
@@ -9,6 +12,7 @@ export interface PerpsOracleHistorySnapshot {
 }
 
 export interface PerpsOracleHistoryResponse {
+  chainKey: PerpsChainKey | null;
   characterId: string;
   marketId: number;
   snapshots: PerpsOracleHistorySnapshot[];
@@ -18,6 +22,7 @@ export interface PerpsOracleHistoryResponse {
 export type PerpsMarketLifecycleStatus = "ACTIVE" | "CLOSE_ONLY" | "ARCHIVED";
 
 export interface PerpsMarketDirectoryEntry {
+  chainKey: PerpsChainKey;
   rank: number | null;
   characterId: string;
   marketId: number;
@@ -36,6 +41,7 @@ export interface PerpsMarketDirectoryEntry {
 }
 
 export interface PerpsMarketsResponse {
+  chainKey: PerpsChainKey | null;
   markets: PerpsMarketDirectoryEntry[];
   updatedAt: number;
 }
@@ -48,6 +54,15 @@ function isPerpsMarketLifecycleStatus(
   value: unknown,
 ): value is PerpsMarketLifecycleStatus {
   return value === "ACTIVE" || value === "CLOSE_ONLY" || value === "ARCHIVED";
+}
+
+function isPerpsChainKey(value: unknown): value is PerpsChainKey {
+  return (
+    value === "solana" ||
+    value === "bsc" ||
+    value === "base" ||
+    value === "avax"
+  );
 }
 
 function isPerpsOracleHistorySnapshot(
@@ -70,6 +85,7 @@ function isPerpsMarketDirectoryEntry(
 ): value is PerpsMarketDirectoryEntry {
   const maybe = value as Partial<PerpsMarketDirectoryEntry>;
   return (
+    isPerpsChainKey(maybe?.chainKey) &&
     typeof maybe?.characterId === "string" &&
     isFiniteNumber(maybe?.marketId) &&
     typeof maybe?.name === "string" &&
@@ -89,10 +105,27 @@ function isPerpsMarketDirectoryEntry(
 export function sanitizePerpsOracleHistoryResponse(
   value: unknown,
   characterId: string,
+  expectedChainKey?: PerpsChainKey | null,
 ): PerpsOracleHistoryResponse {
   const candidate = value as Partial<PerpsOracleHistoryResponse>;
+  const responseChainKey = isPerpsChainKey(candidate?.chainKey)
+    ? candidate.chainKey
+    : null;
+  const chainKey =
+    expectedChainKey && responseChainKey && responseChainKey !== expectedChainKey
+      ? expectedChainKey
+      : (responseChainKey ?? expectedChainKey ?? null);
+  const snapshots =
+    expectedChainKey &&
+    responseChainKey &&
+    responseChainKey !== expectedChainKey
+      ? []
+      : Array.isArray(candidate?.snapshots)
+        ? candidate.snapshots.filter(isPerpsOracleHistorySnapshot)
+        : [];
 
   return {
+    chainKey,
     characterId:
       typeof candidate?.characterId === "string" &&
       candidate.characterId.trim().length > 0
@@ -101,9 +134,7 @@ export function sanitizePerpsOracleHistoryResponse(
     marketId: isFiniteNumber(candidate?.marketId)
       ? candidate.marketId
       : modelMarketIdFromCharacterId(characterId),
-    snapshots: Array.isArray(candidate?.snapshots)
-      ? candidate.snapshots.filter(isPerpsOracleHistorySnapshot)
-      : [],
+    snapshots,
     updatedAt: isFiniteNumber(candidate?.updatedAt)
       ? candidate.updatedAt
       : Date.now(),
@@ -112,12 +143,22 @@ export function sanitizePerpsOracleHistoryResponse(
 
 export function sanitizePerpsMarketsResponse(
   value: unknown,
+  expectedChainKey?: PerpsChainKey | null,
 ): PerpsMarketsResponse {
   const candidate = value as Partial<PerpsMarketsResponse>;
+  const responseChainKey = isPerpsChainKey(candidate?.chainKey)
+    ? candidate.chainKey
+    : null;
+  const chainKey =
+    responseChainKey ?? expectedChainKey ?? null;
+  const markets = Array.isArray(candidate?.markets)
+    ? candidate.markets.filter(isPerpsMarketDirectoryEntry).filter((market) => {
+        return expectedChainKey == null || market.chainKey === expectedChainKey;
+      })
+    : [];
   return {
-    markets: Array.isArray(candidate?.markets)
-      ? candidate.markets.filter(isPerpsMarketDirectoryEntry)
-      : [],
+    chainKey,
+    markets,
     updatedAt: isFiniteNumber(candidate?.updatedAt)
       ? candidate.updatedAt
       : Date.now(),

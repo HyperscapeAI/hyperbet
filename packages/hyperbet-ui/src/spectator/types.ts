@@ -174,6 +174,7 @@ export interface StreamingCycle {
   agent2: AgentInfo | null;
   duelId?: string | null;
   duelKeyHex?: string | null;
+  rawCycle?: Record<string, unknown> | null;
   broadcastTimeline?: BroadcastTimeline | null;
   betOpenTime?: number | null;
   betCloseTime?: number | null;

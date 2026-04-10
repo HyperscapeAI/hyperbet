@@ -33,6 +33,7 @@ import {
   captureInviteCodeFromLocation,
   getStoredInviteCode,
 } from "@hyperbet/ui/lib/invite";
+import { deriveBettorLiveStatus } from "@hyperbet/ui/lib/bettorLiveStatus";
 import { deriveBettorStreamUiState } from "@hyperbet/ui/lib/bettorStreamUi";
 import {
   describeCanonicalRendererDegradedReason,
@@ -410,32 +411,6 @@ function getAppCopy(locale: UiLocale) {
   };
 }
 
-function getPhaseLabel(
-  phase: string,
-  countdown: string | number | null,
-  copy: ReturnType<typeof getAppCopy>,
-): string {
-  if (phase === "FIGHTING") return copy.phaseLive;
-  if (phase === "COUNTDOWN") return copy.phaseStarting(countdown);
-  if (phase === "RESOLUTION") return copy.phaseResolved;
-  if (phase === "ANNOUNCEMENT") return copy.phaseNextMatch;
-  return copy.phaseIdle;
-}
-
-function getMarketStatusLabel(
-  rawStatus: string | null | undefined,
-  copy: ReturnType<typeof getAppCopy>,
-): string {
-  const normalized = rawStatus?.trim().toLowerCase();
-  if (!normalized) return copy.statusPending;
-  if (normalized === "open") return copy.statusOpen;
-  if (normalized === "resolved") return copy.statusResolved;
-  if (normalized === "pending" || normalized === "unavailable") {
-    return copy.statusPending;
-  }
-  return rawStatus ?? copy.statusPending;
-}
-
 const EvmBettingPanel = lazy(() =>
   import("@hyperbet/ui/components/EvmBettingPanel").then((module) => ({
     default: module.EvmBettingPanel,
@@ -715,8 +690,43 @@ export function App() {
     canonicalStreamSession,
     copy.waitingForStream,
   ]);
-  const canonicalPhase =
-    canonicalStreamSession?.phase ?? liveCycle?.phase ?? null;
+  const canonicalLiveStatus = useMemo(
+    () =>
+      deriveBettorLiveStatus({
+        copy,
+        session: canonicalStreamSession,
+        fallbackPhase: liveCycle?.phase ?? null,
+        countdown: liveCycle?.countdown ?? null,
+        marketLifecycleStatus: liveOverviewMarket?.lifecycleStatus ?? null,
+        marketWinner: liveOverviewMarket?.winner ?? null,
+        agent1Name:
+          liveCycle?.agent1?.name?.trim() ||
+          liveOverviewDuel?.agent1Name?.trim() ||
+          "Agent A",
+        agent2Name:
+          liveCycle?.agent2?.name?.trim() ||
+          liveOverviewDuel?.agent2Name?.trim() ||
+          "Agent B",
+        marketPhase: liveOverviewDuel?.phase ?? null,
+        marketDuelId: liveOverviewDuel?.duelId ?? liveOverviewMarket?.duelId ?? null,
+      }),
+    [
+      canonicalStreamSession,
+      copy,
+      liveCycle?.agent1?.name,
+      liveCycle?.agent2?.name,
+      liveCycle?.countdown,
+      liveCycle?.phase,
+      liveOverviewDuel?.agent1Name,
+      liveOverviewDuel?.agent2Name,
+      liveOverviewDuel?.duelId,
+      liveOverviewDuel?.phase,
+      liveOverviewMarket?.duelId,
+      liveOverviewMarket?.lifecycleStatus,
+      liveOverviewMarket?.winner,
+    ],
+  );
+  const canonicalPhase = canonicalLiveStatus.livePhase;
   const rendererDegradedOverlayMessage = useMemo(() => {
     if (activeStreamUrl.length === 0 || canonicalRendererHealth?.ready !== false) {
       return null;
@@ -733,24 +743,16 @@ export function App() {
   ]);
 
   useEffect(() => {
-    const overviewPhase = liveOverviewDuel?.phase?.trim() || null;
-    if (!canonicalPhase || !overviewPhase || canonicalPhase === overviewPhase) {
+    if (!canonicalLiveStatus.driftDiagnostic.detected) {
       return;
     }
     console.warn("[hyperbet] lifecycle_mismatch", {
       chain: activeChain,
-      canonicalPhase,
-      overviewPhase,
-      canonicalDuelId: canonicalStreamSession?.duelId ?? liveCycle?.duelId ?? null,
-      overviewDuelId: liveOverviewDuel?.duelId ?? null,
+      diagnostic: canonicalLiveStatus.driftDiagnostic,
     });
   }, [
     activeChain,
-    canonicalPhase,
-    canonicalStreamSession?.duelId,
-    liveCycle?.duelId,
-    liveOverviewDuel?.duelId,
-    liveOverviewDuel?.phase,
+    canonicalLiveStatus.driftDiagnostic,
   ]);
 
   const handleLocaleChange = useCallback((nextLocale: UiLocale) => {
@@ -1064,13 +1066,9 @@ export function App() {
   const effTotalPool =
     (typeof effYesPot === "number" ? effYesPot : 0) +
     (typeof effNoPot === "number" ? effNoPot : 0);
-  const effPhaseLabel = getPhaseLabel(effCycle.phase, effCycle.countdown, copy);
-
-  const streamPhaseText = canonicalPhase;
-  const marketStatusText = getMarketStatusLabel(
-    streamPhaseText ?? copy.phaseIdle,
-    copy,
-  );
+  const effPhaseLabel = canonicalLiveStatus.livePhaseLabel;
+  const marketStatusText =
+    canonicalLiveStatus.marketSettlementLabel ?? copy.statusPending;
   const countdownText = liveCycle
     ? formatCountdown(normalizeRemainingSeconds(liveCycle.timeRemaining))
     : "";
@@ -1151,6 +1149,7 @@ export function App() {
           gameApiUrl={GAME_API_URL}
           mockData={mockData}
           collateralSymbol={activeEvmCollateralSymbol ?? ""}
+          chainKey={activeEvmChain ?? undefined}
           chainLabel={activeEvmChainLabel ?? ""}
         />
       )}

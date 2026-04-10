@@ -74,6 +74,7 @@ export type BetSyncEvent = {
   sourceEpoch: number;
   seq: number;
   emittedAt: number;
+  cycle: JsonRecord | null;
   duelId: string | null;
   duelKey: string | null;
   phase: string | null;
@@ -378,6 +379,7 @@ export function parseBetSyncEvent(payload: unknown): BetSyncEvent | null {
     sourceEpoch,
     seq,
     emittedAt,
+    cycle: asRecord(candidate.cycle),
     duelId: asString(candidate.duelId),
     duelKey: normalizeDuelKey(candidate.duelKey),
     phase: asString(candidate.phase),
@@ -444,15 +446,20 @@ export function parseBetSyncBootstrapState(
 }
 
 export function toStreamStateFromBetSyncEvent(event: BetSyncEvent): StreamState {
+  const rawCycle = event.cycle;
   return {
     type: "STREAMING_STATE_UPDATE",
     cycle: {
-      cycleId: event.duelId ?? `bet-sync-${event.sourceEpoch}-${event.seq}`,
+      cycleId:
+        asString(rawCycle?.cycleId) ??
+        event.duelId ??
+        `bet-sync-${event.sourceEpoch}-${event.seq}`,
       duelId: event.duelId,
       duelKey: event.duelKey,
       duelKeyHex: event.duelKey ? `0x${event.duelKey}` : null,
       phase: event.phase ?? "IDLE",
       phaseVersion: event.phaseVersion,
+      rawCycle,
       broadcastTimeline: event.broadcastTimeline,
       betOpenTime: event.betOpenTime,
       betCloseTime: event.betCloseTime,

@@ -1122,6 +1122,7 @@ async function updatePerpsOracle(
       connection,
     );
     savePerpsOracleSnapshot({
+      chainKey: "bsc",
       agentId,
       marketId,
       spotIndex,
@@ -1240,6 +1241,7 @@ function toPerpsMarketRecord(
   previous?: DbPerpsMarketRecord,
 ): DbPerpsMarketRecord {
   return {
+    chainKey: "bsc",
     agentId: entry.characterId,
     marketId: modelMarketIdFromCharacterId(entry.characterId),
     rank: entry.rank,

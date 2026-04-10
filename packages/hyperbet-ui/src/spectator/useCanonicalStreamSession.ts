@@ -425,21 +425,31 @@ function normalizeBroadcastTimeline(value: unknown): BroadcastTimeline | null {
   };
 }
 
-function normalizeCycle(value: unknown): StreamingCycle | null {
+function normalizeCycle(
+  value: unknown,
+  topLevelCandidate?: Record<string, unknown> | null,
+): StreamingCycle | null {
   const candidate = asRecord(value);
   if (!candidate) return null;
-  const broadcastTimeline = normalizeBroadcastTimeline(candidate.broadcastTimeline);
+  const broadcastTimeline =
+    normalizeBroadcastTimeline(candidate.broadcastTimeline) ??
+    normalizeBroadcastTimeline(topLevelCandidate?.broadcastTimeline);
 
   return {
     cycleId: asString(candidate.cycleId) ?? "cycle-0",
+    rawCycle: candidate,
     phase:
+      (asString(topLevelCandidate?.phase) as StreamingPhase | null) ??
       broadcastTimeline?.phase ??
       (asString(candidate.phase) as StreamingPhase | null) ??
       "IDLE",
     cycleStartTime: asFiniteNumber(candidate.cycleStartTime) ?? 0,
     phaseStartTime: asFiniteNumber(candidate.phaseStartTime) ?? 0,
     phaseEndTime: asFiniteNumber(candidate.phaseEndTime) ?? 0,
-    phaseVersion: asFiniteNumber(candidate.phaseVersion) ?? 0,
+    phaseVersion:
+      asFiniteNumber(topLevelCandidate?.phaseVersion) ??
+      asFiniteNumber(candidate.phaseVersion) ??
+      0,
     timeRemaining: asFiniteNumber(candidate.timeRemaining) ?? 0,
     agent1: (candidate.agent1 as StreamingCycle["agent1"]) ?? null,
     agent2: (candidate.agent2 as StreamingCycle["agent2"]) ?? null,
@@ -453,26 +463,43 @@ function normalizeCycle(value: unknown): StreamingCycle | null {
         : null,
     broadcastTimeline,
     betOpenTime:
-      broadcastTimeline?.betOpenTime ?? asFiniteNumber(candidate.betOpenTime),
+      asFiniteNumber(topLevelCandidate?.betOpenTime) ??
+      broadcastTimeline?.betOpenTime ??
+      asFiniteNumber(candidate.betOpenTime),
     betCloseTime:
-      broadcastTimeline?.betCloseTime ?? asFiniteNumber(candidate.betCloseTime),
+      asFiniteNumber(topLevelCandidate?.betCloseTime) ??
+      broadcastTimeline?.betCloseTime ??
+      asFiniteNumber(candidate.betCloseTime),
     countdown: asFiniteNumber(candidate.countdown),
     fightStartTime:
+      asFiniteNumber(topLevelCandidate?.fightStartTime) ??
       broadcastTimeline?.fightStartTime ??
       asFiniteNumber(candidate.fightStartTime),
     duelEndTime:
-      broadcastTimeline?.duelEndTime ?? asFiniteNumber(candidate.duelEndTime),
+      asFiniteNumber(topLevelCandidate?.duelEndTime) ??
+      broadcastTimeline?.duelEndTime ??
+      asFiniteNumber(candidate.duelEndTime),
     winnerId:
-      typeof candidate.winnerId === "string" || candidate.winnerId === null
-        ? (candidate.winnerId as string | null)
+      typeof topLevelCandidate?.winnerId === "string" ||
+      topLevelCandidate?.winnerId === null
+        ? (topLevelCandidate.winnerId as string | null)
+        : typeof candidate.winnerId === "string" || candidate.winnerId === null
+          ? (candidate.winnerId as string | null)
         : null,
     winnerName:
-      typeof candidate.winnerName === "string" || candidate.winnerName === null
-        ? (candidate.winnerName as string | null)
+      typeof topLevelCandidate?.winnerName === "string" ||
+      topLevelCandidate?.winnerName === null
+        ? (topLevelCandidate.winnerName as string | null)
+        : typeof candidate.winnerName === "string" ||
+            candidate.winnerName === null
+          ? (candidate.winnerName as string | null)
         : null,
     winReason:
-      typeof candidate.winReason === "string" || candidate.winReason === null
-        ? (candidate.winReason as string | null)
+      typeof topLevelCandidate?.winReason === "string" ||
+      topLevelCandidate?.winReason === null
+        ? (topLevelCandidate.winReason as string | null)
+        : typeof candidate.winReason === "string" || candidate.winReason === null
+          ? (candidate.winReason as string | null)
         : null,
     rendererHealth:
       normalizeRendererHealth(
@@ -496,7 +523,7 @@ export function normalizeCanonicalStreamSession(
   const candidate = asRecord(payload);
   if (!candidate) return null;
 
-  const cycle = normalizeCycle(candidate.cycle);
+  const cycle = normalizeCycle(candidate.cycle, candidate);
   if (!cycle) return null;
 
   const emittedAt = asFiniteNumber(candidate.emittedAt) ?? Date.now();
@@ -608,8 +635,8 @@ export function normalizeCanonicalStreamSession(
       normalizedCycle.duelKeyHex?.replace(/^0x/i, "") ??
       null,
     phase:
-      normalizedCycle.broadcastTimeline?.phase ??
       (asString(candidate.phase) as StreamingPhase | null) ??
+      normalizedCycle.broadcastTimeline?.phase ??
       normalizedCycle.phase,
     phaseVersion:
       asFiniteNumber(candidate.phaseVersion) ??

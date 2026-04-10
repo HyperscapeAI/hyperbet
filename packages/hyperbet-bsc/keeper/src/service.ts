@@ -95,6 +95,10 @@ type StreamState = {
   cameraTarget: string | null;
   seq: number;
   emittedAt: number;
+  phase?: string | null;
+  phaseVersion?: number | null;
+  broadcastTimeline?: Record<string, unknown> | null;
+  rendererHealth?: Record<string, unknown> | null;
   channel?: Record<string, unknown> | null;
   publicReadiness?: Record<string, unknown> | null;
   canonicalDestination?: Record<string, unknown> | null;
@@ -1484,6 +1488,18 @@ function isSupportedEvmRpcChain(
 }
 
 function handlePerpsOracleHistory(req: Request, url: URL): Response {
+  const requestedChainKey = url.searchParams.get("chainKey");
+  if (requestedChainKey && requestedChainKey !== "bsc") {
+    if (typeof console !== "undefined") {
+      console.warn("[hyperbet] perps_chain_mismatch", {
+        endpoint: "/api/perps/oracle-history",
+        requestedChainKey,
+        supportedChainKey: "bsc",
+      });
+    }
+    return jsonResponse(req, { error: "chainKey must be bsc" }, 400);
+  }
+  const chainKey = "bsc" as const;
   const characterId = url.searchParams.get("characterId")?.trim() || "";
   if (!characterId) {
     return jsonResponse(req, { error: "characterId is required" }, 400);
@@ -1499,6 +1515,7 @@ function handlePerpsOracleHistory(req: Request, url: URL): Response {
   return jsonResponse(
     req,
     {
+      chainKey,
       characterId,
       marketId,
       snapshots,
@@ -1511,27 +1528,48 @@ function handlePerpsOracleHistory(req: Request, url: URL): Response {
   );
 }
 
-function handlePerpsMarkets(req: Request): Response {
+function handlePerpsMarkets(req: Request, url: URL): Response {
+  const requestedChainKey = url.searchParams.get("chainKey");
+  if (requestedChainKey && requestedChainKey !== "bsc") {
+    if (typeof console !== "undefined") {
+      console.warn("[hyperbet] perps_chain_mismatch", {
+        endpoint: "/api/perps/markets",
+        requestedChainKey,
+        supportedChainKey: "bsc",
+      });
+    }
+    return jsonResponse(req, { error: "chainKey must be bsc" }, 400);
+  }
+  const chainKey = "bsc" as const;
+  const markets = loadPerpsMarkets().map((market) => ({
+    chainKey: market.chainKey,
+    characterId: market.agentId,
+    marketId: market.marketId,
+    rank: market.rank,
+    name: market.name,
+    provider: market.provider,
+    model: market.model,
+    wins: market.wins,
+    losses: market.losses,
+    winRate: market.winRate,
+    combatLevel: market.combatLevel,
+    currentStreak: market.currentStreak,
+    status: market.status,
+    lastSeenAt: market.lastSeenAt,
+    deprecatedAt: market.deprecatedAt,
+    updatedAt: market.updatedAt,
+  }));
+  if (markets.length === 0 && typeof console !== "undefined") {
+    console.warn("[hyperbet] empty_model_directory", {
+      chainKey,
+      endpoint: "/api/perps/markets",
+    });
+  }
   return jsonResponse(
     req,
     {
-      markets: loadPerpsMarkets().map((market) => ({
-        characterId: market.agentId,
-        marketId: market.marketId,
-        rank: market.rank,
-        name: market.name,
-        provider: market.provider,
-        model: market.model,
-        wins: market.wins,
-        losses: market.losses,
-        winRate: market.winRate,
-        combatLevel: market.combatLevel,
-        currentStreak: market.currentStreak,
-        status: market.status,
-        lastSeenAt: market.lastSeenAt,
-        deprecatedAt: market.deprecatedAt,
-        updatedAt: market.updatedAt,
-      })),
+      chainKey,
+      markets,
       updatedAt: Date.now(),
     },
     200,
@@ -5105,7 +5143,7 @@ const server = Bun.serve({
     }
 
     if (req.method === "GET" && url.pathname === "/api/perps/markets") {
-      return handlePerpsMarkets(req);
+      return handlePerpsMarkets(req, url);
     }
 
     if (

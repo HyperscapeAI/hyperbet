@@ -57,8 +57,8 @@ import {
   type DbBetSyncCheckpoint,
   loadAll,
   loadBetSyncCheckpoint,
-  loadPerpsMarkets,
-  loadPerpsOracleSnapshots,
+  loadChainScopedPerpsMarkets,
+  loadChainScopedPerpsOracleSnapshots,
   loadPredictionMarketsOverviewState,
   saveBet,
   saveBetSyncCheckpoint,
@@ -73,6 +73,7 @@ import {
   saveReferral,
   saveInvitedWallet,
   saveReferralFees,
+  type EvmPerpsChainKey,
 } from "./db";
 import {
   isBetSyncEventStaleAfterSourceReset,
@@ -1646,14 +1647,32 @@ function isSupportedEvmRpcChain(
   return Object.hasOwn(EVM_RPC_PROXY_TARGETS, value);
 }
 
+function normalizePerpsChainKeyParam(value: string | null): EvmPerpsChainKey | null {
+  if (value === "bsc" || value === "base" || value === "avax") {
+    return value;
+  }
+  return null;
+}
+
 function handlePerpsOracleHistory(req: Request, url: URL): Response {
+  const requestedChainKey = url.searchParams.get("chainKey");
+  const chainKey = normalizePerpsChainKeyParam(requestedChainKey);
+  if (!chainKey) {
+    if (typeof console !== "undefined") {
+      console.warn("[hyperbet] perps_chain_missing", {
+        endpoint: "/api/perps/oracle-history",
+        requestedChainKey,
+      });
+    }
+    return jsonResponse(req, { error: "chainKey is required" }, 400);
+  }
   const characterId = url.searchParams.get("characterId")?.trim() || "";
   if (!characterId) {
     return jsonResponse(req, { error: "characterId is required" }, 400);
   }
 
   const limit = parseBoundedInteger(url.searchParams.get("limit"), 120, 1, 500);
-  const snapshots = loadPerpsOracleSnapshots(characterId, limit)
+  const snapshots = loadChainScopedPerpsOracleSnapshots(chainKey, characterId, limit)
     .slice()
     .reverse();
   const marketId =
@@ -1662,6 +1681,7 @@ function handlePerpsOracleHistory(req: Request, url: URL): Response {
   return jsonResponse(
     req,
     {
+      chainKey,
       characterId,
       marketId,
       snapshots,
@@ -1674,27 +1694,48 @@ function handlePerpsOracleHistory(req: Request, url: URL): Response {
   );
 }
 
-function handlePerpsMarkets(req: Request): Response {
+function handlePerpsMarkets(req: Request, url: URL): Response {
+  const requestedChainKey = url.searchParams.get("chainKey");
+  const chainKey = normalizePerpsChainKeyParam(requestedChainKey);
+  if (!chainKey) {
+    if (typeof console !== "undefined") {
+      console.warn("[hyperbet] perps_chain_missing", {
+        endpoint: "/api/perps/markets",
+        requestedChainKey,
+      });
+    }
+    return jsonResponse(req, { error: "chainKey is required" }, 400);
+  }
+
+  const markets = loadChainScopedPerpsMarkets(chainKey).map((market) => ({
+    chainKey: market.chainKey,
+    characterId: market.agentId,
+    marketId: market.marketId,
+    rank: market.rank,
+    name: market.name,
+    provider: market.provider,
+    model: market.model,
+    wins: market.wins,
+    losses: market.losses,
+    winRate: market.winRate,
+    combatLevel: market.combatLevel,
+    currentStreak: market.currentStreak,
+    status: market.status,
+    lastSeenAt: market.lastSeenAt,
+    deprecatedAt: market.deprecatedAt,
+    updatedAt: market.updatedAt,
+  }));
+  if (markets.length === 0 && typeof console !== "undefined") {
+    console.warn("[hyperbet] empty_model_directory", {
+      chainKey,
+      endpoint: "/api/perps/markets",
+    });
+  }
   return jsonResponse(
     req,
     {
-      markets: loadPerpsMarkets().map((market) => ({
-        characterId: market.agentId,
-        marketId: market.marketId,
-        rank: market.rank,
-        name: market.name,
-        provider: market.provider,
-        model: market.model,
-        wins: market.wins,
-        losses: market.losses,
-        winRate: market.winRate,
-        combatLevel: market.combatLevel,
-        currentStreak: market.currentStreak,
-        status: market.status,
-        lastSeenAt: market.lastSeenAt,
-        deprecatedAt: market.deprecatedAt,
-        updatedAt: market.updatedAt,
-      })),
+      chainKey,
+      markets,
       updatedAt: Date.now(),
     },
     200,
@@ -4519,7 +4560,7 @@ const server = Bun.serve({
     }
 
     if (req.method === "GET" && url.pathname === "/api/perps/markets") {
-      return handlePerpsMarkets(req);
+      return handlePerpsMarkets(req, url);
     }
 
     if (

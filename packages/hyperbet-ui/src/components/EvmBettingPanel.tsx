@@ -548,15 +548,16 @@ export function EvmBettingPanel({
       ? activeChain
       : null;
   const {
-    duel: lifecycleDuel,
-    market: lifecycleMarket,
+    duel: fetchedLifecycleDuel,
+    market: fetchedLifecycleMarket,
     refresh: refreshLifecycle,
   } =
     usePredictionMarketLifecycle(lifecycleChainKey, {
       disabled: !chainConfig,
     });
-  const effectiveLifecycleDuel = lifecycleDuel ?? lifecycleDuelOverride;
-  const effectiveLifecycleMarket = lifecycleMarket ?? lifecycleMarketOverride;
+  const effectiveLifecycleDuel = lifecycleDuelOverride ?? fetchedLifecycleDuel;
+  const effectiveLifecycleMarket =
+    lifecycleMarketOverride ?? fetchedLifecycleMarket;
   const pinnedE2eDuelKey =
     isE2eMode
       ? runtimeE2eOverride.duelKey ?? configuredE2eDuelKey
@@ -580,11 +581,11 @@ export function EvmBettingPanel({
     () =>
       pinnedE2eDuelKey ??
       normalizePredictionMarketDuelKeyHex(
-        lifecycleMarket?.duelKey ?? lifecycleDuel?.duelKey,
+        effectiveLifecycleMarket?.duelKey ?? effectiveLifecycleDuel?.duelKey,
       ),
     [
-      lifecycleDuel?.duelKey,
-      lifecycleMarket?.duelKey,
+      effectiveLifecycleDuel?.duelKey,
+      effectiveLifecycleMarket?.duelKey,
       pinnedE2eDuelKey,
     ],
   );
@@ -600,6 +601,13 @@ export function EvmBettingPanel({
     Boolean(authoritativeLifecycleDuelKey) &&
     pinnedE2eDuelKey == null &&
     (streamedDuelKey == null || streamedDuelKey !== authoritativeLifecycleDuelKey);
+  const fetchedLifecycleDuelKey = useMemo(
+    () =>
+      normalizePredictionMarketDuelKeyHex(
+        fetchedLifecycleMarket?.duelKey ?? fetchedLifecycleDuel?.duelKey,
+      ),
+    [fetchedLifecycleDuel?.duelKey, fetchedLifecycleMarket?.duelKey],
+  );
   const nativeDecimals = chainConfig?.nativeCurrency.decimals ?? 18;
   const chainNativeSymbol: Record<string, string> = { bsc: "BNB", base: "ETH", avax: "AVAX" };
   const nativeSymbol = chainConfig?.nativeCurrency.symbol ?? chainNativeSymbol[activeChain] ?? "ETH";
@@ -651,6 +659,33 @@ export function EvmBettingPanel({
       ),
     [copy, cycleAgent1, cycleAgent2, uiState.lifecycleStatus, uiState.winner],
   );
+
+  useEffect(() => {
+    if (
+      authoritativeLifecycleDuelKey == null ||
+      fetchedLifecycleDuelKey == null ||
+      authoritativeLifecycleDuelKey === fetchedLifecycleDuelKey
+    ) {
+      return;
+    }
+    console.warn("[hyperbet] lifecycle_mismatch", {
+      chain: activeChain,
+      visibleDuelKey: authoritativeLifecycleDuelKey,
+      fetchedDuelKey: fetchedLifecycleDuelKey,
+      visibleDuelId:
+        effectiveLifecycleMarket?.duelId ?? effectiveLifecycleDuel?.duelId ?? null,
+      fetchedDuelId:
+        fetchedLifecycleMarket?.duelId ?? fetchedLifecycleDuel?.duelId ?? null,
+    });
+  }, [
+    activeChain,
+    authoritativeLifecycleDuelKey,
+    effectiveLifecycleDuel?.duelId,
+    effectiveLifecycleMarket?.duelId,
+    fetchedLifecycleDuel?.duelId,
+    fetchedLifecycleDuelKey,
+    fetchedLifecycleMarket?.duelId,
+  ]);
 
   const publicClient = useMemo(() => {
     if (!chainConfig) return null;

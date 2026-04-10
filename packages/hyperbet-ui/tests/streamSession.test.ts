@@ -311,6 +311,13 @@ describe("normalizeCanonicalStreamSession", () => {
     expect(session?.cycle.betCloseTime).toBe(6000);
     expect(session?.cycle.fightStartTime).toBe(7000);
     expect(session?.cycle.duelEndTime).toBe(13000);
+    expect(session?.cycle.rawCycle).toMatchObject({
+      phase: "FIGHTING",
+      betOpenTime: 1000,
+      betCloseTime: 2000,
+      fightStartTime: 3000,
+      duelEndTime: 9000,
+    });
   });
 
   it("preserves legacy timing fields when broadcastTimeline is sparse", () => {
@@ -353,6 +360,13 @@ describe("normalizeCanonicalStreamSession", () => {
     expect(session?.cycle.betCloseTime).toBe(2000);
     expect(session?.cycle.fightStartTime).toBe(3000);
     expect(session?.cycle.duelEndTime).toBe(13000);
+    expect(session?.cycle.rawCycle).toMatchObject({
+      phase: "FIGHTING",
+      betOpenTime: 1000,
+      betCloseTime: 2000,
+      fightStartTime: 3000,
+      duelEndTime: 9000,
+    });
   });
 
   it("projects top-level phase and renderer health back into streaming updates", () => {
@@ -393,6 +407,10 @@ describe("normalizeCanonicalStreamSession", () => {
       cycle: {
         phase: "COUNTDOWN",
         phaseVersion: 19,
+        rawCycle: {
+          phase: "FIGHTING",
+          phaseVersion: 3,
+        },
         broadcastTimeline: {
           phase: "COUNTDOWN",
         },
@@ -401,6 +419,46 @@ describe("normalizeCanonicalStreamSession", () => {
           degradedReason: "visual_change_stale",
         },
       },
+    });
+  });
+
+  it("keeps top-level delayed winner fields separate from raw cycle winner metadata", () => {
+    const session = normalizeCanonicalStreamSession({
+      schemaVersion: 3,
+      seq: 12,
+      emittedAt: 1234567893,
+      phase: "FIGHTING",
+      cycle: {
+        cycleId: "cycle-4",
+        phase: "RESOLUTION",
+        winnerId: "agent-1",
+        winnerName: "Alpha",
+        winReason: "knockout",
+      },
+      winnerId: null,
+      winnerName: null,
+      winReason: null,
+      broadcastTimeline: {
+        phase: "FIGHTING",
+        betOpenTime: 5000,
+        betCloseTime: 6000,
+        fightStartTime: 7000,
+        duelEndTime: 13000,
+        presentationDelayMs: 4000,
+        updatedAt: 1234567893,
+      },
+    });
+
+    expect(session?.phase).toBe("FIGHTING");
+    expect(session?.cycle.phase).toBe("FIGHTING");
+    expect(session?.cycle.winnerId).toBeNull();
+    expect(session?.cycle.winnerName).toBeNull();
+    expect(session?.cycle.winReason).toBeNull();
+    expect(session?.cycle.rawCycle).toMatchObject({
+      phase: "RESOLUTION",
+      winnerId: "agent-1",
+      winnerName: "Alpha",
+      winReason: "knockout",
     });
   });
 });
