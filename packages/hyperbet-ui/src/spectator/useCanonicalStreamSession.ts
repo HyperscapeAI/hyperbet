@@ -525,14 +525,20 @@ export function normalizeCanonicalStreamSession(
       : null) ??
     normalizeDestinationState(candidate.fallbackDestination) ??
     null;
-  const rendererHealth =
+  const topLevelRendererHealth =
     normalizeRendererHealth(
       candidate.rendererHealth,
       emittedAt,
     ) ??
-    normalizeRendererHealth(candidate.status && asRecord(candidate.status)?.renderer, emittedAt) ??
-    cycle.rendererHealth ??
-    null;
+    normalizeRendererHealth(
+      candidate.status && asRecord(candidate.status)?.renderer,
+      emittedAt,
+    );
+  const rendererHealth =
+    topLevelRendererHealth ??
+    (publicReadiness == null && sourceRuntime == null
+      ? normalizeRendererHealth(cycle.rendererHealth, emittedAt)
+      : null);
   const rendererMetrics =
     normalizeRendererMetrics(candidate.rendererMetrics) ??
     normalizeRendererMetrics(asRecord(candidate.status)?.rendererMetrics) ??
@@ -900,12 +906,16 @@ export function useCanonicalStreamSession(
       isCanonicalRendererPlaybackReady({
         rendererReady: rendererHealth?.ready,
         degradedReason: rendererHealth?.degradedReason,
+        publicReadiness,
+        sourceRuntime: session?.sourceRuntime ?? null,
         playbackUrl: canonicalPlaybackUrl,
       }),
     [
       canonicalPlaybackUrl,
       rendererHealth?.degradedReason,
       rendererHealth?.ready,
+      publicReadiness,
+      session?.sourceRuntime,
     ],
   );
   const isLive = useMemo(

@@ -16,6 +16,7 @@ import {
   queueCanonicalStreamSession,
   useCanonicalStreamSession,
 } from "../src/spectator/useCanonicalStreamSession";
+import type { SourceRuntimeInfo } from "../src/spectator/types";
 import { render } from "./render";
 
 const originalFetch = globalThis.fetch;
@@ -77,7 +78,9 @@ function makeCanonicalChannel(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function makeSourceRuntime(overrides: Record<string, unknown> = {}) {
+function makeSourceRuntime(
+  overrides: Partial<SourceRuntimeInfo> = {},
+): SourceRuntimeInfo {
   return {
     ready: true,
     statusSource: "external_worker",
@@ -236,6 +239,34 @@ describe("normalizeCanonicalStreamSession", () => {
     expect(resolveCanonicalPlaybackDeliveryMode(session)).toBe(
       "external_hls/llhls",
     );
+  });
+
+  it("ignores legacy cycle renderer staleness when top-level readiness is present", () => {
+    const session = normalizeCanonicalStreamSession({
+      seq: 8,
+      emittedAt: 1234567890,
+      cycle: {
+        cycleId: "cycle-1",
+        phase: "RESOLUTION",
+        rendererHealth: {
+          ready: false,
+          degradedReason: "render_tick_stale",
+          updatedAt: 1234567890,
+        },
+      },
+      channel: makeCanonicalChannel(),
+      sourceRuntime: makeSourceRuntime(),
+      playback: {
+        url: "https://video.example/manifest.m3u8?protocol=llhls",
+        kind: "llhls",
+        renderSessionId: "render-1",
+        presentationDelayMs: 4000,
+      },
+    });
+
+    expect(session?.publicReadiness?.ready).toBe(true);
+    expect(session?.rendererHealth).toBeNull();
+    expect(session?.cycle.rendererHealth).toBeNull();
   });
 
   it("prefers broadcastTimeline timing and phase fields when present", () => {
@@ -735,6 +766,56 @@ describe("selectBetSurfaceStreamUrl", () => {
     expect(selection.preloadStreamUrl).toBe("");
   });
 
+  it("keeps canonical playback mounted when top-level readiness is green despite renderer staleness", () => {
+    const session = normalizeCanonicalStreamSession({
+      seq: 1,
+      emittedAt: 1,
+      cycle: {
+        cycleId: "cycle-1",
+        phase: "RESOLUTION",
+        duelId: "duel-1",
+        duelKeyHex: "deadbeef",
+        rendererHealth: {
+          ready: false,
+          degradedReason: "render_tick_stale",
+          updatedAt: 1,
+        },
+      },
+      rendererHealth: {
+        ready: false,
+        degradedReason: "render_tick_stale",
+        updatedAt: 1,
+      },
+      authorityHealth: {
+        ready: true,
+        degradedReason: null,
+        updatedAt: 1,
+      },
+      sourceRuntime: makeSourceRuntime(),
+      channel: makeCanonicalChannel(),
+      playback: {
+        url: "https://video.example/manifest.m3u8?protocol=llhls",
+        kind: "llhls",
+        renderSessionId: "render-1",
+        presentationDelayMs: 4000,
+      },
+    });
+
+    const selection = selectBetSurfaceStreamUrl({
+      allowFallbackWhenSessionUnavailable: false,
+      fallbackStreamIndex: 0,
+      fallbackStreamSources: ["https://fallback.example/live/stream.m3u8"],
+      authorityHealth: session?.authorityHealth,
+      rendererReady: session?.rendererHealth?.ready,
+      session,
+    });
+
+    expect(session?.publicReadiness?.ready).toBe(true);
+    expect(session?.sourceRuntime?.ready).toBe(true);
+    expect(selection.canUseCanonicalPlayback).toBe(true);
+    expect(selection.activeStreamUrl).toContain("protocol=llhls");
+  });
+
   it("fails closed when source runtime is missing for an existing session", () => {
     const session = normalizeCanonicalStreamSession({
       seq: 1,
@@ -844,6 +925,22 @@ describe("isCanonicalRendererPlaybackReady", () => {
         degradedReason:
           "probe_failed:evaluate: Target page, context or browser has been closed",
         playbackUrl: "https://video.example/live/stream.m3u8",
+      }),
+    ).toBe(true);
+  });
+
+  it("treats renderer staleness as non-blocking when top-level readiness stays green", () => {
+    expect(
+      isCanonicalRendererPlaybackReady({
+        rendererReady: false,
+        degradedReason: "render_tick_stale",
+        publicReadiness: {
+          ready: true,
+          reason: null,
+          updatedAt: 1,
+        },
+        sourceRuntime: makeSourceRuntime(),
+        playbackUrl: "https://video.example/manifest.m3u8?protocol=llhls",
       }),
     ).toBe(true);
   });

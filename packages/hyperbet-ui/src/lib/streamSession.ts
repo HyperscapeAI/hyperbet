@@ -97,6 +97,20 @@ function isHlsPlaybackUrl(value: string): boolean {
   return parsed?.pathname.toLowerCase().endsWith(".m3u8") ?? false;
 }
 
+function isSoftRendererDegradedReason(
+  reason: string | null | undefined,
+): boolean {
+  const normalizedReason = (reason ?? "").trim().toLowerCase();
+  return (
+    normalizedReason === "render_tick_stale" ||
+    normalizedReason === "visual_change_stale" ||
+    normalizedReason === "capture_fps_low" ||
+    normalizedReason === "encoder_fps_low" ||
+    normalizedReason === "player_drifted" ||
+    normalizedReason === "asset_origin_incomplete"
+  );
+}
+
 export function isNonBlockingCanonicalRendererFailure(params: {
   degradedReason: string | null | undefined;
   playbackUrl: string | null | undefined;
@@ -109,13 +123,24 @@ export function isNonBlockingCanonicalRendererFailure(params: {
 export function isCanonicalRendererPlaybackReady(params: {
   rendererReady: boolean | null | undefined;
   degradedReason: string | null | undefined;
+  publicReadiness?: StreamPublicReadiness | null | undefined;
+  sourceRuntime?: SourceRuntimeInfo | null | undefined;
   playbackUrl: string | null | undefined;
 }): boolean {
   if (params.rendererReady !== false) {
     return true;
   }
 
-  return isNonBlockingCanonicalRendererFailure(params);
+  if (isNonBlockingCanonicalRendererFailure(params)) {
+    return true;
+  }
+
+  return (
+    isSoftRendererDegradedReason(params.degradedReason) &&
+    params.publicReadiness?.ready === true &&
+    params.sourceRuntime?.ready === true &&
+    (params.playbackUrl?.trim().length ?? 0) > 0
+  );
 }
 
 export function isCanonicalDeliveryReady(params: {
@@ -242,6 +267,8 @@ export function selectBetSurfaceStreamUrl({
   const canonicalRendererPlaybackReady = isCanonicalRendererPlaybackReady({
     rendererReady: canonicalRendererReady,
     degradedReason: canonicalRendererDegradedReason,
+    publicReadiness: session?.publicReadiness ?? session?.channel?.publicReadiness,
+    sourceRuntime: canonicalSourceRuntime,
     playbackUrl: canonicalPlaybackUrl,
   });
   const canonicalDeliveryReady = isCanonicalDeliveryReady({
