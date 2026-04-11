@@ -96,7 +96,7 @@ import {
   type StreamState as BetSyncStreamState,
 } from "./betSync";
 import {
-  buildRecoveredMarketParitySnapshot,
+  buildProjectedMarketParitySnapshot,
   parseRequiredParityChains,
   redactPendingMarketParity,
 } from "./marketParity";
@@ -2255,7 +2255,7 @@ function resolvePublicMarketParity(
   const rawParity =
     botHealthSnapshot?.marketParity ??
     sourceState.marketParity ??
-    buildRecoveredMarketParitySnapshot({
+    buildProjectedMarketParitySnapshot({
       duelKey: currentDuelKey(sourceState),
       duelId: currentDuelId(sourceState),
       phase:

@@ -45,6 +45,55 @@ function parityStateFromLifecycleStatuses(
   return null;
 }
 
+function lifecycleRank(
+  status: PredictionMarketLifecycleRecord["lifecycleStatus"] | null | undefined,
+): number {
+  switch (status) {
+    case "PENDING":
+      return 1;
+    case "OPEN":
+      return 2;
+    case "LOCKED":
+      return 3;
+    case "RESOLVED":
+    case "CANCELLED":
+      return 4;
+    default:
+      return 0;
+  }
+}
+
+function buildEmptyReceipt(chainKey: BettingChainKey): KeeperParityChainReceipt {
+  return {
+    chainKey,
+    preparedAtMs: null,
+    openedAtMs: null,
+    lockedAtMs: null,
+    resolvedAtMs: null,
+    cancelledAtMs: null,
+    confirmedAtMs: null,
+    lifecycleStatus: null,
+    txRef: null,
+    note: null,
+  };
+}
+
+function findMatchingParityRecord(
+  requiredChain: BettingChainKey,
+  markets: readonly PredictionMarketLifecycleRecord[],
+  duelKey: string | null,
+  duelId: string | null,
+): PredictionMarketLifecycleRecord | null {
+  return (
+    markets.find((record) => {
+      if (record.chainKey !== requiredChain) return false;
+      if (duelKey && record.duelKey) return record.duelKey === duelKey;
+      if (duelId && record.duelId) return record.duelId === duelId;
+      return false;
+    }) ?? null
+  );
+}
+
 function redactedReceipt(receipt: KeeperParityChainReceipt): KeeperParityChainReceipt {
   return {
     ...receipt,
@@ -83,7 +132,7 @@ function buildRecoveredReceipt(
 ): KeeperParityChainReceipt {
   return {
     chainKey: record.chainKey,
-    preparedAtMs: null,
+    preparedAtMs: updatedAtMs,
     openedAtMs: record.lifecycleStatus === "OPEN" ? updatedAtMs : null,
     lockedAtMs: record.lifecycleStatus === "LOCKED" ? updatedAtMs : null,
     resolvedAtMs: record.lifecycleStatus === "RESOLVED" ? updatedAtMs : null,
@@ -172,5 +221,74 @@ export function buildRecoveredMarketParitySnapshot(input: {
     receipts: confirmedRecords.map((record) =>
       buildRecoveredReceipt(record, updatedAtMs),
     ),
+  };
+}
+
+export function buildProjectedMarketParitySnapshot(input: {
+  duelKey: string | null;
+  duelId: string | null;
+  phase: string | null;
+  requiredChains: readonly BettingChainKey[];
+  markets: readonly PredictionMarketLifecycleRecord[];
+  updatedAtMs: number;
+  streamSafe: boolean;
+}): KeeperMarketParitySnapshot | null {
+  const recovered = buildRecoveredMarketParitySnapshot(input);
+  if (recovered) {
+    return recovered;
+  }
+
+  const {
+    duelKey,
+    duelId,
+    phase,
+    requiredChains,
+    markets,
+    updatedAtMs,
+  } = input;
+  if (!duelKey && !duelId) return null;
+
+  const matchedRecords = requiredChains
+    .map((chainKey) =>
+      findMatchingParityRecord(chainKey, markets, duelKey, duelId),
+    )
+    .filter((record): record is PredictionMarketLifecycleRecord => record != null);
+  const receipts = requiredChains.map((chainKey) => {
+    const record = findMatchingParityRecord(chainKey, markets, duelKey, duelId);
+    return record
+      ? buildRecoveredReceipt(record, updatedAtMs)
+      : buildEmptyReceipt(chainKey);
+  });
+  const highestRank = matchedRecords.reduce(
+    (max, record) => Math.max(max, lifecycleRank(record.lifecycleStatus)),
+    0,
+  );
+  const state =
+    highestRank >= 2 ? "awaiting_confirmations" : "preparing";
+  const confirmedChains = receipts
+    .filter((receipt) => {
+      if (state === "preparing") {
+        return receipt.lifecycleStatus != null;
+      }
+      return lifecycleRank(receipt.lifecycleStatus) >= highestRank;
+    })
+    .map((receipt) => receipt.chainKey);
+
+  return {
+    bundleId: `recovered-pending:${duelKey ?? duelId ?? "unknown"}`,
+    duelKey,
+    duelId,
+    revision: 0,
+    requiredChains: [...requiredChains],
+    confirmedChains,
+    state,
+    phase: phase ?? "ANNOUNCEMENT",
+    safeToBet: false,
+    openedAtMs: null,
+    lockedAtMs: null,
+    resolvedAtMs: null,
+    freezeReason: null,
+    updatedAtMs,
+    receipts,
   };
 }

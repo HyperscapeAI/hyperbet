@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import {
+  buildProjectedMarketParitySnapshot,
   buildRecoveredMarketParitySnapshot,
   redactPendingMarketParity,
 } from "./marketParity";
@@ -145,5 +146,96 @@ describe("market parity helpers", () => {
       txRef: null,
       note: null,
     });
+  });
+
+  test("projects a preparing bundle when a live duel exists but no chain receipts do yet", () => {
+    const projected = buildProjectedMarketParitySnapshot({
+      duelKey: "ef".repeat(32),
+      duelId: "duel-preparing",
+      phase: "ANNOUNCEMENT",
+      requiredChains: ["solana", "bsc"],
+      updatedAtMs: 1_700_000_000_000,
+      streamSafe: false,
+      markets: [],
+    });
+
+    expect(projected).toMatchObject({
+      bundleId: `recovered-pending:${"ef".repeat(32)}`,
+      duelKey: "ef".repeat(32),
+      duelId: "duel-preparing",
+      state: "preparing",
+      safeToBet: false,
+      confirmedChains: [],
+    });
+    expect(projected?.receipts).toHaveLength(2);
+    expect(projected?.receipts[0]).toMatchObject({
+      lifecycleStatus: null,
+      confirmedAtMs: null,
+    });
+  });
+
+  test("projects awaiting confirmations when required chains are mid-transition", () => {
+    const projected = buildProjectedMarketParitySnapshot({
+      duelKey: "12".repeat(32),
+      duelId: "duel-awaiting",
+      phase: "ANNOUNCEMENT",
+      requiredChains: ["solana", "bsc"],
+      updatedAtMs: 1_700_000_000_000,
+      streamSafe: true,
+      markets: [
+        {
+          chainKey: "solana",
+          duelKey: "12".repeat(32),
+          duelId: "duel-awaiting",
+          marketId: "sol-market",
+          marketRef: "sol-market",
+          lifecycleStatus: "OPEN",
+          winner: "NONE",
+          betCloseTime: 1_700_000_060_000,
+          contractAddress: null,
+          programId: "sol-program",
+          txRef: "sol-signature",
+          syncedAt: 1_700_000_000_000,
+          metadata: undefined,
+        },
+        {
+          chainKey: "bsc",
+          duelKey: "12".repeat(32),
+          duelId: "duel-awaiting",
+          marketId: "0xmarket",
+          marketRef: "0xmarket",
+          lifecycleStatus: "PENDING",
+          winner: "NONE",
+          betCloseTime: 1_700_000_060_000,
+          contractAddress: "0x0000000000000000000000000000000000000001",
+          programId: null,
+          txRef: null,
+          syncedAt: 1_700_000_000_000,
+          metadata: undefined,
+        },
+      ],
+    });
+
+    expect(projected).toMatchObject({
+      duelKey: "12".repeat(32),
+      duelId: "duel-awaiting",
+      state: "awaiting_confirmations",
+      safeToBet: false,
+      confirmedChains: ["solana"],
+    });
+    expect(projected?.receipts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          chainKey: "solana",
+          lifecycleStatus: "OPEN",
+          openedAtMs: 1_700_000_000_000,
+        }),
+        expect.objectContaining({
+          chainKey: "bsc",
+          lifecycleStatus: "PENDING",
+          preparedAtMs: 1_700_000_000_000,
+        }),
+      ]),
+    );
   });
 });
