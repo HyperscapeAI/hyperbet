@@ -3279,6 +3279,49 @@ function buildMarketParityReceipts(
   }));
 }
 
+function isTerminalMarketParityState(state: KeeperParityBundleState): boolean {
+  return state === "resolved" || state === "cancelled" || state === "aborted";
+}
+
+function isSameMarketParityBundle(
+  current: KeeperMarketParitySnapshot,
+  data: DuelLifecycleEvent,
+): boolean {
+  return (
+    current.duelKey === normalizedBundleDuelKey(data.duelKeyHex) &&
+    current.duelId === data.duelId
+  );
+}
+
+function blockMismatchedMarketParityEvent(
+  data: DuelLifecycleEvent,
+  eventName: string,
+): boolean {
+  if (
+    !marketParitySnapshot ||
+    isTerminalMarketParityState(marketParitySnapshot.state) ||
+    isSameMarketParityBundle(marketParitySnapshot, data)
+  ) {
+    return false;
+  }
+
+  const incomingDuelKey = normalizedBundleDuelKey(data.duelKeyHex);
+  const reason = `blocked_${eventName}_for_${incomingDuelKey ?? data.duelId ?? "unknown"}_while_${marketParitySnapshot.bundleId}_is_${marketParitySnapshot.state}`;
+  console.error("[bot] market_parity_blocked_event", {
+    eventName,
+    reason,
+    activeBundleId: marketParitySnapshot.bundleId,
+    activeDuelKey: marketParitySnapshot.duelKey,
+    activeDuelId: marketParitySnapshot.duelId,
+    activeState: marketParitySnapshot.state,
+    incomingDuelKey,
+    incomingDuelId: data.duelId,
+  });
+  finalizeMarketParityState("frozen", marketParitySnapshot.phase, { reason });
+  writeBotHealthSnapshot();
+  return true;
+}
+
 function updateMarketParitySnapshot(
   updater: (
     current: KeeperMarketParitySnapshot | null,
@@ -3302,9 +3345,7 @@ function beginMarketParityBundle(
     marketParitySnapshot &&
     marketParitySnapshot.duelKey === duelKey &&
     marketParitySnapshot.duelId === data.duelId &&
-    marketParitySnapshot.state !== "resolved" &&
-    marketParitySnapshot.state !== "cancelled" &&
-    marketParitySnapshot.state !== "aborted"
+    !isTerminalMarketParityState(marketParitySnapshot.state)
   ) {
     return marketParitySnapshot;
   }
@@ -4204,6 +4245,9 @@ gameClient.onDuelStart(async (data) => {
 
   console.log("Duel Started:", data);
   const parityPhase = data.phase || "ANNOUNCEMENT";
+  if (blockMismatchedMarketParityEvent(data, "duel_started")) {
+    return;
+  }
   beginMarketParityBundle(data, parityPhase);
   writeBotHealthSnapshot();
 
@@ -4316,6 +4360,9 @@ gameClient.onBettingLocked(async (data) => {
   }
 
   await waitUntilTimestamp(data.betCloseTime ?? null, "bet close");
+  if (blockMismatchedMarketParityEvent(data, "betting_locked")) {
+    return;
+  }
 
   try {
     beginMarketParityBundle(data, "COUNTDOWN");
@@ -4377,6 +4424,9 @@ gameClient.onDuelEnd(async (data) => {
   }
 
   console.log("Duel Ended:", data);
+  if (blockMismatchedMarketParityEvent(data, "duel_ended")) {
+    return;
+  }
   try {
     beginMarketParityBundle(data, "RESOLUTION");
     const winnerId = data.winnerId;
