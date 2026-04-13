@@ -624,6 +624,46 @@ const botKeypair = readKeypair(
     process.env.MARKET_MAKER_KEYPAIR ||
     requireEnv("ORACLE_AUTHORITY_KEYPAIR"),
 );
+function readOptionalKeypair(name: string): Keypair | null {
+  const value = process.env[name]?.trim();
+  return value ? readKeypair(value) : null;
+}
+
+const hasExplicitOracleConfigAuthority = Boolean(
+  process.env.ORACLE_CONFIG_AUTHORITY_KEYPAIR?.trim(),
+);
+const hasExplicitClobConfigAuthority = Boolean(
+  process.env.CLOB_CONFIG_AUTHORITY_KEYPAIR?.trim() ||
+    process.env.CLOB_AUTHORITY_KEYPAIR?.trim(),
+);
+const oracleConfigAuthorityKeypair =
+  readOptionalKeypair("ORACLE_CONFIG_AUTHORITY_KEYPAIR") ||
+  readOptionalKeypair("ORACLE_AUTHORITY_KEYPAIR") ||
+  botKeypair;
+const oracleReporterKeypair =
+  readOptionalKeypair("ORACLE_REPORTER_KEYPAIR") ||
+  readOptionalKeypair("ORACLE_AUTHORITY_KEYPAIR") ||
+  botKeypair;
+const oracleFinalizerKeypair =
+  readOptionalKeypair("ORACLE_FINALIZER_KEYPAIR") ||
+  readOptionalKeypair("ORACLE_AUTHORITY_KEYPAIR") ||
+  oracleReporterKeypair;
+const oracleChallengerKeypair =
+  readOptionalKeypair("ORACLE_CHALLENGER_KEYPAIR") ||
+  readOptionalKeypair("ORACLE_AUTHORITY_KEYPAIR") ||
+  oracleReporterKeypair;
+const clobConfigAuthorityKeypair =
+  readOptionalKeypair("CLOB_CONFIG_AUTHORITY_KEYPAIR") ||
+  readOptionalKeypair("CLOB_AUTHORITY_KEYPAIR") ||
+  readOptionalKeypair("ORACLE_CONFIG_AUTHORITY_KEYPAIR") ||
+  readOptionalKeypair("ORACLE_AUTHORITY_KEYPAIR") ||
+  botKeypair;
+const clobMarketOperatorKeypair =
+  readOptionalKeypair("CLOB_MARKET_OPERATOR_KEYPAIR") ||
+  readOptionalKeypair("MARKET_OPERATOR_KEYPAIR") ||
+  readOptionalKeypair("ORACLE_REPORTER_KEYPAIR") ||
+  readOptionalKeypair("ORACLE_AUTHORITY_KEYPAIR") ||
+  botKeypair;
 const { connection, provider, fightOracle, goldClobMarket, goldPerpsMarket } =
   createPrograms(botKeypair);
 const fightProgram = fightOracle as Program<FightOracle>;
@@ -2233,6 +2273,10 @@ async function ensureWalletAccountReady(
 }
 
 const ensureOracleReady = async (): Promise<void> => {
+  const expectedAuthority = oracleConfigAuthorityKeypair.publicKey;
+  const expectedReporter = oracleReporterKeypair.publicKey;
+  const expectedFinalizer = oracleFinalizerKeypair.publicKey;
+  const expectedChallenger = oracleChallengerKeypair.publicKey;
   let config =
     await fightProgram.account.oracleConfig.fetchNullable(oracleConfigPda);
   if (!config) {
@@ -2240,18 +2284,19 @@ const ensureOracleReady = async (): Promise<void> => {
       () =>
         fightProgram.methods
           .initializeOracle(
-            botKeypair.publicKey,
-            botKeypair.publicKey,
-            botKeypair.publicKey,
+            expectedReporter,
+            expectedFinalizer,
+            expectedChallenger,
             new BN(3600),
           )
           .accountsPartial({
-            authority: botKeypair.publicKey,
+            authority: expectedAuthority,
             oracleConfig: oracleConfigPda,
             program: fightProgram.programId,
             programData: deriveProgramDataAddress(fightProgram.programId),
             systemProgram: SystemProgram.programId,
           })
+          .signers([oracleConfigAuthorityKeypair])
           .rpc(),
       connection,
     );
@@ -2263,31 +2308,38 @@ const ensureOracleReady = async (): Promise<void> => {
       `Oracle config ${oracleConfigPda.toBase58()} was not created`,
     );
   }
-  if (!(config.authority as PublicKey).equals(botKeypair.publicKey)) {
+  const actualAuthority = config.authority as PublicKey;
+  if (hasExplicitOracleConfigAuthority && !actualAuthority.equals(expectedAuthority)) {
     throw new Error(
-      `Bot wallet ${botKeypair.publicKey.toBase58()} is not oracle authority`,
+      `Configured oracle authority ${expectedAuthority.toBase58()} does not match on-chain oracle authority ${actualAuthority.toBase58()}`,
     );
   }
   const configNeedsUpdate =
-    !(config.reporter as PublicKey).equals(botKeypair.publicKey) ||
-    !(config.finalizer as PublicKey).equals(botKeypair.publicKey) ||
-    !(config.challenger as PublicKey).equals(botKeypair.publicKey);
+    !(config.reporter as PublicKey).equals(expectedReporter) ||
+    !(config.finalizer as PublicKey).equals(expectedFinalizer) ||
+    !(config.challenger as PublicKey).equals(expectedChallenger);
   if (configNeedsUpdate) {
+    if (!actualAuthority.equals(expectedAuthority)) {
+      throw new Error(
+        `Oracle role update requires config authority ${actualAuthority.toBase58()}, but keeper has ${expectedAuthority.toBase58()}`,
+      );
+    }
     const disputeWindowSecs = asNum(config.disputeWindowSecs);
     await runWithRecovery(
       () =>
         fightProgram.methods
           .updateOracleConfig(
-            botKeypair.publicKey,
-            botKeypair.publicKey,
-            botKeypair.publicKey,
-            botKeypair.publicKey,
+            expectedAuthority,
+            expectedReporter,
+            expectedFinalizer,
+            expectedChallenger,
             new BN(disputeWindowSecs),
           )
           .accountsPartial({
-            authority: botKeypair.publicKey,
+            authority: expectedAuthority,
             oracleConfig: oracleConfigPda,
           })
+          .signers([oracleConfigAuthorityKeypair])
           .rpc(),
       connection,
     );
@@ -2306,6 +2358,8 @@ const ensureMarketConfigReady = async (): Promise<void> => {
   const existingConfig =
     await marketProgram.account.marketConfig.fetchNullable(marketConfigPda);
   const expectedConfig = {
+    authority: clobConfigAuthorityKeypair.publicKey,
+    marketOperator: clobMarketOperatorKeypair.publicKey,
     treasury: configuredTradeTreasuryWallet,
     marketMaker: configuredTradeMarketMakerWallet,
     tradeTreasuryFeeBps,
@@ -2318,7 +2372,7 @@ const ensureMarketConfigReady = async (): Promise<void> => {
       () =>
         marketProgram.methods
           .initializeConfig(
-            botKeypair.publicKey,
+            expectedConfig.marketOperator,
             expectedConfig.treasury,
             expectedConfig.marketMaker,
             expectedConfig.tradeTreasuryFeeBps,
@@ -2326,12 +2380,13 @@ const ensureMarketConfigReady = async (): Promise<void> => {
             expectedConfig.winningsMarketMakerFeeBps,
           )
           .accountsPartial({
-            authority: botKeypair.publicKey,
+            authority: expectedConfig.authority,
             config: marketConfigPda,
             program: marketProgram.programId,
             programData: deriveProgramDataAddress(marketProgram.programId),
             systemProgram: SystemProgram.programId,
           })
+          .signers([clobConfigAuthorityKeypair])
           .rpc(),
       connection,
     );
@@ -2341,7 +2396,17 @@ const ensureMarketConfigReady = async (): Promise<void> => {
     return;
   }
 
+  const actualAuthority = existingConfig.authority as PublicKey;
+  if (hasExplicitClobConfigAuthority && !actualAuthority.equals(expectedConfig.authority)) {
+    throw new Error(
+      `Configured CLOB authority ${expectedConfig.authority.toBase58()} does not match on-chain CLOB authority ${actualAuthority.toBase58()}`,
+    );
+  }
+
   const configNeedsUpdate =
+    !(existingConfig.marketOperator as PublicKey).equals(
+      expectedConfig.marketOperator,
+    ) ||
     !(existingConfig.treasury as PublicKey).equals(expectedConfig.treasury) ||
     !(existingConfig.marketMaker as PublicKey).equals(
       expectedConfig.marketMaker,
@@ -2354,12 +2419,17 @@ const ensureMarketConfigReady = async (): Promise<void> => {
       expectedConfig.winningsMarketMakerFeeBps;
 
   if (configNeedsUpdate) {
+    if (!actualAuthority.equals(expectedConfig.authority)) {
+      throw new Error(
+        `CLOB config update requires authority ${actualAuthority.toBase58()}, but keeper has ${expectedConfig.authority.toBase58()}`,
+      );
+    }
     await runWithRecovery(
       () =>
         marketProgram.methods
           .updateConfig(
-            botKeypair.publicKey,
-            botKeypair.publicKey,
+            expectedConfig.authority,
+            expectedConfig.marketOperator,
             expectedConfig.treasury,
             expectedConfig.marketMaker,
             expectedConfig.tradeTreasuryFeeBps,
@@ -2367,9 +2437,10 @@ const ensureMarketConfigReady = async (): Promise<void> => {
             expectedConfig.winningsMarketMakerFeeBps,
           )
           .accountsPartial({
-            authority: botKeypair.publicKey,
+            authority: expectedConfig.authority,
             config: marketConfigPda,
           })
+          .signers([clobConfigAuthorityKeypair])
           .rpc(),
       connection,
     );
@@ -2569,11 +2640,12 @@ async function upsertDuelLifecycle(
           duelStatusEnum(status),
         )
         .accountsPartial({
-          reporter: botKeypair.publicKey,
+          reporter: oracleReporterKeypair.publicKey,
           oracleConfig: oracleConfigPda,
           duelState,
           systemProgram: SystemProgram.programId,
         })
+        .signers([oracleReporterKeypair])
         .rpc(),
     connection,
   );
@@ -3001,13 +3073,14 @@ async function ensureSolanaRound(
         marketProgram.methods
           .initializeMarket(Array.from(duelKey), SOLANA_DUEL_WINNER_MARKET_KIND)
           .accountsPartial({
-            operator: botKeypair.publicKey,
+            operator: clobMarketOperatorKeypair.publicKey,
             config: marketConfigPda,
             duelState,
             marketState,
             vault,
             systemProgram: SystemProgram.programId,
           })
+          .signers([clobMarketOperatorKeypair])
           .rpc(),
       connection,
     );
@@ -4041,19 +4114,21 @@ async function reportRoundResult(data: DuelLifecycleEvent): Promise<void> {
           buildDuelMetadata(data),
         )
         .accountsPartial({
-          reporter: botKeypair.publicKey,
+          reporter: oracleReporterKeypair.publicKey,
           oracleConfig: oracleConfigPda,
           duelState: trackedMatch.duelState,
         })
+        .signers([oracleReporterKeypair])
         .rpc()
         .then(() =>
           fightProgram.methods
             .finalizeResult(Array.from(duelKey), buildDuelMetadata(data))
             .accountsPartial({
-              finalizer: botKeypair.publicKey,
+              finalizer: oracleFinalizerKeypair.publicKey,
               oracleConfig: oracleConfigPda,
               duelState: trackedMatch.duelState,
             })
+            .signers([oracleFinalizerKeypair])
             .rpc(),
         ),
     connection,
