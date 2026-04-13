@@ -3553,6 +3553,34 @@ function blockMismatchedMarketParityEvent(
   return true;
 }
 
+function requireExistingMarketParityBundle(
+  data: DuelLifecycleEvent,
+  eventName: string,
+): KeeperMarketParitySnapshot | null {
+  if (blockMismatchedMarketParityEvent(data, eventName)) {
+    return null;
+  }
+
+  if (
+    !marketParitySnapshot ||
+    isTerminalMarketParityState(marketParitySnapshot.state) ||
+    !isSameMarketParityBundle(marketParitySnapshot, data)
+  ) {
+    console.warn("[bot] market_parity_dropped_event", {
+      eventName,
+      reason: `dropped_${eventName}_without_existing_public_bundle`,
+      incomingDuelKey: normalizedBundleDuelKey(data.duelKeyHex),
+      incomingDuelId: data.duelId,
+      activeBundleId: marketParitySnapshot?.bundleId ?? null,
+      activeState: marketParitySnapshot?.state ?? null,
+    });
+    writeBotHealthSnapshot();
+    return null;
+  }
+
+  return marketParitySnapshot;
+}
+
 function updateMarketParitySnapshot(
   updater: (
     current: KeeperMarketParitySnapshot | null,
@@ -4965,7 +4993,25 @@ gameClient.onBettingLocked(async (data) => {
   }
 
   await waitUntilTimestamp(data.betCloseTime ?? null, "bet close");
-  if (blockMismatchedMarketParityEvent(data, "betting_locked")) {
+  const activeBundle = requireExistingMarketParityBundle(data, "betting_locked");
+  if (!activeBundle) {
+    return;
+  }
+  if (activeBundle.state !== "open" || !activeBundle.openedAtMs) {
+    const reason = `betting_locked_for_${data.duelId}_before_public_open`;
+    finalizeMarketParityState(
+      activeBundle.openedAtMs ? "frozen" : "aborted",
+      "COUNTDOWN",
+      { reason },
+    );
+    console.warn("[bot] market_parity_dropped_event", {
+      eventName: "betting_locked",
+      reason,
+      activeBundleId: activeBundle.bundleId,
+      activeState: activeBundle.state,
+      activeOpenedAtMs: activeBundle.openedAtMs,
+    });
+    writeBotHealthSnapshot();
     return;
   }
 
@@ -5029,7 +5075,26 @@ gameClient.onDuelEnd(async (data) => {
   }
 
   console.log("Duel Ended:", data);
-  if (blockMismatchedMarketParityEvent(data, "duel_ended")) {
+  const activeBundle = requireExistingMarketParityBundle(data, "duel_ended");
+  if (!activeBundle) {
+    return;
+  }
+  if (activeBundle.state !== "locked" || !activeBundle.lockedAtMs) {
+    const reason = `duel_ended_for_${data.duelId}_before_parity_lock`;
+    finalizeMarketParityState(
+      activeBundle.openedAtMs ? "frozen" : "aborted",
+      "RESOLUTION",
+      { reason },
+    );
+    console.warn("[bot] market_parity_dropped_event", {
+      eventName: "duel_ended",
+      reason,
+      activeBundleId: activeBundle.bundleId,
+      activeState: activeBundle.state,
+      activeOpenedAtMs: activeBundle.openedAtMs,
+      activeLockedAtMs: activeBundle.lockedAtMs,
+    });
+    writeBotHealthSnapshot();
     return;
   }
   try {
