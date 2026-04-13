@@ -83,11 +83,30 @@ type BetSide = "YES" | "NO";
 const MARKET_KIND_DUEL_WINNER = 0;
 const MIN_RPC_BACKOFF_MS = 15_000;
 
+export type EvmPanelStatusSource = "base" | "transient";
+
 export function shouldSkipEvmRpcRefresh(
   backoffUntilMs: number,
   nowMs = Date.now(),
 ): boolean {
   return nowMs < backoffUntilMs;
+}
+
+export function deriveEvmPanelBaseStatus(params: {
+  parityStatusLabel?: string | null;
+  lifecycleStatusLabel?: string | null;
+  fallback: string;
+}): string {
+  return (
+    params.parityStatusLabel ?? params.lifecycleStatusLabel ?? params.fallback
+  );
+}
+
+export function shouldApplyEvmPanelBaseStatus(
+  statusSource: EvmPanelStatusSource,
+  force = false,
+): boolean {
+  return force || statusSource === "base";
 }
 
 function createStrictPrivateKeyAccount(
@@ -538,7 +557,7 @@ export function EvmBettingPanel({
     : (walletClient ?? e2eWalletClient);
   const walletConnected = Boolean(effectiveWalletClient && effectiveAddress);
 
-  const [status, setStatus] = useState(copy.waitingForLiveDuel);
+  const [status, setStatusState] = useState(copy.waitingForLiveDuel);
   const [side, setSide] = useState<BetSide>("YES");
   const [amountInput, setAmountInput] = useState("1");
   const [priceInput, setPriceInput] = useState("500");
@@ -566,6 +585,7 @@ export function EvmBettingPanel({
   const refreshDataRef = useRef<() => Promise<void>>(async () => {});
   const refreshDataInFlightRef = useRef<Promise<void> | null>(null);
   const rpcBackoffUntilRef = useRef(0);
+  const statusSourceRef = useRef<EvmPanelStatusSource>("base");
 
   const cycle = streamingState?.cycle ?? null;
   const streamedDuelKeyHex =
@@ -696,13 +716,41 @@ export function EvmBettingPanel({
     () => deriveMarketParityLabel(effectiveLifecycleMarketParity, copy),
     [copy, effectiveLifecycleMarketParity],
   );
+  const baseStatusLabel = useMemo(
+    () =>
+      deriveEvmPanelBaseStatus({
+        parityStatusLabel,
+        lifecycleStatusLabel,
+        fallback: copy.waitingForLiveDuel,
+      }),
+    [copy.waitingForLiveDuel, lifecycleStatusLabel, parityStatusLabel],
+  );
   const lastLifecycleMismatchSignatureRef = useRef<string | null>(null);
 
+  const setBaseStatus = useCallback(
+    (nextStatus: string, options: { force?: boolean } = {}) => {
+      if (
+        !shouldApplyEvmPanelBaseStatus(
+          statusSourceRef.current,
+          options.force ?? false,
+        )
+      ) {
+        return;
+      }
+      statusSourceRef.current = "base";
+      setStatusState(nextStatus);
+    },
+    [],
+  );
+
+  const setTransientStatus = useCallback((nextStatus: string) => {
+    statusSourceRef.current = "transient";
+    setStatusState(nextStatus);
+  }, []);
+
   useEffect(() => {
-    if (parityStatusLabel) {
-      setStatus(parityStatusLabel);
-    }
-  }, [parityStatusLabel]);
+    setBaseStatus(baseStatusLabel);
+  }, [baseStatusLabel, setBaseStatus]);
 
   useEffect(() => {
     if (!ENABLE_LIFECYCLE_MISMATCH_CONSOLE) {
@@ -840,16 +888,19 @@ export function EvmBettingPanel({
           winner: getFallbackWinner(market.winner),
         },
       );
-      setStatus(
-        parityStatusLabel ??
-          getLifecycleStatusLabel(
-          nextUiState.lifecycleStatus,
-          nextUiState.winner,
-          cycleAgent1,
-          cycleAgent2,
-          copy,
-        ) ??
-          copy.waitingForMarketOperator,
+      setBaseStatus(
+        deriveEvmPanelBaseStatus({
+          parityStatusLabel,
+          lifecycleStatusLabel: getLifecycleStatusLabel(
+            nextUiState.lifecycleStatus,
+            nextUiState.winner,
+            cycleAgent1,
+            cycleAgent2,
+            copy,
+          ),
+          fallback: copy.waitingForMarketOperator,
+        }),
+        { force: true },
       );
     };
 
@@ -860,15 +911,19 @@ export function EvmBettingPanel({
         setPosition(null);
         setBids([]);
         setAsks([]);
-        setStatus(
-          parityStatusLabel ??
-            lifecycleStatusLabel ??
-            copy.waitingForLiveDuel,
+        setBaseStatus(
+          deriveEvmPanelBaseStatus({
+            parityStatusLabel,
+            lifecycleStatusLabel,
+            fallback: copy.waitingForLiveDuel,
+          }),
+          { force: true },
         );
         return;
       }
 
       if (shouldSkipEvmRpcRefresh(rpcBackoffUntilRef.current)) {
+        setBaseStatus(baseStatusLabel);
         return;
       }
 
@@ -888,10 +943,13 @@ export function EvmBettingPanel({
         setPosition(null);
         setBids([]);
         setAsks([]);
-        setStatus(
-          parityStatusLabel ??
-            lifecycleStatusLabel ??
-            copy.waitingForMarketOperator,
+        setBaseStatus(
+          deriveEvmPanelBaseStatus({
+            parityStatusLabel,
+            lifecycleStatusLabel,
+            fallback: copy.waitingForMarketOperator,
+          }),
+          { force: true },
         );
         return;
       }
@@ -987,13 +1045,15 @@ export function EvmBettingPanel({
       }
     } catch (error) {
       if (applyRateLimitBackoff(error)) {
+        setBaseStatus(baseStatusLabel);
         return;
       }
       const message = (error as Error).message;
       setLastRefreshError(message);
-      setStatus(copy.refreshFailed(message));
+      setTransientStatus(copy.refreshFailed(message));
     }
   }, [
+    baseStatusLabel,
     chainConfig,
     copy,
     cycleAgent1,
@@ -1006,6 +1066,8 @@ export function EvmBettingPanel({
     parityStatusLabel,
     nativeDecimals,
     publicClient,
+    setBaseStatus,
+    setTransientStatus,
     updateChartAndTrades,
   ]);
 
@@ -1103,7 +1165,7 @@ export function EvmBettingPanel({
       !chainConfig ||
       !duelKeyHex
     ) {
-      setStatus(copy.walletNotConnected);
+      setTransientStatus(copy.walletNotConnected);
       return;
     }
     setIsSubmitting(true);
@@ -1111,7 +1173,7 @@ export function EvmBettingPanel({
     try {
       const amount = parseUnits(amountInput, nativeDecimals);
       if (amount <= 0n) {
-        setStatus(copy.amountTooLow);
+        setTransientStatus(copy.amountTooLow);
         return;
       }
 
@@ -1139,7 +1201,7 @@ export function EvmBettingPanel({
               bStake: cost,
             };
 
-      setStatus(copy.placingOrder);
+      setTransientStatus(copy.placingOrder);
       const tx = await placeOrder(
         effectiveWalletClient,
         chainConfig.goldClobAddress as Address,
@@ -1173,7 +1235,7 @@ export function EvmBettingPanel({
           optimisticDelta,
         ),
       );
-      setStatus(copy.orderPlaced);
+      setTransientStatus(copy.orderPlaced);
       setIsSubmitting(false);
       void recordPredictionMarketTrade(trackingInput);
       void requestRefreshData();
@@ -1181,7 +1243,7 @@ export function EvmBettingPanel({
       setLastOrderErrorDetail(
         error instanceof Error ? error.stack ?? error.message : String(error),
       );
-      setStatus(copy.orderFailed((error as Error).message));
+      setTransientStatus(copy.orderFailed((error as Error).message));
     } finally {
       setIsSubmitting(false);
     }
@@ -1201,6 +1263,7 @@ export function EvmBettingPanel({
     publicClient,
     requestRefreshData,
     side,
+    setTransientStatus,
     tradeFeeBps,
     activeLifecycleMarket?.marketRef,
     marketMeta?.marketKey,
@@ -1217,13 +1280,13 @@ export function EvmBettingPanel({
       !chainConfig ||
       !duelKeyHex
     ) {
-      setStatus(copy.walletNotConnected);
+      setTransientStatus(copy.walletNotConnected);
       return;
     }
 
     try {
       const duelKey = toDuelKeyHex(duelKeyHex);
-      setStatus(copy.claimingSettlement);
+      setTransientStatus(copy.claimingSettlement);
       const tx = await claimWinnings(
         effectiveWalletClient,
         chainConfig.goldClobAddress as Address,
@@ -1234,10 +1297,10 @@ export function EvmBettingPanel({
       setLastClaimTx(tx);
       await publicClient?.waitForTransactionReceipt({ hash: tx });
       setOptimisticPosition(null);
-      setStatus(copy.claimComplete);
+      setTransientStatus(copy.claimComplete);
       await requestRefreshData();
     } catch (error) {
-      setStatus(copy.claimFailed((error as Error).message));
+      setTransientStatus(copy.claimFailed((error as Error).message));
     }
   }, [
     chainConfig,
@@ -1248,6 +1311,7 @@ export function EvmBettingPanel({
     effectiveWalletClient,
     publicClient,
     requestRefreshData,
+    setTransientStatus,
   ]);
 
   const yesPercent =
