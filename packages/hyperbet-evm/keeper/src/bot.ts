@@ -72,6 +72,16 @@ const EVM_MARKET_STATUS_LOCKED = 2;
 const EVM_MARKET_STATUS_RESOLVED = 3;
 const EVM_MARKET_STATUS_CANCELLED = 4;
 const DEFAULT_DUEL_START_DELAY_MS = 60_000;
+const DEFAULT_SOLANA_ORACLE_DISPUTE_WINDOW_SECS = 3600;
+const configuredSolanaOracleDisputeWindowSecs = Number(
+  process.env.SOLANA_ORACLE_DISPUTE_WINDOW_SECS ??
+    DEFAULT_SOLANA_ORACLE_DISPUTE_WINDOW_SECS,
+);
+const SOLANA_ORACLE_DISPUTE_WINDOW_SECS = Number.isFinite(
+  configuredSolanaOracleDisputeWindowSecs,
+)
+  ? Math.max(60, Math.floor(configuredSolanaOracleDisputeWindowSecs))
+  : DEFAULT_SOLANA_ORACLE_DISPUTE_WINDOW_SECS;
 const EVM_DISPUTE_WINDOW_ACTIVE_SELECTOR = "0xe52e798f";
 const DEFAULT_REQUIRED_PARITY_CHAINS: readonly BettingChainKey[] = [
   "solana",
@@ -1714,6 +1724,12 @@ type EvmResolutionOutcome = {
   note: string | null;
 };
 
+type SolanaResolutionOutcome = {
+  lifecycleStatus: PredictionMarketLifecycleStatus;
+  finalized: boolean;
+  note: string | null;
+};
+
 type EvmGoldClobMarketState = {
   exists: boolean;
   duelKey: Hex;
@@ -2360,7 +2376,7 @@ const ensureOracleReady = async (): Promise<void> => {
             expectedReporter,
             expectedFinalizer,
             expectedChallenger,
-            new BN(3600),
+            new BN(SOLANA_ORACLE_DISPUTE_WINDOW_SECS),
           )
           .accountsPartial({
             authority: expectedAuthority,
@@ -2390,14 +2406,14 @@ const ensureOracleReady = async (): Promise<void> => {
   const configNeedsUpdate =
     !(config.reporter as PublicKey).equals(expectedReporter) ||
     !(config.finalizer as PublicKey).equals(expectedFinalizer) ||
-    !(config.challenger as PublicKey).equals(expectedChallenger);
+    !(config.challenger as PublicKey).equals(expectedChallenger) ||
+    asNum(config.disputeWindowSecs) !== SOLANA_ORACLE_DISPUTE_WINDOW_SECS;
   if (configNeedsUpdate) {
     if (!actualAuthority.equals(expectedAuthority)) {
       throw new Error(
         `Oracle role update requires config authority ${actualAuthority.toBase58()}, but keeper has ${expectedAuthority.toBase58()}`,
       );
     }
-    const disputeWindowSecs = asNum(config.disputeWindowSecs);
     await runWithRecovery(
       () =>
         fightProgram.methods
@@ -2406,7 +2422,7 @@ const ensureOracleReady = async (): Promise<void> => {
             expectedReporter,
             expectedFinalizer,
             expectedChallenger,
-            new BN(disputeWindowSecs),
+            new BN(SOLANA_ORACLE_DISPUTE_WINDOW_SECS),
           )
           .accountsPartial({
             authority: expectedAuthority,
@@ -2533,6 +2549,15 @@ async function getDuelState(
   const duelState = await fightProgram.account.duelState.fetchNullable(duelStatePda);
   markRpcSuccess();
   return duelState;
+}
+
+async function getOracleConfigState(): Promise<
+  Awaited<ReturnType<typeof fightProgram.account.oracleConfig.fetchNullable>>
+> {
+  const oracleConfig =
+    await fightProgram.account.oracleConfig.fetchNullable(oracleConfigPda);
+  markRpcSuccess();
+  return oracleConfig;
 }
 
 async function getClobMarketState(
@@ -3524,6 +3549,16 @@ function hasPendingEvmParityResolution(): boolean {
   );
 }
 
+function hasPendingParityResolution(): boolean {
+  return Boolean(
+    marketParitySnapshot &&
+      marketParitySnapshot.phase === "RESOLUTION" &&
+      marketParitySnapshot.receipts.some(
+        (receipt) => receipt.lifecycleStatus === "PROPOSED",
+      ),
+  );
+}
+
 function finalizeMarketParityState(
   nextState: Extract<
     KeeperParityBundleState,
@@ -4296,17 +4331,63 @@ async function maybeFinalizePendingEvmParityResolution(): Promise<void> {
   }
 }
 
-async function reportRoundResult(data: DuelLifecycleEvent): Promise<void> {
+async function maybeFinalizeTrackedProposal(
+  trackedMatch: ActiveClobMatch,
+  duelState: Awaited<ReturnType<typeof getDuelState>>,
+  metadataUri: string,
+): Promise<boolean> {
+  if (
+    !duelState ||
+    !enumIs(duelState.status, "proposed") ||
+    Boolean(duelState.pendingChallenged)
+  ) {
+    return false;
+  }
+
+  const oracleConfig = await getOracleConfigState();
+  if (!oracleConfig) {
+    throw new Error(`Missing oracle config ${oracleConfigPda.toBase58()}`);
+  }
+
+  const finalizableAt =
+    asNum(duelState.pendingProposedAt) + asNum(oracleConfig.disputeWindowSecs);
+  if (Math.floor(Date.now() / 1000) < finalizableAt) {
+    return false;
+  }
+
+  await runWithRecovery(
+    () =>
+      fightProgram.methods
+        .finalizeResult(
+          Array.from(duelKeyHexToBytes(trackedMatch.duelKeyHex)),
+          metadataUri,
+        )
+        .accountsPartial({
+          finalizer: oracleFinalizerKeypair.publicKey,
+          oracleConfig: oracleConfigPda,
+          duelState: trackedMatch.duelState,
+        })
+        .signers([oracleFinalizerKeypair])
+        .rpc(),
+    connection,
+  );
+  markRpcSuccess(trackedMatch);
+  return true;
+}
+
+async function reportRoundResult(
+  data: DuelLifecycleEvent,
+): Promise<SolanaResolutionOutcome | null> {
   const trackedMatch = activeClobMatches.get(data.duelId);
   if (!trackedMatch) {
-    return;
+    return null;
   }
 
   if (!data.seed || !data.replayHash) {
     console.warn(
       `[Keeper] duel:completed for ${data.duelId} is missing seed or replayHash; refusing to post an unverifiable oracle result.`,
     );
-    return;
+    return null;
   }
 
   const winnerId = data.winnerId;
@@ -4320,7 +4401,7 @@ async function reportRoundResult(data: DuelLifecycleEvent): Promise<void> {
     console.warn(
       `[Keeper] duel:completed for ${data.duelId} supplied an unknown winner id; refusing to post oracle result.`,
     );
-    return;
+    return null;
   }
 
   let replayHashHex: string;
@@ -4330,12 +4411,12 @@ async function reportRoundResult(data: DuelLifecycleEvent): Promise<void> {
     console.warn(
       `[Keeper] duel:completed for ${data.duelId} supplied an invalid replayHash; refusing to post oracle result.`,
     );
-    return;
+    return null;
   }
 
   const resolvedSeed = data.seed;
 
-  const duelState = await getDuelState(trackedMatch.duelState);
+  let duelState = await getDuelState(trackedMatch.duelState);
   if (duelState && enumIs(duelState.status, "resolved")) {
     trackedMatch.winner = winnerSide;
     await syncTrackedMarketFromOracle(trackedMatch);
@@ -4344,7 +4425,11 @@ async function reportRoundResult(data: DuelLifecycleEvent): Promise<void> {
     activeClobMatches.delete(data.duelId);
     unresolvedOracleWarningMatches.delete(data.duelId);
     writeBotHealthSnapshot();
-    return;
+    return {
+      lifecycleStatus: "RESOLVED",
+      finalized: true,
+      note: "already-resolved",
+    };
   }
 
   const duelKey = duelKeyHexToBytes(data.duelKeyHex);
@@ -4358,44 +4443,76 @@ async function reportRoundResult(data: DuelLifecycleEvent): Promise<void> {
   );
   await sleep(15_000);
 
-  await runWithRecovery(
-    () =>
-      fightProgram.methods
-        .proposeResult(
-          Array.from(duelKey),
-          winnerSide === "A" ? ({ a: {} } as DuelWinner) : ({ b: {} } as DuelWinner),
-          new BN(resolvedSeed),
-          Array.from(Buffer.from(replayHashHex, "hex")),
-          buildResultHash(
-            data.duelKeyHex,
-            winnerSide,
-            resolvedSeed,
-            replayHashHex,
-          ),
-          new BN(duelEndTs),
-          buildDuelMetadata(data),
-        )
-        .accountsPartial({
-          reporter: oracleReporterKeypair.publicKey,
-          oracleConfig: oracleConfigPda,
-          duelState: trackedMatch.duelState,
-        })
-        .signers([oracleReporterKeypair])
-        .rpc()
-        .then(() =>
-          fightProgram.methods
-            .finalizeResult(Array.from(duelKey), buildDuelMetadata(data))
-            .accountsPartial({
-              finalizer: oracleFinalizerKeypair.publicKey,
-              oracleConfig: oracleConfigPda,
-              duelState: trackedMatch.duelState,
-            })
-            .signers([oracleFinalizerKeypair])
-            .rpc(),
-        ),
-    connection,
-  );
-  const resolutionRecordedAt = markRpcSuccess(trackedMatch);
+  if (duelState && enumIs(duelState.status, "challenged")) {
+    await syncTrackedMarketFromOracle(trackedMatch);
+    unresolvedOracleWarningMatches.delete(data.duelId);
+    console.warn(
+      `[Keeper] Duel ${data.duelId} result proposal is challenged; leaving the market fail-closed until manual resolution.`,
+    );
+    return {
+      lifecycleStatus: "CHALLENGED",
+      finalized: false,
+      note: "proposal-challenged",
+    };
+  }
+
+  if (duelState && enumIs(duelState.status, "locked")) {
+    await runWithRecovery(
+      () =>
+        fightProgram.methods
+          .proposeResult(
+            Array.from(duelKey),
+            winnerSide === "A" ? ({ a: {} } as DuelWinner) : ({ b: {} } as DuelWinner),
+            new BN(resolvedSeed),
+            Array.from(Buffer.from(replayHashHex, "hex")),
+            buildResultHash(
+              data.duelKeyHex,
+              winnerSide,
+              resolvedSeed,
+              replayHashHex,
+            ),
+            new BN(duelEndTs),
+            buildDuelMetadata(data),
+          )
+          .accountsPartial({
+            reporter: oracleReporterKeypair.publicKey,
+            oracleConfig: oracleConfigPda,
+            duelState: trackedMatch.duelState,
+          })
+          .signers([oracleReporterKeypair])
+          .rpc(),
+      connection,
+    );
+    trackedMatch.lastOracleAtMs = markRpcSuccess(trackedMatch);
+    duelState = await getDuelState(trackedMatch.duelState);
+  }
+
+  if (
+    duelState &&
+    enumIs(duelState.status, "proposed") &&
+    !(await maybeFinalizeTrackedProposal(
+      trackedMatch,
+      duelState,
+      buildDuelMetadata(data),
+    ))
+  ) {
+    return {
+      lifecycleStatus: "PROPOSED",
+      finalized: false,
+      note: "dispute-window-active",
+    };
+  }
+
+  duelState = await getDuelState(trackedMatch.duelState);
+  if (!duelState || !enumIs(duelState.status, "resolved")) {
+    return {
+      lifecycleStatus: "UNKNOWN",
+      finalized: false,
+      note: "resolution-not-finalized",
+    };
+  }
+
+  const resolutionRecordedAt = Date.now();
   trackedMatch.lastOracleAtMs = resolutionRecordedAt;
   trackedMatch.lastResolvedAtMs = resolutionRecordedAt;
   trackedMatch.winner = winnerSide;
@@ -4419,6 +4536,11 @@ async function reportRoundResult(data: DuelLifecycleEvent): Promise<void> {
     ),
   );
   writeBotHealthSnapshot();
+  return {
+    lifecycleStatus: "RESOLVED",
+    finalized: true,
+    note: null,
+  };
 }
 
 // Event-driven Logic
@@ -4679,11 +4801,17 @@ gameClient.onDuelEnd(async (data) => {
       if (!(await ensureBotSignerFunding())) {
         throw new Error("solana parity chain is required for resolution but bot signer funding is below threshold");
       }
-      await reportRoundResult(data);
+      const solanaOutcome = await reportRoundResult(data);
+      if (!solanaOutcome) {
+        throw new Error("failed to report Solana result");
+      }
       markMarketParityChainConfirmed({
         chainKey: "solana",
-        transition: "resolve",
-        lifecycleStatus: "RESOLVED",
+        transition:
+          solanaOutcome.lifecycleStatus === "RESOLVED" ? "resolve" : "propose",
+        lifecycleStatus: solanaOutcome.lifecycleStatus,
+        countsForQuorum: solanaOutcome.finalized,
+        note: solanaOutcome.note,
       });
       writeBotHealthSnapshot();
     }
@@ -4709,9 +4837,9 @@ gameClient.onDuelEnd(async (data) => {
     }
 
     if (!allRequiredParityChainsConfirmed()) {
-      if (hasPendingEvmParityResolution()) {
+      if (hasPendingParityResolution()) {
         console.warn(
-          `[bot] Duel ${data.duelId} resolution is waiting for EVM final confirmation`,
+          `[bot] Duel ${data.duelId} resolution is waiting for final confirmation`,
         );
         writeBotHealthSnapshot();
         return;
@@ -4767,7 +4895,7 @@ async function runMaintenance(): Promise<void> {
 
   // Poll only the actively tracked CLOB markets we created.
   for (const [duelId, trackedMatch] of activeClobMatches.entries()) {
-    const duelState = await getDuelState(trackedMatch.duelState);
+    let duelState = await getDuelState(trackedMatch.duelState);
     if (!duelState) {
       continue;
     }
@@ -4782,6 +4910,46 @@ async function runMaintenance(): Promise<void> {
     if (enumIs(duelState.status, "locked")) {
       await cancelManagedClobQuotes(trackedMatch, "market-locked");
       await maybeWarnUnresolvedDuel(trackedMatch);
+      continue;
+    }
+
+    if (enumIs(duelState.status, "challenged")) {
+      finalizeMarketParityState("frozen", "RESOLUTION", {
+        reason: `solana duel ${duelId} is challenged`,
+      });
+      continue;
+    }
+
+    if (enumIs(duelState.status, "proposed")) {
+      const finalized = await maybeFinalizeTrackedProposal(
+        trackedMatch,
+        duelState,
+        buildDuelMetadataForDuelKey(trackedMatch.duelKeyHex, duelId),
+      );
+      if (!finalized) {
+        continue;
+      }
+      duelState = await getDuelState(trackedMatch.duelState);
+      if (
+        marketParitySnapshot?.duelKey ===
+          normalizedBundleDuelKey(trackedMatch.duelKeyHex) &&
+        marketParitySnapshot.phase === "RESOLUTION" &&
+        duelState &&
+        enumIs(duelState.status, "resolved")
+      ) {
+        markMarketParityChainConfirmed({
+          chainKey: "solana",
+          transition: "resolve",
+          lifecycleStatus: "RESOLVED",
+          note: "finalized-after-dispute-window",
+        });
+        if (allRequiredParityChainsConfirmed()) {
+          finalizeMarketParityState("resolved", "RESOLUTION");
+        }
+      }
+    }
+
+    if (!duelState) {
       continue;
     }
 

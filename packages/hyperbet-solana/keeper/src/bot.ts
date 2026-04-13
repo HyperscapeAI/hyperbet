@@ -45,6 +45,14 @@ import type { PredictionMarketWinner } from "@hyperbet/chain-registry";
 import { buildResultHash } from "./resultHash";
 
 const DEFAULT_DISPUTE_WINDOW_SECS = 3600;
+const configuredDisputeWindowSecs = Number(
+  process.env.SOLANA_ORACLE_DISPUTE_WINDOW_SECS ?? DEFAULT_DISPUTE_WINDOW_SECS,
+);
+const SOLANA_ORACLE_DISPUTE_WINDOW_SECS = Number.isFinite(
+  configuredDisputeWindowSecs,
+)
+  ? Math.max(60, Math.floor(configuredDisputeWindowSecs))
+  : DEFAULT_DISPUTE_WINDOW_SECS;
 
 function asNum(value: unknown, fallback = 0): number {
   if (typeof value === "number") return value;
@@ -1578,7 +1586,7 @@ const ensureOracleReady = async (): Promise<void> => {
             expectedReporter,
             expectedFinalizer,
             expectedChallenger,
-            new BN(DEFAULT_DISPUTE_WINDOW_SECS),
+            new BN(SOLANA_ORACLE_DISPUTE_WINDOW_SECS),
           )
           .accountsPartial({
             authority: expectedAuthority,
@@ -1608,14 +1616,14 @@ const ensureOracleReady = async (): Promise<void> => {
   const configNeedsUpdate =
     !(config.reporter as PublicKey).equals(expectedReporter) ||
     !(config.finalizer as PublicKey).equals(expectedFinalizer) ||
-    !(config.challenger as PublicKey).equals(expectedChallenger);
+    !(config.challenger as PublicKey).equals(expectedChallenger) ||
+    asNum(config.disputeWindowSecs) !== SOLANA_ORACLE_DISPUTE_WINDOW_SECS;
   if (configNeedsUpdate) {
     if (!actualAuthority.equals(expectedAuthority)) {
       throw new Error(
         `Oracle role update requires config authority ${actualAuthority.toBase58()}, but keeper has ${expectedAuthority.toBase58()}`,
       );
     }
-    const disputeWindowSecs = asNum(config.disputeWindowSecs);
     await runWithRecovery(
       () =>
         fightProgram.methods
@@ -1624,7 +1632,7 @@ const ensureOracleReady = async (): Promise<void> => {
             expectedReporter,
             expectedFinalizer,
             expectedChallenger,
-            new BN(disputeWindowSecs),
+            new BN(SOLANA_ORACLE_DISPUTE_WINDOW_SECS),
           )
           .accountsPartial({
             authority: expectedAuthority,
