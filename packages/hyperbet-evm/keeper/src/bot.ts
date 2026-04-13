@@ -72,6 +72,7 @@ const EVM_MARKET_STATUS_LOCKED = 2;
 const EVM_MARKET_STATUS_RESOLVED = 3;
 const EVM_MARKET_STATUS_CANCELLED = 4;
 const DEFAULT_DUEL_START_DELAY_MS = 60_000;
+const EVM_DISPUTE_WINDOW_ACTIVE_SELECTOR = "0xe52e798f";
 const DEFAULT_REQUIRED_PARITY_CHAINS: readonly BettingChainKey[] = [
   "solana",
   "bsc",
@@ -451,6 +452,14 @@ function isRpcConnectivityError(error: unknown): boolean {
     message.includes("network request failed") ||
     message.includes("timed out") ||
     message.includes("socket hang up")
+  );
+}
+
+function isEvmDisputeWindowActiveError(error: unknown): boolean {
+  const message = (error as Error)?.message ?? "";
+  return (
+    message.includes("DisputeWindowActive") ||
+    message.includes(EVM_DISPUTE_WINDOW_ACTIVE_SELECTOR)
   );
 }
 
@@ -1698,6 +1707,13 @@ type EvmOracleDuelState = {
   metadataUri: string;
 };
 
+type EvmResolutionOutcome = {
+  chainKey: BettingChainKey;
+  lifecycleStatus: PredictionMarketLifecycleStatus;
+  finalized: boolean;
+  note: string | null;
+};
+
 type EvmGoldClobMarketState = {
   exists: boolean;
   duelKey: Hex;
@@ -1937,6 +1953,45 @@ async function waitForEvmTransactionReceipt(
     confirmations: evmParityConfirmationCount(chain),
   });
   lastSuccessfulRpcAtMs = Date.now();
+}
+
+async function finalizeEvmDuelResultIfReady(
+  chain: EvmKeeperRuntime,
+  duelKey: Hex,
+  metadata: string,
+): Promise<"resolved" | "proposed"> {
+  if (!chain.finalizer) {
+    throw new Error(
+      `missing finalizer signer for ${chain.chainKey}; set TESTNET_FINALIZER_PRIVATE_KEY or EVM_FINALIZER_PRIVATE_KEY`,
+    );
+  }
+  try {
+    const finalizeHash = await chain.finalizer.walletClient.writeContract({
+      chain: undefined,
+      address: chain.duelOracleAddress,
+      abi: DUEL_OUTCOME_ORACLE_ABI,
+      functionName: "finalizeResult",
+      args: [duelKey, metadata],
+      account: chain.finalizer.account,
+    });
+    await waitForEvmTransactionReceipt(chain, finalizeHash);
+  } catch (error) {
+    if (isEvmDisputeWindowActiveError(error)) {
+      return "proposed";
+    }
+    throw error;
+  }
+
+  const finalizeSyncHash = await chain.operator.walletClient.writeContract({
+    chain: undefined,
+    address: chain.goldClobAddress,
+    abi: EVM_GOLD_CLOB_ADMIN_ABI,
+    functionName: "syncMarketFromOracle",
+    args: [duelKey, EVM_DUEL_WINNER_MARKET_KIND],
+    account: chain.operator.account,
+  });
+  await waitForEvmTransactionReceipt(chain, finalizeSyncHash);
+  return "resolved";
 }
 
 async function readEvmDuelState(
@@ -2593,11 +2648,18 @@ async function ensureClobVaultReady(vault: PublicKey): Promise<void> {
 }
 
 function buildDuelMetadata(data: DuelLifecycleEvent): string {
-  const duelKeyRef = data.duelKeyHex.trim().replace(/^0x/i, "").toLowerCase();
+  return buildDuelMetadataForDuelKey(data.duelKeyHex, data.duelId);
+}
+
+function buildDuelMetadataForDuelKey(
+  duelKeyHex: string,
+  duelId: string | null,
+): string {
+  const duelKeyRef = duelKeyHex.trim().replace(/^0x/i, "").toLowerCase();
   const metadataUri = `hyperscapes://duel/${duelKeyRef}`;
   if (Buffer.byteLength(metadataUri, "utf8") > 200) {
     throw new Error(
-      `duel metadata URI exceeds Solana oracle limit for duel ${data.duelId}`,
+      `duel metadata URI exceeds Solana oracle limit for duel ${duelId ?? duelKeyRef}`,
     );
   }
   return metadataUri;
@@ -3317,7 +3379,13 @@ function blockMismatchedMarketParityEvent(
     incomingDuelKey,
     incomingDuelId: data.duelId,
   });
-  finalizeMarketParityState("frozen", marketParitySnapshot.phase, { reason });
+  const freezeReason =
+    marketParitySnapshot.state === "frozen"
+      ? marketParitySnapshot.freezeReason ?? reason
+      : reason;
+  finalizeMarketParityState("frozen", marketParitySnapshot.phase, {
+    reason: freezeReason,
+  });
   writeBotHealthSnapshot();
   return true;
 }
@@ -3391,8 +3459,9 @@ function resetMarketParityConfirmations(
 
 function markMarketParityChainConfirmed(params: {
   chainKey: BettingChainKey;
-  transition: "prepare" | "open" | "lock" | "resolve" | "cancel";
+  transition: "prepare" | "open" | "lock" | "propose" | "resolve" | "cancel";
   lifecycleStatus: PredictionMarketLifecycleStatus | null;
+  countsForQuorum?: boolean;
   txRef?: string | null;
   note?: string | null;
 }): void {
@@ -3419,11 +3488,15 @@ function markMarketParityChainConfirmed(params: {
         note: params.note ?? receipt.note,
       };
     });
+    const confirmedChains =
+      params.countsForQuorum === false
+        ? current.confirmedChains
+        : current.confirmedChains.includes(params.chainKey)
+          ? current.confirmedChains
+          : [...current.confirmedChains, params.chainKey];
     return {
       ...current,
-      confirmedChains: current.confirmedChains.includes(params.chainKey)
-        ? current.confirmedChains
-        : [...current.confirmedChains, params.chainKey],
+      confirmedChains,
       receipts,
     };
   });
@@ -3436,6 +3509,18 @@ function allRequiredParityChainsConfirmed(): boolean {
       marketParitySnapshot.requiredChains.every((chainKey) =>
         marketParitySnapshot?.confirmedChains.includes(chainKey),
       ),
+  );
+}
+
+function hasPendingEvmParityResolution(): boolean {
+  if (!marketParitySnapshot || marketParitySnapshot.phase !== "RESOLUTION") {
+    return false;
+  }
+  const evmParityChains = new Set(requiredEvmParityChains());
+  return marketParitySnapshot.receipts.some(
+    (receipt) =>
+      evmParityChains.has(receipt.chainKey as BettingEvmChain) &&
+      receipt.lifecycleStatus === "PROPOSED",
   );
 }
 
@@ -3805,12 +3890,12 @@ async function reportEvmResult(
   targetChains: readonly BettingEvmChain[] = evmKeeperChains.map(
     (chain) => chain.chainKey,
   ),
-): Promise<void> {
+): Promise<Array<EvmResolutionOutcome>> {
   const selectedChains = evmKeeperChains.filter((chain) =>
     targetChains.includes(chain.chainKey),
   );
   if (selectedChains.length === 0 || !data.seed || !data.replayHash) {
-    return;
+    return [];
   }
 
   const duelKey = normalizeHex32(data.duelKeyHex);
@@ -3818,7 +3903,7 @@ async function reportEvmResult(
   const winner =
     data.winnerId === data.agent1?.id ? 1 : data.winnerId === data.agent2?.id ? 2 : 0;
   if (winner === 0) {
-    return;
+    return [];
   }
   const canonicalTimes = deriveCanonicalDuelTimes(data);
   const defaultBetOpenTs = BigInt(canonicalTimes.betOpenTs);
@@ -3828,7 +3913,7 @@ async function reportEvmResult(
   const metadata = buildDuelMetadata(data);
 
   const results = await Promise.allSettled(
-    selectedChains.map(async (chain) => {
+    selectedChains.map(async (chain): Promise<EvmResolutionOutcome> => {
       const existing = await readEvmDuelState(chain, duelKey);
       const existingStatus = asNum(existing?.status, EVM_DUEL_STATUS_NULL);
       const participantAHash =
@@ -3858,7 +3943,12 @@ async function reportEvmResult(
         );
       }
       if (existingStatus >= EVM_DUEL_STATUS_RESOLVED) {
-        return;
+        return {
+          chainKey: chain.chainKey,
+          lifecycleStatus: "RESOLVED",
+          finalized: true,
+          note: "already-resolved",
+        };
       }
 
       // Fail-closed: if the result proposal has been challenged, sync the
@@ -3946,33 +4036,38 @@ async function reportEvmResult(
             betCloseTs: canonicalBetCloseTs,
             duelStartTs: canonicalDuelStartTs,
           });
-          throw new Error(
-            `${chain.chainKey} duel ${data.duelId} is still proposed while finalization is deferred`,
-          );
+          return {
+            chainKey: chain.chainKey,
+            lifecycleStatus: "PROPOSED",
+            finalized: false,
+            note: "finalization-deferred",
+          };
         }
-        if (!chain.finalizer) {
-          throw new Error(
-            `missing finalizer signer for ${chain.chainKey}; set TESTNET_FINALIZER_PRIVATE_KEY or EVM_FINALIZER_PRIVATE_KEY`,
-          );
+        const finalization = await finalizeEvmDuelResultIfReady(
+          chain,
+          duelKey,
+          metadata,
+        );
+        if (finalization === "proposed") {
+          await verifyEvmLifecycleReadback({
+            chain,
+            duelKey,
+            duelId: data.duelId,
+            minimumDuelStatus: EVM_DUEL_STATUS_PROPOSED,
+            expectedMarketStatus: EVM_MARKET_STATUS_LOCKED,
+            participantAHash,
+            participantBHash,
+            betOpenTs: canonicalBetOpenTs,
+            betCloseTs: canonicalBetCloseTs,
+            duelStartTs: canonicalDuelStartTs,
+          });
+          return {
+            chainKey: chain.chainKey,
+            lifecycleStatus: "PROPOSED",
+            finalized: false,
+            note: "dispute-window-active",
+          };
         }
-        const finalizeHash = await chain.finalizer.walletClient.writeContract({
-          chain: undefined,
-          address: chain.duelOracleAddress,
-          abi: DUEL_OUTCOME_ORACLE_ABI,
-          functionName: "finalizeResult",
-          args: [duelKey, metadata],
-          account: chain.finalizer.account,
-        });
-        await waitForEvmTransactionReceipt(chain, finalizeHash);
-        const finalizeSyncHash = await chain.operator.walletClient.writeContract({
-          chain: undefined,
-          address: chain.goldClobAddress,
-          abi: EVM_GOLD_CLOB_ADMIN_ABI,
-          functionName: "syncMarketFromOracle",
-          args: [duelKey, EVM_DUEL_WINNER_MARKET_KIND],
-          account: chain.operator.account,
-        });
-        await waitForEvmTransactionReceipt(chain, finalizeSyncHash);
         await verifyEvmLifecycleReadback({
           chain,
           duelKey,
@@ -3986,7 +4081,12 @@ async function reportEvmResult(
           duelStartTs: canonicalDuelStartTs,
           expectedWinner: winner,
         });
-        return;
+        return {
+          chainKey: chain.chainKey,
+          lifecycleStatus: "RESOLVED",
+          finalized: true,
+          note: null,
+        };
       }
 
       const proposeHash = await chain.reporter.walletClient.writeContract({
@@ -4036,34 +4136,39 @@ async function reportEvmResult(
           betCloseTs: canonicalBetCloseTs,
           duelStartTs: canonicalDuelStartTs,
         });
-        throw new Error(
-          `${chain.chainKey} duel ${data.duelId} is proposed but finalization is deferred`,
-        );
+        return {
+          chainKey: chain.chainKey,
+          lifecycleStatus: "PROPOSED",
+          finalized: false,
+          note: "finalization-deferred",
+        };
       }
 
-      if (!chain.finalizer) {
-        throw new Error(
-          `missing finalizer signer for ${chain.chainKey}; set TESTNET_FINALIZER_PRIVATE_KEY or EVM_FINALIZER_PRIVATE_KEY`,
-        );
+      const finalization = await finalizeEvmDuelResultIfReady(
+        chain,
+        duelKey,
+        metadata,
+      );
+      if (finalization === "proposed") {
+        await verifyEvmLifecycleReadback({
+          chain,
+          duelKey,
+          duelId: data.duelId,
+          minimumDuelStatus: EVM_DUEL_STATUS_PROPOSED,
+          expectedMarketStatus: EVM_MARKET_STATUS_LOCKED,
+          participantAHash,
+          participantBHash,
+          betOpenTs: canonicalBetOpenTs,
+          betCloseTs: canonicalBetCloseTs,
+          duelStartTs: canonicalDuelStartTs,
+        });
+        return {
+          chainKey: chain.chainKey,
+          lifecycleStatus: "PROPOSED",
+          finalized: false,
+          note: "dispute-window-active",
+        };
       }
-      const finalizeHash = await chain.finalizer.walletClient.writeContract({
-        chain: undefined,
-        address: chain.duelOracleAddress,
-        abi: DUEL_OUTCOME_ORACLE_ABI,
-        functionName: "finalizeResult",
-        args: [duelKey, metadata],
-        account: chain.finalizer.account,
-      });
-      await waitForEvmTransactionReceipt(chain, finalizeHash);
-      const finalizeSyncHash = await chain.operator.walletClient.writeContract({
-        chain: undefined,
-        address: chain.goldClobAddress,
-        abi: EVM_GOLD_CLOB_ADMIN_ABI,
-        functionName: "syncMarketFromOracle",
-        args: [duelKey, EVM_DUEL_WINNER_MARKET_KIND],
-        account: chain.operator.account,
-      });
-      await waitForEvmTransactionReceipt(chain, finalizeSyncHash);
       await verifyEvmLifecycleReadback({
         chain,
         duelKey,
@@ -4077,6 +4182,12 @@ async function reportEvmResult(
         duelStartTs: canonicalDuelStartTs,
         expectedWinner: winner,
       });
+      return {
+        chainKey: chain.chainKey,
+        lifecycleStatus: "RESOLVED",
+        finalized: true,
+        note: null,
+      };
     }),
   );
 
@@ -4105,6 +4216,83 @@ async function reportEvmResult(
         .map(({ chain }) => chain.chainKey)
         .join(", ")}`,
     );
+  }
+  return results.map((result) => {
+    if (result.status === "fulfilled") {
+      return result.value;
+    }
+    throw result.reason;
+  });
+}
+
+async function maybeFinalizePendingEvmParityResolution(): Promise<void> {
+  const current = marketParitySnapshot;
+  if (
+    !current ||
+    current.phase !== "RESOLUTION" ||
+    isTerminalMarketParityState(current.state) ||
+    !current.duelKey
+  ) {
+    return;
+  }
+
+  const duelKey = normalizeHex32(current.duelKey);
+  const metadata = buildDuelMetadataForDuelKey(current.duelKey, current.duelId);
+  const evmParityChains = requiredEvmParityChains();
+  if (evmParityChains.length === 0) {
+    return;
+  }
+
+  for (const chain of evmKeeperChains.filter((entry) =>
+    evmParityChains.includes(entry.chainKey),
+  )) {
+    const receipt = marketParitySnapshot?.receipts.find(
+      (entry) => entry.chainKey === chain.chainKey,
+    );
+    if (receipt?.lifecycleStatus === "RESOLVED") {
+      continue;
+    }
+
+    const duel = await readEvmDuelState(chain, duelKey);
+    const status = asNum(duel.status, EVM_DUEL_STATUS_NULL);
+    if (status === EVM_DUEL_STATUS_RESOLVED) {
+      markMarketParityChainConfirmed({
+        chainKey: chain.chainKey,
+        transition: "resolve",
+        lifecycleStatus: "RESOLVED",
+        note: "resolved-on-readback",
+      });
+      continue;
+    }
+    if (status === EVM_DUEL_STATUS_CHALLENGED) {
+      finalizeMarketParityState("frozen", "RESOLUTION", {
+        reason: `${chain.chainKey} duel ${current.duelId ?? current.duelKey} is challenged`,
+      });
+      return;
+    }
+    if (status !== EVM_DUEL_STATUS_PROPOSED) {
+      continue;
+    }
+
+    const finalization = await finalizeEvmDuelResultIfReady(
+      chain,
+      duelKey,
+      metadata,
+    );
+    markMarketParityChainConfirmed({
+      chainKey: chain.chainKey,
+      transition: finalization === "resolved" ? "resolve" : "propose",
+      lifecycleStatus: finalization === "resolved" ? "RESOLVED" : "PROPOSED",
+      countsForQuorum: finalization === "resolved",
+      note:
+        finalization === "resolved"
+          ? "finalized-after-dispute-window"
+          : "dispute-window-active",
+    });
+  }
+
+  if (allRequiredParityChainsConfirmed()) {
+    finalizeMarketParityState("resolved", "RESOLUTION");
   }
 }
 
@@ -4505,12 +4693,15 @@ gameClient.onDuelEnd(async (data) => {
       if (!EVM_KEEPER_ENABLE_LIFECYCLE_WRITES) {
         throw new Error("EVM parity chains are required for resolution but EVM lifecycle writes are disabled");
       }
-      await reportEvmResult(data, evmParityChains);
-      for (const chainKey of evmParityChains) {
+      const evmOutcomes = await reportEvmResult(data, evmParityChains);
+      for (const outcome of evmOutcomes) {
         markMarketParityChainConfirmed({
-          chainKey,
-          transition: "resolve",
-          lifecycleStatus: "RESOLVED",
+          chainKey: outcome.chainKey,
+          transition:
+            outcome.lifecycleStatus === "RESOLVED" ? "resolve" : "propose",
+          lifecycleStatus: outcome.lifecycleStatus,
+          countsForQuorum: outcome.lifecycleStatus === "RESOLVED",
+          note: outcome.note,
         });
       }
       console.log(`Resolved market for duel ${data.duelId}`);
@@ -4518,6 +4709,13 @@ gameClient.onDuelEnd(async (data) => {
     }
 
     if (!allRequiredParityChainsConfirmed()) {
+      if (hasPendingEvmParityResolution()) {
+        console.warn(
+          `[bot] Duel ${data.duelId} resolution is waiting for EVM final confirmation`,
+        );
+        writeBotHealthSnapshot();
+        return;
+      }
       throw new Error("failed to resolve required parity chains");
     }
 
@@ -4565,6 +4763,7 @@ async function runMaintenance(): Promise<void> {
     }
   }
   await maybeArchiveSettledPerpsMarkets();
+  await maybeFinalizePendingEvmParityResolution();
 
   // Poll only the actively tracked CLOB markets we created.
   for (const [duelId, trackedMatch] of activeClobMatches.entries()) {
