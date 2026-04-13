@@ -1859,13 +1859,14 @@ async function ensureClobVaultReady(vault: PublicKey): Promise<void> {
 }
 
 function buildDuelMetadata(data: DuelLifecycleEvent): string {
-  return JSON.stringify({
-    cycleId: data.cycleId,
-    duelId: data.duelId,
-    duelKeyHex: data.duelKeyHex,
-    agent1: data.agent1?.name ?? "Agent A",
-    agent2: data.agent2?.name ?? "Agent B",
-  });
+  const duelKeyRef = data.duelKeyHex.trim().replace(/^0x/i, "").toLowerCase();
+  const metadataUri = `hyperscapes://duel/${duelKeyRef}`;
+  if (Buffer.byteLength(metadataUri, "utf8") > 200) {
+    throw new Error(
+      `duel metadata URI exceeds Solana oracle limit for duel ${data.duelId}`,
+    );
+  }
+  return metadataUri;
 }
 
 function duelStatusEnum(
