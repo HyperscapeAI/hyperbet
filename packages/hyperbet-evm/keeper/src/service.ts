@@ -98,6 +98,8 @@ import {
 import {
   buildProjectedMarketParitySnapshot,
   isPublicMarketParitySnapshot,
+  isPublicMarketParitySnapshotForSourceDuel,
+  marketParityMatchesDuel,
   parseRequiredParityChains,
   redactPendingMarketParity,
 } from "./marketParity";
@@ -2291,7 +2293,13 @@ function projectPublicStreamState(
     botHealthSnapshot,
     sourceState,
   );
-  if (isPublicMarketParitySnapshot(publicMarketParity)) {
+  if (
+    isPublicMarketParitySnapshotForSourceDuel(
+      publicMarketParity,
+      currentDuelKey(sourceState),
+      currentDuelId(sourceState),
+    )
+  ) {
     return {
       ...sourceState,
       marketParity: publicMarketParity,
@@ -2415,7 +2423,10 @@ function buildLivePredictionMarketsSurface(
   const cyclePhase = streamDuel.phase;
   const previousLive = previousOverview?.live ?? null;
 
-  if (!isPublicMarketParitySnapshot(publicMarketParity)) {
+  if (
+    !publicMarketParity ||
+    !isPublicMarketParitySnapshot(publicMarketParity)
+  ) {
     return {
       duel: streamDuel,
       markets: [],
@@ -2439,27 +2450,56 @@ function buildLivePredictionMarketsSurface(
     );
   }
 
-  const markets = buildPredictionMarketLifecycleRecords(effectiveBotHealth, streamDuel);
+  const streamDuelMatchesParity = marketParityMatchesDuel(
+    publicMarketParity,
+    streamDuelKey,
+    streamDuelId,
+  );
+  const previousLiveMatchesParity = marketParityMatchesDuel(
+    publicMarketParity,
+    previousLive?.duel.duelKey,
+    previousLive?.duel.duelId,
+  );
+  const publicDuel: PredictionMarketsSurface["duel"] = streamDuelMatchesParity
+    ? streamDuel
+    : previousLiveMatchesParity && previousLive
+      ? previousLive.duel
+      : {
+          duelKey: publicMarketParity.duelKey,
+          duelId: publicMarketParity.duelId,
+          phase: publicMarketParity.phase,
+          winner: "NONE",
+          betCloseTime: null,
+          agent1Name: null,
+          agent2Name: null,
+        };
+
+  const markets = buildPredictionMarketLifecycleRecords(
+    effectiveBotHealth,
+    publicDuel,
+  );
   const fallbackMarket =
     markets.find((market) => market.duelKey != null || market.duelId != null) ?? null;
-  const cycleWinner = streamDuel.winner;
+  const cycleWinner = publicDuel.winner;
   return {
     duel: {
-      duelKey: streamDuelKey ?? fallbackMarket?.duelKey ?? null,
-      duelId: streamDuelId ?? fallbackMarket?.duelId ?? null,
-      phase: cyclePhase ?? resolvePhaseFromLifecycleStatus(fallbackMarket?.lifecycleStatus),
+      duelKey: publicDuel.duelKey ?? fallbackMarket?.duelKey ?? null,
+      duelId: publicDuel.duelId ?? fallbackMarket?.duelId ?? null,
+      phase:
+        publicDuel.phase ??
+        resolvePhaseFromLifecycleStatus(fallbackMarket?.lifecycleStatus),
       winner:
         cycleWinner !== "NONE"
           ? cycleWinner
           : (fallbackMarket?.winner ?? "NONE"),
       betCloseTime:
-        streamDuel.betCloseTime ?? fallbackMarket?.betCloseTime ?? null,
+        publicDuel.betCloseTime ?? fallbackMarket?.betCloseTime ?? null,
       agent1Name:
-        streamDuel.agent1Name ??
+        publicDuel.agent1Name ??
         previousLive?.duel.agent1Name ??
         null,
       agent2Name:
-        streamDuel.agent2Name ??
+        publicDuel.agent2Name ??
         previousLive?.duel.agent2Name ??
         null,
     },

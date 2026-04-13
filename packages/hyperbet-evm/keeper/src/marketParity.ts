@@ -121,6 +121,27 @@ export function isPublicMarketParitySnapshot(
   );
 }
 
+export function marketParityMatchesDuel(
+  snapshot: KeeperMarketParitySnapshot | null | undefined,
+  duelKey: string | null | undefined,
+  duelId: string | null | undefined,
+): boolean {
+  if (!snapshot) return false;
+  if (snapshot.duelKey && duelKey) return snapshot.duelKey === duelKey;
+  if (snapshot.duelId && duelId) return snapshot.duelId === duelId;
+  return false;
+}
+
+export function isPublicMarketParitySnapshotForSourceDuel(
+  snapshot: KeeperMarketParitySnapshot | null | undefined,
+  duelKey: string | null | undefined,
+  duelId: string | null | undefined,
+): boolean {
+  if (!isPublicMarketParitySnapshot(snapshot)) return false;
+  if (!duelKey && !duelId) return true;
+  return marketParityMatchesDuel(snapshot, duelKey, duelId);
+}
+
 export function redactPendingMarketParity(
   snapshot: KeeperMarketParitySnapshot | null,
 ): KeeperMarketParitySnapshot | null {

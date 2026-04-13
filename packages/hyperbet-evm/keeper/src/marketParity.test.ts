@@ -5,6 +5,7 @@ import {
   buildProjectedMarketParitySnapshot,
   buildRecoveredMarketParitySnapshot,
   isPublicMarketParitySnapshot,
+  isPublicMarketParitySnapshotForSourceDuel,
   redactPendingMarketParity,
 } from "./marketParity";
 
@@ -245,6 +246,20 @@ describe("market parity helpers", () => {
 
     expect(isPublicMarketParitySnapshot(awaitingResolve)).toBe(true);
     expect(redactPendingMarketParity(awaitingResolve)).toBe(awaitingResolve);
+    expect(
+      isPublicMarketParitySnapshotForSourceDuel(
+        awaitingResolve,
+        awaitingResolve.duelKey,
+        awaitingResolve.duelId,
+      ),
+    ).toBe(true);
+    expect(
+      isPublicMarketParitySnapshotForSourceDuel(
+        awaitingResolve,
+        "db".repeat(32),
+        "next-duel",
+      ),
+    ).toBe(false);
   });
 
   test("keeps post-open frozen bundles public", () => {
