@@ -388,7 +388,7 @@ const clobMarketOperatorKeypair =
   readOptionalKeypair("ORACLE_AUTHORITY_KEYPAIR") ||
   botKeypair;
 const { connection, provider, fightOracle, goldClobMarket, goldPerpsMarket } =
-  createPrograms(botKeypair);
+  createPrograms(botKeypair, { usePollingSendAndConfirm: true });
 const fightProgram = fightOracle as unknown as Program<FightOracle>;
 const marketProgram = goldClobMarket as unknown as Program<GoldClobMarket>;
 const perpsProgram = goldPerpsMarket as unknown as Program<GoldPerpsMarket>;
