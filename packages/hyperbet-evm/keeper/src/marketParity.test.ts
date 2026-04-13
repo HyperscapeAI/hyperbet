@@ -1,8 +1,10 @@
 import { describe, expect, test } from "bun:test";
+import type { KeeperMarketParitySnapshot } from "@hyperbet/mm-core";
 
 import {
   buildProjectedMarketParitySnapshot,
   buildRecoveredMarketParitySnapshot,
+  isPublicMarketParitySnapshot,
   redactPendingMarketParity,
 } from "./marketParity";
 
@@ -146,6 +148,78 @@ describe("market parity helpers", () => {
       txRef: null,
       note: null,
     });
+  });
+
+  test("redacts pre-open frozen bundles instead of treating them as public", () => {
+    const frozen: KeeperMarketParitySnapshot = {
+      bundleId: "bundle-pre-open",
+      duelKey: "ab".repeat(32),
+      duelId: "duel-secret",
+      revision: 5,
+      requiredChains: ["solana", "bsc"],
+      confirmedChains: ["solana"],
+      state: "frozen",
+      phase: "ANNOUNCEMENT",
+      safeToBet: false,
+      openedAtMs: null,
+      lockedAtMs: null,
+      resolvedAtMs: null,
+      freezeReason: "chain mismatch",
+      updatedAtMs: 1_700_000_000_000,
+      receipts: [
+        {
+          chainKey: "solana",
+          preparedAtMs: 1_700_000_000_000,
+          openedAtMs: null,
+          lockedAtMs: null,
+          resolvedAtMs: null,
+          cancelledAtMs: null,
+          confirmedAtMs: 1_700_000_000_000,
+          lifecycleStatus: "PENDING",
+          txRef: "sol-tx",
+          note: "prepared",
+        },
+      ],
+    };
+
+    expect(isPublicMarketParitySnapshot(frozen)).toBe(false);
+    expect(redactPendingMarketParity(frozen)).toMatchObject({
+      bundleId: "pending:5",
+      duelKey: null,
+      duelId: null,
+      state: "aborted",
+      safeToBet: false,
+      freezeReason: null,
+      receipts: [
+        {
+          txRef: null,
+          note: null,
+        },
+      ],
+    });
+  });
+
+  test("keeps post-open frozen bundles public", () => {
+    const frozen: KeeperMarketParitySnapshot = {
+      bundleId: "bundle-opened",
+      duelKey: "cd".repeat(32),
+      duelId: "duel-public",
+      revision: 6,
+      requiredChains: ["solana", "bsc"],
+      confirmedChains: ["solana", "bsc"],
+      state: "frozen",
+      phase: "COUNTDOWN",
+      safeToBet: false,
+      openedAtMs: 1_700_000_000_000,
+      lockedAtMs: null,
+      resolvedAtMs: null,
+      freezeReason: "post-open drift",
+      updatedAtMs: 1_700_000_010_000,
+      receipts: [],
+    };
+
+    expect(isPublicMarketParitySnapshot(frozen)).toBe(true);
+    expect(redactPendingMarketParity(frozen)).toBe(frozen);
   });
 
   test("projects a preparing bundle when a live duel exists but no chain receipts do yet", () => {

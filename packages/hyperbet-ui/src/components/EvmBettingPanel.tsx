@@ -83,6 +83,13 @@ type BetSide = "YES" | "NO";
 const MARKET_KIND_DUEL_WINNER = 0;
 const MIN_RPC_BACKOFF_MS = 15_000;
 
+export function shouldSkipEvmRpcRefresh(
+  backoffUntilMs: number,
+  nowMs = Date.now(),
+): boolean {
+  return nowMs < backoffUntilMs;
+}
+
 function createStrictPrivateKeyAccount(
   address: Address,
   privateKey: `0x${string}`,
@@ -861,6 +868,10 @@ export function EvmBettingPanel({
         return;
       }
 
+      if (shouldSkipEvmRpcRefresh(rpcBackoffUntilRef.current)) {
+        return;
+      }
+
       const duelKey = toDuelKeyHex(duelKeyHex);
       const contractAddr = chainConfig.goldClobAddress as Address;
 
@@ -895,10 +906,6 @@ export function EvmBettingPanel({
         updateStatusFromMarket(market, null);
       } else {
         updateStatusFromMarket(market, effectivePosition);
-      }
-
-      if (Date.now() < rpcBackoffUntilRef.current) {
-        return;
       }
 
       const marketReadPromise = getMarketReadSnapshot(

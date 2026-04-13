@@ -144,13 +144,14 @@ export function parseMarketParity(value: unknown): MarketParityInfo | null {
 
 export function isPublicMarketParityState(
   state: MarketParityState | null | undefined,
+  openedAtMs?: number | null,
 ): boolean {
   return (
     state === "open" ||
     state === "locked" ||
     state === "resolved" ||
     state === "cancelled" ||
-    state === "frozen"
+    (state === "frozen" && openedAtMs != null)
   );
 }
 

@@ -16,6 +16,45 @@ export function normalizePublicPerpsChainKeyParam(
   return null;
 }
 
+function asEvmPerpsChainKey(value: string): EvmPerpsChainKey | null {
+  switch (value.trim().toLowerCase()) {
+    case "bsc":
+    case "base":
+    case "avax":
+      return value.trim().toLowerCase() as EvmPerpsChainKey;
+    default:
+      return null;
+  }
+}
+
+function parseEvmPerpsChainList(
+  value: string | null | undefined,
+): EvmPerpsChainKey[] {
+  return Array.from(
+    new Set(
+      (value ?? "")
+        .split(",")
+        .map((entry) => asEvmPerpsChainKey(entry))
+        .filter((entry): entry is EvmPerpsChainKey => entry != null),
+    ),
+  );
+}
+
+export function resolvePublicEvmPerpsChains(params: {
+  configuredChains: readonly string[];
+  publicChains: string | null | undefined;
+}): EvmPerpsChainKey[] {
+  const configured = new Set(
+    params.configuredChains
+      .map((chainKey) => asEvmPerpsChainKey(chainKey))
+      .filter((chainKey): chainKey is EvmPerpsChainKey => chainKey != null),
+  );
+  const requested = parseEvmPerpsChainList(params.publicChains);
+  const publishChains: EvmPerpsChainKey[] =
+    requested.length > 0 ? requested : ["bsc"];
+  return publishChains.filter((chainKey) => configured.has(chainKey));
+}
+
 export function buildExternalPerpsUrl(params: {
   baseUrl: string;
   pathname: "/api/perps/markets" | "/api/perps/oracle-history";

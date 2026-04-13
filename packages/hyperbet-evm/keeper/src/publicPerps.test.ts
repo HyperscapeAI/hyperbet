@@ -5,6 +5,7 @@ import {
   adaptLegacySolanaPerpsOracleHistoryPayload,
   buildExternalPerpsUrl,
   normalizePublicPerpsChainKeyParam,
+  resolvePublicEvmPerpsChains,
 } from "./publicPerps";
 
 describe("public perps helpers", () => {
@@ -31,6 +32,30 @@ describe("public perps helpers", () => {
     ).toBe(
       "https://solana-keeper.example/api/perps/oracle-history?characterId=agent-a&limit=24",
     );
+  });
+
+  test("defaults public EVM perps publishing to BSC only", () => {
+    expect(
+      resolvePublicEvmPerpsChains({
+        configuredChains: ["bsc", "base", "avax"],
+        publicChains: undefined,
+      }),
+    ).toEqual(["bsc"]);
+  });
+
+  test("publishes only explicitly configured public EVM perps chains", () => {
+    expect(
+      resolvePublicEvmPerpsChains({
+        configuredChains: ["bsc", "base", "avax"],
+        publicChains: "base,avax",
+      }),
+    ).toEqual(["base", "avax"]);
+    expect(
+      resolvePublicEvmPerpsChains({
+        configuredChains: ["base", "avax"],
+        publicChains: undefined,
+      }),
+    ).toEqual([]);
   });
 
   test("adapts legacy Solana markets responses into chain-scoped payloads", () => {

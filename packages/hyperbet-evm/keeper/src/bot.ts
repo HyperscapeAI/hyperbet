@@ -661,6 +661,7 @@ import {
   type DbPerpsMarketRecord,
   type DbPerpsMarketStatus,
 } from "./db";
+import { resolvePublicEvmPerpsChains } from "./publicPerps";
 
 const BPF_LOADER_UPGRADEABLE_PROGRAM_ID = new PublicKey(
   "BPFLoaderUpgradeab1e11111111111111111111111",
@@ -1986,6 +1987,10 @@ const configuredEvmKeeperChains = parseBettingEvmChainList(
   process.env.EVM_KEEPER_CHAINS,
   BETTING_EVM_CHAIN_ORDER,
 );
+const configuredPublicPerpsChains = resolvePublicEvmPerpsChains({
+  configuredChains: configuredEvmKeeperChains,
+  publicChains: process.env.EVM_PUBLIC_PERPS_CHAINS,
+});
 const evmKeeperChains = configuredEvmKeeperChains
   .map((chainKey) => buildEvmRuntime(chainKey))
   .filter((chain): chain is EvmKeeperRuntime => chain !== null);
@@ -2196,10 +2201,7 @@ async function verifyEvmLifecycleReadback(params: {
 }
 
 function publicPerpsChains(): EvmPerpsChainKey[] {
-  return configuredEvmKeeperChains.filter(
-    (chainKey): chainKey is EvmPerpsChainKey =>
-      chainKey === "bsc" || chainKey === "base" || chainKey === "avax",
-  );
+  return configuredPublicPerpsChains;
 }
 
 function savePublicPerpsOracleSnapshot(snapshot: {
@@ -3497,16 +3499,12 @@ function shouldFreezeMismatchedMarketParityEvent(
   current: KeeperMarketParitySnapshot,
 ): boolean {
   if (current.state === "frozen") {
+    return current.openedAtMs != null;
+  }
+  if (current.openedAtMs || current.safeToBet || current.state === "open") {
     return true;
   }
-  if (current.safeToBet || current.state === "open") {
-    return true;
-  }
-  return !(
-    current.state === "locked" ||
-    current.phase === "COUNTDOWN" ||
-    current.phase === "RESOLUTION"
-  );
+  return false;
 }
 
 function blockMismatchedMarketParityEvent(
@@ -3530,7 +3528,7 @@ function blockMismatchedMarketParityEvent(
   logBlockedEvent("[bot] market_parity_blocked_event", {
     eventName,
     reason,
-    action: shouldFreeze ? "freeze" : "ignore",
+    action: shouldFreeze ? "freeze" : "abort",
     activeBundleId: marketParitySnapshot.bundleId,
     activeDuelKey: marketParitySnapshot.duelKey,
     activeDuelId: marketParitySnapshot.duelId,
@@ -3539,8 +3537,11 @@ function blockMismatchedMarketParityEvent(
     incomingDuelId: data.duelId,
   });
   if (!shouldFreeze) {
+    finalizeMarketParityState("aborted", marketParitySnapshot.phase, {
+      reason,
+    });
     writeBotHealthSnapshot();
-    return true;
+    return eventName !== "duel_started";
   }
   const freezeReason =
     marketParitySnapshot.state === "frozen"

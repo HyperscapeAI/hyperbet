@@ -102,17 +102,24 @@ function redactedReceipt(receipt: KeeperParityChainReceipt): KeeperParityChainRe
   };
 }
 
-export function redactPendingMarketParity(
-  snapshot: KeeperMarketParitySnapshot | null,
-): KeeperMarketParitySnapshot | null {
-  if (!snapshot) return null;
-  if (
+export function isPublicMarketParitySnapshot(
+  snapshot: KeeperMarketParitySnapshot | null | undefined,
+): boolean {
+  if (!snapshot) return false;
+  return (
     snapshot.state === "open" ||
     snapshot.state === "locked" ||
     snapshot.state === "resolved" ||
     snapshot.state === "cancelled" ||
-    snapshot.state === "frozen"
-  ) {
+    (snapshot.state === "frozen" && snapshot.openedAtMs != null)
+  );
+}
+
+export function redactPendingMarketParity(
+  snapshot: KeeperMarketParitySnapshot | null,
+): KeeperMarketParitySnapshot | null {
+  if (!snapshot) return null;
+  if (isPublicMarketParitySnapshot(snapshot)) {
     return snapshot;
   }
   return {
@@ -120,6 +127,7 @@ export function redactPendingMarketParity(
     bundleId: `pending:${snapshot.revision}`,
     duelKey: null,
     duelId: null,
+    state: snapshot.state === "frozen" ? "aborted" : snapshot.state,
     safeToBet: false,
     freezeReason: null,
     receipts: snapshot.receipts.map(redactedReceipt),

@@ -97,6 +97,7 @@ import {
 } from "./betSync";
 import {
   buildProjectedMarketParitySnapshot,
+  isPublicMarketParitySnapshot,
   parseRequiredParityChains,
   redactPendingMarketParity,
 } from "./marketParity";
@@ -2220,18 +2221,6 @@ function currentDuelSnapshot(
   };
 }
 
-function isPublicMarketParityState(
-  state: KeeperMarketParitySnapshot["state"] | null | undefined,
-): boolean {
-  return (
-    state === "open" ||
-    state === "locked" ||
-    state === "resolved" ||
-    state === "cancelled" ||
-    state === "frozen"
-  );
-}
-
 function isStreamSafeForBetting(sourceState: StreamState): boolean {
   const publicReadiness = asJsonRecord(sourceState.publicReadiness);
   const topLevelRenderer = asJsonRecord(sourceState.rendererHealth);
@@ -2282,6 +2271,18 @@ function resolvePublicMarketParity(
   };
 }
 
+function maskNonPublicStreamChannel(
+  channel: StreamState["channel"] | null | undefined,
+): StreamState["channel"] | null | undefined {
+  const channelRecord = asJsonRecord(channel);
+  if (!channelRecord) return channel;
+  return {
+    ...channelRecord,
+    activeDuelId: null,
+    activeDuelKey: null,
+  };
+}
+
 function projectPublicStreamState(
   sourceState: StreamState,
   botHealthSnapshot: KeeperBotHealthSnapshot | null,
@@ -2290,7 +2291,7 @@ function projectPublicStreamState(
     botHealthSnapshot,
     sourceState,
   );
-  if (isPublicMarketParityState(publicMarketParity?.state)) {
+  if (isPublicMarketParitySnapshot(publicMarketParity)) {
     return {
       ...sourceState,
       marketParity: publicMarketParity,
@@ -2340,6 +2341,7 @@ function projectPublicStreamState(
       agent1: null,
       agent2: null,
     },
+    channel: maskNonPublicStreamChannel(sourceState.channel),
     phase: "ANNOUNCEMENT",
     broadcastTimeline: maskedTimeline,
     marketParity: publicMarketParity,
@@ -2413,7 +2415,7 @@ function buildLivePredictionMarketsSurface(
   const cyclePhase = streamDuel.phase;
   const previousLive = previousOverview?.live ?? null;
 
-  if (!isPublicMarketParityState(publicMarketParity?.state)) {
+  if (!isPublicMarketParitySnapshot(publicMarketParity)) {
     return {
       duel: streamDuel,
       markets: [],
