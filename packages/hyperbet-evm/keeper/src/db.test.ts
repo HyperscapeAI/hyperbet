@@ -144,6 +144,7 @@ describe("keeper db persistence", () => {
 
   afterEach(() => {
     delete process.env.KEEPER_DB_PATH;
+    delete process.env.KEEPER_DB_BUSY_TIMEOUT_MS;
     for (const module of loadedModules) {
       module.closeDb();
     }
@@ -595,5 +596,55 @@ describe("keeper db persistence", () => {
     expect(
       db.loadPredictionMarketsOverviewState()?.liveJson,
     ).toBe(JSON.stringify({ duel: { duelId: "duel-1" } }));
+  });
+
+  test("treats a busy bet-sync projection write as a skipped derived commit", async () => {
+    process.env.KEEPER_DB_BUSY_TIMEOUT_MS = "25";
+    const dbPath = process.env.KEEPER_DB_PATH;
+    if (!dbPath) {
+      throw new Error("KEEPER_DB_PATH missing for busy projection test");
+    }
+    const db = (await import(
+      `./db.ts?case=${Date.now()}-projection-busy`
+    )) as typeof import("./db.ts");
+    loadedModules.push(db);
+
+    const blocker = new Database(dbPath, { create: true });
+    blocker.run("PRAGMA busy_timeout = 25");
+    blocker.run("BEGIN IMMEDIATE");
+    try {
+      expect(
+        db.commitBetSyncProjectionState({
+          streamState: {
+            stateJson: JSON.stringify({
+              type: "STREAMING_STATE_UPDATE",
+              cycle: { duelId: "duel-busy", phase: "RESOLUTION" },
+              leaderboard: [],
+              cameraTarget: null,
+              seq: 19,
+              emittedAt: 1_700_000_202_000,
+            }),
+            updatedAt: 1_700_000_202_000,
+          },
+          checkpoint: {
+            sourceEpoch: 9,
+            lastSeenSeq: 19,
+            lastAppliedSeq: 19,
+            replayMode: "live",
+            degradedReason: null,
+            updatedAt: 1_700_000_202_010,
+          },
+          overview: {
+            liveJson: JSON.stringify({ duel: { duelId: "duel-busy" } }),
+            recentSettlementJson: null,
+            updatedAt: 1_700_000_202_020,
+          },
+        }),
+      ).toBe(false);
+      expect(db.loadBetSyncCheckpoint()).toBeNull();
+    } finally {
+      blocker.run("ROLLBACK");
+      blocker.close(false);
+    }
   });
 });

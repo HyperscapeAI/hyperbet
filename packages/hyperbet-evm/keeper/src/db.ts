@@ -144,6 +144,20 @@ db.run("PRAGMA journal_mode = WAL");
 db.run("PRAGMA synchronous = NORMAL");
 db.run("PRAGMA foreign_keys = ON");
 db.run("PRAGMA auto_vacuum = INCREMENTAL");
+db.run(
+  `PRAGMA busy_timeout = ${Math.max(
+    0,
+    Math.floor(Number(process.env.KEEPER_DB_BUSY_TIMEOUT_MS || 5_000)),
+  )}`,
+);
+
+function isSqliteBusyError(error: unknown): boolean {
+  const candidate = error as { code?: unknown; message?: unknown };
+  const code = typeof candidate?.code === "string" ? candidate.code : "";
+  const message =
+    typeof candidate?.message === "string" ? candidate.message : String(error);
+  return code === "SQLITE_BUSY" || /database is (?:locked|busy)/i.test(message);
+}
 
 // ── Schema ────────────────────────────────────────────────────────────────────
 
@@ -1355,15 +1369,28 @@ export function loadBetSyncCheckpoint(): DbBetSyncCheckpoint | null {
   };
 }
 
-export function saveBetSyncCheckpoint(checkpoint: DbBetSyncCheckpoint): void {
-  upsertBetSyncCheckpoint.run({
-    $sourceEpoch: checkpoint.sourceEpoch,
-    $lastSeenSeq: checkpoint.lastSeenSeq,
-    $lastAppliedSeq: checkpoint.lastAppliedSeq,
-    $replayMode: checkpoint.replayMode,
-    $degradedReason: checkpoint.degradedReason,
-    $updatedAt: checkpoint.updatedAt,
-  });
+export function saveBetSyncCheckpoint(checkpoint: DbBetSyncCheckpoint): boolean {
+  try {
+    upsertBetSyncCheckpoint.run({
+      $sourceEpoch: checkpoint.sourceEpoch,
+      $lastSeenSeq: checkpoint.lastSeenSeq,
+      $lastAppliedSeq: checkpoint.lastAppliedSeq,
+      $replayMode: checkpoint.replayMode,
+      $degradedReason: checkpoint.degradedReason,
+      $updatedAt: checkpoint.updatedAt,
+    });
+    return true;
+  } catch (error) {
+    if (!isSqliteBusyError(error)) {
+      throw error;
+    }
+    console.warn("[db] skipped bet-sync checkpoint write because SQLite is busy", {
+      sourceEpoch: checkpoint.sourceEpoch,
+      lastSeenSeq: checkpoint.lastSeenSeq,
+      lastAppliedSeq: checkpoint.lastAppliedSeq,
+    });
+    return false;
+  }
 }
 
 export function appendBetSyncApplyLogEntry(
@@ -1482,12 +1509,24 @@ export function commitBetSyncProjectionState(input: {
     },
   );
 
-  return commit(
-    input.streamState,
-    input.checkpoint,
-    input.overview,
-    input.applyLogEntry,
-  );
+  try {
+    return commit(
+      input.streamState,
+      input.checkpoint,
+      input.overview,
+      input.applyLogEntry,
+    );
+  } catch (error) {
+    if (!isSqliteBusyError(error)) {
+      throw error;
+    }
+    console.warn("[db] skipped bet-sync projection commit because SQLite is busy", {
+      sourceEpoch: input.checkpoint.sourceEpoch,
+      lastSeenSeq: input.checkpoint.lastSeenSeq,
+      lastAppliedSeq: input.checkpoint.lastAppliedSeq,
+    });
+    return false;
+  }
 }
 
 export function closeDb(): void {

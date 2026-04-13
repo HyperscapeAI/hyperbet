@@ -562,6 +562,11 @@ const args = await yargs(hideBin(process.argv))
     default: Number(process.env.AUTO_SEED_DELAY_SECONDS || 10),
     describe: "Auto-seed delay for new markets",
   })
+  .option("result-post-delay-seconds", {
+    type: "number",
+    default: Number(process.env.RESULT_POST_DELAY_SECONDS || 0),
+    describe: "Delay after an authoritative stream result before posting oracle resolution",
+  })
   .option("seed-sol", {
     type: "number",
     default: Number(
@@ -1682,6 +1687,10 @@ const marketMakerSeedLamports = Math.max(
 const autoSeedDelayMs = Math.max(
   0,
   Math.floor(Number(args["auto-seed-delay-seconds"]) * 1000),
+);
+const resultPostDelayMs = Math.max(
+  0,
+  Math.floor(Number(args["result-post-delay-seconds"]) * 1000),
 );
 const configuredBidPrice = Math.max(
   1,
@@ -4720,10 +4729,14 @@ async function reportRoundResult(
     duelState ? asNum(duelState.betCloseTs) : 0,
   );
 
-  console.log(
-    `[Keeper] Waiting 15s before posting result for duel ${data.duelId} to sync with stream...`,
-  );
-  await sleep(15_000);
+  if (resultPostDelayMs > 0) {
+    console.log(
+      `[Keeper] Waiting ${Math.ceil(
+        resultPostDelayMs / 1000,
+      )}s before posting result for duel ${data.duelId}...`,
+    );
+    await sleep(resultPostDelayMs);
+  }
 
   if (duelState && enumIs(duelState.status, "challenged")) {
     await syncTrackedMarketFromOracle(trackedMatch);
