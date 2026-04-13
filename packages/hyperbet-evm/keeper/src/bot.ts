@@ -4904,7 +4904,6 @@ async function runMaintenance(): Promise<void> {
     return;
   }
   await ensureOracleReady();
-  await ensurePerpsConfigReady();
   await maybeFinalizePendingEvmParityResolution();
 
   // Poll only the actively tracked CLOB markets we created.
@@ -4982,6 +4981,7 @@ async function runMaintenance(): Promise<void> {
 
   // Perps maintenance is intentionally after CLOB/parity lifecycle work so a
   // slow oracle-directory sync cannot stall public market finality.
+  await ensurePerpsConfigReady();
   await syncPerpsOraclesFromLeaderboard();
   if (PERPS_MARKET_MAKER_RECYCLE_ENABLED) {
     const perpsMarkets = loadPerpsMarkets().filter(
