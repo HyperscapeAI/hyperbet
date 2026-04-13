@@ -96,6 +96,7 @@ import {
   type StreamState as BetSyncStreamState,
 } from "./betSync";
 import {
+  applyMarketParityReceiptsToMarkets,
   buildProjectedMarketParitySnapshot,
   isPublicMarketParitySnapshot,
   isPublicMarketParitySnapshotForSourceDuel,
@@ -2474,9 +2475,13 @@ function buildLivePredictionMarketsSurface(
           agent2Name: null,
         };
 
-  const markets = buildPredictionMarketLifecycleRecords(
-    effectiveBotHealth,
-    publicDuel,
+  const markets = applyMarketParityReceiptsToMarkets(
+    buildPredictionMarketLifecycleRecords(
+      effectiveBotHealth,
+      publicDuel,
+    ),
+    publicMarketParity,
+    publicDuel.winner,
   );
   const fallbackMarket =
     markets.find((market) => market.duelKey != null || market.duelId != null) ?? null;

@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import type { KeeperMarketParitySnapshot } from "@hyperbet/mm-core";
 
 import {
+  applyMarketParityReceiptsToMarkets,
   buildProjectedMarketParitySnapshot,
   buildRecoveredMarketParitySnapshot,
   isPublicMarketParitySnapshot,
@@ -260,6 +261,72 @@ describe("market parity helpers", () => {
         "next-duel",
       ),
     ).toBe(false);
+  });
+
+  test("aligns public market rows from confirmed parity receipts", () => {
+    const duelKey = "da".repeat(32);
+    const aligned = applyMarketParityReceiptsToMarkets(
+      [
+        {
+          chainKey: "bsc",
+          duelKey,
+          duelId: "duel-public",
+          marketId: "0xmarket",
+          marketRef: "0xmarket",
+          lifecycleStatus: "PENDING",
+          winner: "NONE",
+          betCloseTime: 1_700_000_030_000,
+          contractAddress: "0x0000000000000000000000000000000000000001",
+          programId: null,
+          txRef: null,
+          syncedAt: 1_700_000_010_000,
+          metadata: undefined,
+        },
+      ],
+      {
+        bundleId: `${duelKey}:7`,
+        duelKey,
+        duelId: "duel-public",
+        revision: 7,
+        requiredChains: ["solana", "bsc"],
+        confirmedChains: ["solana", "bsc"],
+        state: "resolved",
+        phase: "RESOLUTION",
+        safeToBet: false,
+        openedAtMs: 1_700_000_000_000,
+        lockedAtMs: 1_700_000_030_000,
+        resolvedAtMs: 1_700_000_060_000,
+        freezeReason: null,
+        updatedAtMs: 1_700_000_060_000,
+        receipts: [
+          {
+            chainKey: "bsc",
+            preparedAtMs: 1_699_999_990_000,
+            openedAtMs: 1_700_000_000_000,
+            lockedAtMs: 1_700_000_030_000,
+            resolvedAtMs: 1_700_000_060_000,
+            cancelledAtMs: null,
+            confirmedAtMs: 1_700_000_060_000,
+            lifecycleStatus: "RESOLVED",
+            txRef: null,
+            note: "finalized-after-dispute-window",
+          },
+        ],
+      },
+      "B",
+    );
+
+    expect(aligned[0]).toMatchObject({
+      chainKey: "bsc",
+      duelKey,
+      lifecycleStatus: "RESOLVED",
+      winner: "B",
+      syncedAt: 1_700_000_060_000,
+      metadata: {
+        parityReceiptLifecycleStatus: "RESOLVED",
+        parityReceiptConfirmedAtMs: 1_700_000_060_000,
+      },
+    });
   });
 
   test("keeps post-open frozen bundles public", () => {

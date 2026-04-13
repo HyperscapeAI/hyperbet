@@ -142,6 +142,42 @@ export function isPublicMarketParitySnapshotForSourceDuel(
   return marketParityMatchesDuel(snapshot, duelKey, duelId);
 }
 
+export function applyMarketParityReceiptsToMarkets(
+  markets: readonly PredictionMarketLifecycleRecord[],
+  snapshot: KeeperMarketParitySnapshot | null | undefined,
+  winner: PredictionMarketLifecycleRecord["winner"] | null = null,
+): PredictionMarketLifecycleRecord[] {
+  if (!snapshot || !isPublicMarketParitySnapshot(snapshot)) {
+    return [...markets];
+  }
+  return markets.map((market) => {
+    if (!marketParityMatchesDuel(snapshot, market.duelKey, market.duelId)) {
+      return market;
+    }
+    const receipt = snapshot.receipts.find(
+      (candidate) => candidate.chainKey === market.chainKey,
+    );
+    if (!receipt?.lifecycleStatus) return market;
+    return {
+      ...market,
+      duelKey: snapshot.duelKey ?? market.duelKey,
+      duelId: snapshot.duelId ?? market.duelId,
+      lifecycleStatus: receipt.lifecycleStatus,
+      winner:
+        receipt.lifecycleStatus === "RESOLVED" && winner && winner !== "NONE"
+          ? winner
+          : market.winner,
+      txRef: receipt.txRef ?? market.txRef,
+      syncedAt: receipt.confirmedAtMs ?? market.syncedAt,
+      metadata: {
+        ...(market.metadata ?? {}),
+        parityReceiptLifecycleStatus: receipt.lifecycleStatus,
+        parityReceiptConfirmedAtMs: receipt.confirmedAtMs,
+      },
+    };
+  });
+}
+
 export function redactPendingMarketParity(
   snapshot: KeeperMarketParitySnapshot | null,
 ): KeeperMarketParitySnapshot | null {
