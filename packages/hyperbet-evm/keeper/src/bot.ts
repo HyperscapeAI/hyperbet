@@ -487,6 +487,8 @@ function isRpcConnectivityError(error: unknown): boolean {
     message.includes("unable to connect") ||
     message.includes("fetch failed") ||
     message.includes("failed to fetch") ||
+    message.includes("aborterror") ||
+    message.includes("aborted") ||
     message.includes("econnrefused") ||
     message.includes("connection refused") ||
     message.includes("connection reset") ||

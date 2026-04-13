@@ -7,6 +7,7 @@ import { AnchorProvider, Idl, Program, Wallet } from "@coral-xyz/anchor";
 import {
   Connection,
   type ConfirmOptions,
+  type FetchFn,
   Keypair,
   PublicKey,
   Transaction,
@@ -58,6 +59,50 @@ type CreateProgramsOptions = {
 type AnchorLikeWallet = Wallet & {
   payer: Keypair;
 };
+
+const DEFAULT_SOLANA_RPC_REQUEST_TIMEOUT_MS = 15_000;
+
+function resolveSolanaRpcRequestTimeoutMs(): number {
+  const configured = Number(process.env.SOLANA_RPC_REQUEST_TIMEOUT_MS);
+  return Number.isFinite(configured) && configured > 0
+    ? Math.floor(configured)
+    : DEFAULT_SOLANA_RPC_REQUEST_TIMEOUT_MS;
+}
+
+function createSolanaRpcFetch(timeoutMs: number): FetchFn {
+  const solanaFetch = (async (input, init) => {
+    const controller = new AbortController();
+    const upstreamSignal = init?.signal ?? null;
+    const abortFromUpstream = () => controller.abort(upstreamSignal?.reason);
+
+    if (upstreamSignal?.aborted) {
+      controller.abort(upstreamSignal.reason);
+    } else {
+      upstreamSignal?.addEventListener("abort", abortFromUpstream, {
+        once: true,
+      });
+    }
+
+    const timeout = setTimeout(() => {
+      controller.abort(
+        new Error(`Solana RPC request timed out after ${timeoutMs}ms`),
+      );
+    }, timeoutMs);
+
+    try {
+      return await fetch(input, {
+        ...(init ?? {}),
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timeout);
+      upstreamSignal?.removeEventListener("abort", abortFromUpstream);
+    }
+  }) as FetchFn;
+
+  solanaFetch.preconnect = fetch.preconnect.bind(fetch);
+  return solanaFetch;
+}
 
 function signTx(tx: SignableTx, signer: Keypair): SignableTx {
   if (tx instanceof VersionedTransaction) {
@@ -458,6 +503,7 @@ export function createPrograms(signer: Keypair, options?: CreateProgramsOptions)
   const connection = new Connection(getRpcUrl(), {
     commitment,
     confirmTransactionInitialTimeout: options?.confirmTimeoutMs,
+    fetch: createSolanaRpcFetch(resolveSolanaRpcRequestTimeoutMs()),
   });
   const wallet = toAnchorWallet(signer);
   const provider = options?.usePollingSendAndConfirm
