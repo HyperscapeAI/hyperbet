@@ -3380,6 +3380,22 @@ function isSameMarketParityBundle(
   );
 }
 
+function shouldFreezeMismatchedMarketParityEvent(
+  current: KeeperMarketParitySnapshot,
+): boolean {
+  if (current.state === "frozen") {
+    return true;
+  }
+  if (current.safeToBet || current.state === "open") {
+    return true;
+  }
+  return !(
+    current.state === "locked" ||
+    current.phase === "COUNTDOWN" ||
+    current.phase === "RESOLUTION"
+  );
+}
+
 function blockMismatchedMarketParityEvent(
   data: DuelLifecycleEvent,
   eventName: string,
@@ -3394,9 +3410,14 @@ function blockMismatchedMarketParityEvent(
 
   const incomingDuelKey = normalizedBundleDuelKey(data.duelKeyHex);
   const reason = `blocked_${eventName}_for_${incomingDuelKey ?? data.duelId ?? "unknown"}_while_${marketParitySnapshot.bundleId}_is_${marketParitySnapshot.state}`;
-  console.error("[bot] market_parity_blocked_event", {
+  const shouldFreeze = shouldFreezeMismatchedMarketParityEvent(
+    marketParitySnapshot,
+  );
+  const logBlockedEvent = shouldFreeze ? console.error : console.warn;
+  logBlockedEvent("[bot] market_parity_blocked_event", {
     eventName,
     reason,
+    action: shouldFreeze ? "freeze" : "ignore",
     activeBundleId: marketParitySnapshot.bundleId,
     activeDuelKey: marketParitySnapshot.duelKey,
     activeDuelId: marketParitySnapshot.duelId,
@@ -3404,6 +3425,10 @@ function blockMismatchedMarketParityEvent(
     incomingDuelKey,
     incomingDuelId: data.duelId,
   });
+  if (!shouldFreeze) {
+    writeBotHealthSnapshot();
+    return true;
+  }
   const freezeReason =
     marketParitySnapshot.state === "frozen"
       ? marketParitySnapshot.freezeReason ?? reason
