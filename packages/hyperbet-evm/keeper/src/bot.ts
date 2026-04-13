@@ -131,6 +131,28 @@ function isSolanaDisputeWindowActiveError(error: unknown): boolean {
   return /DisputeWindowActive/i.test(message);
 }
 
+async function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  label: string,
+): Promise<T> {
+  let timeout: ReturnType<typeof setTimeout> | null = null;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timeout = setTimeout(() => {
+          reject(new Error(`${label} timed out after ${timeoutMs}ms`));
+        }, timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeout) {
+      clearTimeout(timeout);
+    }
+  }
+}
+
 function asChainKey(value: string): BettingChainKey | null {
   switch (value.trim().toLowerCase()) {
     case "solana":
@@ -847,6 +869,11 @@ const PERPS_MARKET_MAKER_RECYCLE_MIN_SOL = Math.max(
   0,
   Number(process.env.PERPS_MARKET_MAKER_RECYCLE_MIN_SOL || 0.25),
 );
+const PERPS_MAINTENANCE_TIMEOUT_MS = Math.max(
+  5_000,
+  Number(process.env.PERPS_MAINTENANCE_TIMEOUT_MS || 30_000),
+);
+let perpsMaintenancePromise: Promise<void> | null = null;
 
 if (PERPS_ORACLE_ENABLED && !PERPS_LIQUIDATOR_ENABLED) {
   console.warn(
@@ -5210,6 +5237,10 @@ async function runMaintenance(): Promise<void> {
 
   // Perps maintenance is intentionally after CLOB/parity lifecycle work so a
   // slow oracle-directory sync cannot stall public market finality.
+  await maybeRunPerpsMaintenance();
+}
+
+async function runPerpsMaintenance(): Promise<void> {
   await ensurePerpsConfigReady();
   await syncPerpsOraclesFromLeaderboard();
   if (PERPS_MARKET_MAKER_RECYCLE_ENABLED) {
@@ -5224,6 +5255,34 @@ async function runMaintenance(): Promise<void> {
 
   if (PERPS_LIQUIDATOR_ENABLED) {
     await runLiquidatorLoop();
+  }
+}
+
+function startPerpsMaintenance(): Promise<void> {
+  const task = (async () => {
+    try {
+      await runPerpsMaintenance();
+    } catch (error) {
+      console.warn("[bot] perps_maintenance_failed", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  })();
+  perpsMaintenancePromise = task.finally(() => {
+    perpsMaintenancePromise = null;
+  });
+  return perpsMaintenancePromise;
+}
+
+async function maybeRunPerpsMaintenance(): Promise<void> {
+  const task = perpsMaintenancePromise ?? startPerpsMaintenance();
+  try {
+    await withTimeout(task, PERPS_MAINTENANCE_TIMEOUT_MS, "perps maintenance");
+  } catch (error) {
+    console.warn("[bot] perps_maintenance_deferred", {
+      timeoutMs: PERPS_MAINTENANCE_TIMEOUT_MS,
+      error: error instanceof Error ? error.message : String(error),
+    });
   }
 }
 
