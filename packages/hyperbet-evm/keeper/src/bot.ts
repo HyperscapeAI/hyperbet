@@ -4905,17 +4905,6 @@ async function runMaintenance(): Promise<void> {
   }
   await ensureOracleReady();
   await ensurePerpsConfigReady();
-  // ... (simplified loop for seeing liquidity and resolving old markets)
-  await syncPerpsOraclesFromLeaderboard();
-  if (PERPS_MARKET_MAKER_RECYCLE_ENABLED) {
-    const perpsMarkets = loadPerpsMarkets().filter(
-      (record) => record.status !== PERPS_MARKET_STATUS_ARCHIVED,
-    );
-    for (const record of perpsMarkets) {
-      await maybeRecyclePerpsMarketMakerFees(record.marketId);
-    }
-  }
-  await maybeArchiveSettledPerpsMarkets();
   await maybeFinalizePendingEvmParityResolution();
 
   // Poll only the actively tracked CLOB markets we created.
@@ -4990,6 +4979,19 @@ async function runMaintenance(): Promise<void> {
   }
 
   // NOTE: We do NOT create new rounds here anymore.
+
+  // Perps maintenance is intentionally after CLOB/parity lifecycle work so a
+  // slow oracle-directory sync cannot stall public market finality.
+  await syncPerpsOraclesFromLeaderboard();
+  if (PERPS_MARKET_MAKER_RECYCLE_ENABLED) {
+    const perpsMarkets = loadPerpsMarkets().filter(
+      (record) => record.status !== PERPS_MARKET_STATUS_ARCHIVED,
+    );
+    for (const record of perpsMarkets) {
+      await maybeRecyclePerpsMarketMakerFees(record.marketId);
+    }
+  }
+  await maybeArchiveSettledPerpsMarkets();
 
   if (PERPS_LIQUIDATOR_ENABLED) {
     await runLiquidatorLoop();
