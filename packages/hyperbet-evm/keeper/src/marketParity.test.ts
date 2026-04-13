@@ -199,6 +199,54 @@ describe("market parity helpers", () => {
     });
   });
 
+  test("keeps post-open confirmation gaps public", () => {
+    const awaitingResolve: KeeperMarketParitySnapshot = {
+      bundleId: "bundle-awaiting-resolve",
+      duelKey: "ca".repeat(32),
+      duelId: "duel-public",
+      revision: 6,
+      requiredChains: ["solana", "bsc"],
+      confirmedChains: ["solana", "bsc"],
+      state: "awaiting_confirmations",
+      phase: "RESOLUTION",
+      safeToBet: false,
+      openedAtMs: 1_700_000_000_000,
+      lockedAtMs: 1_700_000_030_000,
+      resolvedAtMs: null,
+      freezeReason: null,
+      updatedAtMs: 1_700_000_060_000,
+      receipts: [
+        {
+          chainKey: "solana",
+          preparedAtMs: 1_699_999_990_000,
+          openedAtMs: 1_700_000_000_000,
+          lockedAtMs: 1_700_000_030_000,
+          resolvedAtMs: null,
+          cancelledAtMs: null,
+          confirmedAtMs: 1_700_000_060_000,
+          lifecycleStatus: "PROPOSED",
+          txRef: "sol-tx",
+          note: "waiting-dispute-window",
+        },
+        {
+          chainKey: "bsc",
+          preparedAtMs: 1_699_999_990_000,
+          openedAtMs: 1_700_000_000_000,
+          lockedAtMs: 1_700_000_030_000,
+          resolvedAtMs: null,
+          cancelledAtMs: null,
+          confirmedAtMs: 1_700_000_060_000,
+          lifecycleStatus: "PROPOSED",
+          txRef: null,
+          note: "waiting-dispute-window",
+        },
+      ],
+    };
+
+    expect(isPublicMarketParitySnapshot(awaitingResolve)).toBe(true);
+    expect(redactPendingMarketParity(awaitingResolve)).toBe(awaitingResolve);
+  });
+
   test("keeps post-open frozen bundles public", () => {
     const frozen: KeeperMarketParitySnapshot = {
       bundleId: "bundle-opened",

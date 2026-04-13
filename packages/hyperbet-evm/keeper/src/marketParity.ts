@@ -106,6 +106,12 @@ export function isPublicMarketParitySnapshot(
   snapshot: KeeperMarketParitySnapshot | null | undefined,
 ): boolean {
   if (!snapshot) return false;
+  if (
+    snapshot.openedAtMs != null &&
+    snapshot.state === "awaiting_confirmations"
+  ) {
+    return true;
+  }
   return (
     snapshot.state === "open" ||
     snapshot.state === "locked" ||
