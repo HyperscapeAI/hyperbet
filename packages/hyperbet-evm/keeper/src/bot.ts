@@ -4604,6 +4604,9 @@ async function maybeFinalizePendingSolanaParityResolution(): Promise<void> {
   }
 
   if (!finalized) {
+    if (trackedMatch.duelId) {
+      unresolvedOracleWarningMatches.delete(trackedMatch.duelId);
+    }
     markMarketParityChainConfirmed({
       chainKey: "solana",
       transition: "propose",
@@ -4819,6 +4822,7 @@ async function reportRoundResult(
       buildDuelMetadata(data),
     ))
   ) {
+    unresolvedOracleWarningMatches.delete(data.duelId);
     return {
       lifecycleStatus: "PROPOSED",
       finalized: false,
