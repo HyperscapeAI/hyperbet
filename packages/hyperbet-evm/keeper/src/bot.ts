@@ -108,6 +108,10 @@ function parsePositiveInteger(value: string | undefined): number | null {
 const configuredEvmParityConfirmations = parsePositiveInteger(
   process.env.EVM_PARITY_CONFIRMATIONS,
 );
+const evmTxReceiptTimeoutMs = Math.max(
+  30_000,
+  Number(process.env.EVM_TX_RECEIPT_TIMEOUT_MS || 120_000),
+);
 
 function asBigInt(value: unknown, fallback = 0n): bigint {
   if (typeof value === "bigint") return value;
@@ -120,6 +124,11 @@ function asBigInt(value: unknown, fallback = 0n): bigint {
     }
   }
   return fallback;
+}
+
+function isSolanaDisputeWindowActiveError(error: unknown): boolean {
+  const message = (error as Error)?.message ?? "";
+  return /DisputeWindowActive/i.test(message);
 }
 
 function asChainKey(value: string): BettingChainKey | null {
@@ -1967,6 +1976,7 @@ async function waitForEvmTransactionReceipt(
   await chain.publicClient.waitForTransactionReceipt({
     hash,
     confirmations: evmParityConfirmationCount(chain),
+    timeout: evmTxReceiptTimeoutMs,
   });
   lastSuccessfulRpcAtMs = Date.now();
 }
@@ -2014,24 +2024,28 @@ async function readEvmDuelState(
   chain: EvmKeeperRuntime,
   duelKey: Hex,
 ): Promise<EvmOracleDuelState> {
-  return (await chain.publicClient.readContract({
+  const duel = (await chain.publicClient.readContract({
     address: chain.duelOracleAddress,
     abi: DUEL_OUTCOME_ORACLE_ABI,
     functionName: "getDuel",
     args: [duelKey],
   })) as EvmOracleDuelState;
+  lastSuccessfulRpcAtMs = Date.now();
+  return duel;
 }
 
 async function readEvmMarketState(
   chain: EvmKeeperRuntime,
   duelKey: Hex,
 ): Promise<EvmGoldClobMarketState> {
-  return (await chain.publicClient.readContract({
+  const market = (await chain.publicClient.readContract({
     address: chain.goldClobAddress,
     abi: EVM_GOLD_CLOB_ADMIN_ABI,
     functionName: "getMarket",
     args: [duelKey, EVM_DUEL_WINNER_MARKET_KIND],
   })) as EvmGoldClobMarketState;
+  lastSuccessfulRpcAtMs = Date.now();
+  return market;
 }
 
 function expectedMarketStatusForDuelStatus(status: number): number {
@@ -3153,13 +3167,31 @@ function buildTrackedMatch(
   marketState: PublicKey,
   vault: PublicKey,
 ): ActiveClobMatch {
-  return {
+  return buildTrackedMatchFromKeys({
     duelId: data.duelId,
     duelKeyHex: data.duelKeyHex,
     duelState,
     marketState,
     vault,
     createdAt: Date.now(),
+  });
+}
+
+function buildTrackedMatchFromKeys(params: {
+  duelId: string;
+  duelKeyHex: string;
+  duelState: PublicKey;
+  marketState: PublicKey;
+  vault: PublicKey;
+  createdAt?: number | null;
+}): ActiveClobMatch {
+  return {
+    duelId: params.duelId,
+    duelKeyHex: params.duelKeyHex,
+    duelState: params.duelState,
+    marketState: params.marketState,
+    vault: params.vault,
+    createdAt: params.createdAt ?? Date.now(),
     lastStreamAtMs: Date.now(),
     lastOracleAtMs: null,
     lastRpcAtMs: null,
@@ -3172,6 +3204,49 @@ function buildTrackedMatch(
     yesBidOrder: null,
     noAskOrder: null,
   };
+}
+
+function deriveTrackedMatchForParitySnapshot(
+  snapshot: KeeperMarketParitySnapshot,
+): ActiveClobMatch | null {
+  const duelKey = normalizedBundleDuelKey(snapshot.duelKey);
+  if (!duelKey) return null;
+
+  const existing = snapshot.duelId
+    ? activeClobMatches.get(snapshot.duelId)
+    : null;
+  if (
+    existing &&
+    normalizedBundleDuelKey(existing.duelKeyHex) === duelKey
+  ) {
+    return existing;
+  }
+
+  const duelKeyBytes = duelKeyHexToBytes(duelKey);
+  const duelState = findDuelStatePda(fightProgram.programId, duelKeyBytes);
+  const marketState = findMarketPda(
+    marketProgram.programId,
+    duelState,
+    SOLANA_DUEL_WINNER_MARKET_KIND,
+  );
+  const vault = findClobVaultPda(marketProgram.programId, marketState);
+  return buildTrackedMatchFromKeys({
+    duelId: snapshot.duelId ?? `parity:${duelKey}`,
+    duelKeyHex: duelKey,
+    duelState,
+    marketState,
+    vault,
+    createdAt: snapshot.openedAtMs ?? snapshot.updatedAtMs,
+  });
+}
+
+function resolvedWinnerFromDuelState(
+  duelState: Record<string, unknown> | null,
+): PredictionMarketWinner {
+  if (!duelState) return "NONE";
+  if (enumIs(duelState.winner, "a")) return "A";
+  if (enumIs(duelState.winner, "b")) return "B";
+  return "NONE";
 }
 
 async function ensureSolanaRound(
@@ -4306,51 +4381,197 @@ async function maybeFinalizePendingEvmParityResolution(): Promise<void> {
   for (const chain of evmKeeperChains.filter((entry) =>
     evmParityChains.includes(entry.chainKey),
   )) {
-    const receipt = marketParitySnapshot?.receipts.find(
-      (entry) => entry.chainKey === chain.chainKey,
-    );
-    if (receipt?.lifecycleStatus === "RESOLVED") {
-      continue;
-    }
+    try {
+      const receipt = marketParitySnapshot?.receipts.find(
+        (entry) => entry.chainKey === chain.chainKey,
+      );
+      if (receipt?.lifecycleStatus === "RESOLVED") {
+        continue;
+      }
 
-    const duel = await readEvmDuelState(chain, duelKey);
-    const status = asNum(duel.status, EVM_DUEL_STATUS_NULL);
-    if (status === EVM_DUEL_STATUS_RESOLVED) {
+      const duel = await readEvmDuelState(chain, duelKey);
+      const status = asNum(duel.status, EVM_DUEL_STATUS_NULL);
+      if (status === EVM_DUEL_STATUS_RESOLVED) {
+        markMarketParityChainConfirmed({
+          chainKey: chain.chainKey,
+          transition: "resolve",
+          lifecycleStatus: "RESOLVED",
+          note: "resolved-on-readback",
+        });
+        continue;
+      }
+      if (status === EVM_DUEL_STATUS_CHALLENGED) {
+        finalizeMarketParityState("frozen", "RESOLUTION", {
+          reason: `${chain.chainKey} duel ${current.duelId ?? current.duelKey} is challenged`,
+        });
+        return;
+      }
+      if (status !== EVM_DUEL_STATUS_PROPOSED) {
+        console.warn("[bot] market_parity_evm_finalize_skip", {
+          chainKey: chain.chainKey,
+          duelId: current.duelId,
+          duelKey: current.duelKey,
+          status,
+        });
+        continue;
+      }
+
+      const finalization = await finalizeEvmDuelResultIfReady(
+        chain,
+        duelKey,
+        metadata,
+      );
       markMarketParityChainConfirmed({
         chainKey: chain.chainKey,
-        transition: "resolve",
-        lifecycleStatus: "RESOLVED",
-        note: "resolved-on-readback",
+        transition: finalization === "resolved" ? "resolve" : "propose",
+        lifecycleStatus: finalization === "resolved" ? "RESOLVED" : "PROPOSED",
+        countsForQuorum: finalization === "resolved",
+        note:
+          finalization === "resolved"
+            ? "finalized-after-dispute-window"
+            : "dispute-window-active",
       });
-      continue;
-    }
-    if (status === EVM_DUEL_STATUS_CHALLENGED) {
-      finalizeMarketParityState("frozen", "RESOLUTION", {
-        reason: `${chain.chainKey} duel ${current.duelId ?? current.duelKey} is challenged`,
+    } catch (error) {
+      console.warn("[bot] market_parity_evm_finalize_retry", {
+        chainKey: chain.chainKey,
+        duelId: current.duelId,
+        duelKey: current.duelKey,
+        error: error instanceof Error ? error.message : String(error),
       });
-      return;
     }
-    if (status !== EVM_DUEL_STATUS_PROPOSED) {
-      continue;
-    }
-
-    const finalization = await finalizeEvmDuelResultIfReady(
-      chain,
-      duelKey,
-      metadata,
-    );
-    markMarketParityChainConfirmed({
-      chainKey: chain.chainKey,
-      transition: finalization === "resolved" ? "resolve" : "propose",
-      lifecycleStatus: finalization === "resolved" ? "RESOLVED" : "PROPOSED",
-      countsForQuorum: finalization === "resolved",
-      note:
-        finalization === "resolved"
-          ? "finalized-after-dispute-window"
-          : "dispute-window-active",
-    });
   }
 
+  if (allRequiredParityChainsConfirmed()) {
+    finalizeMarketParityState("resolved", "RESOLUTION");
+  }
+}
+
+async function maybeFinalizePendingSolanaParityResolution(): Promise<void> {
+  const current = marketParitySnapshot;
+  if (
+    !current ||
+    current.phase !== "RESOLUTION" ||
+    isTerminalMarketParityState(current.state) ||
+    !requiredParityChains.includes("solana")
+  ) {
+    return;
+  }
+
+  const receipt = current.receipts.find((entry) => entry.chainKey === "solana");
+  if (receipt?.lifecycleStatus === "RESOLVED") {
+    return;
+  }
+
+  const trackedMatch = deriveTrackedMatchForParitySnapshot(current);
+  if (!trackedMatch) {
+    console.warn("[bot] market_parity_solana_finalize_skip", {
+      reason: "missing-duel-key",
+      duelId: current.duelId,
+      duelKey: current.duelKey,
+    });
+    return;
+  }
+
+  let duelState = await getDuelState(trackedMatch.duelState);
+  if (!duelState) {
+    console.warn("[bot] market_parity_solana_finalize_skip", {
+      reason: "duel-state-missing",
+      duelId: current.duelId,
+      duelKey: current.duelKey,
+      duelState: trackedMatch.duelState.toBase58(),
+    });
+    return;
+  }
+
+  if (enumIs(duelState.status, "challenged") || Boolean(duelState.pendingChallenged)) {
+    finalizeMarketParityState("frozen", "RESOLUTION", {
+      reason: `solana duel ${current.duelId ?? current.duelKey} is challenged`,
+    });
+    return;
+  }
+
+  if (enumIs(duelState.status, "resolved")) {
+    trackedMatch.winner = resolvedWinnerFromDuelState(duelState);
+    await syncTrackedMarketFromOracle(trackedMatch);
+    await captureSettledClobHealth(trackedMatch, "RESOLVED");
+    if (trackedMatch.duelId) {
+      activeClobMatches.delete(trackedMatch.duelId);
+      unresolvedOracleWarningMatches.delete(trackedMatch.duelId);
+    }
+    markMarketParityChainConfirmed({
+      chainKey: "solana",
+      transition: "resolve",
+      lifecycleStatus: "RESOLVED",
+      note: "resolved-on-readback",
+    });
+    if (allRequiredParityChainsConfirmed()) {
+      finalizeMarketParityState("resolved", "RESOLUTION");
+    }
+    return;
+  }
+
+  if (!enumIs(duelState.status, "proposed")) {
+    console.warn("[bot] market_parity_solana_finalize_skip", {
+      reason: "not-proposed",
+      duelId: current.duelId,
+      duelKey: current.duelKey,
+      status: duelState.status,
+    });
+    return;
+  }
+
+  const metadata = buildDuelMetadataForDuelKey(
+    trackedMatch.duelKeyHex,
+    trackedMatch.duelId,
+  );
+  let finalized = false;
+  try {
+    finalized = await maybeFinalizeTrackedProposal(
+      trackedMatch,
+      duelState,
+      metadata,
+    );
+  } catch (error) {
+    if (!isSolanaDisputeWindowActiveError(error)) {
+      throw error;
+    }
+  }
+
+  if (!finalized) {
+    markMarketParityChainConfirmed({
+      chainKey: "solana",
+      transition: "propose",
+      lifecycleStatus: "PROPOSED",
+      countsForQuorum: false,
+      note: "dispute-window-active",
+    });
+    return;
+  }
+
+  duelState = await getDuelState(trackedMatch.duelState);
+  if (!duelState || !enumIs(duelState.status, "resolved")) {
+    console.warn("[bot] market_parity_solana_finalize_skip", {
+      reason: "finalize-readback-not-resolved",
+      duelId: current.duelId,
+      duelKey: current.duelKey,
+      status: duelState?.status ?? null,
+    });
+    return;
+  }
+
+  trackedMatch.winner = resolvedWinnerFromDuelState(duelState);
+  await syncTrackedMarketFromOracle(trackedMatch);
+  await captureSettledClobHealth(trackedMatch, "RESOLVED");
+  if (trackedMatch.duelId) {
+    activeClobMatches.delete(trackedMatch.duelId);
+    unresolvedOracleWarningMatches.delete(trackedMatch.duelId);
+  }
+  markMarketParityChainConfirmed({
+    chainKey: "solana",
+    transition: "resolve",
+    lifecycleStatus: "RESOLVED",
+    note: "finalized-after-dispute-window",
+  });
   if (allRequiredParityChainsConfirmed()) {
     finalizeMarketParityState("resolved", "RESOLUTION");
   }
@@ -4380,22 +4601,29 @@ async function maybeFinalizeTrackedProposal(
     return false;
   }
 
-  await runWithRecovery(
-    () =>
-      fightProgram.methods
-        .finalizeResult(
-          Array.from(duelKeyHexToBytes(trackedMatch.duelKeyHex)),
-          metadataUri,
-        )
-        .accountsPartial({
-          finalizer: oracleFinalizerKeypair.publicKey,
-          oracleConfig: oracleConfigPda,
-          duelState: trackedMatch.duelState,
-        })
-        .signers([oracleFinalizerKeypair])
-        .rpc(),
-    connection,
-  );
+  try {
+    await runWithRecovery(
+      () =>
+        fightProgram.methods
+          .finalizeResult(
+            Array.from(duelKeyHexToBytes(trackedMatch.duelKeyHex)),
+            metadataUri,
+          )
+          .accountsPartial({
+            finalizer: oracleFinalizerKeypair.publicKey,
+            oracleConfig: oracleConfigPda,
+            duelState: trackedMatch.duelState,
+          })
+          .signers([oracleFinalizerKeypair])
+          .rpc(),
+      connection,
+    );
+  } catch (error) {
+    if (isSolanaDisputeWindowActiveError(error)) {
+      return false;
+    }
+    throw error;
+  }
   markRpcSuccess(trackedMatch);
   return true;
 }
@@ -4904,6 +5132,7 @@ async function runMaintenance(): Promise<void> {
     return;
   }
   await ensureOracleReady();
+  await maybeFinalizePendingSolanaParityResolution();
   await maybeFinalizePendingEvmParityResolution();
 
   // Poll only the actively tracked CLOB markets we created.
