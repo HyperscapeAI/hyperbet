@@ -93,6 +93,10 @@ type StreamState = {
   cameraTarget: string | null;
   seq: number;
   emittedAt: number;
+  phase?: string | null;
+  phaseVersion?: number | null;
+  broadcastTimeline?: Record<string, unknown> | null;
+  rendererHealth?: Record<string, unknown> | null;
   channel?: Record<string, unknown> | null;
   publicReadiness?: Record<string, unknown> | null;
   canonicalDestination?: Record<string, unknown> | null;

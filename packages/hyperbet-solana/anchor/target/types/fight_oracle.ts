@@ -5,7 +5,7 @@
  * IDL can be found at `target/idl/fight_oracle.json`.
  */
 export type FightOracle = {
-  "address": "GFdnu7kUnZGiXh4ejWiJSBCUxvq4UfdEeUv9jjFzr5EM",
+  "address": "7EXSmAP4fcabojJBQbxN7GcBE4hinqfZao1tJcGLTrfB",
   "metadata": {
     "name": "fightOracle",
     "version": "0.1.0",
@@ -349,7 +349,7 @@ export type FightOracle = {
         },
         {
           "name": "program",
-          "address": "GFdnu7kUnZGiXh4ejWiJSBCUxvq4UfdEeUv9jjFzr5EM"
+          "address": "7EXSmAP4fcabojJBQbxN7GcBE4hinqfZao1tJcGLTrfB"
         },
         {
           "name": "programData"

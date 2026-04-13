@@ -6,20 +6,20 @@ resolution = true
 skip-lint = false
 
 [programs.devnet]
-fight_oracle = "GFdnu7kUnZGiXh4ejWiJSBCUxvq4UfdEeUv9jjFzr5EM"
-gold_clob_market = "3QUVoaKJqo1rg9eXe7vyFewJrY75NWdtH8JZfvTb79Uy"
+fight_oracle = "7EXSmAP4fcabojJBQbxN7GcBE4hinqfZao1tJcGLTrfB"
+gold_clob_market = "EHBdndoQUXZXDtoTcb5D5AimJ1x715vKWzbqLH8entTt"
 gold_perps_market = "BFbmQbSbf3R6fMDdXKMKQZCTyMhMs9MCcjAhGDBLETXS"
 lvr_amm = "12E8Lz5w8Qxyj8Fh6LgsCgPDQNJMCLMV1y43LhPrH66w"
 
 [programs.localnet]
-fight_oracle = "GFdnu7kUnZGiXh4ejWiJSBCUxvq4UfdEeUv9jjFzr5EM"
-gold_clob_market = "3QUVoaKJqo1rg9eXe7vyFewJrY75NWdtH8JZfvTb79Uy"
+fight_oracle = "7EXSmAP4fcabojJBQbxN7GcBE4hinqfZao1tJcGLTrfB"
+gold_clob_market = "EHBdndoQUXZXDtoTcb5D5AimJ1x715vKWzbqLH8entTt"
 gold_perps_market = "BFbmQbSbf3R6fMDdXKMKQZCTyMhMs9MCcjAhGDBLETXS"
 lvr_amm = "12E8Lz5w8Qxyj8Fh6LgsCgPDQNJMCLMV1y43LhPrH66w"
 
 [programs.testnet]
-fight_oracle = "GFdnu7kUnZGiXh4ejWiJSBCUxvq4UfdEeUv9jjFzr5EM"
-gold_clob_market = "3QUVoaKJqo1rg9eXe7vyFewJrY75NWdtH8JZfvTb79Uy"
+fight_oracle = "7EXSmAP4fcabojJBQbxN7GcBE4hinqfZao1tJcGLTrfB"
+gold_clob_market = "EHBdndoQUXZXDtoTcb5D5AimJ1x715vKWzbqLH8entTt"
 gold_perps_market = "BFbmQbSbf3R6fMDdXKMKQZCTyMhMs9MCcjAhGDBLETXS"
 lvr_amm = "12E8Lz5w8Qxyj8Fh6LgsCgPDQNJMCLMV1y43LhPrH66w"
 
