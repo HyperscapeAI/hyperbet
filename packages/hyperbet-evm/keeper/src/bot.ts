@@ -183,6 +183,24 @@ function hashParticipant(agent: { id?: string; name?: string } | null): number[]
   return Array.from(createHash("sha256").update(id).digest());
 }
 
+function toByteArray32(value: unknown): number[] | null {
+  if (Array.isArray(value) && value.length === 32) {
+    const normalized = value.map((entry) => Number(entry));
+    return normalized.every(
+      (entry) => Number.isInteger(entry) && entry >= 0 && entry <= 255,
+    )
+      ? normalized
+      : null;
+  }
+  if (value instanceof Uint8Array && value.length === 32) {
+    return Array.from(value);
+  }
+  if (Buffer.isBuffer(value) && value.length === 32) {
+    return Array.from(value);
+  }
+  return null;
+}
+
 type WinnerSide = "A" | "B";
 type DuelStatusState =
   | { scheduled: {} }
@@ -2625,15 +2643,29 @@ async function upsertDuelLifecycle(
 ): Promise<PublicKey> {
   const duelKey = duelKeyHexToBytes(data.duelKeyHex);
   const duelState = findDuelStatePda(fightProgram.programId, duelKey);
-  const { betOpenTs, betCloseTs, duelStartTs } = deriveCanonicalDuelTimes(data);
+  const existingDuelState = await getDuelState(duelState);
+  const derivedTimes = deriveCanonicalDuelTimes(data);
+  const betOpenTs = existingDuelState
+    ? asNum(existingDuelState.betOpenTs, derivedTimes.betOpenTs)
+    : derivedTimes.betOpenTs;
+  const betCloseTs = existingDuelState
+    ? asNum(existingDuelState.betCloseTs, derivedTimes.betCloseTs)
+    : derivedTimes.betCloseTs;
+  const duelStartTs = existingDuelState
+    ? asNum(existingDuelState.duelStartTs, derivedTimes.duelStartTs)
+    : derivedTimes.duelStartTs;
+  const participantAHash =
+    toByteArray32(existingDuelState?.participantAHash) ?? hashParticipant(data.agent1);
+  const participantBHash =
+    toByteArray32(existingDuelState?.participantBHash) ?? hashParticipant(data.agent2);
 
   await runWithRecovery(
     () =>
       fightProgram.methods
         .upsertDuel(
           Array.from(duelKey),
-          hashParticipant(data.agent1),
-          hashParticipant(data.agent2),
+          participantAHash,
+          participantBHash,
           new BN(betOpenTs),
           new BN(betCloseTs),
           new BN(duelStartTs),

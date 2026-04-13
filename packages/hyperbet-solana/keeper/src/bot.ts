@@ -1907,17 +1907,26 @@ async function upsertDuelLifecycle(
   const duelKey = duelKeyHexToBytes(data.duelKeyHex);
   const duelState = findDuelStatePda(fightProgram.programId, duelKey);
   const existingDuelState = await getDuelState(duelState);
-  const betOpenTs = Math.floor((data.betOpenTime ?? Date.now()) / 1000);
-  const betCloseTs = Math.max(
-    betOpenTs + 1,
+  const derivedBetOpenTs = Math.floor((data.betOpenTime ?? Date.now()) / 1000);
+  const derivedBetCloseTs = Math.max(
+    derivedBetOpenTs + 1,
     Math.floor(
       (data.betCloseTime ?? data.fightStartTime ?? Date.now() + 1_000) / 1000,
     ),
   );
-  const duelStartTs = Math.max(
-    betCloseTs,
+  const derivedDuelStartTs = Math.max(
+    derivedBetCloseTs,
     Math.floor((data.fightStartTime ?? data.betCloseTime ?? Date.now()) / 1000),
   );
+  const betOpenTs = existingDuelState
+    ? asNum(existingDuelState.betOpenTs, derivedBetOpenTs)
+    : derivedBetOpenTs;
+  const betCloseTs = existingDuelState
+    ? asNum(existingDuelState.betCloseTs, derivedBetCloseTs)
+    : derivedBetCloseTs;
+  const duelStartTs = existingDuelState
+    ? asNum(existingDuelState.duelStartTs, derivedDuelStartTs)
+    : derivedDuelStartTs;
   const participantAHash =
     toByteArray32(existingDuelState?.participantAHash) ?? hashParticipant(data.agent1);
   const participantBHash =
