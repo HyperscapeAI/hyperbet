@@ -180,4 +180,21 @@ describe("advanceViewerSyncState", () => {
     });
     expect(second.syncState).toBe("aligned");
   });
+
+  it("does not compare HLS live latency against a zero presentation delay", () => {
+    const next = advanceViewerSyncState({
+      previousState: "aligned",
+      consecutiveAlignedPolls: 0,
+      consecutiveOutOfSyncPolls: 0,
+      liveEdgeLatencyMs: 20_000,
+      playbackStarted: true,
+      presentationDelayMs: 0,
+      ready: true,
+      status: "playing",
+      syncToleranceMs: 1_500,
+    });
+
+    expect(next.syncDeltaMs).toBeNull();
+    expect(next.syncState).toBe("aligned");
+  });
 });

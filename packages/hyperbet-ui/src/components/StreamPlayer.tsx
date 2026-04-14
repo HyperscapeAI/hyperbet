@@ -1479,7 +1479,8 @@ export function advanceViewerSyncState(params: {
     params.liveEdgeLatencyMs != null &&
     Number.isFinite(params.liveEdgeLatencyMs) &&
     params.presentationDelayMs != null &&
-    Number.isFinite(params.presentationDelayMs)
+    Number.isFinite(params.presentationDelayMs) &&
+    params.presentationDelayMs > 0
       ? Math.round(params.liveEdgeLatencyMs - params.presentationDelayMs)
       : null;
 
