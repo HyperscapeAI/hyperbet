@@ -700,7 +700,7 @@ export function HlsPlayerApp() {
           runtime.stalledCount += 1;
           setTelemetry({ stallCount: runtime.stalledCount });
           markDegraded(
-            "Player buffering near the live edge.",
+            "Your playback is catching up to the live edge.",
             "buffering",
             "reconnecting",
           );

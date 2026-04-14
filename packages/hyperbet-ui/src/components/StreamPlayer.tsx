@@ -861,7 +861,7 @@ export const StreamPlayer: React.FC<StreamPlayerProps> = ({
           ...current,
           stallCount: current.stallCount + 1,
         }));
-        markDegraded("Player buffering near the live edge.");
+        markDegraded("Your playback is catching up to the live edge.");
       }, playbackProfile.waitingGraceMs);
     };
     const onStalled = () => {
@@ -1646,7 +1646,7 @@ function describePlayerStatus(
     case "player_drifted":
       return describeCanonicalRendererDegradedReason("player_drifted");
     case "buffering":
-      return "Player buffering near the live edge.";
+      return "Your playback is catching up to the live edge.";
     case "reconnecting":
       return "Reconnecting to the live stream.";
     default:

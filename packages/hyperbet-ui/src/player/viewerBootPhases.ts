@@ -26,10 +26,10 @@ const DEFAULT_PROGRESS_BY_PHASE: Record<ViewerBootPhase, number> = {
 const DEFAULT_STAGE_LABEL_BY_PHASE: Record<ViewerBootPhase, string> = {
   connecting: "Connecting to live stream...",
   initializing: "Initializing stream session...",
-  buffering_media: "Aligning stream with live bets...",
-  finalizing: "Finalizing stream playback...",
-  reconnecting: "Aligning stream with live bets...",
-  error: "Aligning stream with live bets...",
+  buffering_media: "Your playback is catching up...",
+  finalizing: "Your playback is catching up...",
+  reconnecting: "Your playback is catching up...",
+  error: "Your playback is catching up...",
 };
 
 const DEFAULT_OVERLAY_BY_PHASE: Partial<Record<ViewerBootPhase, string>> = {
