@@ -78,6 +78,17 @@ describe("resolveHlsPlaybackProfile", () => {
     expect(profile.startupGraceMs).toBe(4_000);
     expect(profile.reloadOnBufferStall).toBe(true);
   });
+
+  it("keeps stable HLS away from the playlist tail without pinning to the old edge", () => {
+    const profile = resolveHlsPlaybackProfile(
+      "https://video.example/live/stream.m3u8",
+      "self_hls/hls",
+    );
+
+    expect(profile.config.liveSyncDurationCount).toBe(4);
+    expect(profile.config.liveMaxLatencyDurationCount).toBe(12);
+    expect(profile.config.maxBufferLength).toBe(30);
+  });
 });
 
 describe("resolvePlayerDeliveryModeHint", () => {
