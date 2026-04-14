@@ -108,8 +108,8 @@ export const LIVE_EDGE_HLS_CONFIG = LOW_LATENCY_HLS_CONFIG;
 const STABLE_LIVE_HLS_CONFIG = {
   enableWorker: true,
   lowLatencyMode: false,
-  liveSyncDurationCount: 4,
-  liveMaxLatencyDurationCount: 12,
+  liveSyncDurationCount: 10,
+  liveMaxLatencyDurationCount: 16,
   liveBackBufferLength: 30,
   maxBufferLength: 30,
   maxMaxBufferLength: 60,
