@@ -110,9 +110,9 @@ const STABLE_LIVE_HLS_CONFIG = {
   lowLatencyMode: false,
   liveSyncDurationCount: 10,
   liveMaxLatencyDurationCount: 16,
-  liveBackBufferLength: 30,
-  maxBufferLength: 30,
-  maxMaxBufferLength: 60,
+  liveBackBufferLength: 45,
+  maxBufferLength: 45,
+  maxMaxBufferLength: 90,
   maxLiveSyncPlaybackRate: 1.1,
   startFragPrefetch: false,
   manifestLoadingMaxRetry: 6,
@@ -1420,7 +1420,7 @@ export function resolveHlsPlaybackProfile(
 
   return {
     config: STABLE_LIVE_HLS_CONFIG,
-    driftThresholdMs: 20_000,
+    driftThresholdMs: 35_000,
     waitingGraceMs: 2_500,
     reloadOnBufferStall: false,
     rebuildOnVideoError: false,

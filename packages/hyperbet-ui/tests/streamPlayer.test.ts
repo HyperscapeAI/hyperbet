@@ -87,7 +87,8 @@ describe("resolveHlsPlaybackProfile", () => {
 
     expect(profile.config.liveSyncDurationCount).toBe(10);
     expect(profile.config.liveMaxLatencyDurationCount).toBe(16);
-    expect(profile.config.maxBufferLength).toBe(30);
+    expect(profile.config.maxBufferLength).toBe(45);
+    expect(profile.driftThresholdMs).toBe(35_000);
   });
 });
 
