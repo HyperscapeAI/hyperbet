@@ -1310,7 +1310,17 @@ export class CrossChainMarketMaker {
     }
 
     if (order.chainKey === "solana") {
-      const activeOrder = await this.getManagedSolanaOrder(order).catch(() => null);
+      let activeOrder: SolanaManagedOrder | null = null;
+      try {
+        activeOrder = await this.getManagedSolanaOrder(order);
+      } catch (error) {
+        await this.markTrackedOrderStatus(order, "QUARANTINED", "recovered_order_check_failed", {
+          lastReconciledAt: now,
+          quarantineReason:
+            error instanceof Error ? error.message : String(error),
+        });
+        return;
+      }
       if (!activeOrder) {
         await this.markTrackedOrderStatus(order, "FILLED", "recovered_missing_order", {
           lastReconciledAt: now,
@@ -1352,7 +1362,16 @@ export class CrossChainMarketMaker {
       return;
     }
 
-    const onChain = await this.inspectEvmTrackedOrder(runtime, order).catch(() => null);
+    let onChain: { active: boolean; amount: number; price: number } | null = null;
+    try {
+      onChain = await this.inspectEvmTrackedOrder(runtime, order);
+    } catch (error) {
+      await this.markTrackedOrderStatus(order, "QUARANTINED", "recovered_order_check_failed", {
+        lastReconciledAt: now,
+        quarantineReason: error instanceof Error ? error.message : String(error),
+      });
+      return;
+    }
     if (!onChain?.active) {
       await this.markTrackedOrderStatus(order, "FILLED", "recovered_missing_order", {
         lastReconciledAt: now,
@@ -2611,7 +2630,7 @@ export class CrossChainMarketMaker {
           order.duelKey === duelKey &&
           order.side === BUY_SIDE,
       ) ?? null,
-    ).catch(() => null);
+    );
     const noAskOrder = await this.getManagedSolanaOrder(
       this.activeOrders.find(
         (order) =>
@@ -2619,7 +2638,7 @@ export class CrossChainMarketMaker {
           order.duelKey === duelKey &&
           order.side === SELL_SIDE,
       ) ?? null,
-    ).catch(() => null);
+    );
     const openOrders = [yesBidOrder, noAskOrder].filter(
       (order): order is SolanaManagedOrder => order != null,
     );
@@ -2982,6 +3001,14 @@ export class CrossChainMarketMaker {
     }
   }
 
+  private async readSolanaTokenAmount(
+    runtime: SolanaAmmRuntime,
+    tokenAccount: PublicKey,
+  ): Promise<bigint> {
+    const response = await runtime.connection.getTokenAccountBalance(tokenAccount);
+    return BigInt(response.value.amount);
+  }
+
   private async solanaAmmMarketMakeOne(
     runtime: SolanaAmmRuntime,
     market: PredictionMarketLifecycleRecord,
@@ -3104,13 +3131,9 @@ export class CrossChainMarketMaker {
       }
 
       // Read actual token balances after trade for accurate position tracking
-      const [yesBalResp, noBalResp] = await Promise.all([
-        runtime.connection.getTokenAccountBalance(destinationYes).catch(() => ({
-          value: { amount: "0" },
-        })),
-        runtime.connection.getTokenAccountBalance(destinationNo).catch(() => ({
-          value: { amount: "0" },
-        })),
+      const [yesBalance, noBalance] = await Promise.all([
+        this.readSolanaTokenAmount(runtime, destinationYes),
+        this.readSolanaTokenAmount(runtime, destinationNo),
       ]);
 
       const pos: AmmPosition = existing ?? {
@@ -3123,8 +3146,8 @@ export class CrossChainMarketMaker {
         costBasis: 0n,
         settled: false,
       };
-      pos.yesBalance = BigInt(yesBalResp.value.amount);
-      pos.noBalance = BigInt(noBalResp.value.amount);
+      pos.yesBalance = yesBalance;
+      pos.noBalance = noBalance;
       if (isBuy) {
         pos.costBasis += BigInt(decision.amount);
       }
@@ -3158,17 +3181,11 @@ export class CrossChainMarketMaker {
         mintNo,
         runtime.wallet.publicKey,
       );
-      const [yesBalanceResp, noBalanceResp] = await Promise.all([
-        runtime.connection.getTokenAccountBalance(destinationYes).catch(() => ({
-          value: { amount: "0" },
-        })),
-        runtime.connection.getTokenAccountBalance(destinationNo).catch(() => ({
-          value: { amount: "0" },
-        })),
+      const [yesBalance, noBalance] = await Promise.all([
+        this.readSolanaTokenAmount(runtime, destinationYes),
+        this.readSolanaTokenAmount(runtime, destinationNo),
       ]);
 
-      const yesBalance = BigInt(yesBalanceResp.value.amount);
-      const noBalance = BigInt(noBalanceResp.value.amount);
       const sideWon: number = Number(betAccount.sideWon);
       const withdrawals: Array<{ outcome: number; balance: bigint }> = [];
 

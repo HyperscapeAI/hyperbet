@@ -35,6 +35,7 @@ import {
 import {
   createPrograms,
   createReadonlyPrograms,
+  type ProgramsBundle,
   type SigningWalletLike,
 } from "../lib/programs";
 import {
@@ -90,6 +91,8 @@ type MarketSnapshot = {
   bestAsk: number;
   betCloseTime: number | null;
 };
+
+type ClobProgram = ProgramsBundle["goldClobMarket"];
 
 type PriceLevelAccount = {
   publicKey: PublicKey;
@@ -795,8 +798,8 @@ export function SolanaClobPanel({
   );
 
   const runRefreshData = useCallback(async () => {
-    const clobProgram: any = readonlyPrograms.goldClobMarket;
-    const oracleProgram: any = readonlyPrograms.fightOracle;
+    const clobProgram = readonlyPrograms.goldClobMarket;
+    const oracleProgram = readonlyPrograms.fightOracle;
     const runtimeConfigPda = findClobConfigPda(clobProgram.programId);
 
     if (!marketConfigCheckedRef.current) {
@@ -1100,7 +1103,7 @@ export function SolanaClobPanel({
 
   const buildPlaceOrderRemainingAccounts = useCallback(
     async (
-      clobProgram: any,
+      clobProgram: ClobProgram,
       market: MarketSnapshot,
       sideValue: number,
       price: number,
@@ -1237,7 +1240,7 @@ export function SolanaClobPanel({
 
 
   const handlePlaceOrder = useCallback(async () => {
-    const clobProgram: any = writablePrograms?.goldClobMarket;
+    const clobProgram = writablePrograms?.goldClobMarket;
     const marketRef = activeMarket?.marketState.toBase58() ?? "-";
     const duelRef = duelId ?? "-";
     const walletRef = wallet.publicKey?.toBase58() ?? "-";
@@ -1391,7 +1394,7 @@ export function SolanaClobPanel({
 
 
   const handleClaim = useCallback(async () => {
-    const clobProgram: any = writablePrograms?.goldClobMarket;
+    const clobProgram = writablePrograms?.goldClobMarket;
     if (!clobProgram || !wallet.publicKey || !activeMarket) {
       setStatus(copy.connectWalletToClaim);
       return;

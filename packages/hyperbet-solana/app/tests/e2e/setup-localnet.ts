@@ -366,8 +366,8 @@ async function main(): Promise<void> {
     10 * LAMPORTS_PER_SOL,
   );
 
-  // CLOB settlement uses native SOL in this test stack; the legacy config
-  // key still carries a mint address, so point it at wrapped SOL.
+  // Local e2e stack settles CLOB in native SOL, so the legacy mint key is
+  // redirected to WSOL to satisfy downstream account initialization.
   const goldMint = new PublicKey("So11111111111111111111111111111111111111112");
   const e2eModelCharacterId = "e2e-model-alpha";
   const e2eModelName = "E2E Model Alpha";

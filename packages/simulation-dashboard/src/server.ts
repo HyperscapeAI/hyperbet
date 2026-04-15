@@ -735,7 +735,16 @@ async function sendAnvilRpc(method: string, params: unknown[] = []): Promise<any
             params,
         }),
     });
-    const payload = await response.json().catch(() => null);
+    let payload: any;
+    try {
+        payload = await response.json();
+    } catch (error) {
+        throw new Error(
+            `Failed to parse JSON response for ${method}: ${
+                error instanceof Error ? error.message : String(error)
+            }`,
+        );
+    }
     if (!response.ok) {
         throw new Error(
             payload?.error?.message || `${method} failed with ${response.status} ${response.statusText}`,

@@ -1,9 +1,16 @@
-import { defineConfig, loadEnv, type UserConfig } from "vite";
+import {
+  defineConfig,
+  loadEnv,
+  type PluginOption,
+  type UserConfig,
+  type ViteDevServer,
+} from "vite";
 import react from "@vitejs/plugin-react";
 import * as path from "path";
 import * as fs from "fs";
 import { execSync } from "child_process";
 import { fileURLToPath } from "url";
+import type { IncomingMessage, ServerResponse } from "node:http";
 // @ts-ignore
 import { createRequire } from "module";
 import { nodePolyfills } from "vite-plugin-node-polyfills";
@@ -71,7 +78,7 @@ function assertPublicBuildSecrets(
 export default defineConfig(async ({ mode }) => {
   const env = loadEnv(mode, __dirname, "");
   assertPublicBuildSecrets(mode, env);
-  const plugins: any[] = [react()];
+  const plugins: PluginOption[] = [react()];
   const alias: Record<string, string> = {};
   const require = createRequire(import.meta.url);
   const nodePolyfillsRoot = path.dirname(
@@ -160,7 +167,7 @@ export default defineConfig(async ({ mode }) => {
     include: ["buffer", "process"],
     globals: { global: true, process: true, Buffer: true },
     protocolImports: true,
-  }) as any;
+  }) as PluginOption | PluginOption[];
   if (Array.isArray(polyfills)) {
     plugins.push(...polyfills);
   } else {
@@ -186,10 +193,12 @@ export default defineConfig(async ({ mode }) => {
   const hlsRoots = useLocalAppHlsFallback
     ? [serverHlsRoot, localAppHlsRoot]
     : [serverHlsRoot];
-  const hlsPlugin = {
+  const hlsPlugin: PluginOption = {
     name: "hls-live-serve",
-    configureServer(server: any) {
-      server.middlewares.use("/live", (req: any, res: any, next: any) => {
+    configureServer(server: ViteDevServer) {
+      server.middlewares.use(
+        "/live",
+        (req: IncomingMessage, res: ServerResponse, _next: () => void) => {
         let requestPath = "/";
         try {
           const parsed = new URL(req.url || "/", "http://localhost");

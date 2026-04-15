@@ -1704,7 +1704,26 @@ async function fetchExternalSolanaPerpsPayload(
       headers: { Accept: "application/json" },
       signal: AbortSignal.timeout(10_000),
     });
-    const payload = await response.json().catch(() => null);
+    let payload: unknown;
+    try {
+      payload = await response.json();
+    } catch (error) {
+      if (!response.ok) {
+        return jsonResponse(
+          req,
+          {
+            error: `solana perps upstream returned invalid JSON (${response.status})`,
+          },
+          response.status,
+          { "cache-control": "no-store" },
+        );
+      }
+      throw new Error(
+        `solana perps upstream returned invalid JSON: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
     if (!response.ok) {
       return jsonResponse(
         req,

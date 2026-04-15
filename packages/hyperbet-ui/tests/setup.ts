@@ -13,11 +13,11 @@ window.matchMedia = (query: string) => ({
   addEventListener: () => { },
   removeEventListener: () => { },
   dispatchEvent: () => false,
-} as any);
+} as MediaQueryList);
 
 window.HTMLElement.prototype.scrollIntoView = () => { };
 
-(globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 afterEach(() => {
   cleanupRenderedTrees();

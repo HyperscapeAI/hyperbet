@@ -62,7 +62,7 @@ export function captureInviteCodeFromLocation(): string | null {
   try {
     window.localStorage.setItem(STORAGE_KEY, captured);
   } catch {
-    // no-op
+    // Ignore localStorage failures (e.g. privacy mode); invite capture is best-effort only.
   }
 
   for (const key of INVITE_QUERY_KEYS) {
@@ -123,6 +123,6 @@ export function markInviteAppliedForWallet(
       "1",
     );
   } catch {
-    // no-op
+    // Ignore localStorage failures (e.g. privacy mode); we can still proceed without persistence.
   }
 }

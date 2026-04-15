@@ -62,9 +62,12 @@ export function createHyperbetAppRoot({
       (entry) => entry.autoConnect,
     );
     if (autoConnectWallet) {
+      const adapterProfile = autoConnectWallet.adapter as { name?: unknown };
       localStorage.setItem(
         "walletName",
-        JSON.stringify((autoConnectWallet.adapter as any).name),
+        JSON.stringify(
+          typeof adapterProfile.name === "string" ? adapterProfile.name : "unknown",
+        ),
       );
     }
 

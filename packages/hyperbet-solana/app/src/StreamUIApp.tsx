@@ -25,7 +25,7 @@ export function StreamUIApp() {
   };
 
   const handlePlaceBet = () => {
-    /* no-op in mock mode */
+    // Mock mode only updates engine state; no separate submit path is required.
   };
 
   const phase = mock.streamState.cycle.phase;

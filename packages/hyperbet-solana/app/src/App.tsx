@@ -887,7 +887,7 @@ export function App() {
           setInviteCode(payload.inviteCode.trim().toUpperCase());
         }
       } catch {
-        // no-op: keep existing stored invite code fallback
+        // Preserve existing local invite code when the invite lookup fails.
       }
     };
 

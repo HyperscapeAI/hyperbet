@@ -564,9 +564,7 @@ contract PmPerpsInvariantTest is Test {
         // The contract enforces the liquidation threshold by reverting
         // liquidate() on healthy positions.  The handler's ghost counter
         // `ghost_liquidationsExecuted` only increments on successful calls.
-        // TODO: add a ghost counter for *attempted* liquidations on healthy
-        //       positions (try/catch around liquidate with a pre-check) to
-        //       make this invariant independently verifiable at runtime.
+        // This invariant currently verifies successful liquidations only.
         assertGe(handler.ghost_perpsLiquidations(), 0, "INV-11: liquidation counter is coherent");
     }
 

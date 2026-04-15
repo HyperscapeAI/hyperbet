@@ -97,19 +97,7 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_WRANGLER_CONFIG_B64: ${{ secrets.CLOUDFLARE_WRANGLER_CONFIG_B64 }}
-        run: |
-          if [ -n "${CLOUDFLARE_API_TOKEN}" ]; then
-            echo "CLOUDFLARE_API_TOKEN=${CLOUDFLARE_API_TOKEN}" >> "${GITHUB_ENV}"
-            exit 0
-          fi
-
-          if [ -z "${CLOUDFLARE_WRANGLER_CONFIG_B64}" ]; then
-            echo "Missing Cloudflare deploy credentials" >&2
-            exit 1
-          fi
-
-          mkdir -p "${HOME}/.wrangler/config"
-          printf '%s' "${CLOUDFLARE_WRANGLER_CONFIG_B64}" | base64 --decode > "${HOME}/.wrangler/config/default.toml"
+        run: bash scripts/ci-cloudflare-auth.sh
 
       - name: Setup Hyperbet toolchain
         uses: ./.github/actions/setup-hyperbet
@@ -146,78 +134,28 @@ jobs:
           VITE_BASE_GOLD_CLOB_ADDRESS: ${{ env.HYPERBET_BASE_GOLD_CLOB_ADDRESS }}
 
       - name: Verify dist hygiene
-        run: |
-          test -f packages/hyperbet-solana/app/dist/build-info.json
-          if find packages/hyperbet-solana/app/dist -name '*.map' | grep -q .; then
-            echo "Unexpected source maps in production dist"
-            exit 1
-          fi
-          if grep -R -n "api-key=" packages/hyperbet-solana/app/dist; then
-            echo "Provider key leak detected in dist"
-            exit 1
-          fi
+        run: bash scripts/ci-pages-deploy.sh verify-dist packages/hyperbet-solana/app
 
       - name: Deploy to Cloudflare Pages
-        working-directory: packages/hyperbet-solana/app
+        env:
+          INPUTS_ENVIRONMENT: ${{ github.event_name == 'workflow_dispatch' && inputs.environment || '' }}
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.environment }}" = "preview" ]; then
-            BRANCH="preview-${{ github.run_id }}"
-          elif [ "${DEPLOY_TARGET}" = "staging" ]; then
-            BRANCH="enoomian/staging"
-          else
-            BRANCH="main"
-          fi
-
-          COMMIT_MSG=$(git log -1 --pretty=%s | tr -d '"' | cut -c1-100)
-
-          npx wrangler@4.72.0 pages deploy dist \
-            --project-name="${PAGES_PROJECT_NAME}" \
-            --branch="${BRANCH}" \
-            --commit-hash="${GITHUB_SHA}" \
-            --commit-message="${COMMIT_MSG}" \
-            --commit-dirty=true \
-            --skip-caching
+          bash scripts/ci-pages-deploy.sh deploy \
+            packages/hyperbet-solana/app \
+            "${PAGES_PROJECT_NAME}"
 
       - name: Resolve deployed Pages URL
         id: deployment_url
         if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.environment != 'preview' }}
-        run: |
-          pages_environment="production"
-          if [ "${DEPLOY_TARGET}" != "production" ]; then
-            pages_environment="preview"
-          fi
-
-          deployed_url="$(npx wrangler@4.72.0 pages deployment list \
-            --project-name "${PAGES_PROJECT_NAME}" \
-            --environment "${pages_environment}" \
-            --json | jq -r --arg source "${GITHUB_SHA::7}" 'map(select(.Source == $source)) | .[0].Deployment // empty')"
-
-          if [ -z "${deployed_url}" ]; then
-            echo "Unable to resolve deployed Pages URL for ${PAGES_PROJECT_NAME}" >&2
-            exit 1
-          fi
-
-          echo "deployed_url=${deployed_url}" >> "${GITHUB_OUTPUT}"
+        run: bash scripts/ci-pages-deploy.sh resolve-url \
+            "${PAGES_PROJECT_NAME}" \
+            "${DEPLOY_TARGET}" \
+            "${GITHUB_SHA}"
 
       - name: Verify production build metadata
         if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.environment != 'preview' }}
-        run: |
-          deployed_url="${{ steps.deployment_url.outputs.deployed_url }}"
-          for attempt in $(seq 1 20); do
-            payload="$(curl -fsSL "${deployed_url}/build-info.json" || true)"
-            if [ -n "$payload" ] && echo "$payload" | jq -e --arg sha "$GITHUB_SHA" '.commitHash == $sha' >/dev/null; then
-              echo "build-info.json matches ${GITHUB_SHA} at ${deployed_url}"
-              break
-            fi
-            sleep 15
-          done
-          curl -fsSL "${deployed_url}/build-info.json" | jq -e --arg sha "$GITHUB_SHA" '.commitHash == $sha'
-
-          if [ -n "${PAGES_EXPECTED_URL}" ] && [ "${PAGES_EXPECTED_URL}" != "${deployed_url}" ]; then
-            custom_payload="$(curl -fsSL "${PAGES_EXPECTED_URL}/build-info.json" || true)"
-            if [ -n "${custom_payload}" ] && echo "${custom_payload}" | jq -e --arg sha "$GITHUB_SHA" '.commitHash == $sha' >/dev/null; then
-              echo "custom domain build-info.json matches ${GITHUB_SHA}"
-            else
-              echo "warning: ${PAGES_EXPECTED_URL}/build-info.json is not serving ${GITHUB_SHA} yet" >&2
-            fi
-          fi
+        run: bash scripts/ci-pages-deploy.sh verify-metadata \
+          "${{ steps.deployment_url.outputs.deployed_url }}" \
+          "${PAGES_EXPECTED_URL}" \
+          "${GITHUB_SHA}"
