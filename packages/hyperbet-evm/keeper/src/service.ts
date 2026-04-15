@@ -4689,7 +4689,19 @@ const server = Bun.serve({
       );
     }
 
-    if (req.method === "GET" && url.pathname === "/api/streaming/state") {
+    // `/api/streaming/session` is an alias for `/api/streaming/state`. The
+    // overhaul bets bundle's `useCanonicalStreamSession` hook fetches the
+    // `/session` URL but the canonical envelope it consumes (cycle,
+    // canonicalAuthority, rendererHealth, deliveryHealth, publicReadiness,
+    // sourceRuntime, channel, marketParity, seq, emittedAt, ...) is exactly
+    // what `currentPublicStreamState()` already emits on `/state`. Exposing
+    // both URL names keeps the existing `/state` consumers working while
+    // letting the canonical-session hook light up with zero client changes.
+    if (
+      req.method === "GET" &&
+      (url.pathname === "/api/streaming/state" ||
+        url.pathname === "/api/streaming/session")
+    ) {
       return jsonResponse(
         req,
         currentPublicStreamState(effectiveKeeperBotHealthSnapshot()),
@@ -4798,9 +4810,15 @@ const server = Bun.serve({
       return handleStreamingLeaderboardDetails(req, url);
     }
 
+    // `/api/streaming/session/events` is an alias for
+    // `/api/streaming/state/events` — same SSE stream, same canonical
+    // envelope. The overhaul bets bundle's canonical-session hook
+    // subscribes to the `/session/events` URL; the existing bundles that
+    // consume `useStreamingState` keep using `/state/events`.
     if (
       req.method === "GET" &&
-      url.pathname === "/api/streaming/state/events"
+      (url.pathname === "/api/streaming/state/events" ||
+        url.pathname === "/api/streaming/session/events")
     ) {
       let sseController: ReadableStreamDefaultController<Uint8Array> | null =
         null;
