@@ -112,6 +112,7 @@ import {
   normalizePublicPerpsChainKeyParam,
   type PublicPerpsChainKey,
 } from "./publicPerps";
+import { sourceStatePhaseAllowsUnmaskedDuelIdentity } from "./streamPhaseUnmask";
 import {
   isLegacyDerivedPointsWalletKey,
   normalizePointsWalletInput,
@@ -2311,8 +2312,22 @@ function projectPublicStreamState(
   const existingTimeline =
     asJsonRecord(cycle.broadcastTimeline) ??
     asJsonRecord(sourceState.broadcastTimeline);
+  const unmaskDuelIdentity =
+    sourceStatePhaseAllowsUnmaskedDuelIdentity(sourceState);
+  const effectivePhase = unmaskDuelIdentity
+    ? (typeof cycle.phase === "string"
+        ? cycle.phase
+        : typeof sourceState.phase === "string"
+          ? sourceState.phase
+          : "ANNOUNCEMENT")
+    : "ANNOUNCEMENT";
+  const effectiveTimelinePhase = unmaskDuelIdentity
+    ? (typeof existingTimeline?.phase === "string"
+        ? existingTimeline.phase
+        : effectivePhase)
+    : "ANNOUNCEMENT";
   const maskedTimeline = {
-    phase: "ANNOUNCEMENT",
+    phase: effectiveTimelinePhase,
     betOpenTime: null,
     betCloseTime: null,
     fightStartTime: null,
@@ -2331,11 +2346,11 @@ function projectPublicStreamState(
     ...sourceState,
     cycle: {
       ...cycle,
-      duelId: null,
-      duelKey: null,
-      duelKeyHex: null,
+      duelId: unmaskDuelIdentity ? (cycle.duelId ?? null) : null,
+      duelKey: unmaskDuelIdentity ? (cycle.duelKey ?? null) : null,
+      duelKeyHex: unmaskDuelIdentity ? (cycle.duelKeyHex ?? null) : null,
       rawCycle: null,
-      phase: "ANNOUNCEMENT",
+      phase: effectivePhase,
       broadcastTimeline: maskedTimeline,
       betOpenTime: null,
       betCloseTime: null,
@@ -2350,8 +2365,10 @@ function projectPublicStreamState(
       agent1: null,
       agent2: null,
     },
-    channel: maskNonPublicStreamChannel(sourceState.channel),
-    phase: "ANNOUNCEMENT",
+    channel: unmaskDuelIdentity
+      ? sourceState.channel
+      : maskNonPublicStreamChannel(sourceState.channel),
+    phase: effectivePhase,
     broadcastTimeline: maskedTimeline,
     marketParity: publicMarketParity,
   };
