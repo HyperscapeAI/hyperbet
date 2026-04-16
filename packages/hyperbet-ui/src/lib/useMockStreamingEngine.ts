@@ -5,35 +5,15 @@ import type {
   LeaderboardEntry,
   StreamingStateUpdate,
   StreamingCycle,
+  StreamingAgentContext,
+  StreamingInventoryItem,
+  StreamingMonologue,
 } from "../spectator/types";
 import type { ChartDataPoint } from "../components/PredictionMarketPanel";
 import type { Trade } from "../components/RecentTrades";
 import type { OrderLevel } from "../components/OrderBook";
 
-type StreamingInventoryItem = {
-  slot: number;
-  itemId: string;
-  quantity: number;
-};
-
-type StreamingMonologue = {
-  id: string;
-  type: string;
-  content: string;
-  timestamp: number;
-};
-
-export type MockAgentContext = {
-  id: string;
-  name: string;
-  provider: string;
-  model: string;
-  hp: number;
-  maxHp: number;
-  combatLevel: number;
-  wins: number;
-  losses: number;
-  damageDealtThisFight: number;
+export type MockAgentContext = StreamingAgentContext & {
   inventory: StreamingInventoryItem[];
   monologues: StreamingMonologue[];
   equipment: Record<string, string>;
@@ -447,7 +427,7 @@ export function useMockStreamingEngine(
         setAgent1((prev) => {
           const dmg = randInt(1, 12);
           const newHp = Math.max(0, prev.hp - dmg);
-          const mono: StreamingMonologue =
+          const mono: StreamingMonologue | null =
             Math.random() > 0.6
               ? {
                   id: `mono-1-${Date.now()}`,
@@ -458,7 +438,7 @@ export function useMockStreamingEngine(
                       : pickRandom(MONOLOGUE_THOUGHTS),
                   timestamp: Date.now(),
                 }
-              : (null as unknown as StreamingMonologue);
+              : null;
 
           return {
             ...prev,
@@ -473,7 +453,7 @@ export function useMockStreamingEngine(
         setAgent2((prev) => {
           const dmg = randInt(1, 14);
           const newHp = Math.max(0, prev.hp - dmg);
-          const mono: StreamingMonologue =
+          const mono: StreamingMonologue | null =
             Math.random() > 0.6
               ? {
                   id: `mono-2-${Date.now()}`,
@@ -484,7 +464,7 @@ export function useMockStreamingEngine(
                       : pickRandom(MONOLOGUE_THOUGHTS),
                   timestamp: Date.now(),
                 }
-              : (null as unknown as StreamingMonologue);
+              : null;
 
           return {
             ...prev,

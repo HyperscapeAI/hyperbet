@@ -1,32 +1,18 @@
 import { useEffect, useRef, useState } from "react";
 import { CONFIG } from "../lib/config";
+import type {
+  StreamingAgentContext,
+  StreamingInventoryItem,
+  StreamingMonologue,
+} from "./types";
 
-export type DuelInventoryItem = {
-  slot: number;
-  itemId: string;
-  quantity: number;
-};
+export type DuelInventoryItem = StreamingInventoryItem;
 
-export type DuelMonologue = {
-  id: string;
-  type: string;
-  content: string;
-  timestamp: number;
-};
+export type DuelMonologue = StreamingMonologue;
 
-export type DuelAgentContext = {
-  id: string;
-  name: string;
-  provider: string;
-  model: string;
-  hp: number;
-  maxHp: number;
-  combatLevel: number;
-  wins: number;
-  losses: number;
-  damageDealtThisFight: number;
-  inventory: DuelInventoryItem[];
-  monologues: DuelMonologue[];
+export type DuelAgentContext = StreamingAgentContext & {
+  inventory: StreamingInventoryItem[];
+  monologues: StreamingMonologue[];
 };
 
 export type DuelContextState = {
@@ -37,15 +23,6 @@ export type DuelContextState = {
     cycleId?: string;
     duelId?: string | null;
     duelKeyHex?: string | null;
-    broadcastTimeline?: {
-      phase?: string | null;
-      betOpenTime?: number | null;
-      betCloseTime?: number | null;
-      fightStartTime?: number | null;
-      duelEndTime?: number | null;
-      presentationDelayMs?: number;
-      updatedAt?: number | null;
-    } | null;
     betOpenTime?: number | null;
     betCloseTime?: number | null;
     fightStartTime?: number | null;
@@ -94,10 +71,6 @@ function normalizeDuelContext(raw: unknown): DuelContextState | null {
   const r = raw as Record<string, unknown>;
   if (!r.cycle || typeof r.cycle !== "object") return null;
   const cycle = r.cycle as Record<string, unknown>;
-  const broadcastTimeline =
-    cycle.broadcastTimeline && typeof cycle.broadcastTimeline === "object"
-      ? (cycle.broadcastTimeline as Record<string, unknown>)
-      : null;
   return {
     type: typeof r.type === "string" ? r.type : "STREAMING_DUEL_CONTEXT",
     cycle: {
@@ -112,69 +85,15 @@ function normalizeDuelContext(raw: unknown): DuelContextState | null {
         typeof cycle.duelKeyHex === "string" || cycle.duelKeyHex === null
           ? (cycle.duelKeyHex as string | null)
           : null,
-      broadcastTimeline: broadcastTimeline
-        ? {
-            phase:
-              typeof broadcastTimeline.phase === "string" ||
-              broadcastTimeline.phase === null
-                ? (broadcastTimeline.phase as string | null)
-                : null,
-            betOpenTime:
-              typeof broadcastTimeline.betOpenTime === "number"
-                ? broadcastTimeline.betOpenTime
-                : null,
-            betCloseTime:
-              typeof broadcastTimeline.betCloseTime === "number"
-                ? broadcastTimeline.betCloseTime
-                : null,
-            fightStartTime:
-              typeof broadcastTimeline.fightStartTime === "number"
-                ? broadcastTimeline.fightStartTime
-                : null,
-            duelEndTime:
-              typeof broadcastTimeline.duelEndTime === "number"
-                ? broadcastTimeline.duelEndTime
-                : null,
-            presentationDelayMs:
-              typeof broadcastTimeline.presentationDelayMs === "number"
-                ? broadcastTimeline.presentationDelayMs
-                : 0,
-            updatedAt:
-              typeof broadcastTimeline.updatedAt === "number"
-                ? broadcastTimeline.updatedAt
-                : null,
-          }
-        : null,
       betOpenTime:
-        typeof broadcastTimeline?.betOpenTime === "number"
-          ? broadcastTimeline.betOpenTime
-          : typeof cycle.betOpenTime === "number"
-            ? cycle.betOpenTime
-            : null,
+        typeof cycle.betOpenTime === "number" ? cycle.betOpenTime : null,
       betCloseTime:
-        typeof broadcastTimeline?.betCloseTime === "number"
-          ? broadcastTimeline.betCloseTime
-          : typeof cycle.betCloseTime === "number"
-            ? cycle.betCloseTime
-            : null,
+        typeof cycle.betCloseTime === "number" ? cycle.betCloseTime : null,
       fightStartTime:
-        typeof broadcastTimeline?.fightStartTime === "number"
-          ? broadcastTimeline.fightStartTime
-          : typeof cycle.fightStartTime === "number"
-            ? cycle.fightStartTime
-            : null,
+        typeof cycle.fightStartTime === "number" ? cycle.fightStartTime : null,
       duelEndTime:
-        typeof broadcastTimeline?.duelEndTime === "number"
-          ? broadcastTimeline.duelEndTime
-          : typeof cycle.duelEndTime === "number"
-            ? cycle.duelEndTime
-            : null,
-      phase:
-        typeof broadcastTimeline?.phase === "string"
-          ? broadcastTimeline.phase
-          : typeof cycle.phase === "string"
-            ? cycle.phase
-            : undefined,
+        typeof cycle.duelEndTime === "number" ? cycle.duelEndTime : null,
+      phase: typeof cycle.phase === "string" ? cycle.phase : undefined,
       winnerId:
         typeof cycle.winnerId === "string" || cycle.winnerId === null
           ? (cycle.winnerId as string | null)

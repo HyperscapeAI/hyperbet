@@ -1,33 +1,8 @@
 import React from "react";
 import { resolveUiLocale, type UiLocale } from "@hyperbet/ui/i18n";
+import type { StreamingAgentContext } from "../spectator/types";
 
-type StreamingInventoryItem = {
-  slot: number;
-  itemId: string;
-  quantity: number;
-};
-
-type StreamingMonologue = {
-  id: string;
-  type: string;
-  content: string;
-  timestamp: number;
-};
-
-export type StreamingAgentContext = {
-  id: string;
-  name: string;
-  provider: string;
-  model: string;
-  hp: number;
-  maxHp: number;
-  combatLevel: number;
-  wins: number;
-  losses: number;
-  damageDealtThisFight: number;
-  inventory: StreamingInventoryItem[];
-  monologues: StreamingMonologue[];
-};
+export type { StreamingAgentContext } from "../spectator/types";
 
 interface AgentStatsProps {
   agent: StreamingAgentContext | null;
@@ -250,7 +225,7 @@ export function AgentStats({
           }}
         >
           {Array.from({ length: 15 }).map((_, i) => {
-            const item = agent.inventory.find((inv) => inv.slot === i);
+            const item = agent.inventory?.find((inv) => inv.slot === i);
             return (
               <div
                 key={i}

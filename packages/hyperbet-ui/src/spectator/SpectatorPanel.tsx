@@ -3,29 +3,10 @@ import { createPortal } from "react-dom";
 import { useStreamingState } from "./useStreamingState";
 import type {
   LeaderboardEntry,
+  StreamingAgentContext,
   StreamingPhase,
   StreamingStateUpdate,
 } from "./types";
-
-type StreamingInventoryItem = {
-  slot: number;
-  itemId: string;
-  quantity: number;
-};
-
-type StreamingAgentContext = {
-  id: string;
-  name: string;
-  provider: string;
-  model: string;
-  hp: number;
-  maxHp: number;
-  combatLevel: number;
-  wins: number;
-  losses: number;
-  damageDealtThisFight: number;
-  inventory?: StreamingInventoryItem[] | null;
-};
 
 interface SpectatorPanelProps {
   agentA?: StreamingAgentContext | null;
