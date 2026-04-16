@@ -1,10 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
-/**
- * Returns true when the viewport is at or below `breakpoint` px wide.
- * Tracks resize events so components re-render when the user rotates or
- * resizes. The default breakpoint (768) matches our CSS resize-handle hide rule.
- */
+/** Default breakpoint (768) matches CSS resize-handle hide rule. */
 export function useIsMobile(breakpoint = 768): boolean {
   const [isMobile, setIsMobile] = useState<boolean>(() => {
     if (typeof window === "undefined") return false;
@@ -20,14 +16,7 @@ export function useIsMobile(breakpoint = 768): boolean {
   return isMobile;
 }
 
-/**
- * Returns a draggable panel size value (pixels) that persists across reloads.
- *
- * `startDrag(event, axis, invert?)` — call from the resize handle's onMouseDown.
- * - axis: "x" for horizontal handles, "y" for vertical handles.
- * - invert: true when dragging in the positive direction should SHRINK the panel
- *           (e.g. right-side sidebar: dragging right → sidebar gets narrower).
- */
+/** Draggable panel size (px) persisted to localStorage. Invert startDrag for right-side panels. */
 export function useResizePanel(options: {
   initial: number;
   min: number;
@@ -44,13 +33,11 @@ export function useResizePanel(options: {
         if (Number.isFinite(n)) return Math.max(min, Math.min(max, n));
       }
     } catch {
-      // private-mode or SSR — fall back to initial
+      // private-mode or SSR
     }
     return initial;
   });
 
-  // Keep a ref so the drag closure always reads the latest size at drag-start,
-  // not a stale captured value.
   const sizeRef = useRef(size);
   sizeRef.current = size;
 

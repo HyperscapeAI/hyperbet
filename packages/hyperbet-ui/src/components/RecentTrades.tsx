@@ -38,7 +38,6 @@ export function RecentTrades({
   const resolvedLocale = resolveUiLocale(locale);
   const copy = getUiCopy(resolvedLocale);
   const tradesRegionId = useId();
-  // We'll use a tick to keep "time ago" fresh
   const [, setTick] = useState(0);
   useEffect(() => {
     const timer = setInterval(() => setTick((t) => t + 1), 1000);
@@ -139,7 +138,6 @@ export function RecentTrades({
           </div>
         ) : (
           trades.map((trade, i) => {
-            // Assume trade is "new" if under 2 seconds old
             const isNew = Date.now() - trade.time < 2000;
             return (
               <div

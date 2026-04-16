@@ -4,13 +4,9 @@ import type {
   VersionedTransaction,
 } from "@solana/web3.js";
 
-// Helius Sender endpoint for dual-routing (SWQoS + Jito).
-// Requires a Jito tip of at least HELIUS_SENDER_MIN_TIP_LAMPORTS in the tx.
+// Helius dual-routing (SWQoS + Jito). Tx must include a Jito tip >= MIN_TIP.
 const HELIUS_SENDER_URL = "https://sender.helius-rpc.com/fast";
-// Minimum Jito tip required by Helius Sender dual-routing mode (0.0002 SOL).
-export const HELIUS_SENDER_MIN_TIP_LAMPORTS = 200_000;
-
-// Tip accounts — pick one at random per transaction.
+export const HELIUS_SENDER_MIN_TIP_LAMPORTS = 200_000; // 0.0002 SOL
 const HELIUS_JITO_TIP_ACCOUNTS = [
   "4ACfpUFoaSD9bfPdeu6DBt89gB6ENTeHBXCAi87NhDEE",
   "D2L6yPZ2FmmmTKPgzaMKdhu6EWZcTpLy1Vhx8uvZe7NZ",
@@ -104,7 +100,6 @@ function resolveSolanaSenderEndpoint(endpoint: string): string {
       return parsed.toString();
     }
   } catch {
-    // Fall through to the resolved endpoint.
   }
   return resolvedEndpoint;
 }
@@ -273,14 +268,7 @@ export async function confirmSignatureViaRpc(
   throw new Error(`Transaction ${signature} was not confirmed in time`);
 }
 
-/**
- * Send a serialized transaction via Helius Sender (dual-routing: SWQoS + Jito).
- * The transaction MUST include a Jito tip transfer of at least
- * HELIUS_SENDER_MIN_TIP_LAMPORTS to a tip account (see randomJitoTipAccount).
- *
- * Returns the base-58 transaction signature on success.
- * Throws on HTTP error or RPC-level failure.
- */
+/** Tx MUST include a Jito tip >= HELIUS_SENDER_MIN_TIP_LAMPORTS. */
 export async function sendViaHeliusSender(
   wireTransactionBase64: string,
 ): Promise<string> {
@@ -317,10 +305,6 @@ export async function sendViaHeliusSender(
   return payload.result;
 }
 
-/**
- * Fetch a dynamic priority fee estimate from Helius.
- * Falls back to a conservative default on any error.
- */
 export async function fetchPriorityFeeEstimate(
   rpcEndpoint: string,
   accountKeys: string[] = [],
@@ -340,10 +324,7 @@ export async function fetchPriorityFeeEstimate(
   }
 }
 
-/**
- * Warm the Helius Sender connection to avoid cold-start latency.
- * Call once on app mount and every 30s thereafter.
- */
+/** Ping Helius Sender every 30s to avoid cold-start latency. */
 export function startHeliusSenderWarmup(): () => void {
   const ping = () =>
     fetch("https://sender.helius-rpc.com/ping").catch(() => undefined);

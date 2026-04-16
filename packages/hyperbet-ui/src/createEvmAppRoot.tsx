@@ -1,8 +1,4 @@
-/**
- * EVM-only app root factory — no Solana imports whatsoever.
- * Use this in hyperbet-avax and hyperbet-bsc so that Vite never crawls
- * @solana/* dependencies and hits the @noble/hashes v1/v2 conflict.
- */
+// EVM-only app root — avoids @solana/* imports (prevents @noble/hashes v1/v2 conflict).
 import {
   type CSSProperties,
   type ComponentProps,

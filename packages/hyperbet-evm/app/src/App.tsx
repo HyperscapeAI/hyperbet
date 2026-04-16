@@ -25,44 +25,26 @@ import { NavTabs } from "@hyperbet/ui/components/NavTabs";
 
 import {
   DEFAULT_REFRESH_INTERVAL_MS,
-  ENABLE_LIFECYCLE_MISMATCH_CONSOLE,
   GAME_API_URL,
   getFixedMatchId,
+  STREAM_URLS,
 } from "./lib/config";
 import { POINTS_DRAWER_OVERLAY_STYLE } from "./lib/pointsDrawer";
+import {
+  advanceStreamSyncUiState,
+  INITIAL_STREAM_SYNC_UI_SNAPSHOT,
+  type StreamSyncUiState,
+} from "./lib/streamSyncUi";
 import {
   captureInviteCodeFromLocation,
   getStoredInviteCode,
 } from "@hyperbet/ui/lib/invite";
-import {
-  deriveBettorLiveStatus,
-  serializeBettorDriftDiagnostic,
-} from "@hyperbet/ui/lib/bettorLiveStatus";
-import {
-  deriveMarketParityLabel,
-  isPublicMarketParityState,
-} from "@hyperbet/ui/lib/marketParity";
-import { deriveBettorStreamUiState } from "@hyperbet/ui/lib/bettorStreamUi";
-import {
-  describeCanonicalRendererDegradedReason,
-  resolveCanonicalPlaybackDeliveryMode,
-  selectBetSurfaceStreamUrl,
-} from "@hyperbet/ui/lib/streamSession";
-import {
-  StreamPlayer,
-  type StreamPlayerStatus,
-} from "@hyperbet/ui/components/StreamPlayer";
+import { StreamPlayer } from "@hyperbet/ui/components/StreamPlayer";
 import { ChainSelector } from "@hyperbet/ui/components/ChainSelector";
 import { ThemeSelector } from "@hyperbet/ui/components/ThemeSelector";
 import { selectConfiguredEvmPrivateKey } from "@hyperbet/ui/lib/evmPrivateKey";
-import {
-  useAppConnection,
-  useAppWallet,
-  useAppWalletModal,
-} from "@hyperbet/ui/lib/solanaRuntime";
 
 import { useChain } from "./lib/ChainContext";
-import { useCanonicalStreamSession } from "@hyperbet/ui/spectator/useCanonicalStreamSession";
 import { useStreamingState } from "@hyperbet/ui/spectator/useStreamingState";
 import { useDuelContext } from "@hyperbet/ui/spectator/useDuelContext";
 import type { StreamingAgentContext } from "@hyperbet/ui/components/AgentStats";
@@ -74,17 +56,13 @@ import {
   createEvmPublicClient,
   toDuelKeyHex,
 } from "@hyperbet/ui/lib/evmClient";
+import { getEvmChainConfig } from "@hyperbet/ui/lib/chainConfig";
 import {
   normalizePredictionMarketDuelKeyHex,
   usePredictionMarketOverview,
+  usePredictionMarketSyncStatus,
 } from "@hyperbet/ui/lib/predictionMarkets";
-import {
-  CHAIN_DISPLAY,
-  getEvmChainConfig,
-  getEnabledEvmChains,
-} from "@hyperbet/ui/lib/chainConfig";
 
-// ── Shared UI utilities ──────────────────────────────────────────────────────
 function formatGold(v: number, locale: UiLocale): string {
   if (locale === "zh") {
     if (v >= 100_000_000) return `${(v / 100_000_000).toFixed(1)}亿`;
@@ -123,12 +101,6 @@ function deriveAddressFromPrivateKey(
   } catch {
     return null;
   }
-}
-
-function normalizeAddress(value: string | undefined): `0x${string}` | null {
-  const trimmed = value?.trim() ?? "";
-  if (!/^0x[0-9a-fA-F]{40}$/.test(trimmed)) return null;
-  return trimmed as `0x${string}`;
 }
 
 const FOOTER_SOCIALS = [
@@ -207,7 +179,7 @@ function normalizeTimestamp(value: number): number {
 function normalizeRemainingSeconds(value: number | null | undefined): number {
   if (!Number.isFinite(value as number)) return 0;
   const raw = Math.max(0, Number(value));
-  // Streaming API reports ms, while mock mode reports whole seconds.
+  // Streaming API reports ms; mock mode reports seconds.
   return raw > 10_000 ? Math.floor(raw / 1000) : Math.floor(raw);
 }
 
@@ -236,7 +208,6 @@ function getAppCopy(locale: UiLocale) {
       loadingAgentStats: "正在加载代理数据",
       loadingModelMarkets: "正在加载模型市场",
       loadingEvmMarket: "正在加载 EVM 市场",
-      loadingSolanaMarket: "正在加载 Solana 市场",
       debugTitle: "极简对战下注",
       chain: "链",
       currentMatch: "当前对局",
@@ -245,7 +216,6 @@ function getAppCopy(locale: UiLocale) {
       noPool: "NO 池",
       refresh: "刷新",
       connectEvm: "连接 EVM",
-      connectSolana: "连接 Solana",
       wrongNet: "网络错误",
       duels: "对决",
       models: "模型",
@@ -257,11 +227,11 @@ function getAppCopy(locale: UiLocale) {
       muteStream: "静音",
       source: "信源",
       waitingForStream: "等待直播流…",
-      refreshingLiveState: "本地播放启动中",
+      refreshingLiveState: "即将开放下注",
       streamReady: "直播流已就绪",
-      reconnectingStream: "正在恢复本地播放",
-      resyncingMarketState: "正在同步到权威直播状态",
-      outOfSync: "本地播放不同步",
+      reconnectingStream: "即将开放下注",
+      resyncingMarketState: "即将开放下注",
+      outOfSync: "即将开放下注",
       trades: "成交",
       orderBook: "订单簿",
       matchLog: "对局日志",
@@ -311,14 +281,6 @@ function getAppCopy(locale: UiLocale) {
       phaseResolved: "已结算",
       phaseNextMatch: "下一场",
       phaseIdle: "空闲",
-      parityPreparing: "全链市场准备中",
-      parityAwaitingConfirmations: "等待最终确认",
-      parityBettingOpen: "投注已开启",
-      parityLocked: "已锁定",
-      parityResolved: "已结算",
-      parityFrozen: "已冻结",
-      parityCancelled: "已取消",
-      parityAborted: "启动已中止",
       bettingUnavailable: (cluster: string) =>
         `${cluster} 上的下注暂时不可用。请稍后重试或切换链。`,
       record: (wins: number, losses: number) => `${wins}胜-${losses}负`,
@@ -341,7 +303,6 @@ function getAppCopy(locale: UiLocale) {
     loadingAgentStats: "Loading agent stats",
     loadingModelMarkets: "Loading model markets",
     loadingEvmMarket: "Loading EVM market",
-    loadingSolanaMarket: "Loading Solana market",
     debugTitle: "Ultra Simple Fight Bet",
     chain: "Chain",
     currentMatch: "Current match",
@@ -350,7 +311,6 @@ function getAppCopy(locale: UiLocale) {
     noPool: "NO pool",
     refresh: "Refresh",
     connectEvm: "Connect EVM",
-    connectSolana: "Connect Solana",
     wrongNet: "Wrong Net",
     duels: "Duels",
     models: "Models",
@@ -362,11 +322,11 @@ function getAppCopy(locale: UiLocale) {
     muteStream: "Mute stream",
     source: "Source",
     waitingForStream: "Waiting for stream…",
-    refreshingLiveState: "Local playback starting",
+    refreshingLiveState: "Betting starts soon",
     streamReady: "Stream ready",
-    reconnectingStream: "Recovering local playback",
-    resyncingMarketState: "Syncing player to stream authority",
-    outOfSync: "Local playback out of sync",
+    reconnectingStream: "Betting starts soon",
+    resyncingMarketState: "Betting starts soon",
+    outOfSync: "Betting starts soon",
     trades: "Trades",
     orderBook: "Order Book",
     matchLog: "Match Log",
@@ -416,14 +376,6 @@ function getAppCopy(locale: UiLocale) {
     phaseResolved: "RESOLVED",
     phaseNextMatch: "NEXT MATCH",
     phaseIdle: "IDLE",
-    parityPreparing: "Preparing markets on all chains",
-    parityAwaitingConfirmations: "Awaiting final confirmations",
-    parityBettingOpen: "Betting open",
-    parityLocked: "Locked",
-    parityResolved: "Resolved",
-    parityFrozen: "Frozen",
-    parityCancelled: "Cancelled",
-    parityAborted: "Start aborted",
     bettingUnavailable: (cluster: string) =>
       `Betting is temporarily unavailable on ${cluster}. Please try again later or switch chain.`,
     record: (wins: number, losses: number) => `${wins}W-${losses}L`,
@@ -435,24 +387,40 @@ function getAppCopy(locale: UiLocale) {
   };
 }
 
+function getPhaseLabel(
+  phase: string,
+  countdown: string | number | null,
+  copy: ReturnType<typeof getAppCopy>,
+): string {
+  if (phase === "FIGHTING") return copy.phaseLive;
+  if (phase === "COUNTDOWN") return copy.phaseStarting(countdown);
+  if (phase === "RESOLUTION") return copy.phaseResolved;
+  if (phase === "ANNOUNCEMENT") return copy.phaseNextMatch;
+  return copy.phaseIdle;
+}
+
+function getMarketStatusLabel(
+  rawStatus: string | null | undefined,
+  copy: ReturnType<typeof getAppCopy>,
+): string {
+  const normalized = rawStatus?.trim().toLowerCase();
+  if (!normalized) return copy.statusPending;
+  if (normalized === "open") return copy.statusOpen;
+  if (normalized === "resolved") return copy.statusResolved;
+  if (normalized === "pending" || normalized === "unavailable") {
+    return copy.statusPending;
+  }
+  return rawStatus ?? copy.statusPending;
+}
+
 const EvmBettingPanel = lazy(() =>
   import("@hyperbet/ui/components/EvmBettingPanel").then((module) => ({
     default: module.EvmBettingPanel,
   })),
 );
-const SolanaClobPanel = lazy(() =>
-  import("@hyperbet/ui/components/SolanaClobPanel").then((module) => ({
-    default: module.SolanaClobPanel,
-  })),
-);
 const EvmModelsMarketView = lazy(() =>
   import("@hyperbet/ui/components/EvmModelsMarketView").then((module) => ({
     default: module.EvmModelsMarketView,
-  })),
-);
-const SolanaModelsMarketView = lazy(() =>
-  import("@hyperbet/ui/components/SolanaModelsMarketView").then((module) => ({
-    default: module.SolanaModelsMarketView,
   })),
 );
 const PointsLeaderboard = lazy(() =>
@@ -511,7 +479,7 @@ function StreamStatusChip({
 }: {
   title: string;
   detail?: string | null;
-  state: "refreshing" | "degraded" | "drift";
+  state: Exclude<StreamSyncUiState, "hidden">;
   loading?: boolean;
 }) {
   return (
@@ -531,33 +499,18 @@ export function App() {
     () => new URLSearchParams(window.location.search),
     [],
   );
-  const { address: evmWalletAddress, chainId: evmWalletChainId } = useAccount();
-  const solanaConnection = useAppConnection().connection;
-  const solanaWallet = useAppWallet();
-  const solanaWalletModal = useAppWalletModal();
-  const solanaWalletAddress = solanaWallet.publicKey?.toBase58() ?? null;
+  const { address: evmWalletAddress } = useAccount();
   const { activeChain, setActiveChain, availableChains } = useChain();
-  const connectedEvmChain = useMemo(() => {
-    if (!evmWalletChainId) return null;
-    return (
-      getEnabledEvmChains().find(
-        (chain) => chain.evmChainId === evmWalletChainId,
-      )?.chainId ?? null
-    );
-  }, [evmWalletChainId]);
-  const activeEvmChain = activeChain === "solana" ? null : activeChain;
-  const activeChainDisplay = CHAIN_DISPLAY[activeChain];
-  const activeChainLabel = activeChainDisplay.shortName;
-  const activeEvmChainConfig =
-    activeEvmChain != null ? getEvmChainConfig(activeEvmChain) : null;
-  const activeEvmChainLabel =
-    activeEvmChain != null ? CHAIN_DISPLAY[activeEvmChain].shortName : null;
-  const activeEvmCollateralSymbol =
-    activeEvmChainConfig?.nativeCurrency.symbol ?? activeEvmChainLabel ?? null;
-  const linkedEvmWalletPlatform =
-    connectedEvmChain != null
-      ? (connectedEvmChain.toUpperCase() as "BSC" | "BASE" | "AVAX")
-      : null;
+  const activeEvmChain =
+    activeChain === "bsc" || activeChain === "base" || activeChain === "avax"
+      ? activeChain
+      : ((availableChains[0] as "bsc" | "base" | "avax" | undefined) ?? "bsc");
+  const activeChainLabel =
+    activeEvmChain === "base"
+      ? "BASE"
+      : activeEvmChain === "bsc"
+        ? "BSC"
+        : "AVAX";
   const [locale, setLocale] = useState<UiLocale>(() => resolveUiLocale());
   const copy = useMemo(() => getAppCopy(locale), [locale]);
   const isE2eMode = import.meta.env.MODE === "e2e";
@@ -570,34 +523,16 @@ export function App() {
     [],
   );
   const configuredHeadlessEvmAddress = useMemo(
-    () =>
-      normalizeAddress(
-        (import.meta.env.VITE_E2E_EVM_ADDRESS as string | undefined) ??
-          (import.meta.env.VITE_HEADLESS_EVM_ADDRESS as string | undefined) ??
-          "",
-      ),
-    [],
-  );
-  const configuredHeadlessDerivedAddress = useMemo(
     () => deriveAddressFromPrivateKey(configuredHeadlessEvmPrivateKey),
     [configuredHeadlessEvmPrivateKey],
   );
   const effectiveEvmWalletAddress =
-    evmWalletAddress ??
-    configuredHeadlessEvmAddress ??
-    configuredHeadlessDerivedAddress ??
-    null;
-  const activeWalletAddress =
-    activeChain === "solana"
-      ? solanaWalletAddress
-      : effectiveEvmWalletAddress;
-  // Only poll chain data when an active-chain wallet is connected.
+    evmWalletAddress ?? configuredHeadlessEvmAddress ?? null;
   const shouldPollChainData = Boolean(
-    !isStreamUiMode && (isE2eMode || activeWalletAddress),
+    !isStreamUiMode && (isE2eMode || effectiveEvmWalletAddress),
   );
-  // In stream-ui mode treat wallet as disconnected so invite/points fetches don't fire.
-  const pointsWalletAddress = isStreamUiMode ? null : activeWalletAddress;
-  const invitePlatformQuery = activeChain === "solana" ? "solana" : "evm";
+  const pointsWalletAddress = isStreamUiMode ? null : effectiveEvmWalletAddress;
+  const invitePlatformQuery = "evm" as const;
 
   const [surfaceMode, setSurfaceMode] = useState<"DUELS" | "MODELS">("DUELS");
   const [status, _setStatus] = useState<string>("");
@@ -610,31 +545,23 @@ export function App() {
   );
   const [selectedAgentForStats, _setSelectedAgentForStats] = useState<StreamingAgentContext | null>(null);
   const [isShowingStats, setIsShowingStats] = useState(false);
+  const [streamSourceIndex, setStreamSourceIndex] = useState(0);
   const [showPointsDrawer, setShowPointsDrawer] = useState(false);
-  const isSolanaChain = activeChain === "solana";
-  const activePointsScope = isSolanaChain ? "wallet" : "linked";
 
-  // ── Market data ──────────────────────────────────────────────────────────
   const [chartData, setChartData] = useState<HmChartPoint[]>([]);
   const [marketYesPercent, setMarketYesPercent] = useState(50);
   const lastSharesRef = useRef<{ a: bigint; b: bigint }>({ a: 0n, b: 0n });
 
-  // ── Resizable panels ─────────────────────────────────────────────────────
-  // Track mobile breakpoint — inline resize styles must NOT apply on mobile
-  // because they override CSS media-query layout (sidebar fixed sheet, etc.)
+  // Inline resize styles must NOT apply on mobile (overrides CSS media-query layout).
   const isMobile = useIsMobile(768);
-  // Stack the trading sidebar earlier so smaller desktop widths do not clip
-  // the right rail or force the betting controls off-screen.
   const isStackedLayout = useIsMobile(1360);
 
-  // Sidebar width (right column)
   const { size: sidebarWidthPx, startDrag: startSidebarDrag } = useResizePanel({
     initial: 320,
     min: 200,
     max: 640,
     storageKey: "hs-panel-sidebar",
   });
-  // Bottom panel height
   const { size: bottomHeightPx, startDrag: startBottomDrag } = useResizePanel({
     initial: 240,
     min: 80,
@@ -652,163 +579,46 @@ export function App() {
   const {
     live: liveOverviewMarket,
     liveDuel: liveOverviewDuel,
-    liveMarketParity,
     refresh: refreshMarketOverview,
-  } = usePredictionMarketOverview(activeChain);
-  const {
-    session: canonicalStreamSession,
-    rendererHealth: canonicalRendererHealth,
-    deliveryHealth: canonicalDeliveryHealth,
-    publicReadiness: canonicalPublicReadiness,
-    authorityHealth: canonicalAuthorityHealth,
-    presentationDelayMs: canonicalPresentationDelayMs,
-  } = useCanonicalStreamSession();
+    error: marketOverviewError,
+  } = usePredictionMarketOverview(activeEvmChain);
+  const { data: syncStatus } = usePredictionMarketSyncStatus();
   const requestOverviewRefresh = useCallback(async () => {
     await refreshMarketOverview();
   }, [refreshMarketOverview]);
   const liveCycle = streamingState?.cycle ?? null;
-  const { activeStreamUrl, preloadStreamUrl } = selectBetSurfaceStreamUrl({
-    authorityHealth: canonicalAuthorityHealth,
-    fallbackStreamIndex: 0,
-    fallbackStreamSources: [],
-    rendererReady: canonicalRendererHealth?.ready ?? null,
-    session: canonicalStreamSession,
-  });
-  const mountedStreamUrl = activeStreamUrl || preloadStreamUrl;
-  const streamDeliveryMode = resolveCanonicalPlaybackDeliveryMode(
-    canonicalStreamSession,
-  );
-  const [streamPlayerStatus, setStreamPlayerStatus] =
-    useState<StreamPlayerStatus | null>(null);
-  useEffect(() => {
-    setStreamPlayerStatus(null);
-  }, [mountedStreamUrl]);
-  const streamPlaceholderMessage = useMemo(() => {
-    if (!canonicalStreamSession) {
-      return "Connecting to live session...";
-    }
-    if (canonicalAuthorityHealth?.ready === false) {
-      return "Stream authority unavailable. Waiting for session state.";
-    }
-    if (canonicalRendererHealth?.ready === false) {
-      return describeCanonicalRendererDegradedReason(
-        canonicalRendererHealth.degradedReason,
-        copy.waitingForStream,
-      );
-    }
-    if (
-      canonicalPublicReadiness?.ready === false ||
-      canonicalDeliveryHealth?.ready === false
-    ) {
-      return describeCanonicalRendererDegradedReason(
-        canonicalPublicReadiness?.reason ??
-          canonicalDeliveryHealth?.degradedReason,
-        copy.waitingForStream,
-      );
-    }
-    return copy.waitingForStream;
-  }, [
-    canonicalAuthorityHealth?.ready,
-    canonicalDeliveryHealth?.degradedReason,
-    canonicalDeliveryHealth?.ready,
-    canonicalPublicReadiness?.ready,
-    canonicalPublicReadiness?.reason,
-    canonicalRendererHealth?.degradedReason,
-    canonicalRendererHealth?.ready,
-    canonicalStreamSession,
-    copy.waitingForStream,
-  ]);
-  const canonicalLiveStatus = useMemo(
-    () =>
-      deriveBettorLiveStatus({
-        copy,
-        session: canonicalStreamSession,
-        fallbackPhase: liveCycle?.phase ?? null,
-        countdown: liveCycle?.countdown ?? null,
-        marketLifecycleStatus: liveOverviewMarket?.lifecycleStatus ?? null,
-        marketWinner: liveOverviewMarket?.winner ?? null,
-        agent1Name:
-          liveCycle?.agent1?.name?.trim() ||
-          liveOverviewDuel?.agent1Name?.trim() ||
-          "Agent A",
-        agent2Name:
-          liveCycle?.agent2?.name?.trim() ||
-          liveOverviewDuel?.agent2Name?.trim() ||
-          "Agent B",
-        marketPhase: liveOverviewDuel?.phase ?? null,
-        marketDuelId: liveOverviewDuel?.duelId ?? liveOverviewMarket?.duelId ?? null,
-      }),
-    [
-      canonicalStreamSession,
-      copy,
-      liveCycle?.agent1?.name,
-      liveCycle?.agent2?.name,
-      liveCycle?.countdown,
-      liveCycle?.phase,
-      liveOverviewDuel?.agent1Name,
-      liveOverviewDuel?.agent2Name,
-      liveOverviewDuel?.duelId,
-      liveOverviewDuel?.phase,
-      liveOverviewMarket?.duelId,
-      liveOverviewMarket?.lifecycleStatus,
-      liveOverviewMarket?.winner,
-    ],
-  );
-  const effectiveMarketParity =
-    canonicalStreamSession?.marketParity ?? liveMarketParity ?? null;
-  const marketParityStatusText = useMemo(
-    () => deriveMarketParityLabel(effectiveMarketParity, copy),
-    [copy, effectiveMarketParity],
-  );
-  const canonicalPhase = canonicalLiveStatus.livePhase;
-  const lastLifecycleMismatchSignatureRef = useRef<string | null>(null);
-  const rendererDegradedOverlayMessage = useMemo(() => {
-    if (activeStreamUrl.length === 0 || canonicalRendererHealth?.ready !== false) {
-      return null;
-    }
-    return describeCanonicalRendererDegradedReason(
-      canonicalRendererHealth.degradedReason,
-      copy.waitingForStream,
-    );
-  }, [
-    activeStreamUrl,
-    canonicalRendererHealth?.degradedReason,
-    canonicalRendererHealth?.ready,
-    copy.waitingForStream,
-  ]);
-
-  useEffect(() => {
-    if (!ENABLE_LIFECYCLE_MISMATCH_CONSOLE) {
-      lastLifecycleMismatchSignatureRef.current = null;
-      return;
-    }
-    const signature = serializeBettorDriftDiagnostic(
-      canonicalLiveStatus.driftDiagnostic,
-    );
-    const chainScopedSignature =
-      signature == null ? null : `${activeChain}:${signature}`;
-    if (chainScopedSignature == null) {
-      lastLifecycleMismatchSignatureRef.current = null;
-      return;
-    }
-    if (lastLifecycleMismatchSignatureRef.current === chainScopedSignature) {
-      return;
-    }
-    lastLifecycleMismatchSignatureRef.current = chainScopedSignature;
-    console.warn("[hyperbet] lifecycle_mismatch", {
-      chain: activeChain,
-      diagnostic: canonicalLiveStatus.driftDiagnostic,
-    });
-  }, [
-    ENABLE_LIFECYCLE_MISMATCH_CONSOLE,
-    activeChain,
-    canonicalLiveStatus.driftDiagnostic,
-  ]);
+  const streamSources = STREAM_URLS;
+  const activeStreamUrl = streamSources[streamSourceIndex] ?? "";
+  const [streamSurfaceReady, setStreamSurfaceReady] = useState(false);
+  const [streamSurfaceUnavailable, setStreamSurfaceUnavailable] =
+    useState(false);
 
   const handleLocaleChange = useCallback((nextLocale: UiLocale) => {
     setStoredUiLocale(nextLocale);
     setLocale(nextLocale);
   }, []);
+
+  const switchToBackupStream = useCallback(() => {
+    setStreamSourceIndex((current) =>
+      current + 1 < streamSources.length ? current + 1 : current,
+    );
+  }, [streamSources.length]);
+
+  const cycleStreamSource = useCallback(() => {
+    setStreamSourceIndex((current) =>
+      streamSources.length > 1 ? (current + 1) % streamSources.length : current,
+    );
+  }, [streamSources.length]);
+
+  useEffect(() => {
+    if (streamSourceIndex < streamSources.length) return;
+    setStreamSourceIndex(0);
+  }, [streamSourceIndex, streamSources.length]);
+
+  useEffect(() => {
+    setStreamSurfaceReady(false);
+    setStreamSurfaceUnavailable(false);
+  }, [activeStreamUrl]);
 
   useEffect(() => {
     captureInviteCodeFromLocation();
@@ -838,7 +648,7 @@ export function App() {
           setInviteCode(payload.inviteCode.trim().toUpperCase());
         }
       } catch {
-        // no-op: keep existing stored invite code fallback
+        // no-op
       }
     };
 
@@ -943,17 +753,10 @@ export function App() {
     setRefreshNonce((value) => value + 1);
   };
 
-  // ── Market data polling ───────────────────────────────────────────────────
-  // Runs independently of wallet connection — spectators see live odds too.
   useEffect(() => {
-    if (activeChain === "solana") {
-      return;
-    }
-
     const duelKeyHex = normalizePredictionMarketDuelKeyHex(
       typeof liveCycle?.duelKeyHex === "string" ? liveCycle.duelKeyHex : null,
     );
-    if (!activeEvmChain) return;
     const chainConfig = getEvmChainConfig(activeEvmChain);
     if (!duelKeyHex || !chainConfig) return;
 
@@ -991,7 +794,6 @@ export function App() {
           });
         }
       } catch {
-        // network errors are silent — chart just doesn't update
       }
     };
 
@@ -1001,14 +803,13 @@ export function App() {
       cancelled = true;
       clearInterval(id);
     };
-  }, [activeChain, activeEvmChain, liveCycle?.duelKeyHex]);
+  }, [activeEvmChain, liveCycle?.duelKeyHex]);
 
-  // Reset chart when duel changes
   useEffect(() => {
     setChartData([]);
     setMarketYesPercent(50);
     lastSharesRef.current = { a: 0n, b: 0n };
-  }, [activeChain, liveCycle?.cycleId]);
+  }, [liveCycle?.cycleId]);
 
   const effYesPot = 0;
   const effNoPot = 0;
@@ -1051,7 +852,6 @@ export function App() {
   const contextAgent1 = duelContext?.cycle.agent1 ?? null;
   const contextAgent2 = duelContext?.cycle.agent2 ?? null;
 
-  // Agent context from live SSE + duel-context polling
   const effA1 = {
     id: "agent1",
     name: effAgent1Name,
@@ -1106,7 +906,7 @@ export function App() {
   };
   const effCycle = {
     cycleId: liveCycle?.cycleId ?? "cycle-0",
-    phase: canonicalPhase ?? liveCycle?.phase ?? "IDLE",
+    phase: liveCycle?.phase ?? "IDLE",
     countdown: liveCycle?.countdown ?? null,
     winnerName: liveCycle?.winnerName ?? null,
     winReason: liveCycle?.winReason ?? null,
@@ -1116,41 +916,51 @@ export function App() {
   const effTotalPool =
     (typeof effYesPot === "number" ? effYesPot : 0) +
     (typeof effNoPot === "number" ? effNoPot : 0);
-  const parityGatesPublicPhase =
-    effectiveMarketParity != null &&
-    !isPublicMarketParityState(
-      effectiveMarketParity.state,
-      effectiveMarketParity.openedAtMs,
-    );
-  const effPhaseLabel =
-    parityGatesPublicPhase && marketParityStatusText
-      ? marketParityStatusText
-      : canonicalLiveStatus.livePhaseLabel;
-  const marketStatusText =
-    marketParityStatusText ??
-    canonicalLiveStatus.marketSettlementLabel ??
-    copy.statusPending;
+  const effPhaseLabel = getPhaseLabel(effCycle.phase, effCycle.countdown, copy);
+
+  const streamPhaseText = liveCycle?.phase ?? null;
+  const marketStatusText = getMarketStatusLabel(
+    streamPhaseText ?? currentMatch?.status ?? copy.phaseLive,
+    copy,
+  );
   const countdownText = liveCycle
     ? formatCountdown(normalizeRemainingSeconds(liveCycle.timeRemaining))
     : "";
-  const streamSyncUiState = useMemo(
-    () =>
-      deriveBettorStreamUiState({
-        session: canonicalStreamSession,
-        playerStatus: streamPlayerStatus,
-        authorityHealth: canonicalAuthorityHealth,
-        publicReadiness: canonicalPublicReadiness,
-        sourceRuntime: canonicalStreamSession?.sourceRuntime ?? null,
-      }),
-    [
-      canonicalAuthorityHealth,
-      canonicalPublicReadiness,
-      canonicalStreamSession,
-      streamPlayerStatus,
-    ],
+  const liveOverviewDuelKey = normalizePredictionMarketDuelKeyHex(
+    liveOverviewDuel?.duelKey ?? null,
+  );
+  const streamedDuelKey = normalizePredictionMarketDuelKeyHex(
+    liveCycle?.duelKeyHex ?? null,
+  );
+  const rendererHealth =
+    liveCycle?.rendererHealth ?? syncStatus?.rendererHealth ?? null;
+  const streamMarketAligned = !liveOverviewDuelKey
+    ? true
+    : streamedDuelKey === liveOverviewDuelKey;
+  const [streamSyncUi, setStreamSyncUi] = useState(
+    INITIAL_STREAM_SYNC_UI_SNAPSHOT,
   );
 
-  // Sidebar bet state
+  useEffect(() => {
+    setStreamSyncUi((previous) =>
+      advanceStreamSyncUiState(previous, {
+        marketAligned: streamMarketAligned,
+        syncStatus,
+        rendererReady: rendererHealth?.ready ?? null,
+        streamSurfaceReady,
+        streamSurfaceUnavailable,
+        marketOverviewErrorPresent: Boolean(marketOverviewError),
+      }),
+    );
+  }, [
+    marketOverviewError,
+    rendererHealth?.ready,
+    streamMarketAligned,
+    streamSurfaceReady,
+    streamSurfaceUnavailable,
+    syncStatus,
+  ]);
+
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [hmBottomTab, setHmBottomTab] = useState<
     "positions" | "orders" | "trades" | "topTraders" | "holders" | "news"
@@ -1165,123 +975,18 @@ export function App() {
 
   const bettingPanelBody = (
     <Suspense
-      fallback={
-        <PanelFallback
-          label={isSolanaChain ? copy.loadingSolanaMarket : copy.loadingEvmMarket}
-          minHeight={360}
-        />
-      }
+      fallback={<PanelFallback label={copy.loadingEvmMarket} minHeight={360} />}
     >
-      {isSolanaChain ? (
-        <SolanaClobPanel
-          agent1Name={effAgent1Name}
-          agent2Name={effAgent2Name}
-          compact
-          locale={locale}
-          connectionOverride={solanaConnection}
-          walletOverride={solanaWallet as any}
-        />
-      ) : (
-        <EvmBettingPanel
-          agent1Name={effAgent1Name}
-          agent2Name={effAgent2Name}
-          compact
-          locale={locale}
-          lifecycleDuelOverride={liveOverviewDuel}
-          lifecycleMarketOverride={liveOverviewMarket}
-          lifecycleMarketParityOverride={effectiveMarketParity}
-          onLifecycleRefreshRequested={requestOverviewRefresh}
-        />
-      )}
+      <EvmBettingPanel
+        agent1Name={effAgent1Name}
+        agent2Name={effAgent2Name}
+        compact
+        locale={locale}
+        lifecycleDuelOverride={liveOverviewDuel}
+        lifecycleMarketOverride={liveOverviewMarket}
+        onLifecycleRefreshRequested={requestOverviewRefresh}
+      />
     </Suspense>
-  );
-  const modelsPanelBody = (
-    <Suspense
-      fallback={<PanelFallback label={copy.loadingModelMarkets} minHeight={480} />}
-    >
-      {isSolanaChain ? (
-        <SolanaModelsMarketView
-          activeMatchup={`${effA1.name} vs ${effA2.name}`}
-        />
-      ) : (
-        <EvmModelsMarketView
-          fightingAgentA={effA1.name}
-          fightingAgentB={effA2.name}
-          locale={locale}
-          gameApiUrl={GAME_API_URL}
-          mockData={mockData}
-          collateralSymbol={activeEvmCollateralSymbol ?? ""}
-          chainKey={activeEvmChain ?? undefined}
-          chainLabel={activeEvmChainLabel ?? ""}
-        />
-      )}
-    </Suspense>
-  );
-  const walletButton = isSolanaChain ? (
-    <button
-      type="button"
-      className="hm-wallet-btn hm-wallet-btn--linked"
-      title={solanaWalletAddress ?? copy.connectSolana}
-      onClick={() => {
-        if (solanaWallet.connected) {
-          void solanaWallet.disconnect();
-          return;
-        }
-        solanaWalletModal.setVisible(true);
-      }}
-    >
-      ☀️{" "}
-      {solanaWalletAddress ? truncateAddr(solanaWalletAddress) : copy.connectSolana}
-    </button>
-  ) : (
-    <ConnectButton.Custom>
-      {({
-        openConnectModal,
-        openAccountModal,
-        openChainModal,
-        account,
-        chain,
-        mounted,
-      }) => {
-        if (!mounted || !account)
-          return effectiveEvmWalletAddress ? (
-            <button
-              type="button"
-              className="hm-wallet-btn hm-wallet-btn--linked"
-              title={effectiveEvmWalletAddress}
-            >
-              ⬡ {truncateAddr(effectiveEvmWalletAddress)}
-            </button>
-          ) : (
-            <button
-              type="button"
-              className="hm-wallet-btn"
-              onClick={openConnectModal}
-            >
-              {copy.addEvmWallet}
-            </button>
-          );
-        if (chain?.unsupported)
-          return (
-            <button
-              type="button"
-              className="hm-wallet-btn"
-              onClick={openChainModal}
-            >
-              {copy.switchNetwork}
-            </button>
-          );
-        return (
-          <button
-            type="button"
-            className="hm-wallet-btn hm-wallet-btn--linked"
-            onClick={openAccountModal}
-          >
-            {account.displayName}
-          </button>
-        );
-      }}
-    </ConnectButton.Custom>
   );
 
   const tradingSidebar = (
@@ -1325,9 +1030,9 @@ export function App() {
           ) : null}
         </div>
       </div>
-      {streamSyncUiState !== "aligned" ? (
+      {streamSyncUi.state !== "hidden" ? (
         <div className="hm-stream-status-row">
-          {streamSyncUiState === "connecting" ? (
+          {streamSyncUi.state === "refreshing" ? (
             <StreamStatusChip
               state="refreshing"
               title={copy.refreshingLiveState}
@@ -1335,27 +1040,15 @@ export function App() {
             />
           ) : null}
 
-          {streamSyncUiState === "recovering" ? (
-            <StreamStatusChip
-              state="refreshing"
-              title={copy.reconnectingStream}
-              loading
-            />
-          ) : null}
-
-          {streamSyncUiState === "degraded" ? (
+          {streamSyncUi.state === "degraded" ? (
             <StreamStatusChip
               state="degraded"
-              title={streamPlaceholderMessage}
-              detail={
-                canonicalRendererHealth?.ready === false
-                  ? null
-                  : copy.refreshingLiveState
-              }
+              title={copy.reconnectingStream}
+              detail={copy.refreshingLiveState}
             />
           ) : null}
 
-          {streamSyncUiState === "drifted" ? (
+          {streamSyncUi.state === "drift" ? (
             <StreamStatusChip
               state="drift"
               title={copy.outOfSync}
@@ -1626,29 +1319,21 @@ export function App() {
                 <Suspense
                   fallback={<PanelFallback label={copy.loadingLeaderboard} />}
                 >
-                  <PointsLeaderboard
-                    defaultScope={activePointsScope}
-                    locale={locale}
-                  />
+                  <PointsLeaderboard locale={locale} />
                 </Suspense>
               )}
               {pointsDrawerTab === "history" && (
                 <Suspense fallback={<PanelFallback label={copy.loadingHistory} />}>
-                  <PointsHistory
-                    walletAddress={pointsWalletAddress}
-                    locale={locale}
-                    scope={activePointsScope}
-                  />
+                  <PointsHistory walletAddress={pointsWalletAddress} locale={locale} />
                 </Suspense>
               )}
               {pointsDrawerTab === "referral" && (
                 <Suspense fallback={<PanelFallback label={copy.loadingReferral} />}>
                   <ReferralPanel
                     activeChain={activeChain}
-                    solanaWallet={solanaWalletAddress}
-                    evmWallet={effectiveEvmWalletAddress}
+                    evmWallet={evmWalletAddress ?? null}
                     locale={locale}
-                    evmWalletPlatform={effectiveEvmWalletAddress ? linkedEvmWalletPlatform : null}
+                    evmWalletPlatform={activeChainLabel}
                   />
                 </Suspense>
               )}
@@ -1864,72 +1549,54 @@ export function App() {
                 >
                   🏆
                 </button>
-                {isSolanaChain ? (
-                  <button
-                    type="button"
-                    className="hm-header-mob-wallet-btn hm-header-mob-wallet-btn--linked"
-                    title={solanaWalletAddress ?? copy.connectSolana}
-                    onClick={() => {
-                      if (solanaWallet.connected) {
-                        void solanaWallet.disconnect();
-                        return;
-                      }
-                      solanaWalletModal.setVisible(true);
-                    }}
-                  >
-                    ☀️{" "}
-                    {solanaWalletAddress ? truncateAddr(solanaWalletAddress) : copy.connectSolana}
-                  </button>
-                ) : (
-                  <ConnectButton.Custom>
-                    {({
-                      openConnectModal,
-                      openAccountModal,
-                      openChainModal,
-                      account,
-                      chain,
-                      mounted,
-                    }) => {
-                      if (!mounted || !account)
-                        return effectiveEvmWalletAddress ? (
-                          <button
-                            type="button"
-                            className="hm-header-mob-wallet-btn hm-header-mob-wallet-btn--linked"
-                            title={effectiveEvmWalletAddress}
-                          >
-                            ⬡ {truncateAddr(effectiveEvmWalletAddress)}
-                          </button>
-                        ) : (
-                          <button
-                            type="button"
-                            className="hm-header-mob-wallet-btn"
-                            onClick={openConnectModal}
-                          >
-                            {copy.connectEvm}
-                          </button>
-                        );
-                      if (chain?.unsupported)
-                        return (
-                          <button
-                            type="button"
-                            className="hm-header-mob-wallet-btn"
-                            onClick={openChainModal}
-                          >
-                            ⚠ {copy.wrongNet}
-                          </button>
-                        );
-                      return (
+                <ConnectButton.Custom>
+                  {({
+                    openConnectModal,
+                    openAccountModal,
+                    openChainModal,
+                    account,
+                    chain,
+                    mounted,
+                  }) => {
+                    if (!mounted || !account)
+                      return effectiveEvmWalletAddress ? (
                         <button
                           type="button"
                           className="hm-header-mob-wallet-btn hm-header-mob-wallet-btn--linked"
-                          onClick={openAccountModal}
+                          title={effectiveEvmWalletAddress}
                         >
-                          ⬡ {account.displayName?.slice(0, 6) ?? activeChainLabel}
+                          ⬡ {truncateAddr(effectiveEvmWalletAddress)}
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          className="hm-header-mob-wallet-btn"
+                          onClick={openConnectModal}
+                        >
+                          {copy.connectEvm}
                         </button>
                       );
-                    }}
-                  </ConnectButton.Custom>
-                )}
+                    if (chain?.unsupported)
+                      return (
+                        <button
+                          type="button"
+                          className="hm-header-mob-wallet-btn"
+                          onClick={openChainModal}
+                        >
+                          ⚠ {copy.wrongNet}
+                        </button>
+                      );
+                    return (
+                      <button
+                        type="button"
+                        className="hm-header-mob-wallet-btn hm-header-mob-wallet-btn--linked"
+                        onClick={openAccountModal}
+                      >
+                        ⬡ {account.displayName?.slice(0, 6) ?? activeChainLabel}
+                      </button>
+                    );
+                  }}
+                </ConnectButton.Custom>
               </div>
             </div>
             {/* Row 2: Match strip — name + agent side-select chips */}
@@ -1990,7 +1657,54 @@ export function App() {
               >
                 🏆
               </button>
-              {walletButton}
+                <ConnectButton.Custom>
+                  {({
+                    openConnectModal,
+                    openAccountModal,
+                    openChainModal,
+                  account,
+                    chain,
+                    mounted,
+                  }) => {
+                    if (!mounted || !account)
+                    return effectiveEvmWalletAddress ? (
+                      <button
+                        type="button"
+                        className="hm-wallet-btn hm-wallet-btn--linked"
+                        title={effectiveEvmWalletAddress}
+                      >
+                        {truncateAddr(effectiveEvmWalletAddress)}
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        className="hm-wallet-btn"
+                        onClick={openConnectModal}
+                      >
+                        {copy.addEvmWallet}
+                      </button>
+                    );
+                  if (chain?.unsupported)
+                    return (
+                      <button
+                        type="button"
+                        className="hm-wallet-btn"
+                        onClick={openChainModal}
+                      >
+                        {copy.switchNetwork}
+                      </button>
+                    );
+                  return (
+                    <button
+                      type="button"
+                      className="hm-wallet-btn hm-wallet-btn--linked"
+                      onClick={openAccountModal}
+                    >
+                      {account.displayName}
+                    </button>
+                  );
+                }}
+              </ConnectButton.Custom>
             </div>
           </>
         )}
@@ -1999,7 +1713,21 @@ export function App() {
       {surfaceMode === "MODELS" ? (
         <div className="hm-main hm-main--models">
           <div className="hm-models-main">
-            {modelsPanelBody}
+            <Suspense
+              fallback={
+                <PanelFallback label={copy.loadingModelMarkets} minHeight={480} />
+              }
+            >
+              <EvmModelsMarketView
+                fightingAgentA={effA1.name}
+                fightingAgentB={effA2.name}
+                locale={locale}
+                gameApiUrl={GAME_API_URL}
+                mockData={mockData}
+                collateralSymbol={activeChainLabel}
+                chainLabel={activeChainLabel}
+              />
+            </Suspense>
           </div>
         </div>
       ) : (
@@ -2012,16 +1740,20 @@ export function App() {
 
                 {/* Game Viewport */}
                 <div className="hm-game-viewport">
-                  {mountedStreamUrl ? (
+                  {activeStreamUrl ? (
                     <>
                       <StreamPlayer
-                        streamUrl={mountedStreamUrl}
-                        deliveryMode={streamDeliveryMode}
-                        presentationDelayMs={canonicalPresentationDelayMs}
-                        syncToleranceMs={1_500}
+                        streamUrl={activeStreamUrl}
                         muted={hmMuted}
                         autoPlay={true}
-                        onStatusChange={setStreamPlayerStatus}
+                        onStreamReady={() => {
+                          setStreamSurfaceReady(true);
+                          setStreamSurfaceUnavailable(false);
+                        }}
+                        onStreamUnavailable={() => {
+                          setStreamSurfaceUnavailable(true);
+                          switchToBackupStream();
+                        }}
                         style={{
                           position: "absolute",
                           inset: 0,
@@ -2029,70 +1761,62 @@ export function App() {
                           height: "100%",
                         }}
                       />
-                      {activeStreamUrl ? (
-                        <div className="hm-stream-controls">
+                      <div className="hm-stream-controls">
+                        <button
+                          className="hm-stream-mute-btn"
+                          onClick={() => setHmMuted((m) => !m)}
+                          type="button"
+                          aria-label={hmMuted ? copy.unmuteStream : copy.muteStream}
+                        >
+                          {hmMuted ? (
+                            <svg
+                              width="18"
+                              height="18"
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                            >
+                              <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+                              <line x1="23" y1="9" x2="17" y2="15" />
+                              <line x1="17" y1="9" x2="23" y2="15" />
+                            </svg>
+                          ) : (
+                            <svg
+                              width="18"
+                              height="18"
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="2"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                            >
+                              <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+                              <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
+                              <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
+                            </svg>
+                          )}
+                        </button>
+                        {streamSources.length > 1 && (
                           <button
-                            className="hm-stream-mute-btn"
-                            onClick={() => setHmMuted((m) => !m)}
+                            className="hm-stream-source-btn"
+                            onClick={cycleStreamSource}
                             type="button"
-                            aria-label={hmMuted ? copy.unmuteStream : copy.muteStream}
                           >
-                            {hmMuted ? (
-                              <svg
-                                width="18"
-                                height="18"
-                                viewBox="0 0 24 24"
-                                fill="none"
-                                stroke="currentColor"
-                                strokeWidth="2"
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                              >
-                                <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
-                                <line x1="23" y1="9" x2="17" y2="15" />
-                                <line x1="17" y1="9" x2="23" y2="15" />
-                              </svg>
-                            ) : (
-                              <svg
-                                width="18"
-                                height="18"
-                                viewBox="0 0 24 24"
-                                fill="none"
-                                stroke="currentColor"
-                                strokeWidth="2"
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                              >
-                                <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
-                                <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
-                                <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
-                              </svg>
-                            )}
+                            {copy.source} {streamSourceIndex + 1}/
+                            {streamSources.length}
                           </button>
-                        </div>
-                      ) : null}
-                      {rendererDegradedOverlayMessage ? (
-                        <div className="hm-stream-degraded-overlay" role="status">
-                          <div className="hm-stream-degraded-backdrop" />
-                          <span className="hm-stream-degraded-message">
-                            {rendererDegradedOverlayMessage}
-                          </span>
-                        </div>
-                      ) : null}
-                      {!activeStreamUrl ? (
-                        <div className="hm-game-placeholder hm-game-placeholder--overlay">
-                          <div className="hm-game-bg" />
-                          <span className="hm-game-waiting">
-                            {streamPlaceholderMessage}
-                          </span>
-                        </div>
-                      ) : null}
+                        )}
+                      </div>
                     </>
                   ) : (
                     <div className="hm-game-placeholder">
                       <div className="hm-game-bg" />
                       <span className="hm-game-waiting">
-                        {streamPlaceholderMessage}
+                        {copy.waitingForStream}
                       </span>
                     </div>
                   )}

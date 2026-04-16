@@ -1,7 +1,3 @@
-/**
- * ChainSelector — Dropdown to pick active chain (Solana / BSC / Base / AVAX).
- */
-
 import { useChain } from "../lib/ChainContext";
 import { type ChainId } from "../lib/chainConfig";
 import { getLocalizedChainDisplay } from "@hyperbet/ui/tokens";
@@ -55,7 +51,6 @@ export function ChainSelector() {
       >
         {availableChains.map((chain) => {
           const display = getLocalizedChainDisplay(chain, locale);
-          // <option> can't render images — fall back to emoji or short name
           const optionIcon =
             display.icon.startsWith("http://") ||
             display.icon.startsWith("https://")

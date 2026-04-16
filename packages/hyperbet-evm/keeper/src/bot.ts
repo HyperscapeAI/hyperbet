@@ -1072,7 +1072,6 @@ async function updatePerpsOracle(
   agentId: string,
   rating: AgentRating,
 ): Promise<boolean> {
-  // Skip if perps oracle is disabled (program not deployed)
   if (!PERPS_ORACLE_ENABLED) return false;
 
   try {
@@ -3450,7 +3449,6 @@ async function reportRoundResult(data: DuelLifecycleEvent): Promise<void> {
   writeBotHealthSnapshot();
 }
 
-// Event-driven Logic
 const gameClient = new GameClient(args["game-url"]);
 
 gameClient.onDuelStart(async (data) => {
@@ -3535,7 +3533,6 @@ gameClient.onDuelEnd(async (data) => {
     const winnerId = data.winnerId;
     const isAgent1 = winnerId === data.agent1?.id;
 
-    // Update TrueSkill Ratings
     if (data.agent1?.id && data.agent2?.id) {
       const uA1 = getRating(data.agent1.id.toString());
       const uA2 = getRating(data.agent2.id.toString());
@@ -3608,7 +3605,6 @@ gameClient.onDuelEnd(async (data) => {
 writeBotHealthSnapshot();
 gameClient.connect();
 
-// Maintenance Loop (Seeding & Cleanup)
 async function runMaintenance(): Promise<void> {
   if (!solanaKeeperWriteEnabled) {
     return;
@@ -3628,7 +3624,6 @@ async function runMaintenance(): Promise<void> {
   }
   await ensureOracleReady();
   await ensurePerpsConfigReady();
-  // ... (simplified loop for seeing liquidity and resolving old markets)
   await syncPerpsOraclesFromLeaderboard();
   if (PERPS_MARKET_MAKER_RECYCLE_ENABLED) {
     const perpsMarkets = loadPerpsMarkets().filter(
@@ -3640,7 +3635,6 @@ async function runMaintenance(): Promise<void> {
   }
   await maybeArchiveSettledPerpsMarkets();
 
-  // Poll only the actively tracked CLOB markets we created.
   for (const [duelId, trackedMatch] of activeClobMatches.entries()) {
     const duelState = await getDuelState(trackedMatch.duelState);
     if (!duelState) {
@@ -3670,8 +3664,6 @@ async function runMaintenance(): Promise<void> {
       activeClobMatches.delete(duelId);
     }
   }
-
-  // NOTE: We do NOT create new rounds here anymore.
 
   if (PERPS_LIQUIDATOR_ENABLED) {
     await runLiquidatorLoop();

@@ -1,12 +1,4 @@
-/**
- * perpsLiquidation.test.ts — Integration tests for keeper-driven perps liquidation flow.
- *
- * Tests the end-to-end lifecycle: oracle outcome → skill update → position health
- * check → liquidation execution → insurance fund accounting.
- *
- * Requires: anvil running on localhost:18545
- *   anvil --host 127.0.0.1 --port 18545 --chain-id 97 --accounts 20 --balance 10000
- */
+// Requires: anvil --host 127.0.0.1 --port 18545 --chain-id 97 --accounts 20 --balance 10000
 import { describe, test, expect, beforeAll } from "bun:test";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -22,7 +14,6 @@ import {
 } from "viem";
 import { mnemonicToAccount } from "viem/accounts";
 
-// ─── Setup ──────────────────────────────────────────────────────────────────
 
 const ANVIL_MNEMONIC = "test test test test test test test test test test test junk";
 const RPC_URL = process.env.PERPS_TEST_RPC || "http://127.0.0.1:18545";
@@ -141,7 +132,6 @@ async function crashOracle(mu: number) {
     address: oracleAddr, abi: skillOracleArtifact!.abi,
     functionName: "updateAgentSkill", args: [agentId, mu, 0],
   }));
-  // Propagate new price into the perps engine's stored state
   await waitReceipt(await admin.wallet.writeContract({
     address: engineAddr, abi: agentPerpEngineArtifact!.abi,
     functionName: "syncOracle", args: [agentId],
@@ -155,7 +145,6 @@ async function getPosition(addr: Address): Promise<PositionResult> {
   }) as Promise<PositionResult>;
 }
 
-// ─── Deploy once ────────────────────────────────────────────────────────────
 
 let anvilAvailable = false;
 
@@ -189,29 +178,25 @@ beforeAll(async () => {
   trader = makeWallet(1);
   keeperBot = makeWallet(2);
 
-  // Deploy SkillOracle
   let hash = await admin.wallet.deployContract({
     abi: skillOracleArtifact.abi, bytecode: resolveBytecode(skillOracleArtifact),
     args: [parseUnits("100", 18), 7200n, admin.address, admin.address, admin.address],
   });
   oracleAddr = (await waitReceipt(hash)).contractAddress!;
 
-  // Deploy margin token
   hash = await admin.wallet.deployContract({
     abi: mockErc20Artifact.abi, bytecode: resolveBytecode(mockErc20Artifact),
     args: ["USDC", "USDC"],
   });
   tokenAddr = (await waitReceipt(hash)).contractAddress!;
 
-  // Deploy AgentPerpEngine
   hash = await admin.wallet.deployContract({
     abi: agentPerpEngineArtifact.abi, bytecode: resolveBytecode(agentPerpEngineArtifact),
     args: [oracleAddr, tokenAddr, parseUnits("1000000", 18), admin.address, admin.address, admin.address],
   });
   engineAddr = (await waitReceipt(hash)).contractAddress!;
 
-  // Setup: oracle skills for 2 agents (needed so globalMeanMu is anchored)
-  // Agent A starts at mu=1500, Agent B at mu=1500 (anchors the mean)
+  // Anchor globalMeanMu with two agents at mu=1500.
   await waitReceipt(await admin.wallet.writeContract({
     address: oracleAddr, abi: skillOracleArtifact.abi,
     functionName: "updateAgentSkill", args: [agentId, 1500, 0],
@@ -225,7 +210,6 @@ beforeAll(async () => {
     functionName: "createMarket", args: [agentId],
   }));
 
-  // Fund trader + keeper with margin tokens
   for (const w of [admin, trader, keeperBot]) {
     await waitReceipt(await admin.wallet.writeContract({
       address: tokenAddr, abi: mockErc20Artifact.abi,
@@ -237,25 +221,21 @@ beforeAll(async () => {
     }));
   }
 
-  // Seed insurance fund
   await waitReceipt(await admin.wallet.writeContract({
     address: engineAddr, abi: agentPerpEngineArtifact.abi,
     functionName: "depositInsuranceFund", args: [agentId, parseUnits("50000", 18)],
   }));
 
-  // Take base snapshot — each test reverts to this then re-snapshots
   snapshotId = await snapshot();
   suiteAvailable = true;
 });
 
 async function isolate<T>(fn: () => Promise<T>): Promise<T> {
-  // Revert to base state, re-snapshot for next test
   await revert(snapshotId);
   snapshotId = await snapshot();
   return fn();
 }
 
-// ─── Tests ──────────────────────────────────────────────────────────────────
 
 describe("keeper perps liquidation flow", () => {
   test("happy path: oracle crash → position underwater → keeper liquidates", async () => {
@@ -263,25 +243,20 @@ describe("keeper perps liquidation flow", () => {
     await revert(snapshotId); snapshotId = await snapshot();
     const sid = await snapshot();
 
-    // Trader opens long position: 100 margin, 5 size
     await waitReceipt(await trader.wallet.writeContract({
       address: engineAddr, abi: agentPerpEngineArtifact!.abi,
       functionName: "modifyPosition",
       args: [agentId, parseUnits("100", 18), parseUnits("5", 18)],
     }));
 
-    // Verify position is healthy
     let health = await getPositionHealth(trader.address);
-    expect(health.liquidatable).toBe(false); // not liquidatable
+    expect(health.liquidatable).toBe(false);
 
-    // Oracle crash: mu 1500 → 1000, synced into perps engine
     await crashOracle(1000);
 
-    // Position should now be liquidatable
     health = await getPositionHealth(trader.address);
-    expect(health.liquidatable).toBe(true); // liquidatable
+    expect(health.liquidatable).toBe(true);
 
-    // Keeper executes liquidation
     const liqHash = await keeperBot.wallet.writeContract({
       address: engineAddr, abi: agentPerpEngineArtifact!.abi,
       functionName: "liquidate", args: [agentId, trader.address],
@@ -289,10 +264,8 @@ describe("keeper perps liquidation flow", () => {
     const receipt = await waitReceipt(liqHash);
     expect(receipt.status).toBe("success");
 
-    // Verify position is closed or reduced
     const pos = await getPosition(trader.address);
     const sizeAfter = BigInt(pos.size ?? 0);
-    // Position should be fully or partially liquidated
     expect(Math.abs(Number(sizeAfter))).toBeLessThan(Number(parseUnits("5", 18)));
 
     await revert(sid);
@@ -305,17 +278,14 @@ describe("keeper perps liquidation flow", () => {
     const mktBefore = await getMarketState();
     const insuranceBefore = BigInt(mktBefore.insuranceFund ?? 0);
 
-    // Trader opens leveraged long
     await waitReceipt(await trader.wallet.writeContract({
       address: engineAddr, abi: agentPerpEngineArtifact!.abi,
       functionName: "modifyPosition",
-      args: [agentId, parseUnits("120", 18), parseUnits("5", 18)], // near max leverage
+      args: [agentId, parseUnits("120", 18), parseUnits("5", 18)],
     }));
 
-    // Oracle crash
     await crashOracle(1000);
 
-    // Liquidate
     try {
       await waitReceipt(await keeperBot.wallet.writeContract({
         address: engineAddr, abi: agentPerpEngineArtifact!.abi,
@@ -327,7 +297,6 @@ describe("keeper perps liquidation flow", () => {
     const insuranceAfter = BigInt(mktAfter.insuranceFund ?? 0);
     const badDebt = BigInt(mktAfter.badDebt ?? 0);
 
-    // Insurance should have absorbed losses or bad debt was recorded
     expect(insuranceAfter <= insuranceBefore || badDebt > 0n).toBe(true);
 
     await revert(sid);
@@ -337,24 +306,20 @@ describe("keeper perps liquidation flow", () => {
     if (!suiteAvailable) return;
     const sid = await snapshot();
 
-    // Trader opens well-collateralized position
     await waitReceipt(await trader.wallet.writeContract({
       address: engineAddr, abi: agentPerpEngineArtifact!.abi,
       functionName: "modifyPosition",
-      args: [agentId, parseUnits("500", 18), parseUnits("5", 18)], // 100x margin
+      args: [agentId, parseUnits("500", 18), parseUnits("5", 18)],
     }));
 
-    // Small oracle move (within delta caps but not enough to liquidate)
     await waitReceipt(await admin.wallet.writeContract({
       address: oracleAddr, abi: skillOracleArtifact!.abi,
       functionName: "updateAgentSkill", args: [agentId, 1400, 0], // -100 mu
     }));
 
-    // Position should NOT be liquidatable
     const health = await getPositionHealth(trader.address);
     expect(health.liquidatable).toBe(false);
 
-    // Liquidation attempt should revert
     let reverted = false;
     try {
       await waitReceipt(await keeperBot.wallet.writeContract({
@@ -378,17 +343,14 @@ describe("keeper perps liquidation flow", () => {
       functionName: "balanceOf", args: [keeperBot.address],
     }) as bigint;
 
-    // Trader opens leveraged long
     await waitReceipt(await trader.wallet.writeContract({
       address: engineAddr, abi: agentPerpEngineArtifact!.abi,
       functionName: "modifyPosition",
       args: [agentId, parseUnits("100", 18), parseUnits("5", 18)],
     }));
 
-    // Oracle crash
     await crashOracle(1000);
 
-    // Liquidate
     try {
       await waitReceipt(await keeperBot.wallet.writeContract({
         address: engineAddr, abi: agentPerpEngineArtifact!.abi,
@@ -401,7 +363,6 @@ describe("keeper perps liquidation flow", () => {
       functionName: "balanceOf", args: [keeperBot.address],
     }) as bigint;
 
-    // Keeper should have received a liquidation reward
     expect(keeperBalAfter).toBeGreaterThanOrEqual(keeperBalBefore);
 
     await revert(sid);
@@ -411,7 +372,6 @@ describe("keeper perps liquidation flow", () => {
     if (!suiteAvailable) return;
     const sid = await snapshot();
 
-    // Drain insurance to minimum
     const mkt0 = await getMarketState();
     const currentInsurance = BigInt(mkt0.insuranceFund ?? 0);
     if (currentInsurance > parseUnits("1", 18)) {
@@ -424,17 +384,14 @@ describe("keeper perps liquidation flow", () => {
       } catch {}
     }
 
-    // Trader opens very leveraged position
     await waitReceipt(await trader.wallet.writeContract({
       address: engineAddr, abi: agentPerpEngineArtifact!.abi,
       functionName: "modifyPosition",
-      args: [agentId, parseUnits("110", 18), parseUnits("5", 18)], // near max leverage, minimal cushion
+      args: [agentId, parseUnits("110", 18), parseUnits("5", 18)],
     }));
 
-    // Oracle crash
     await crashOracle(1000);
 
-    // Liquidate — may create bad debt if insurance insufficient
     try {
       await waitReceipt(await keeperBot.wallet.writeContract({
         address: engineAddr, abi: agentPerpEngineArtifact!.abi,
@@ -446,7 +403,6 @@ describe("keeper perps liquidation flow", () => {
     const badDebt = BigInt(mktAfter.badDebt ?? 0);
     const insuranceAfter = BigInt(mktAfter.insuranceFund ?? 0);
 
-    // Either bad debt was recorded or insurance was depleted (or both)
     expect(badDebt > 0n || insuranceAfter === 0n).toBe(true);
 
     await revert(sid);

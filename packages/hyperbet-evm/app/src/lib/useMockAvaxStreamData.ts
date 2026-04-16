@@ -57,34 +57,15 @@ export interface MockTrade {
 }
 
 export interface MockAvaxStreamData {
-  /** Chart data compatible with HmChartPoint = { time: number; pct: number } */
   chartData: HmChartPoint[];
-
-  /**
-   * Streaming state shaped to match what useStreamingState() returns.
-   * null during the initial IDLE tick before agents are assigned.
-   */
+  /** null during IDLE tick before agents are assigned. */
   streamingState: MockStreamingStateBridge;
-
-  /** Fixed mock EVM address for wallet-gated UI in stream-ui mode */
   mockEvmAddress: `0x${string}`;
-
-  /** YES percentage (0–100) derived from pot ratio */
   yesPct: number;
-
-  /** Combined YES + NO pot value */
   totalPot: number;
-
-  /** Order book bid levels */
   bids: MockOrderLevel[];
-
-  /** Order book ask levels */
   asks: MockOrderLevel[];
-
-  /** Recent trade feed */
   recentTrades: MockTrade[];
-
-  /** Full ranked leaderboard of all agents */
   leaderboard: MockLeaderboardEntry[];
 }
 
@@ -92,20 +73,12 @@ export interface MockAvaxStreamData {
 const MOCK_EVM_ADDRESS: `0x${string}` =
   '0xMock000000000000000000000000000000001234' as `0x${string}`;
 
-/**
- * Converts the engine's OrderLevel (price/amount/total) to the leaner
- * MockOrderLevel (price/size) expected by the public interface.
- */
 function toMockOrderLevels(
   levels: Array<{ price: number; amount: number; total: number }>,
 ): MockOrderLevel[] {
   return levels.map((l) => ({ price: l.price, size: l.amount }));
 }
 
-/**
- * Maps engine Trade (id/side/amount/price/time) to MockTrade (price/size/side/timestamp).
- * The engine uses "YES"/"NO" sides; we normalise to "buy"/"sell" (YES = buy).
- */
 function toMockTrades(
   trades: Array<{ id: string; side: 'YES' | 'NO'; amount: number; price?: number; time: number }>,
 ): MockTrade[] {
@@ -117,11 +90,6 @@ function toMockTrades(
   }));
 }
 
-/**
- * Builds a MockStreamingStateBridge from the raw StreamingStateUpdate produced
- * by the mock engine. Returns state: null when agents haven't been populated yet
- * (e.g. the first IDLE tick).
- */
 function buildStreamingStateBridge(
   raw: StreamingStateUpdate,
 ): MockStreamingStateBridge {
@@ -228,10 +196,7 @@ export function MockDataProvider({ children }: MockDataProviderProps): React.Rea
 }
 
 
-/**
- * Returns mock data when called inside a <MockDataProvider>, null otherwise.
- * Use this in components that may render in both mock and live modes.
- */
+/** Returns null outside a MockDataProvider (safe for live+mock dual rendering). */
 export function useMockDataOptional(): MockAvaxStreamData | null {
   return useContext(MockDataContext);
 }

@@ -1,4 +1,4 @@
-import { useRef, useState, ReactNode } from "react";
+import { useState, ReactNode } from "react";
 import { getUiCopy, resolveUiLocale, type UiLocale } from "@hyperbet/ui/i18n";
 import {
   LineChart,
@@ -6,9 +6,9 @@ import {
   XAxis,
   YAxis,
   Tooltip,
+  ResponsiveContainer,
   ReferenceLine,
 } from "recharts";
-import { useMeasuredContentBox } from "../lib/useMeasuredContentBox";
 import { OrderBook, type OrderLevel } from "./OrderBook";
 import { RecentTrades, type Trade } from "./RecentTrades";
 
@@ -88,8 +88,6 @@ export function PredictionMarketPanel({
   const resolvedLocale = resolveUiLocale(locale);
   const copy = getUiCopy(resolvedLocale);
   const [activeTab, setActiveTab] = useState<"buy" | "sell">("buy");
-  const chartContainerRef = useRef<HTMLDivElement | null>(null);
-  const chartSize = useMeasuredContentBox(chartContainerRef, true, 2);
 
   const yesSelected = side === "YES";
   const noSelected = side === "NO";
@@ -105,7 +103,6 @@ export function PredictionMarketPanel({
       ? "linear-gradient(180deg, var(--hm-buy-soft, rgba(34,197,94,0.18)) 0%, var(--hm-buy-soft-fade, rgba(34,197,94,0.05)) 100%)"
       : "linear-gradient(180deg, var(--hm-sell-soft, rgba(232,65,66,0.18)) 0%, var(--hm-sell-soft-fade, rgba(232,65,66,0.05)) 100%)";
 
-  // Compact mode colour tokens (hm-* theme)
   const C_YES_ACTIVE_BG = compact
     ? "linear-gradient(180deg, var(--hm-buy-soft, rgba(34,197,94,0.22)) 0%, var(--hm-buy-soft-fade, rgba(34,197,94,0.06)) 100%)"
     : "linear-gradient(180deg, var(--hm-buy-soft, rgba(34,197,94,0.22)) 0%, var(--hm-buy-soft-fade, rgba(34,197,94,0.06)) 100%)";
@@ -120,7 +117,6 @@ export function PredictionMarketPanel({
   const C_YES_BAR = compact
     ? "linear-gradient(90deg, var(--hm-buy-soft, rgba(34,197,94,0.2)), var(--hm-buy), var(--hm-buy-soft, rgba(34,197,94,0.2)))"
     : "linear-gradient(90deg, var(--hm-buy-soft, rgba(34,197,94,0.2)), var(--hm-buy), var(--hm-buy-soft, rgba(34,197,94,0.2)))";
-
   const C_YES_BAR_SHADOW = compact
     ? "0 0 8px var(--hm-buy-glow-strong, rgba(34,197,94,0.5))"
     : "0 0 8px var(--hm-buy-glow-strong, rgba(34,197,94,0.5))";
@@ -896,7 +892,6 @@ export function PredictionMarketPanel({
                 />
               </div>
               <div
-                ref={chartContainerRef}
                 style={{
                   flex: 1,
                   minHeight: 0,
@@ -904,12 +899,8 @@ export function PredictionMarketPanel({
                   zIndex: 1,
                 }}
               >
-                {chartSize ? (
-                  <LineChart
-                    data={chartData}
-                    width={chartSize.width}
-                    height={chartSize.height}
-                  >
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={chartData}>
                     <defs>
                       <filter
                         id="glow"
@@ -939,8 +930,7 @@ export function PredictionMarketPanel({
                                 WebkitBackdropFilter: "blur(20px)",
                                 padding: "6px 12px",
                                 borderRadius: 8,
-                                border:
-                                  "1px solid var(--hm-chip-border, rgba(232,65,66,0.3))",
+                                border: "1px solid var(--hm-chip-border, rgba(232,65,66,0.3))",
                                 fontSize: 13,
                                 fontFamily: "var(--hm-font-mono)",
                                 fontWeight: 900,
@@ -973,7 +963,7 @@ export function PredictionMarketPanel({
                       filter="url(#glow)"
                     />
                   </LineChart>
-                ) : null}
+                </ResponsiveContainer>
               </div>
             </div>
 
