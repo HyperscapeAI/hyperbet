@@ -151,7 +151,8 @@ export function isPublicMarketParityState(
     state === "locked" ||
     state === "resolved" ||
     state === "cancelled" ||
-    (state === "frozen" && openedAtMs != null)
+    (state === "frozen" && openedAtMs != null) ||
+    (state === "awaiting_confirmations" && openedAtMs != null)
   );
 }
 
