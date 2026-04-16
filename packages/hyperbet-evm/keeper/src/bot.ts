@@ -4460,8 +4460,20 @@ function isPendingParityLock(snapshot: KeeperMarketParitySnapshot): boolean {
   if (isTerminalMarketParityState(snapshot.state)) return false;
   if (snapshot.state === "locked") return false;
   if (!snapshot.openedAtMs) return false;
-  if (snapshot.lockedAtMs) return false;
-  return true;
+  // Check per-chain receipts rather than the top-level lockedAtMs, because
+  // partial success (one chain locked, others still open) can set the top-level
+  // timestamp while leaving some chains unlocked. We keep reconciling until
+  // every required chain's receipt reports LOCKED or a terminal state.
+  return snapshot.requiredChains.some((chainKey) => {
+    const receipt = snapshot.receipts.find((entry) => entry.chainKey === chainKey);
+    if (!receipt) return true;
+    return (
+      receipt.lifecycleStatus !== "LOCKED" &&
+      receipt.lifecycleStatus !== "PROPOSED" &&
+      receipt.lifecycleStatus !== "RESOLVED" &&
+      receipt.lifecycleStatus !== "CANCELLED"
+    );
+  });
 }
 
 async function maybeFinalizePendingSolanaParityLock(): Promise<void> {
