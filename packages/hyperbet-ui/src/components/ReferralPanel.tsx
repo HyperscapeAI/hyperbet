@@ -6,8 +6,7 @@ import {
 } from "@hyperbet/ui/i18n";
 import type { ChainId } from "../lib/chainConfig";
 import { buildArenaWriteHeaders, GAME_API_URL } from "../lib/config";
-
-type EvmPlatform = "BSC" | "BASE" | "AVAX";
+import type { EvmPlatform, WalletLinkResponse } from "./WalletLinkCard";
 
 type PointsSnapshot = {
   wallet: string;
@@ -37,14 +36,6 @@ type InviteSummary = {
   activeReferralCount: number;
   pendingSignupBonuses: number;
   totalReferralWinPoints: number;
-};
-
-type WalletLinkResponse = {
-  result?: {
-    alreadyLinked: boolean;
-    awardedPoints: number;
-  };
-  error?: string;
 };
 
 const LOCAL_INVITE_ORIGIN = "http://localhost:4179";
@@ -193,13 +184,14 @@ export function ReferralPanel(props: {
     ) {
       return evmWallet;
     }
-    return null;
+    return solanaWallet ?? evmWallet ?? null;
   }, [activeChain, solanaWallet, evmWallet]);
 
   const platformQuery = useMemo(() => {
+    if (primaryWallet && primaryWallet === solanaWallet) return "solana";
+    if (primaryWallet && primaryWallet === evmWallet) return "evm";
     return activeChain === "solana" ? "solana" : "evm";
-  }, [activeChain]);
-  const pointsScope = activeChain === "solana" ? "wallet" : "linked";
+  }, [activeChain, evmWallet, primaryWallet, solanaWallet]);
   const [points, setPoints] = useState<PointsSnapshot | null>(null);
   const [invite, setInvite] = useState<InviteSummary | null>(null);
   const [loadingStats, setLoadingStats] = useState(false);
@@ -222,7 +214,7 @@ export function ReferralPanel(props: {
       setStatsError("");
       const [pointsRes, inviteRes] = await Promise.all([
         fetch(
-          `${GAME_API_URL}/api/arena/points/${primaryWallet}?scope=${pointsScope}`,
+          `${GAME_API_URL}/api/arena/points/${primaryWallet}?scope=linked`,
           { cache: "no-store" },
         ),
         fetch(
@@ -255,7 +247,7 @@ export function ReferralPanel(props: {
     } finally {
       setLoadingStats(false);
     }
-  }, [copy, platformQuery, pointsScope, primaryWallet]);
+  }, [copy, platformQuery, primaryWallet]);
 
   useEffect(() => {
     void refreshStats();

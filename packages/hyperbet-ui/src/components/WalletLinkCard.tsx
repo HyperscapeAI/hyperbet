@@ -3,9 +3,9 @@ import { resolveUiLocale, type UiLocale } from "@hyperbet/ui/i18n";
 import type { ChainId } from "../lib/chainConfig";
 import { GAME_API_URL, buildArenaWriteHeaders } from "../lib/config";
 
-type EvmPlatform = "BSC" | "BASE" | "AVAX";
+export type EvmPlatform = "BSC" | "BASE" | "AVAX";
 
-type WalletLinkResponse = {
+export type WalletLinkResponse = {
   result?: {
     alreadyLinked: boolean;
     awardedPoints: number;
