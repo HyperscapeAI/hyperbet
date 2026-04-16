@@ -884,6 +884,7 @@ export function useCanonicalStreamSession(
       }
     };
 
+    source.addEventListener("state", handleEvent);
     source.addEventListener("session", handleEvent);
     source.addEventListener("reset", handleEvent);
 
