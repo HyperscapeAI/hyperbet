@@ -10,25 +10,18 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { RainbowKitProvider, darkTheme } from "@rainbow-me/rainbowkit";
 import { WagmiProvider } from "wagmi";
 
-// Derive the config type from WagmiProvider's props so that minor viem
-// version mismatches between packages don't cause deep structural errors.
+// Avoids deep structural type errors from minor viem version mismatches.
 type WagmiConfig = ComponentProps<typeof WagmiProvider>["config"];
 
 import "@rainbow-me/rainbowkit/styles.css";
 
-// Solana wallet providers are lazy-loaded so the import is only followed
-// at runtime — not at Vite dep-scan time for EVM-only packages that use
-// createEvmAppRoot instead of this factory.
+import type { HeadlessWalletDescriptor } from "./lib/appRootTypes";
+export type { HeadlessWalletDescriptor } from "./lib/appRootTypes";
+
+// Lazy-loaded so EVM-only packages never trigger @solana/* dep scanning.
 const SolanaProviders = lazy(() =>
   import("./SolanaProviders").then((m) => ({ default: m.SolanaProviders })),
 );
-
-export type HeadlessWalletDescriptor = {
-  // Using `unknown` here avoids importing @solana/wallet-adapter-base in this
-  // file. SolanaProviders.tsx imports the real Adapter type directly.
-  adapter: unknown;
-  autoConnect: boolean;
-};
 
 export type CreateHyperbetAppRootOptions = {
   getRpcUrl: () => string;
@@ -62,10 +55,10 @@ export function createHyperbetAppRoot({
       (entry) => entry.autoConnect,
     );
     if (autoConnectWallet) {
-      localStorage.setItem(
-        "walletName",
-        JSON.stringify((autoConnectWallet.adapter as any).name),
-      );
+      const adapter = autoConnectWallet.adapter as { name?: string };
+      if (adapter.name) {
+        localStorage.setItem("walletName", JSON.stringify(adapter.name));
+      }
     }
 
     const appContent = isStreamUi ? <StreamUIApp /> : <App />;
