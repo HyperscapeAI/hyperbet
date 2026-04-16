@@ -3348,9 +3348,15 @@ async function createOrSyncRound(
 }
 
 async function lockRound(data: DuelLifecycleEvent): Promise<void> {
-  const trackedMatch = activeClobMatches.get(data.duelId);
+  let trackedMatch = activeClobMatches.get(data.duelId);
+  if (!trackedMatch && marketParitySnapshot) {
+    trackedMatch =
+      deriveTrackedMatchForParitySnapshot(marketParitySnapshot) ?? undefined;
+  }
   if (!trackedMatch) {
-    return;
+    throw new Error(
+      `lockRound: cannot resolve Solana tracked match for duel ${data.duelId}`,
+    );
   }
 
   await upsertDuelLifecycle(data, "locked");
@@ -4427,6 +4433,229 @@ async function reportEvmResult(
   });
 }
 
+function buildSyntheticLockEvent(
+  snapshot: KeeperMarketParitySnapshot,
+  fallbackDuelKeyHex: string | null = null,
+): DuelLifecycleEvent | null {
+  const duelKey = snapshot.duelKey ?? fallbackDuelKeyHex;
+  if (!duelKey) return null;
+  return {
+    cycleId: snapshot.bundleId,
+    duelId: snapshot.duelId ?? `parity:${duelKey}`,
+    duelKeyHex: duelKey,
+    betOpenTime: null,
+    betCloseTime: null,
+    fightStartTime: null,
+    duelEndTime: null,
+    phase: snapshot.phase ?? "COUNTDOWN",
+    winnerId: null,
+    seed: null,
+    replayHash: null,
+    agent1: null,
+    agent2: null,
+  };
+}
+
+function isPendingParityLock(snapshot: KeeperMarketParitySnapshot): boolean {
+  if (isTerminalMarketParityState(snapshot.state)) return false;
+  if (snapshot.state === "locked") return false;
+  if (!snapshot.openedAtMs) return false;
+  if (snapshot.lockedAtMs) return false;
+  return true;
+}
+
+async function maybeFinalizePendingSolanaParityLock(): Promise<void> {
+  const current = marketParitySnapshot;
+  if (!current || !isPendingParityLock(current)) {
+    return;
+  }
+  if (!requiredParityChains.includes("solana")) {
+    return;
+  }
+
+  const receipt = current.receipts.find((entry) => entry.chainKey === "solana");
+  if (
+    receipt?.lifecycleStatus === "LOCKED" ||
+    receipt?.lifecycleStatus === "RESOLVED"
+  ) {
+    return;
+  }
+
+  const trackedMatch = deriveTrackedMatchForParitySnapshot(current);
+  if (!trackedMatch) {
+    console.warn("[bot] market_parity_solana_lock_skip", {
+      reason: "missing-duel-key",
+      duelId: current.duelId,
+      duelKey: current.duelKey,
+    });
+    return;
+  }
+
+  const duelState = await getDuelState(trackedMatch.duelState);
+  if (!duelState) {
+    console.warn("[bot] market_parity_solana_lock_skip", {
+      reason: "duel-state-missing",
+      duelId: current.duelId,
+      duelKey: current.duelKey,
+    });
+    return;
+  }
+
+  if (enumIs(duelState.status, "challenged") || Boolean(duelState.pendingChallenged)) {
+    finalizeMarketParityState("frozen", current.phase, {
+      reason: `solana duel ${current.duelId ?? current.duelKey} is challenged`,
+    });
+    return;
+  }
+
+  if (
+    enumIs(duelState.status, "locked") ||
+    enumIs(duelState.status, "proposed") ||
+    enumIs(duelState.status, "resolved")
+  ) {
+    markMarketParityChainConfirmed({
+      chainKey: "solana",
+      transition: "lock",
+      lifecycleStatus: "LOCKED",
+      note: "locked-on-readback",
+    });
+    if (allRequiredParityChainsConfirmed()) {
+      finalizeMarketParityState("locked", current.phase ?? "COUNTDOWN");
+    }
+    return;
+  }
+
+  if (!enumIs(duelState.status, "bettingOpen")) {
+    console.warn("[bot] market_parity_solana_lock_skip", {
+      reason: "unexpected-status",
+      duelId: current.duelId,
+      duelKey: current.duelKey,
+      status: duelState.status,
+    });
+    return;
+  }
+
+  const betCloseTs = asNum(duelState.betCloseTs, 0);
+  if (betCloseTs > 0 && Date.now() < betCloseTs * 1_000) {
+    return;
+  }
+
+  const syntheticEvent = buildSyntheticLockEvent(current, trackedMatch.duelKeyHex);
+  if (!syntheticEvent) return;
+
+  try {
+    await lockRound(syntheticEvent);
+    markMarketParityChainConfirmed({
+      chainKey: "solana",
+      transition: "lock",
+      lifecycleStatus: "LOCKED",
+      note: "reconciler-lock",
+    });
+    if (allRequiredParityChainsConfirmed()) {
+      finalizeMarketParityState("locked", current.phase ?? "COUNTDOWN");
+    }
+  } catch (error) {
+    console.warn("[bot] market_parity_solana_lock_retry", {
+      duelId: current.duelId,
+      duelKey: current.duelKey,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+async function maybeFinalizePendingEvmParityLock(): Promise<void> {
+  const current = marketParitySnapshot;
+  if (!current || !isPendingParityLock(current) || !current.duelKey) {
+    return;
+  }
+
+  const evmParityChains = requiredEvmParityChains();
+  if (evmParityChains.length === 0) {
+    return;
+  }
+
+  if (!EVM_KEEPER_ENABLE_LIFECYCLE_WRITES) {
+    return;
+  }
+
+  const duelKey = normalizeHex32(current.duelKey);
+  const syntheticEvent = buildSyntheticLockEvent(current);
+  if (!syntheticEvent) return;
+
+  let confirmedHere = false;
+  for (const chain of evmKeeperChains.filter((entry) =>
+    evmParityChains.includes(entry.chainKey),
+  )) {
+    try {
+      const receipt = marketParitySnapshot?.receipts.find(
+        (entry) => entry.chainKey === chain.chainKey,
+      );
+      if (
+        receipt?.lifecycleStatus === "LOCKED" ||
+        receipt?.lifecycleStatus === "RESOLVED"
+      ) {
+        continue;
+      }
+
+      const duel = await readEvmDuelState(chain, duelKey);
+      const status = asNum(duel.status, EVM_DUEL_STATUS_NULL);
+
+      if (status === EVM_DUEL_STATUS_CHALLENGED) {
+        finalizeMarketParityState("frozen", current.phase, {
+          reason: `${chain.chainKey} duel ${current.duelId ?? current.duelKey} is challenged`,
+        });
+        return;
+      }
+
+      if (status >= EVM_DUEL_STATUS_LOCKED) {
+        markMarketParityChainConfirmed({
+          chainKey: chain.chainKey,
+          transition: "lock",
+          lifecycleStatus: lifecycleStatusFromEvmWriteStatus(3),
+          note: "locked-on-readback",
+        });
+        confirmedHere = true;
+        continue;
+      }
+
+      if (status !== EVM_DUEL_STATUS_BETTING_OPEN) {
+        console.warn("[bot] market_parity_evm_lock_skip", {
+          chainKey: chain.chainKey,
+          duelId: current.duelId,
+          duelKey: current.duelKey,
+          status,
+        });
+        continue;
+      }
+
+      const betCloseTs = Number(duel.betCloseTs ?? 0n);
+      if (betCloseTs > 0 && Date.now() < betCloseTs * 1_000) {
+        continue;
+      }
+
+      await upsertEvmDuelLifecycle(syntheticEvent, 3, [chain.chainKey]);
+      markMarketParityChainConfirmed({
+        chainKey: chain.chainKey,
+        transition: "lock",
+        lifecycleStatus: lifecycleStatusFromEvmWriteStatus(3),
+        note: "reconciler-lock",
+      });
+      confirmedHere = true;
+    } catch (error) {
+      console.warn("[bot] market_parity_evm_lock_retry", {
+        chainKey: chain.chainKey,
+        duelId: current.duelId,
+        duelKey: current.duelKey,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  if (confirmedHere && allRequiredParityChainsConfirmed()) {
+    finalizeMarketParityState("locked", current.phase ?? "COUNTDOWN");
+  }
+}
+
 async function maybeFinalizePendingEvmParityResolution(): Promise<void> {
   const current = marketParitySnapshot;
   if (
@@ -5244,6 +5473,8 @@ async function runMaintenance(): Promise<void> {
     return;
   }
   await ensureOracleReady();
+  await maybeFinalizePendingSolanaParityLock();
+  await maybeFinalizePendingEvmParityLock();
   await maybeFinalizePendingSolanaParityResolution();
   await maybeFinalizePendingEvmParityResolution();
 
