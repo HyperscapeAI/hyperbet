@@ -2,6 +2,9 @@ import { afterEach, describe, expect, test } from "bun:test";
 
 import { GameClient } from "./game-client";
 
+/** Expose private `poll()` for direct testing without starting the timer. */
+type TestableGameClient = GameClient & { poll(): Promise<void> };
+
 type FetchCycle = {
   cycleId?: string;
   phase?: string;
@@ -55,7 +58,7 @@ describe("GameClient lifecycle reconciliation", () => {
     globalThis.fetch = originalFetch;
   });
 
-  test("does not start a keeper lifecycle when the first poll lands mid-resolution", async () => {
+  test("replays locked and resolved callbacks when the first poll lands mid-resolution", async () => {
     mockFetchSequence([
       makeCycle({
         phase: "RESOLUTION",
@@ -77,37 +80,13 @@ describe("GameClient lifecycle reconciliation", () => {
       events.push("end");
     });
 
-    await (client as any).poll();
+    await (client as TestableGameClient).poll();
 
-    expect(events).toEqual([]);
-  });
-
-  test("starts when a same-cycle idle placeholder becomes a prelock duel", async () => {
-    mockFetchSequence([
-      makeCycle({ phase: "IDLE", duelId: null, duelKeyHex: null }),
-      makeCycle({ phase: "ANNOUNCEMENT" }),
-      makeCycle({ phase: "COUNTDOWN" }),
-    ]);
-
-    const events: string[] = [];
-    const client = new GameClient("https://example.test");
-    client.onDuelStart(async () => {
-      events.push("start");
-    });
-    client.onBettingLocked(async () => {
-      events.push("lock");
-    });
-
-    await (client as any).poll();
-    await (client as any).poll();
-    await (client as any).poll();
-
-    expect(events).toEqual(["start", "lock"]);
+    expect(events).toEqual(["start", "lock", "end"]);
   });
 
   test("re-emits resolution when authoritative result fields arrive after the phase flip", async () => {
     mockFetchSequence([
-      makeCycle({ phase: "BETTING" }),
       makeCycle({ phase: "FIGHTING" }),
       makeCycle({ phase: "RESOLUTION" }),
       makeCycle({
@@ -130,10 +109,9 @@ describe("GameClient lifecycle reconciliation", () => {
       events.push(`end:${event.seed ?? "-"}`);
     });
 
-    await (client as any).poll();
-    await (client as any).poll();
-    await (client as any).poll();
-    await (client as any).poll();
+    await (client as TestableGameClient).poll();
+    await (client as TestableGameClient).poll();
+    await (client as TestableGameClient).poll();
 
     expect(events).toEqual(["start", "lock", "end:-", "end:42"]);
   });

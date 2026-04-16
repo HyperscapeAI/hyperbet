@@ -1,23 +1,18 @@
+import { type ComponentProps } from "react";
+import { type WagmiProvider } from "wagmi";
 import { ChainProvider } from "./lib/ChainContext";
-import { createHybridAppRoot } from "@hyperbet/ui/createHybridAppRoot";
-import { CONFIG, getRpcUrl, getWsUrl } from "@hyperbet/ui/lib/config";
+import { createEvmAppRoot } from "@hyperbet/ui";
 import { wagmiConfig } from "@hyperbet/ui/lib/wagmiConfig";
 import { App } from "./App";
 import { StreamUIApp } from "./StreamUIApp";
 
-const UnifiedAppRoot = createHybridAppRoot({
+type WagmiConfig = ComponentProps<typeof WagmiProvider>["config"];
+
+export default createEvmAppRoot({
   ChainProvider,
-  wagmiConfig: wagmiConfig as any,
+  wagmiConfig: wagmiConfig as WagmiConfig,
   App,
   StreamUIApp,
-  getSolanaRpcUrl: getRpcUrl,
-  getSolanaWsUrl: getWsUrl,
-  getSolanaCluster: () => CONFIG.cluster,
-  isStreamUi: import.meta.env.MODE === "stream-ui",
   themeId: "evm",
   themeStorageKey: "hyperbet-evm-theme",
 });
-
-export default function AppRoot() {
-  return <UnifiedAppRoot />;
-}

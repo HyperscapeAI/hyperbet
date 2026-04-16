@@ -74,8 +74,8 @@ const GOLD_CLOB_MARKET_IDL = ensureIdlAddress(
 
 export type ProgramsBundle = {
   provider: AnchorProvider;
-  fightOracle: Program<any>;
-  goldClobMarket: Program<any>;
+  fightOracle: Program<Idl>;
+  goldClobMarket: Program<Idl>;
 };
 
 export type SigningWalletLike = {
@@ -84,7 +84,7 @@ export type SigningWalletLike = {
   signAllTransactions?: WalletContextState["signAllTransactions"];
 };
 
-function asAnchorWallet(wallet: SigningWalletLike): any {
+function asAnchorWallet(wallet: SigningWalletLike): AnchorProvider["wallet"] {
   if (
     !wallet.publicKey ||
     !wallet.signTransaction ||
@@ -98,17 +98,17 @@ function asAnchorWallet(wallet: SigningWalletLike): any {
     publicKey: wallet.publicKey,
     signTransaction: wallet.signTransaction,
     signAllTransactions: wallet.signAllTransactions,
-  };
+  } as AnchorProvider["wallet"];
 }
 
-function readonlyAnchorWallet(): any {
+function readonlyAnchorWallet(): AnchorProvider["wallet"] {
   const readonlyPk = new PublicKey("11111111111111111111111111111111");
   return {
     payer: null,
     publicKey: readonlyPk,
     signTransaction: async <T>(tx: T): Promise<T> => tx,
     signAllTransactions: async <T>(txs: T): Promise<T> => txs,
-  };
+  } as AnchorProvider["wallet"];
 }
 
 export function createPrograms(

@@ -43,6 +43,17 @@ type EvmArtifact = {
       };
 };
 
+type JsonRpcResult = { result: string };
+
+type PositionHealthResult = { liquidatable: boolean };
+
+type PositionResult = { size: bigint };
+
+type MarketStateResult = {
+  insuranceFund: bigint;
+  badDebt: bigint;
+};
+
 async function loadArtifact(
   label: string,
   candidatePaths: string[],
@@ -102,7 +113,7 @@ async function snapshot(): Promise<string> {
   const res = await fetch(RPC_URL, { method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ jsonrpc: "2.0", method: "evm_snapshot", params: [], id: 1 }),
   });
-  return (await res.json() as any).result;
+  return (await res.json() as JsonRpcResult).result;
 }
 
 async function revert(id: string) {
@@ -111,18 +122,18 @@ async function revert(id: string) {
   });
 }
 
-async function getMarketState() {
+async function getMarketState(): Promise<MarketStateResult> {
   return pub.readContract({
     address: engineAddr, abi: agentPerpEngineArtifact!.abi,
     functionName: "markets", args: [agentId],
-  }) as any;
+  }) as Promise<MarketStateResult>;
 }
 
-async function getPositionHealth(addr: Address) {
+async function getPositionHealth(addr: Address): Promise<PositionHealthResult> {
   return pub.readContract({
     address: engineAddr, abi: agentPerpEngineArtifact!.abi,
     functionName: "getPositionHealth", args: [agentId, addr],
-  }) as any;
+  }) as Promise<PositionHealthResult>;
 }
 
 async function crashOracle(mu: number) {
@@ -137,11 +148,11 @@ async function crashOracle(mu: number) {
   }));
 }
 
-async function getPosition(addr: Address) {
+async function getPosition(addr: Address): Promise<PositionResult> {
   return pub.readContract({
     address: engineAddr, abi: agentPerpEngineArtifact!.abi,
     functionName: "positions", args: [agentId, addr],
-  }) as any;
+  }) as Promise<PositionResult>;
 }
 
 // ─── Deploy once ────────────────────────────────────────────────────────────
@@ -261,14 +272,14 @@ describe("keeper perps liquidation flow", () => {
 
     // Verify position is healthy
     let health = await getPositionHealth(trader.address);
-    expect((health as any).liquidatable).toBe(false); // not liquidatable
+    expect(health.liquidatable).toBe(false); // not liquidatable
 
     // Oracle crash: mu 1500 → 1000, synced into perps engine
     await crashOracle(1000);
 
     // Position should now be liquidatable
     health = await getPositionHealth(trader.address);
-    expect((health as any).liquidatable).toBe(true); // liquidatable
+    expect(health.liquidatable).toBe(true); // liquidatable
 
     // Keeper executes liquidation
     const liqHash = await keeperBot.wallet.writeContract({
@@ -280,7 +291,7 @@ describe("keeper perps liquidation flow", () => {
 
     // Verify position is closed or reduced
     const pos = await getPosition(trader.address);
-    const sizeAfter = BigInt((pos as any).size ?? 0);
+    const sizeAfter = BigInt(pos.size ?? 0);
     // Position should be fully or partially liquidated
     expect(Math.abs(Number(sizeAfter))).toBeLessThan(Number(parseUnits("5", 18)));
 
@@ -292,7 +303,7 @@ describe("keeper perps liquidation flow", () => {
     const sid = await snapshot();
 
     const mktBefore = await getMarketState();
-    const insuranceBefore = BigInt((mktBefore as any).insuranceFund ?? 0);
+    const insuranceBefore = BigInt(mktBefore.insuranceFund ?? 0);
 
     // Trader opens leveraged long
     await waitReceipt(await trader.wallet.writeContract({
@@ -313,8 +324,8 @@ describe("keeper perps liquidation flow", () => {
     } catch {}
 
     const mktAfter = await getMarketState();
-    const insuranceAfter = BigInt((mktAfter as any).insuranceFund ?? 0);
-    const badDebt = BigInt((mktAfter as any).badDebt ?? 0);
+    const insuranceAfter = BigInt(mktAfter.insuranceFund ?? 0);
+    const badDebt = BigInt(mktAfter.badDebt ?? 0);
 
     // Insurance should have absorbed losses or bad debt was recorded
     expect(insuranceAfter <= insuranceBefore || badDebt > 0n).toBe(true);
@@ -341,7 +352,7 @@ describe("keeper perps liquidation flow", () => {
 
     // Position should NOT be liquidatable
     const health = await getPositionHealth(trader.address);
-    expect((health as any).liquidatable).toBe(false);
+    expect(health.liquidatable).toBe(false);
 
     // Liquidation attempt should revert
     let reverted = false;
@@ -402,7 +413,7 @@ describe("keeper perps liquidation flow", () => {
 
     // Drain insurance to minimum
     const mkt0 = await getMarketState();
-    const currentInsurance = BigInt((mkt0 as any).insuranceFund ?? 0);
+    const currentInsurance = BigInt(mkt0.insuranceFund ?? 0);
     if (currentInsurance > parseUnits("1", 18)) {
       try {
         await waitReceipt(await admin.wallet.writeContract({
@@ -432,8 +443,8 @@ describe("keeper perps liquidation flow", () => {
     } catch {}
 
     const mktAfter = await getMarketState();
-    const badDebt = BigInt((mktAfter as any).badDebt ?? 0);
-    const insuranceAfter = BigInt((mktAfter as any).insuranceFund ?? 0);
+    const badDebt = BigInt(mktAfter.badDebt ?? 0);
+    const insuranceAfter = BigInt(mktAfter.insuranceFund ?? 0);
 
     // Either bad debt was recorded or insurance was depleted (or both)
     expect(badDebt > 0n || insuranceAfter === 0n).toBe(true);
