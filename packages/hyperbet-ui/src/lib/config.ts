@@ -11,13 +11,8 @@ import {
   resolveBettingEvmDefaults,
   resolveBettingSolanaDeployment,
 } from "@hyperbet/chain-registry";
-import { sanitizeResolvedStreamSources } from "./streamSession";
 
 export type SolanaCluster = "localnet" | "devnet" | "testnet" | "mainnet-beta";
-
-// ============================================================================
-// Environment Configuration
-// ============================================================================
 
 export type Environment =
   | "devnet"
@@ -47,12 +42,6 @@ function readEnvString(name: string): string | undefined {
   if (typeof rawValue !== "string") return undefined;
   const trimmed = rawValue.trim();
   return trimmed.length > 0 ? trimmed : undefined;
-}
-
-function readEnvStringOverride(name: string): string | undefined {
-  const rawValue = import.meta.env[name];
-  if (typeof rawValue !== "string") return undefined;
-  return rawValue.trim();
 }
 
 function readEnvNumber(name: string, fallback: number): number {
@@ -195,54 +184,39 @@ function buildEvmConfig(
   | "avaxGoldClobAddress"
   | "avaxGoldTokenAddress"
 > {
-  const defaults = resolveBettingEvmDefaults(
-    asDeploymentEnvironment(environment),
+  const deploymentEnv = asDeploymentEnvironment(environment);
+  const defaults = resolveBettingEvmDefaults(deploymentEnv);
+
+  const evmChains = Object.fromEntries(
+    BETTING_EVM_CHAIN_ORDER.map((chainKey) => {
+      const runtime = getEvmRuntimeConfig(chainKey, deploymentEnv);
+      return [
+        chainKey,
+        {
+          chainId: runtime.chainId,
+          rpcUrl: runtime.rpcUrl,
+          goldClobAddress: runtime.goldClobAddress,
+          goldTokenAddress: runtime.goldTokenAddress,
+          networkKey: defaults[chainKey].networkKey,
+          deployment: runtime.deployment,
+        } satisfies EvmChainEnvConfig,
+      ];
+    }),
+  ) as Record<BettingEvmChain, EvmChainEnvConfig>;
+
+  const flatFields = Object.fromEntries(
+    BETTING_EVM_CHAIN_ORDER.flatMap((chainKey) => {
+      const entry = evmChains[chainKey];
+      return [
+        [`${chainKey}RpcUrl`, entry.rpcUrl],
+        [`${chainKey}ChainId`, entry.chainId],
+        [`${chainKey}GoldClobAddress`, entry.goldClobAddress],
+        [`${chainKey}GoldTokenAddress`, entry.goldTokenAddress],
+      ];
+    }),
   );
-  const evmChains = {
-    bsc: getEvmRuntimeConfig("bsc", asDeploymentEnvironment(environment)),
-    base: getEvmRuntimeConfig("base", asDeploymentEnvironment(environment)),
-    avax: getEvmRuntimeConfig("avax", asDeploymentEnvironment(environment)),
-  } satisfies Record<BettingEvmChain, ReturnType<typeof getEvmRuntimeConfig>>;
-  return {
-    evmChains: {
-      bsc: {
-        chainId: evmChains.bsc.chainId,
-        rpcUrl: evmChains.bsc.rpcUrl,
-        goldClobAddress: evmChains.bsc.goldClobAddress,
-        goldTokenAddress: evmChains.bsc.goldTokenAddress,
-        networkKey: defaults.bsc.networkKey,
-        deployment: evmChains.bsc.deployment,
-      },
-      base: {
-        chainId: evmChains.base.chainId,
-        rpcUrl: evmChains.base.rpcUrl,
-        goldClobAddress: evmChains.base.goldClobAddress,
-        goldTokenAddress: evmChains.base.goldTokenAddress,
-        networkKey: defaults.base.networkKey,
-        deployment: evmChains.base.deployment,
-      },
-      avax: {
-        chainId: evmChains.avax.chainId,
-        rpcUrl: evmChains.avax.rpcUrl,
-        goldClobAddress: evmChains.avax.goldClobAddress,
-        goldTokenAddress: evmChains.avax.goldTokenAddress,
-        networkKey: defaults.avax.networkKey,
-        deployment: evmChains.avax.deployment,
-      },
-    },
-    bscRpcUrl: evmChains.bsc.rpcUrl,
-    bscChainId: evmChains.bsc.chainId,
-    bscGoldClobAddress: evmChains.bsc.goldClobAddress,
-    bscGoldTokenAddress: evmChains.bsc.goldTokenAddress,
-    baseRpcUrl: evmChains.base.rpcUrl,
-    baseChainId: evmChains.base.chainId,
-    baseGoldClobAddress: evmChains.base.goldClobAddress,
-    baseGoldTokenAddress: evmChains.base.goldTokenAddress,
-    avaxRpcUrl: evmChains.avax.rpcUrl,
-    avaxChainId: evmChains.avax.chainId,
-    avaxGoldClobAddress: evmChains.avax.goldClobAddress,
-    avaxGoldTokenAddress: evmChains.avax.goldTokenAddress,
-  };
+
+  return { evmChains, ...flatFields } as ReturnType<typeof buildEvmConfig>;
 }
 
 export interface EnvConfig {
@@ -266,7 +240,6 @@ export interface EnvConfig {
   enableAutoSeed: boolean;
   gameApiUrl: string;
   gameWsUrl: string;
-  publicCdnUrl: string;
   streamUrl: string;
   uiSyncDelayMs: number;
   refreshIntervalMs: number;
@@ -276,7 +249,6 @@ export interface EnvConfig {
   headlessWalletsJson: string;
   jupiterBaseUrl: string;
 
-  // EVM
   evmChains: Partial<Record<BettingEvmChain, EvmChainEnvConfig>>;
   bscRpcUrl: string;
   bscChainId: number;
@@ -297,7 +269,7 @@ export interface EnvConfig {
 const DEFAULT_STREAM_URL = "https://www.twitch.tv/hyperscapeai";
 const DEFAULT_STREAM_FALLBACK_URL = "";
 const DEFAULT_GAME_API_URL = "http://127.0.0.1:5555";
-const DEFAULT_PRODUCTION_GAME_API_URL = "https://api.hyperbet.win";
+const DEFAULT_PRODUCTION_GAME_API_URL = "https://gold-betting-keeper-production.up.railway.app";
 const DEFAULT_LOCAL_STREAM_URL =
   "http://127.0.0.1:3333/stream.html?disableBridgeCapture=1";
 
@@ -314,7 +286,6 @@ const baseConfig: Partial<EnvConfig> = {
   enableAutoSeed: true,
   gameApiUrl: DEFAULT_GAME_API_URL,
   gameWsUrl: `${DEFAULT_GAME_API_URL.replace(/^http/, "ws")}/ws`,
-  publicCdnUrl: `${DEFAULT_GAME_API_URL}/game-assets`,
   streamUrl: DEFAULT_STREAM_URL,
   refreshIntervalMs: 5000,
   jupiterBaseUrl: "https://lite-api.jup.ag",
@@ -401,7 +372,6 @@ export const ENV_CONFIGS: Record<Environment, EnvConfig> = {
     wsUrl: "wss://api.mainnet-beta.solana.com/",
     gameApiUrl: DEFAULT_PRODUCTION_GAME_API_URL,
     gameWsUrl: `${DEFAULT_PRODUCTION_GAME_API_URL.replace(/^http/, "ws")}/ws`,
-    publicCdnUrl: `${DEFAULT_PRODUCTION_GAME_API_URL}/game-assets`,
     uiSyncDelayMs: 0,
     headlessWalletName: "Headless Test Wallet",
     headlessWalletAutoConnect: false,
@@ -424,9 +394,6 @@ const resolvedGameApiUrl = envGameApiUrl ?? baseEnvConfig.gameApiUrl;
 const envGameWsUrl = readEnvString("VITE_GAME_WS_URL");
 const resolvedGameWsUrl =
   envGameWsUrl ?? `${resolvedGameApiUrl.replace(/^http/, "ws")}/ws`;
-const envPublicCdnUrl = readEnvString("VITE_PUBLIC_CDN_URL");
-const resolvedPublicCdnUrl =
-  envPublicCdnUrl ?? `${resolvedGameApiUrl.replace(/\/$/, "")}/game-assets`;
 const envStreamUrl = readEnvString("VITE_STREAM_URL");
 const envStreamSources = parseEnvList(readEnvString("VITE_STREAM_SOURCES"));
 const suppressDefaultStreamFallback =
@@ -438,7 +405,7 @@ const defaultPrimaryStreamUrl =
   envStreamUrl ?? (suppressDefaultStreamFallback ? "" : baseEnvConfig.streamUrl);
 const resolvedStreamSources = (() => {
   if (envStreamSources.length > 0) {
-    return sanitizeResolvedStreamSources(envStreamSources);
+    return uniqueList(envStreamSources);
   }
   const envFallbackUrl = readEnvString("VITE_STREAM_FALLBACK_URL");
   const fallbackUrl =
@@ -446,10 +413,8 @@ const resolvedStreamSources = (() => {
     (defaultPrimaryStreamUrl && !suppressDefaultStreamFallback
       ? DEFAULT_STREAM_FALLBACK_URL
       : "");
-  return sanitizeResolvedStreamSources(
-    uniqueList([defaultPrimaryStreamUrl, fallbackUrl ?? ""]).filter(
-      (value) => value.length > 0,
-    ),
+  return uniqueList([defaultPrimaryStreamUrl, fallbackUrl ?? ""]).filter(
+    (value) => value.length > 0,
   );
 })();
 const resolvedStreamUrl = resolvedStreamSources[0] ?? "";
@@ -462,28 +427,19 @@ const resolvedEvmChains = BETTING_EVM_CHAIN_ORDER.reduce<
   }
 
   const envPrefix = chainKey.toUpperCase();
-  const rpcUrlOverride = readEnvStringOverride(`VITE_${envPrefix}_RPC_URL`);
-  const goldClobAddressOverride = readEnvStringOverride(
-    `VITE_${envPrefix}_GOLD_CLOB_ADDRESS`,
-  );
-  const goldTokenAddressOverride = readEnvStringOverride(
-    `VITE_${envPrefix}_GOLD_TOKEN_ADDRESS`,
-  );
   acc[chainKey] = {
     chainId: readEnvNumber(
       `VITE_${envPrefix}_CHAIN_ID`,
       baseChainConfig.chainId,
     ),
     rpcUrl:
-      rpcUrlOverride !== undefined ? rpcUrlOverride : baseChainConfig.rpcUrl,
+      readEnvString(`VITE_${envPrefix}_RPC_URL`) ?? baseChainConfig.rpcUrl,
     goldClobAddress:
-      goldClobAddressOverride !== undefined
-        ? goldClobAddressOverride
-        : baseChainConfig.goldClobAddress,
+      readEnvString(`VITE_${envPrefix}_GOLD_CLOB_ADDRESS`) ??
+      baseChainConfig.goldClobAddress,
     goldTokenAddress:
-      goldTokenAddressOverride !== undefined
-        ? goldTokenAddressOverride
-        : baseChainConfig.goldTokenAddress,
+      readEnvString(`VITE_${envPrefix}_GOLD_TOKEN_ADDRESS`) ??
+      baseChainConfig.goldTokenAddress,
     networkKey: resolvedEvmNetworkKey(
       chainKey,
       readEnvNumber(`VITE_${envPrefix}_CHAIN_ID`, baseChainConfig.chainId),
@@ -541,7 +497,6 @@ export const CONFIG: EnvConfig = {
   ),
   gameApiUrl: resolvedGameApiUrl,
   gameWsUrl: resolvedGameWsUrl,
-  publicCdnUrl: resolvedPublicCdnUrl,
   streamUrl: resolvedStreamUrl,
   uiSyncDelayMs: readEnvNumber(
     "VITE_UI_SYNC_DELAY_MS",
@@ -583,7 +538,6 @@ export const CONFIG: EnvConfig = {
     baseEnvConfig.walletConnectProjectId,
 };
 
-// Legacy Exports mapping to CONFIG
 export const GOLD_MAINNET_MINT = new PublicKey(
   "DK9nBUMfdu4XprPRWeh8f6KnQiGWD8Z4xz3yzs9gpump",
 );
@@ -611,29 +565,9 @@ export function toBaseUnits(amount: number, decimals = GOLD_DECIMALS): bigint {
 
 export const STREAM_URL: string = CONFIG.streamUrl;
 export const STREAM_URLS: string[] = resolvedStreamSources;
-export const ENABLE_STREAM_SOURCE_OVERRIDE = readEnvBoolean(
-  "VITE_ENABLE_STREAM_SOURCE_OVERRIDE",
-  RUNTIME_ENV === "e2e" || !isPublicBrowserRuntime(),
-);
-export const ENABLE_LIFECYCLE_MISMATCH_CONSOLE = readEnvBoolean(
-  "VITE_ENABLE_LIFECYCLE_MISMATCH_CONSOLE",
-  !isPublicBrowserRuntime() && Boolean(import.meta.env.DEV),
-);
 export const GAME_API_URL: string = CONFIG.gameApiUrl;
 export const GAME_WS_URL: string = CONFIG.gameWsUrl;
-export const PUBLIC_CDN_URL: string = CONFIG.publicCdnUrl;
 export const UI_SYNC_DELAY_MS: number = CONFIG.uiSyncDelayMs;
-
-if (
-  typeof window !== "undefined" &&
-  PUBLIC_CDN_URL.length > 0
-) {
-  (
-    window as Window & {
-      __CDN_URL?: string;
-    }
-  ).__CDN_URL = PUBLIC_CDN_URL;
-}
 // Mainnet must route through backend RPC proxy so we can use server-side
 // Helius credentials and avoid browser-origin RPC blocking.
 const USE_GAME_RPC_PROXY =
@@ -713,7 +647,6 @@ export function getRpcUrl(): string {
   if (shouldUseLocalSolanaRpcProxy()) {
     return buildLocalSolanaProxyUrl("/rpc", "http");
   }
-  // Non-proxy environments (for example standalone dev) use direct RPC.
   if (!USE_GAME_RPC_PROXY || CONFIG.cluster === "localnet") {
     return CONFIG.rpcUrl;
   }
@@ -730,13 +663,9 @@ export function getWsUrl(): string | undefined {
   if (CONFIG.cluster === "localnet" && CONFIG.wsUrl) {
     return CONFIG.wsUrl;
   }
-  // Public builds proxy HTTP RPC through the keeper; websocket stays direct.
+  // Websocket not proxied — only HTTP RPC goes through the keeper.
   return undefined;
 }
-
-// ============================================================================
-// EVM Chain Configuration
-// ============================================================================
 
 function shouldUseGameEvmRpcProxy(): boolean {
   return USE_GAME_EVM_RPC_PROXY && CONFIG.cluster !== "localnet";
