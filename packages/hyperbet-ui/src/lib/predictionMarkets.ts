@@ -12,10 +12,6 @@ import {
 } from "@hyperbet/chain-registry";
 
 import { GAME_API_URL } from "./config";
-import {
-  parseMarketParity,
-  type MarketParityInfo,
-} from "./marketParity";
 
 const ACTIVE_PREDICTION_MARKETS_URL = `${GAME_API_URL.replace(/\/$/, "")}/api/arena/prediction-markets/active`;
 const OVERVIEW_PREDICTION_MARKETS_URL = `${GAME_API_URL.replace(/\/$/, "")}/api/arena/prediction-markets/overview`;
@@ -36,7 +32,6 @@ export type PredictionMarketsResponse = {
   duel: PredictionMarketsDuelSnapshot;
   markets: PredictionMarketLifecycleRecord[];
   updatedAt: number | null;
-  marketParity?: MarketParityInfo | null;
 };
 
 export type PredictionMarketsOverviewResponse = {
@@ -109,7 +104,6 @@ export function parsePredictionMarketsResponse(
       .map((market) => normalizePredictionMarketLifecycleRecord(market))
       .filter((market): market is PredictionMarketLifecycleRecord => market !== null),
     updatedAt: normalizePredictionMarketTimestamp(candidate.updatedAt),
-    marketParity: parseMarketParity(candidate.marketParity),
   };
 }
 
@@ -266,24 +260,27 @@ export function selectPredictionMarketOverviewRecord(
   return selectPredictionMarketLifecycleRecord(payload[surface], chainKey);
 }
 
-export function usePredictionMarketLifecycle(
-  chainKey: BettingChainKey | null,
+function usePollResource<T>(
+  fetcher: (signal: AbortSignal) => Promise<T>,
   options: {
-    disabled?: boolean;
-    pollIntervalMs?: number;
-  } = {},
-) {
-  const { disabled = false, pollIntervalMs = DEFAULT_POLL_INTERVAL_MS } = options;
-  const [data, setData] = useState<PredictionMarketsResponse | null>(null);
+    enabled: boolean;
+    pollIntervalMs: number;
+    errorLabel: string;
+    trackLoading?: boolean;
+    deps: readonly unknown[];
+  },
+): { data: T | null; error: string | null; isLoading: boolean; refresh: (signal?: AbortSignal) => Promise<T | null> } {
+  const { enabled, pollIntervalMs, errorLabel, trackLoading = false, deps } = options;
+  const [data, setData] = useState<T | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
 
   const refresh = useCallback(
     async (signal?: AbortSignal) => {
-      if (disabled || !chainKey) return null;
-      setIsLoading(true);
+      if (!enabled) return null;
+      if (trackLoading) setIsLoading(true);
       try {
-        const nextData = await fetchActivePredictionMarkets(signal);
+        const nextData = await fetcher(signal ?? new AbortController().signal);
         setData(nextData);
         setError(null);
         return nextData;
@@ -292,24 +289,25 @@ export function usePredictionMarketLifecycle(
           setError(
             refreshError instanceof Error
               ? refreshError.message
-              : "prediction markets refresh failed",
+              : errorLabel,
           );
         }
         return null;
       } finally {
-        if (!signal?.aborted) {
+        if (trackLoading && !signal?.aborted) {
           setIsLoading(false);
         }
       }
     },
-    [chainKey, disabled],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [enabled, trackLoading, ...deps],
   );
 
   useEffect(() => {
-    if (disabled || !chainKey) {
+    if (!enabled) {
       setData(null);
       setError(null);
-      setIsLoading(false);
+      if (trackLoading) setIsLoading(false);
       return;
     }
 
@@ -327,7 +325,29 @@ export function usePredictionMarketLifecycle(
       activePollController?.abort();
       window.clearInterval(intervalId);
     };
-  }, [chainKey, disabled, pollIntervalMs, refresh]);
+  }, [enabled, pollIntervalMs, trackLoading, refresh]);
+
+  return { data, error, isLoading, refresh };
+}
+
+export function usePredictionMarketLifecycle(
+  chainKey: BettingChainKey | null,
+  options: {
+    disabled?: boolean;
+    pollIntervalMs?: number;
+  } = {},
+) {
+  const { disabled = false, pollIntervalMs = DEFAULT_POLL_INTERVAL_MS } = options;
+  const { data, error, isLoading, refresh } = usePollResource(
+    (signal) => fetchActivePredictionMarkets(signal),
+    {
+      enabled: !disabled && chainKey != null,
+      pollIntervalMs,
+      errorLabel: "prediction markets refresh failed",
+      trackLoading: true,
+      deps: [chainKey, disabled],
+    },
+  );
 
   const market = useMemo(
     () => selectPredictionMarketLifecycleRecord(data, chainKey),
@@ -338,7 +358,6 @@ export function usePredictionMarketLifecycle(
     data,
     duel: data?.duel ?? null,
     market,
-    marketParity: data?.marketParity ?? null,
     isLoading,
     error,
     refresh,
@@ -352,64 +371,17 @@ export function usePredictionMarketOverview(
     pollIntervalMs?: number;
   } = {},
 ) {
-  const { disabled = false, pollIntervalMs = DEFAULT_POLL_INTERVAL_MS } =
-    options;
-  const [data, setData] = useState<PredictionMarketsOverviewResponse | null>(
-    null,
-  );
-  const [error, setError] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
-
-  const refresh = useCallback(
-    async (signal?: AbortSignal) => {
-      if (disabled || !chainKey) return null;
-      setIsLoading(true);
-      try {
-        const nextData = await fetchPredictionMarketsOverview(signal);
-        setData(nextData);
-        setError(null);
-        return nextData;
-      } catch (refreshError) {
-        if (!signal?.aborted) {
-          setError(
-            refreshError instanceof Error
-              ? refreshError.message
-              : "prediction markets overview refresh failed",
-          );
-        }
-        return null;
-      } finally {
-        if (!signal?.aborted) {
-          setIsLoading(false);
-        }
-      }
+  const { disabled = false, pollIntervalMs = DEFAULT_POLL_INTERVAL_MS } = options;
+  const { data, error, isLoading, refresh } = usePollResource(
+    (signal) => fetchPredictionMarketsOverview(signal),
+    {
+      enabled: !disabled && chainKey != null,
+      pollIntervalMs,
+      errorLabel: "prediction markets overview refresh failed",
+      trackLoading: true,
+      deps: [chainKey, disabled],
     },
-    [chainKey, disabled],
   );
-
-  useEffect(() => {
-    if (disabled || !chainKey) {
-      setData(null);
-      setError(null);
-      setIsLoading(false);
-      return;
-    }
-
-    const controller = new AbortController();
-    let activePollController: AbortController | null = null;
-    void refresh(controller.signal);
-    const intervalId = window.setInterval(() => {
-      activePollController?.abort();
-      activePollController = new AbortController();
-      void refresh(activePollController.signal);
-    }, pollIntervalMs);
-
-    return () => {
-      controller.abort();
-      activePollController?.abort();
-      window.clearInterval(intervalId);
-    };
-  }, [chainKey, disabled, pollIntervalMs, refresh]);
 
   const live = useMemo(
     () => selectPredictionMarketOverviewRecord(data, chainKey, "live"),
@@ -426,7 +398,6 @@ export function usePredictionMarketOverview(
     live,
     recentSettlement,
     liveDuel: data?.live?.duel ?? null,
-    liveMarketParity: data?.live?.marketParity ?? null,
     recentSettlementDuel: data?.recentSettlement?.duel ?? null,
     liveMarket: live,
     recentSettlementMarket: recentSettlement,
@@ -442,61 +413,16 @@ export function usePredictionMarketSyncStatus(
     pollIntervalMs?: number;
   } = {},
 ) {
-  const { disabled = false, pollIntervalMs = DEFAULT_POLL_INTERVAL_MS } =
-    options;
-  const [data, setData] = useState<PredictionMarketSyncStatusResponse | null>(
-    null,
-  );
-  const [error, setError] = useState<string | null>(null);
-
-  const refresh = useCallback(
-    async (signal?: AbortSignal) => {
-      if (disabled) return null;
-      try {
-        const nextData = await fetchPredictionMarketSyncStatus(signal);
-        setData(nextData);
-        setError(null);
-        return nextData;
-      } catch (refreshError) {
-        if (!signal?.aborted) {
-          setError(
-            refreshError instanceof Error
-              ? refreshError.message
-              : "prediction market sync status refresh failed",
-          );
-        }
-        return null;
-      }
+  const { disabled = false, pollIntervalMs = DEFAULT_POLL_INTERVAL_MS } = options;
+  const { data, error, refresh } = usePollResource(
+    (signal) => fetchPredictionMarketSyncStatus(signal),
+    {
+      enabled: !disabled,
+      pollIntervalMs,
+      errorLabel: "prediction market sync status refresh failed",
+      deps: [disabled],
     },
-    [disabled],
   );
 
-  useEffect(() => {
-    if (disabled) {
-      setData(null);
-      setError(null);
-      return;
-    }
-
-    const controller = new AbortController();
-    let activePollController: AbortController | null = null;
-    void refresh(controller.signal);
-    const intervalId = window.setInterval(() => {
-      activePollController?.abort();
-      activePollController = new AbortController();
-      void refresh(activePollController.signal);
-    }, pollIntervalMs);
-
-    return () => {
-      controller.abort();
-      activePollController?.abort();
-      window.clearInterval(intervalId);
-    };
-  }, [disabled, pollIntervalMs, refresh]);
-
-  return {
-    data,
-    error,
-    refresh,
-  };
+  return { data, error, refresh };
 }
