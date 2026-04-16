@@ -240,6 +240,7 @@ export interface EnvConfig {
   enableAutoSeed: boolean;
   gameApiUrl: string;
   gameWsUrl: string;
+  publicCdnUrl: string;
   streamUrl: string;
   uiSyncDelayMs: number;
   refreshIntervalMs: number;
@@ -286,6 +287,7 @@ const baseConfig: Partial<EnvConfig> = {
   enableAutoSeed: true,
   gameApiUrl: DEFAULT_GAME_API_URL,
   gameWsUrl: `${DEFAULT_GAME_API_URL.replace(/^http/, "ws")}/ws`,
+  publicCdnUrl: `${DEFAULT_GAME_API_URL}/game-assets`,
   streamUrl: DEFAULT_STREAM_URL,
   refreshIntervalMs: 5000,
   jupiterBaseUrl: "https://lite-api.jup.ag",
@@ -372,6 +374,7 @@ export const ENV_CONFIGS: Record<Environment, EnvConfig> = {
     wsUrl: "wss://api.mainnet-beta.solana.com/",
     gameApiUrl: DEFAULT_PRODUCTION_GAME_API_URL,
     gameWsUrl: `${DEFAULT_PRODUCTION_GAME_API_URL.replace(/^http/, "ws")}/ws`,
+    publicCdnUrl: `${DEFAULT_PRODUCTION_GAME_API_URL}/game-assets`,
     uiSyncDelayMs: 0,
     headlessWalletName: "Headless Test Wallet",
     headlessWalletAutoConnect: false,
@@ -394,6 +397,9 @@ const resolvedGameApiUrl = envGameApiUrl ?? baseEnvConfig.gameApiUrl;
 const envGameWsUrl = readEnvString("VITE_GAME_WS_URL");
 const resolvedGameWsUrl =
   envGameWsUrl ?? `${resolvedGameApiUrl.replace(/^http/, "ws")}/ws`;
+const envPublicCdnUrl = readEnvString("VITE_PUBLIC_CDN_URL");
+const resolvedPublicCdnUrl =
+  envPublicCdnUrl ?? `${resolvedGameApiUrl.replace(/\/$/, "")}/game-assets`;
 const envStreamUrl = readEnvString("VITE_STREAM_URL");
 const envStreamSources = parseEnvList(readEnvString("VITE_STREAM_SOURCES"));
 const suppressDefaultStreamFallback =
@@ -497,6 +503,7 @@ export const CONFIG: EnvConfig = {
   ),
   gameApiUrl: resolvedGameApiUrl,
   gameWsUrl: resolvedGameWsUrl,
+  publicCdnUrl: resolvedPublicCdnUrl,
   streamUrl: resolvedStreamUrl,
   uiSyncDelayMs: readEnvNumber(
     "VITE_UI_SYNC_DELAY_MS",
@@ -565,8 +572,17 @@ export function toBaseUnits(amount: number, decimals = GOLD_DECIMALS): bigint {
 
 export const STREAM_URL: string = CONFIG.streamUrl;
 export const STREAM_URLS: string[] = resolvedStreamSources;
+export const ENABLE_STREAM_SOURCE_OVERRIDE = readEnvBoolean(
+  "VITE_ENABLE_STREAM_SOURCE_OVERRIDE",
+  RUNTIME_ENV === "e2e" || !isPublicBrowserRuntime(),
+);
+export const ENABLE_LIFECYCLE_MISMATCH_CONSOLE = readEnvBoolean(
+  "VITE_ENABLE_LIFECYCLE_MISMATCH_CONSOLE",
+  !isPublicBrowserRuntime() && Boolean(import.meta.env.DEV),
+);
 export const GAME_API_URL: string = CONFIG.gameApiUrl;
 export const GAME_WS_URL: string = CONFIG.gameWsUrl;
+export const PUBLIC_CDN_URL: string = CONFIG.publicCdnUrl;
 export const UI_SYNC_DELAY_MS: number = CONFIG.uiSyncDelayMs;
 // Mainnet must route through backend RPC proxy so we can use server-side
 // Helius credentials and avoid browser-origin RPC blocking.
