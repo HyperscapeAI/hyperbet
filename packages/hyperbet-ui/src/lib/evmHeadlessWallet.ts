@@ -276,11 +276,6 @@ export function shouldAutoConnectHeadlessWallet(): boolean {
   );
 }
 
-export function createHeadlessWalletFromEnv(): HeadlessKeypairWalletAdapter | null {
-  const first = createHeadlessWalletsFromEnv()[0];
-  return first?.adapter ?? null;
-}
-
 export function createHeadlessWalletsFromEnv(): HeadlessWalletDescriptor[] {
   const entries = parseHeadlessWalletEntries();
   if (entries.length === 0) return [];

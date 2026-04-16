@@ -8,7 +8,6 @@ import { useMockStreamingEngine } from "@hyperbet/ui/lib/useMockStreamingEngine"
 import type { StreamingStateUpdate } from "@hyperbet/ui/spectator/types";
 import type { HmChartPoint } from "@hyperbet/ui/components/HmChart";
 
-// ── Public shape ─────────────────────────────────────────────────────────────
 
 export interface MockAgentSnapshot {
   name: string;
@@ -89,7 +88,6 @@ export interface MockAvaxStreamData {
   leaderboard: MockLeaderboardEntry[];
 }
 
-// ── Internal helpers ──────────────────────────────────────────────────────────
 
 const MOCK_EVM_ADDRESS: `0x${string}` =
   '0xMock000000000000000000000000000000001234' as `0x${string}`;
@@ -181,11 +179,9 @@ function buildStreamingStateBridge(
   };
 }
 
-// ── Context ───────────────────────────────────────────────────────────────────
 
 const MockDataContext = createContext<MockAvaxStreamData | null>(null);
 
-// ── Provider ──────────────────────────────────────────────────────────────────
 
 interface MockDataProviderProps {
   children: ReactNode;
@@ -231,22 +227,9 @@ export function MockDataProvider({ children }: MockDataProviderProps): React.Rea
   return createElement(MockDataContext.Provider, { value }, children);
 }
 
-// ── Consumer hook ─────────────────────────────────────────────────────────────
 
 /**
- * Returns all mock data needed by the canonical EVM app in stream-ui mode.
- * Must be called inside a <MockDataProvider>.
- */
-export function useMockData(): MockAvaxStreamData {
-  const ctx = useContext(MockDataContext);
-  if (!ctx) {
-    throw new Error('useMockData must be used within a MockDataProvider');
-  }
-  return ctx;
-}
-
-/**
- * Safe version — returns null when called outside a <MockDataProvider>.
+ * Returns mock data when called inside a <MockDataProvider>, null otherwise.
  * Use this in components that may render in both mock and live modes.
  */
 export function useMockDataOptional(): MockAvaxStreamData | null {
