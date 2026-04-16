@@ -1118,7 +1118,10 @@ export function App() {
     (typeof effNoPot === "number" ? effNoPot : 0);
   const parityGatesPublicPhase =
     effectiveMarketParity != null &&
-    !isPublicMarketParityState(effectiveMarketParity.state);
+    !isPublicMarketParityState(
+      effectiveMarketParity.state,
+      effectiveMarketParity.openedAtMs,
+    );
   const effPhaseLabel =
     parityGatesPublicPhase && marketParityStatusText
       ? marketParityStatusText
