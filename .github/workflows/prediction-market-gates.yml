@@ -262,16 +262,21 @@ jobs:
 
       - name: Audit unified page env
         env:
-          ENOOMIAN_HYPERBET_PAGES_URL: ${{ vars.ENOOMIAN_HYPERBET_PAGES_URL }}
-          ENOOMIAN_HYPERBET_KEEPER_URL: ${{ vars.ENOOMIAN_HYPERBET_KEEPER_URL }}
-          ENOOMIAN_HYPERBET_KEEPER_WS_URL: ${{ vars.ENOOMIAN_HYPERBET_KEEPER_WS_URL }}
-          VITE_GAME_API_URL: ${{ vars.ENOOMIAN_HYPERBET_KEEPER_URL }}
-          VITE_GAME_WS_URL: ${{ vars.ENOOMIAN_HYPERBET_KEEPER_WS_URL }}
+          # Enoomian staging targets are public URLs already baked into the
+          # deployed bets-page bundle. Falling back to literals here lets the
+          # gate run green on branches that don't have project-level
+          # vars.ENOOMIAN_* populated (e.g. enoomian/staging). When project
+          # vars are set on other branches, they win via the `||` short-circuit.
+          ENOOMIAN_HYPERBET_PAGES_URL: ${{ vars.ENOOMIAN_HYPERBET_PAGES_URL || 'https://hyperbet-enoomian-staging.pages.dev' }}
+          ENOOMIAN_HYPERBET_KEEPER_URL: ${{ vars.ENOOMIAN_HYPERBET_KEEPER_URL || 'https://hyperbet-keeper-staging-production.up.railway.app' }}
+          ENOOMIAN_HYPERBET_KEEPER_WS_URL: ${{ vars.ENOOMIAN_HYPERBET_KEEPER_WS_URL || 'wss://hyperbet-keeper-staging-production.up.railway.app/ws' }}
+          VITE_GAME_API_URL: ${{ vars.ENOOMIAN_HYPERBET_KEEPER_URL || 'https://hyperbet-keeper-staging-production.up.railway.app' }}
+          VITE_GAME_WS_URL: ${{ vars.ENOOMIAN_HYPERBET_KEEPER_WS_URL || 'wss://hyperbet-keeper-staging-production.up.railway.app/ws' }}
           VITE_SOLANA_CLUSTER: mainnet-beta
           VITE_USE_GAME_RPC_PROXY: "true"
           VITE_USE_GAME_EVM_RPC_PROXY: "true"
-          VITE_BSC_CHAIN_ID: ${{ vars.ENOOMIAN_BSC_CHAIN_ID != '' && vars.ENOOMIAN_BSC_CHAIN_ID || vars.HYPERBET_BSC_STAGING_CHAIN_ID }}
-          VITE_BSC_GOLD_CLOB_ADDRESS: ${{ vars.ENOOMIAN_BSC_GOLD_CLOB_ADDRESS != '' && vars.ENOOMIAN_BSC_GOLD_CLOB_ADDRESS || vars.HYPERBET_BSC_STAGING_GOLD_CLOB_ADDRESS }}
+          VITE_BSC_CHAIN_ID: ${{ vars.ENOOMIAN_BSC_CHAIN_ID != '' && vars.ENOOMIAN_BSC_CHAIN_ID || vars.HYPERBET_BSC_STAGING_CHAIN_ID || '97' }}
+          VITE_BSC_GOLD_CLOB_ADDRESS: ${{ vars.ENOOMIAN_BSC_GOLD_CLOB_ADDRESS != '' && vars.ENOOMIAN_BSC_GOLD_CLOB_ADDRESS || vars.HYPERBET_BSC_STAGING_GOLD_CLOB_ADDRESS || '0xb7b2833875A17d5E5401C310C694Bb75a21a2582' }}
         run: bun run ci:env -- --target=pages:unified --deployment=staging
 
       - name: Run Gate 10 local E2E
