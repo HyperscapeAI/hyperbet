@@ -4687,14 +4687,241 @@ async function maybeFinalizePendingEvmParityLock(): Promise<void> {
   }
 }
 
+// ── Missed-duel-end catch-up ─────────────────────────────────────────────────
+// If a keeper restart (or WebSocket drop) loses a live `duel_ended` event,
+// the bundle gets stuck in state=locked with phase="COUNTDOWN" — the resolve
+// reconcilers below gate on phase==="RESOLUTION" and never fire, and Solana
+// resolution requires seed+replayHash that only arrive on that event. The
+// Hyperscapes API persists those fields to streaming_duel_history at
+// resolution time and exposes them via GET /api/streaming/results/:duelId
+// (bearer-auth). This helper polls that endpoint for stuck bundles and
+// synthesises a DuelLifecycleEvent the existing onDuelEnd flow can consume.
+
+type HyperscapesDuelResult = {
+  duelId: string;
+  cycleId: string;
+  duelKeyHex: string;
+  duelEndTime: number | null;
+  seed: string;
+  replayHash: string;
+  winnerId: string;
+  winnerName: string;
+  loserId: string;
+  loserName: string;
+  winReason: string;
+  damageWinner: number;
+  damageLoser: number;
+  finishedAt: number;
+};
+
+const RESULT_CATCHUP_BEARER_TOKEN =
+  process.env.HYPERSCAPES_RESULT_LOOKUP_BEARER_TOKEN?.trim() ||
+  process.env.BETTING_FEED_ACCESS_TOKEN?.trim() ||
+  process.env.STREAM_STATE_SOURCE_BEARER_TOKEN?.trim() ||
+  "";
+
+const RESULT_CATCHUP_TIMEOUT_MS = Math.max(
+  1_000,
+  Number(process.env.HYPERSCAPES_RESULT_LOOKUP_TIMEOUT_MS || 5_000),
+);
+
+async function fetchHyperscapesDuelResult(
+  duelId: string,
+): Promise<HyperscapesDuelResult | null> {
+  if (!RESULT_CATCHUP_BEARER_TOKEN) return null;
+
+  const base = args["game-url"];
+  if (!base) return null;
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(
+    () => controller.abort(),
+    RESULT_CATCHUP_TIMEOUT_MS,
+  );
+  try {
+    const res = await fetch(
+      `${base.replace(/\/$/, "")}/api/streaming/results/${encodeURIComponent(duelId)}`,
+      {
+        cache: "no-store",
+        headers: {
+          authorization: `Bearer ${RESULT_CATCHUP_BEARER_TOKEN}`,
+          connection: "close",
+        },
+        signal: controller.signal,
+      },
+    );
+    if (res.status === 404 || res.status === 409) {
+      // 404: result not yet persisted, retry later.
+      // 409: legacy row without oracle proof, can't be used for synthetic replay.
+      try {
+        await res.body?.cancel();
+      } catch {}
+      return null;
+    }
+    if (!res.ok) {
+      try {
+        await res.body?.cancel();
+      } catch {}
+      return null;
+    }
+    return (await res.json()) as HyperscapesDuelResult;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+async function maybeCatchUpMissedDuelEnd(): Promise<void> {
+  const current = marketParitySnapshot;
+  if (!current) return;
+  if (isTerminalMarketParityState(current.state)) return;
+  // Bundle must be past the open window (locked or a post-lock frozen state)
+  // and not already confirmed resolved.
+  if (!current.lockedAtMs) return;
+  if (current.resolvedAtMs) return;
+  if (current.phase === "RESOLUTION") return; // existing reconcilers handle this
+  if (!current.duelId) return;
+
+  const result = await fetchHyperscapesDuelResult(current.duelId);
+  if (!result) return;
+
+  // Reject mismatched catch-up results to avoid resolving with wrong data.
+  const expectedDuelKey = normalizedBundleDuelKey(current.duelKey);
+  const resultDuelKey = normalizedBundleDuelKey(result.duelKeyHex);
+  if (expectedDuelKey && resultDuelKey && expectedDuelKey !== resultDuelKey) {
+    console.warn("[bot] result_catchup_duelkey_mismatch", {
+      duelId: current.duelId,
+      expectedDuelKey,
+      resultDuelKey,
+    });
+    return;
+  }
+
+  const winnerIsAgent1 = result.winnerId === "agent1" || result.winnerId.endsWith(":agent1");
+  const syntheticEvent: DuelLifecycleEvent = {
+    cycleId: result.cycleId,
+    duelId: result.duelId,
+    duelKeyHex: result.duelKeyHex,
+    betOpenTime: null,
+    betCloseTime: null,
+    fightStartTime: null,
+    duelEndTime: result.duelEndTime,
+    phase: "RESOLUTION",
+    winnerId: result.winnerId,
+    seed: result.seed,
+    replayHash: result.replayHash,
+    agent1: {
+      id: winnerIsAgent1 ? result.winnerId : result.loserId,
+      name: winnerIsAgent1 ? result.winnerName : result.loserName,
+    },
+    agent2: {
+      id: winnerIsAgent1 ? result.loserId : result.winnerId,
+      name: winnerIsAgent1 ? result.loserName : result.winnerName,
+    },
+  };
+
+  console.log("[bot] result_catchup_firing_synthetic_duel_end", {
+    duelId: current.duelId,
+    winnerId: result.winnerId,
+    finishedAt: result.finishedAt,
+  });
+
+  // Prime the snapshot for resolution and run the resolve flow directly.
+  // We mirror onDuelEnd's resolve portion, skipping the ratings/monologues
+  // bookkeeping — those are already persisted by Hyperscapes and don't
+  // belong in a catch-up.
+  beginMarketParityBundle(syntheticEvent, "RESOLUTION");
+  resetMarketParityConfirmations("awaiting_confirmations", "RESOLUTION", false);
+  writeBotHealthSnapshot();
+
+  try {
+    if (requiredParityChains.includes("solana")) {
+      if (!solanaKeeperWriteEnabled) {
+        throw new Error(
+          "result_catchup: solana parity required but keeper writes disabled",
+        );
+      }
+      if (!(await ensureKeeperChainReady())) {
+        throw new Error(
+          "result_catchup: solana parity required but keeper chain not ready",
+        );
+      }
+      if (!(await ensureBotSignerFunding())) {
+        throw new Error(
+          "result_catchup: solana parity required but bot signer funding is below threshold",
+        );
+      }
+      const solanaOutcome = await reportRoundResult(syntheticEvent);
+      markMarketParityChainConfirmed({
+        chainKey: "solana",
+        transition:
+          solanaOutcome.lifecycleStatus === "RESOLVED" ? "resolve" : "propose",
+        lifecycleStatus: solanaOutcome.lifecycleStatus,
+        countsForQuorum: solanaOutcome.finalized,
+        note: `catchup:${solanaOutcome.note ?? "ok"}`,
+      });
+      writeBotHealthSnapshot();
+    }
+
+    const evmParityChains = requiredEvmParityChains();
+    if (evmParityChains.length > 0) {
+      if (!EVM_KEEPER_ENABLE_LIFECYCLE_WRITES) {
+        throw new Error(
+          "result_catchup: EVM parity required but lifecycle writes disabled",
+        );
+      }
+      const evmOutcomes = await reportEvmResult(
+        syntheticEvent,
+        evmParityChains,
+      );
+      for (const outcome of evmOutcomes) {
+        markMarketParityChainConfirmed({
+          chainKey: outcome.chainKey,
+          transition:
+            outcome.lifecycleStatus === "RESOLVED" ? "resolve" : "propose",
+          lifecycleStatus: outcome.lifecycleStatus,
+          countsForQuorum: outcome.lifecycleStatus === "RESOLVED",
+          note: `catchup:${outcome.note ?? "ok"}`,
+        });
+      }
+      writeBotHealthSnapshot();
+    }
+
+    if (allRequiredParityChainsConfirmed()) {
+      finalizeMarketParityState("resolved", "RESOLUTION");
+    }
+    // Else: the normal resolve reconcilers will pick up any remaining
+    // dispute-window chains on subsequent maintenance ticks.
+  } catch (err) {
+    finalizeMarketParityState("frozen", "RESOLUTION", {
+      reason: `result_catchup_failed: ${err instanceof Error ? err.message : String(err)}`,
+    });
+    console.error("[bot] result_catchup_failed", err);
+  }
+  writeBotHealthSnapshot();
+}
+
 async function maybeFinalizePendingEvmParityResolution(): Promise<void> {
   const current = marketParitySnapshot;
-  if (
-    !current ||
-    current.phase !== "RESOLUTION" ||
-    isTerminalMarketParityState(current.state) ||
-    !current.duelKey
-  ) {
+  if (!current || isTerminalMarketParityState(current.state) || !current.duelKey) {
+    return;
+  }
+  // Phase-independent on-chain readback: even if `onDuelEnd` was missed (so
+  // phase never advanced to "RESOLUTION"), we still want to reconcile when
+  // on-chain state shows the duel has moved past LOCKED. Gate on:
+  //  - phase === "RESOLUTION" (normal flow), OR
+  //  - bundle already reached LOCKED but hasn't been resolved and at least
+  //    one EVM chain receipt is still short of RESOLVED.
+  const hasPendingEvmReceipt =
+    current.lockedAtMs != null &&
+    current.resolvedAtMs == null &&
+    current.receipts.some(
+      (receipt) =>
+        receipt.lifecycleStatus !== "RESOLVED" &&
+        receipt.lifecycleStatus !== "CANCELLED",
+    );
+  if (current.phase !== "RESOLUTION" && !hasPendingEvmReceipt) {
     return;
   }
 
@@ -4777,7 +5004,6 @@ async function maybeFinalizePendingSolanaParityResolution(): Promise<void> {
   const current = marketParitySnapshot;
   if (
     !current ||
-    current.phase !== "RESOLUTION" ||
     isTerminalMarketParityState(current.state) ||
     !requiredParityChains.includes("solana")
   ) {
@@ -4786,6 +5012,25 @@ async function maybeFinalizePendingSolanaParityResolution(): Promise<void> {
 
   const receipt = current.receipts.find((entry) => entry.chainKey === "solana");
   if (receipt?.lifecycleStatus === "RESOLVED") {
+    return;
+  }
+
+  // Phase-independent readback: run when phase === "RESOLUTION" (normal flow)
+  // OR when the bundle is already locked on-chain but the Solana receipt
+  // hasn't reached RESOLVED yet. The latter covers the case where
+  // `onDuelEnd` was missed and `reportRoundResult` was never invoked; an
+  // on-chain readback can still promote the receipt to RESOLVED if the
+  // proposal has already been finalized out-of-band, or catch a CHALLENGED
+  // transition.
+  // We already returned above when the Solana receipt is RESOLVED, so from
+  // here the receipt is null/undefined/pending or something earlier in the
+  // lifecycle. Accept phase==="RESOLUTION" (normal flow) OR a bundle that
+  // reached LOCKED on-chain but never got its Solana receipt advanced.
+  const hasPendingSolanaReceipt =
+    current.lockedAtMs != null &&
+    current.resolvedAtMs == null &&
+    receipt?.lifecycleStatus !== "CANCELLED";
+  if (current.phase !== "RESOLUTION" && !hasPendingSolanaReceipt) {
     return;
   }
 
@@ -5517,6 +5762,11 @@ async function runMaintenance(): Promise<void> {
   await ensureOracleReady();
   await maybeFinalizePendingSolanaParityLock();
   await maybeFinalizePendingEvmParityLock();
+  // Catch up bundles whose live duel_ended event was missed (keeper restart,
+  // WebSocket drop, etc.). Runs BEFORE the resolve reconcilers so a
+  // successfully caught-up bundle flips to RESOLUTION phase and the normal
+  // resolve reconcilers can finish it in the same tick.
+  await maybeCatchUpMissedDuelEnd();
   await maybeFinalizePendingSolanaParityResolution();
   await maybeFinalizePendingEvmParityResolution();
 
