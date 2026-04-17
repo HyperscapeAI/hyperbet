@@ -40,7 +40,9 @@ describe("shouldTreatPlaybackLatencyAsDrifted", () => {
     expect(
       shouldTreatPlaybackLatencyAsDrifted({
         driftThresholdMs: 20_000,
+        syncDriftThresholdMs: 2_500,
         latencyMs: 24_000,
+        presentationDelayMs: null,
         playbackStarted: false,
         ready: true,
       }),
@@ -49,7 +51,9 @@ describe("shouldTreatPlaybackLatencyAsDrifted", () => {
     expect(
       shouldTreatPlaybackLatencyAsDrifted({
         driftThresholdMs: 20_000,
+        syncDriftThresholdMs: 2_500,
         latencyMs: 24_000,
+        presentationDelayMs: null,
         playbackStarted: true,
         ready: false,
       }),
@@ -60,7 +64,33 @@ describe("shouldTreatPlaybackLatencyAsDrifted", () => {
     expect(
       shouldTreatPlaybackLatencyAsDrifted({
         driftThresholdMs: 20_000,
+        syncDriftThresholdMs: 2_500,
         latencyMs: 24_000,
+        presentationDelayMs: null,
+        playbackStarted: true,
+        ready: true,
+      }),
+    ).toBe(true);
+  });
+
+  it("judges LL-HLS drift against presentation delay when one is provided", () => {
+    expect(
+      shouldTreatPlaybackLatencyAsDrifted({
+        driftThresholdMs: 12_000,
+        syncDriftThresholdMs: 2_500,
+        latencyMs: 6_200,
+        presentationDelayMs: 4_000,
+        playbackStarted: true,
+        ready: true,
+      }),
+    ).toBe(false);
+
+    expect(
+      shouldTreatPlaybackLatencyAsDrifted({
+        driftThresholdMs: 12_000,
+        syncDriftThresholdMs: 2_500,
+        latencyMs: 7_000,
+        presentationDelayMs: 4_000,
         playbackStarted: true,
         ready: true,
       }),
@@ -76,7 +106,12 @@ describe("resolveHlsPlaybackProfile", () => {
     );
 
     expect(profile.startupGraceMs).toBe(4_000);
+    expect(profile.waitingGraceMs).toBe(1_200);
+    expect(profile.syncDriftThresholdMs).toBe(2_500);
     expect(profile.reloadOnBufferStall).toBe(true);
+    expect(profile.config.liveSyncDurationCount).toBe(3);
+    expect(profile.config.liveMaxLatencyDurationCount).toBe(6);
+    expect(profile.config.maxBufferLength).toBe(12);
   });
 
   it("keeps stable HLS away from the playlist tail without pinning to the old edge", () => {
@@ -89,6 +124,7 @@ describe("resolveHlsPlaybackProfile", () => {
     expect(profile.config.liveMaxLatencyDurationCount).toBe(16);
     expect(profile.config.maxBufferLength).toBe(45);
     expect(profile.driftThresholdMs).toBe(35_000);
+    expect(profile.syncDriftThresholdMs).toBe(8_000);
   });
 });
 

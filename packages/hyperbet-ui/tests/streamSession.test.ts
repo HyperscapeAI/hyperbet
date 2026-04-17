@@ -1218,9 +1218,9 @@ describe("deriveBettorStreamUiState", () => {
 describe("LIVE_EDGE_HLS_CONFIG", () => {
   it("keeps the shared live-edge tuning tight", () => {
     expect(LIVE_EDGE_HLS_CONFIG.lowLatencyMode).toBe(true);
-    expect(LIVE_EDGE_HLS_CONFIG.liveSyncDurationCount).toBe(2);
-    expect(LIVE_EDGE_HLS_CONFIG.liveMaxLatencyDurationCount).toBe(4);
-    expect(LIVE_EDGE_HLS_CONFIG.maxBufferLength).toBe(6);
+    expect(LIVE_EDGE_HLS_CONFIG.liveSyncDurationCount).toBe(3);
+    expect(LIVE_EDGE_HLS_CONFIG.liveMaxLatencyDurationCount).toBe(6);
+    expect(LIVE_EDGE_HLS_CONFIG.maxBufferLength).toBe(12);
     expect(LIVE_EDGE_HLS_CONFIG.maxMaxBufferLength).toBe(12);
     expect(LIVE_EDGE_HLS_CONFIG.liveBackBufferLength).toBe(10);
     expect(LIVE_EDGE_HLS_CONFIG.maxLiveSyncPlaybackRate).toBe(1.5);

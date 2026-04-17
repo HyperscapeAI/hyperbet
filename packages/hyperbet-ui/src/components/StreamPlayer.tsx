@@ -78,6 +78,7 @@ type EmbedStatusPayload = {
 type HlsPlaybackProfile = {
   config: Record<string, unknown>;
   driftThresholdMs: number;
+  syncDriftThresholdMs: number;
   waitingGraceMs: number;
   reloadOnBufferStall: boolean;
   rebuildOnVideoError: boolean;
@@ -88,10 +89,10 @@ type HlsPlaybackProfile = {
 const LOW_LATENCY_HLS_CONFIG = {
   enableWorker: true,
   lowLatencyMode: true,
-  liveSyncDurationCount: 2,
-  liveMaxLatencyDurationCount: 4,
+  liveSyncDurationCount: 3,
+  liveMaxLatencyDurationCount: 6,
   liveBackBufferLength: 10,
-  maxBufferLength: 6,
+  maxBufferLength: 12,
   maxMaxBufferLength: 12,
   maxLiveSyncPlaybackRate: 1.5,
   startFragPrefetch: true,
@@ -506,19 +507,26 @@ export const StreamPlayer: React.FC<StreamPlayerProps> = ({
 
     const syncLatencyTelemetry = () => {
       const latencyMs = readLiveEdgeLatencyMs(hls, video);
+      const normalizedPresentationDelayMs =
+        typeof presentationDelayMs === "number" &&
+        Number.isFinite(presentationDelayMs)
+          ? Math.max(0, presentationDelayMs)
+          : null;
       updateTelemetry({
         liveEdgeLatencyMs: latencyMs,
         playbackUrl: sourceUrl,
         deliveryMode: resolvePlayerDeliveryModeHint(sourceUrl, deliveryMode),
-        presentationDelayMs:
-          typeof presentationDelayMs === "number" && Number.isFinite(presentationDelayMs)
-            ? Math.max(0, presentationDelayMs)
-            : null,
+        presentationDelayMs: normalizedPresentationDelayMs,
       });
       if (
         playbackStarted &&
         !video.paused &&
-        (latencyMs == null || latencyMs <= playbackProfile.driftThresholdMs)
+        isPlaybackLatencyWithinBudget({
+          driftThresholdMs: playbackProfile.driftThresholdMs,
+          syncDriftThresholdMs: playbackProfile.syncDriftThresholdMs,
+          latencyMs,
+          presentationDelayMs: normalizedPresentationDelayMs,
+        })
       ) {
         playerReady = true;
         markDegraded(null);
@@ -528,7 +536,9 @@ export const StreamPlayer: React.FC<StreamPlayerProps> = ({
       if (
         shouldTreatPlaybackLatencyAsDrifted({
           driftThresholdMs: playbackProfile.driftThresholdMs,
+          syncDriftThresholdMs: playbackProfile.syncDriftThresholdMs,
           latencyMs,
+          presentationDelayMs: normalizedPresentationDelayMs,
           playbackStarted,
           ready: playerReady,
         })
@@ -1409,8 +1419,9 @@ export function resolveHlsPlaybackProfile(
   if (deliveryMode === "external_hls/llhls") {
     return {
       config: LOW_LATENCY_HLS_CONFIG,
-      driftThresholdMs: 8_000,
-      waitingGraceMs: 450,
+      driftThresholdMs: 12_000,
+      syncDriftThresholdMs: 2_500,
+      waitingGraceMs: 1_200,
       reloadOnBufferStall: true,
       rebuildOnVideoError: true,
       minVideoErrorTailMs: 750,
@@ -1421,6 +1432,7 @@ export function resolveHlsPlaybackProfile(
   return {
     config: STABLE_LIVE_HLS_CONFIG,
     driftThresholdMs: 35_000,
+    syncDriftThresholdMs: 8_000,
     waitingGraceMs: 2_500,
     reloadOnBufferStall: false,
     rebuildOnVideoError: false,
@@ -1443,18 +1455,57 @@ export function shouldTreatPlaybackStartupAsPending(params: {
   );
 }
 
+export function resolvePlaybackSyncDeltaMs(
+  latencyMs: number | null,
+  presentationDelayMs: number | null,
+): number | null {
+  return latencyMs != null &&
+    Number.isFinite(latencyMs) &&
+    presentationDelayMs != null &&
+    Number.isFinite(presentationDelayMs) &&
+    presentationDelayMs > 0
+    ? Math.round(latencyMs - presentationDelayMs)
+    : null;
+}
+
+export function isPlaybackLatencyWithinBudget(params: {
+  driftThresholdMs: number;
+  syncDriftThresholdMs: number;
+  latencyMs: number | null;
+  presentationDelayMs: number | null;
+}): boolean {
+  if (params.latencyMs == null || !Number.isFinite(params.latencyMs)) {
+    return true;
+  }
+
+  const syncDeltaMs = resolvePlaybackSyncDeltaMs(
+    params.latencyMs,
+    params.presentationDelayMs,
+  );
+  if (syncDeltaMs != null) {
+    return Math.abs(syncDeltaMs) <= params.syncDriftThresholdMs;
+  }
+
+  return params.latencyMs <= params.driftThresholdMs;
+}
+
 export function shouldTreatPlaybackLatencyAsDrifted(params: {
   driftThresholdMs: number;
+  syncDriftThresholdMs: number;
   latencyMs: number | null;
+  presentationDelayMs: number | null;
   playbackStarted: boolean;
   ready: boolean;
 }): boolean {
   return (
     params.ready &&
     params.playbackStarted &&
-    params.latencyMs != null &&
-    Number.isFinite(params.latencyMs) &&
-    params.latencyMs > params.driftThresholdMs
+    !isPlaybackLatencyWithinBudget({
+      driftThresholdMs: params.driftThresholdMs,
+      syncDriftThresholdMs: params.syncDriftThresholdMs,
+      latencyMs: params.latencyMs,
+      presentationDelayMs: params.presentationDelayMs,
+    })
   );
 }
 
@@ -1475,14 +1526,10 @@ export function advanceViewerSyncState(params: {
   syncState: ViewerSyncState;
 } {
   const normalizedStatus = (params.status ?? "").trim().toLowerCase();
-  const syncDeltaMs =
-    params.liveEdgeLatencyMs != null &&
-    Number.isFinite(params.liveEdgeLatencyMs) &&
-    params.presentationDelayMs != null &&
-    Number.isFinite(params.presentationDelayMs) &&
-    params.presentationDelayMs > 0
-      ? Math.round(params.liveEdgeLatencyMs - params.presentationDelayMs)
-      : null;
+  const syncDeltaMs = resolvePlaybackSyncDeltaMs(
+    params.liveEdgeLatencyMs,
+    params.presentationDelayMs,
+  );
 
   if (normalizedStatus.startsWith("error:")) {
     return {

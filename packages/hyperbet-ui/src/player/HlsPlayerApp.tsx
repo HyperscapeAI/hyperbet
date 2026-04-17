@@ -3,8 +3,10 @@ import Hls from "hls.js";
 
 import {
   advanceViewerSyncState,
+  isPlaybackLatencyWithinBudget,
   resolveHlsPlaybackProfile,
   resolvePlayerDeliveryModeHint,
+  shouldTreatPlaybackLatencyAsDrifted,
   type StreamPlayerStatus,
   type ViewerSyncState,
 } from "../components/StreamPlayer";
@@ -535,9 +537,14 @@ export function HlsPlayerApp() {
       if (
         runtime.playbackStarted &&
         !video.paused &&
-        (latencyMs == null ||
-          (runtime.playbackProfile != null &&
-            latencyMs <= runtime.playbackProfile.driftThresholdMs))
+        (runtime.playbackProfile == null ||
+          isPlaybackLatencyWithinBudget({
+            driftThresholdMs: runtime.playbackProfile.driftThresholdMs,
+            syncDriftThresholdMs:
+              runtime.playbackProfile.syncDriftThresholdMs,
+            latencyMs,
+            presentationDelayMs: params.presentationDelayMs,
+          }))
       ) {
         if (!runtime.readySent || runtime.currentStatus !== "playing") {
           markReady();
@@ -545,11 +552,15 @@ export function HlsPlayerApp() {
         return;
       }
       if (
-        runtime.readySent &&
-        runtime.playbackStarted &&
         runtime.playbackProfile != null &&
-        latencyMs != null &&
-        latencyMs > runtime.playbackProfile.driftThresholdMs
+        shouldTreatPlaybackLatencyAsDrifted({
+          driftThresholdMs: runtime.playbackProfile.driftThresholdMs,
+          syncDriftThresholdMs: runtime.playbackProfile.syncDriftThresholdMs,
+          latencyMs,
+          presentationDelayMs: params.presentationDelayMs,
+          playbackStarted: runtime.playbackStarted,
+          ready: runtime.readySent,
+        })
       ) {
         markDegraded(
           "Playback drifted from the live edge.",
