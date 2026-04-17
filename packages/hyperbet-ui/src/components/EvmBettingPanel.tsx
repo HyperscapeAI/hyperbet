@@ -906,7 +906,7 @@ export function EvmBettingPanel({
 
     try {
       if (!duelKeyHex) {
-        setLastRefreshError("missing-duel-key");
+        setLastRefreshError(null);
         setMarketMeta(null);
         setPosition(null);
         setBids([]);
@@ -938,7 +938,7 @@ export function EvmBettingPanel({
       );
 
       if (!market.exists) {
-        setLastRefreshError("missing-market");
+        setLastRefreshError(null);
         setMarketMeta(null);
         setPosition(null);
         setBids([]);

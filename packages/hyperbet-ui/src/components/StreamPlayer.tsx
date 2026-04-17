@@ -107,6 +107,7 @@ const LOW_LATENCY_HLS_CONFIG = {
 export const LIVE_EDGE_HLS_CONFIG = LOW_LATENCY_HLS_CONFIG;
 export const RECENT_PLAYER_SIGNAL_WINDOW_MS = 30_000;
 export const RECENT_PLAYER_SIGNAL_THRESHOLD = 3;
+export const DEFAULT_SYNC_TOLERANCE_MS = 2_500;
 
 const STABLE_LIVE_HLS_CONFIG = {
   enableWorker: true,
@@ -135,7 +136,7 @@ export const StreamPlayer: React.FC<StreamPlayerProps> = ({
   style,
   deliveryMode = null,
   presentationDelayMs = null,
-  syncToleranceMs = 1_500,
+  syncToleranceMs = DEFAULT_SYNC_TOLERANCE_MS,
   showDiagnostics = false,
   onStreamUnavailable,
   onStreamReady,

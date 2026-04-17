@@ -15,6 +15,7 @@ import {
   consumeDueCanonicalStreamSession,
   normalizeCanonicalStreamSession,
   queueCanonicalStreamSession,
+  sessionPlaybackDelayMs,
   useCanonicalStreamSession,
 } from "../src/spectator/useCanonicalStreamSession";
 import type { SourceRuntimeInfo } from "../src/spectator/types";
@@ -1005,6 +1006,70 @@ describe("selectBetSurfaceStreamUrl", () => {
 
     expect(selection.activeStreamUrl).toBe("");
     expect(selection.preloadStreamUrl).toBe("");
+  });
+
+  it("falls back to the canonical channel delay when playback delay is unset", () => {
+    const session = normalizeCanonicalStreamSession({
+      seq: 1,
+      emittedAt: 1,
+      cycle: {
+        cycleId: "cycle-1",
+        phase: "ANNOUNCEMENT",
+        duelId: "duel-1",
+        duelKeyHex: "deadbeef",
+        rendererHealth: {
+          ready: true,
+          degradedReason: null,
+          updatedAt: 1,
+        },
+      },
+      channel: makeCanonicalChannel({
+        presentationDelayMs: 4000,
+      }),
+      playback: {
+        url: "https://video.example/manifest.m3u8?protocol=llhls",
+        kind: "llhls",
+        renderSessionId: "render-1",
+        presentationDelayMs: 0,
+      },
+    });
+
+    expect(sessionPlaybackDelayMs(session)).toBe(4000);
+  });
+
+  it("falls back to the broadcast timeline delay when playback and channel delays are unset", () => {
+    const session = normalizeCanonicalStreamSession({
+      seq: 1,
+      emittedAt: 1,
+      cycle: {
+        cycleId: "cycle-1",
+        phase: "ANNOUNCEMENT",
+        duelId: "duel-1",
+        duelKeyHex: "deadbeef",
+        broadcastTimeline: {
+          phase: "ANNOUNCEMENT",
+          betOpenTime: 10,
+          betCloseTime: 20,
+          fightStartTime: null,
+          duelEndTime: null,
+          presentationDelayMs: 4000,
+          updatedAt: 1,
+        },
+        rendererHealth: {
+          ready: true,
+          degradedReason: null,
+          updatedAt: 1,
+        },
+      },
+      playback: {
+        url: "https://video.example/manifest.m3u8?protocol=llhls",
+        kind: "llhls",
+        renderSessionId: "render-1",
+        presentationDelayMs: 0,
+      },
+    });
+
+    expect(sessionPlaybackDelayMs(session)).toBe(4000);
   });
 
   it("only activates fallback sources when an explicit override is enabled", () => {

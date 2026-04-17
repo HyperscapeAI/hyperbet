@@ -694,7 +694,24 @@ export function canonicalSessionToStreamingState(
 export function sessionPlaybackDelayMs(
   session: CanonicalStreamSession | null,
 ): number {
-  return Math.max(0, session?.playback?.presentationDelayMs ?? 0);
+  const playbackDelayMs = asFiniteNumber(session?.playback?.presentationDelayMs);
+  if (playbackDelayMs != null && playbackDelayMs > 0) {
+    return Math.max(0, playbackDelayMs);
+  }
+
+  const channelDelayMs = asFiniteNumber(session?.channel?.presentationDelayMs);
+  if (channelDelayMs != null && channelDelayMs > 0) {
+    return Math.max(0, channelDelayMs);
+  }
+
+  const timelineDelayMs = asFiniteNumber(
+    session?.cycle?.broadcastTimeline?.presentationDelayMs,
+  );
+  if (timelineDelayMs != null && timelineDelayMs > 0) {
+    return Math.max(0, timelineDelayMs);
+  }
+
+  return 0;
 }
 
 export function queueCanonicalStreamSession(

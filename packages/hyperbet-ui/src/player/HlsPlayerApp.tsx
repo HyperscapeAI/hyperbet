@@ -3,10 +3,12 @@ import Hls from "hls.js";
 
 import {
   advanceViewerSyncState,
+  DEFAULT_SYNC_TOLERANCE_MS,
   isPlaybackLatencyWithinBudget,
   RECENT_PLAYER_SIGNAL_THRESHOLD,
   recordRecentPlaybackSignal,
   resolveHlsPlaybackProfile,
+  resolvePlaybackSyncDeltaMs,
   resolvePlayerDeliveryModeHint,
   shouldTreatPlaybackLatencyAsDrifted,
   type StreamPlayerStatus,
@@ -86,6 +88,101 @@ type RuntimeState = {
   telemetry: StreamPlayerStatus;
   loader: ViewerLoaderState;
 };
+
+export function resolveBufferedPresentationDelayTarget(params: {
+  bufferedStart: number;
+  bufferedEnd: number;
+  liveEdge: number;
+  presentationDelayMs: number | null;
+}): number | null {
+  if (
+    !Number.isFinite(params.bufferedStart) ||
+    !Number.isFinite(params.bufferedEnd) ||
+    !Number.isFinite(params.liveEdge) ||
+    params.bufferedEnd <= params.bufferedStart
+  ) {
+    return null;
+  }
+  if (
+    params.presentationDelayMs == null ||
+    !Number.isFinite(params.presentationDelayMs) ||
+    params.presentationDelayMs <= 0
+  ) {
+    return null;
+  }
+
+  const minTarget = params.bufferedStart + 0.01;
+  const maxTarget = params.bufferedEnd - 0.01;
+  if (!Number.isFinite(minTarget) || !Number.isFinite(maxTarget) || maxTarget <= minTarget) {
+    return null;
+  }
+
+  const desiredTarget = params.liveEdge - params.presentationDelayMs / 1000;
+  if (!Number.isFinite(desiredTarget)) {
+    return null;
+  }
+
+  return Math.min(maxTarget, Math.max(minTarget, desiredTarget));
+}
+
+export function resolveObservedPlaybackLatencyMs(params: {
+  currentTime: number;
+  hlsLatencySeconds: number | null;
+  seekableEnd: number | null;
+  bufferedEnd: number | null;
+  duration: number | null;
+}): number | null {
+  const candidates: number[] = [];
+
+  if (
+    params.seekableEnd != null &&
+    Number.isFinite(params.seekableEnd) &&
+    Number.isFinite(params.currentTime)
+  ) {
+    const remaining = params.seekableEnd - params.currentTime;
+    if (Number.isFinite(remaining) && remaining >= 0) {
+      candidates.push(Math.round(remaining * 1000));
+    }
+  }
+
+  if (
+    params.bufferedEnd != null &&
+    Number.isFinite(params.bufferedEnd) &&
+    Number.isFinite(params.currentTime)
+  ) {
+    const remaining = params.bufferedEnd - params.currentTime;
+    if (Number.isFinite(remaining) && remaining >= 0) {
+      candidates.push(Math.round(remaining * 1000));
+    }
+  }
+
+  if (
+    params.hlsLatencySeconds != null &&
+    Number.isFinite(params.hlsLatencySeconds)
+  ) {
+    candidates.push(Math.max(0, Math.round(params.hlsLatencySeconds * 1000)));
+  }
+
+  if (candidates.length > 0) {
+    return Math.max(...candidates);
+  }
+
+  if (
+    params.duration == null ||
+    !Number.isFinite(params.duration) ||
+    params.duration <= 0 ||
+    !Number.isFinite(params.currentTime)
+  ) {
+    return null;
+  }
+
+  const remaining = params.duration - params.currentTime;
+  if (!Number.isFinite(remaining) || remaining < 0) {
+    return null;
+  }
+
+  return Math.round(remaining * 1000);
+}
 
 export function HlsPlayerApp() {
   const params = useMemo(readPlayerQuery, []);
@@ -337,6 +434,20 @@ export function HlsPlayerApp() {
       if (!Number.isFinite(bufferedStart) || !Number.isFinite(bufferedEnd)) {
         return null;
       }
+      const liveEdge =
+        video.seekable.length > 0
+          ? video.seekable.end(video.seekable.length - 1)
+          : bufferedEnd;
+
+      const delayedTarget = resolveBufferedPresentationDelayTarget({
+        bufferedStart,
+        bufferedEnd,
+        liveEdge,
+        presentationDelayMs: params.presentationDelayMs,
+      });
+      if (delayedTarget != null) {
+        return delayedTarget;
+      }
 
       let target: number | null =
         runtime.hls && Number.isFinite(runtime.hls.liveSyncPosition)
@@ -360,6 +471,50 @@ export function HlsPlayerApp() {
         bufferedEnd - 0.01,
         Math.max(bufferedStart + 0.01, safeTarget),
       );
+    };
+
+    const alignPlaybackToPresentationDelay = (reason: string) => {
+      if (!video.buffered || video.buffered.length === 0) {
+        return false;
+      }
+      const lastIndex = video.buffered.length - 1;
+      const bufferedStart = video.buffered.start(lastIndex);
+      const bufferedEnd = video.buffered.end(lastIndex);
+      if (!Number.isFinite(bufferedStart) || !Number.isFinite(bufferedEnd)) {
+        return false;
+      }
+      const liveEdge =
+        video.seekable.length > 0
+          ? video.seekable.end(video.seekable.length - 1)
+          : bufferedEnd;
+      const target = resolveBufferedPresentationDelayTarget({
+        bufferedStart,
+        bufferedEnd,
+        liveEdge,
+        presentationDelayMs: params.presentationDelayMs,
+      });
+      if (target == null || Math.abs(video.currentTime - target) <= 0.1) {
+        return false;
+      }
+
+      try {
+        video.currentTime = target;
+      } catch {
+        return false;
+      }
+
+      runtime.lastProgressAt = Date.now();
+      if (!runtime.readySent) {
+        updateLoaderPhase("finalizing", { overlayMessage: null, visible: true });
+      }
+      console.info(`[hls-player] aligning playback via ${reason}`, {
+        target,
+        liveEdge,
+        buffered: readBufferedRanges(),
+        streamUrl: runtime.activeStreamUrl,
+      });
+      void video.play().catch(() => {});
+      return true;
     };
 
     const syncFirstFrameTelemetry = () => {
@@ -405,6 +560,30 @@ export function HlsPlayerApp() {
       });
       void video.play().catch(() => {});
       return true;
+    };
+
+    const hasBufferedPresentationDelay = () => {
+      if (params.presentationDelayMs == null || params.presentationDelayMs <= 0) {
+        return true;
+      }
+      const bufferedTailMs = readBufferedTailMs();
+      return bufferedTailMs != null && bufferedTailMs >= params.presentationDelayMs;
+    };
+
+    const maybeStartPlayback = (reason: string) => {
+      if (!params.autoplay) {
+        return;
+      }
+      if (!hasBufferedPresentationDelay()) {
+        updateLoaderPhase("buffering_media", {
+          overlayMessage: null,
+          visible: true,
+        });
+        syncTelemetry();
+        return;
+      }
+      promoteBufferedStartup(`${reason}_startup`);
+      void video.play().catch(() => {});
     };
 
     const revealDecodedFrame = (reason: string) => {
@@ -512,39 +691,30 @@ export function HlsPlayerApp() {
     };
 
     const readLiveEdgeLatencyMs = () => {
-      if (
-        runtime.hls &&
-        typeof runtime.hls.latency === "number" &&
-        Number.isFinite(runtime.hls.latency)
-      ) {
-        return Math.max(0, Math.round(runtime.hls.latency * 1000));
-      }
-      if (video.seekable.length > 0) {
-        const liveEdge = video.seekable.end(video.seekable.length - 1);
-        const remaining = liveEdge - video.currentTime;
-        if (Number.isFinite(remaining) && remaining >= 0) {
-          return Math.round(remaining * 1000);
-        }
-      }
-      if (video.buffered.length > 0) {
-        const bufferedEnd = video.buffered.end(video.buffered.length - 1);
-        const remaining = bufferedEnd - video.currentTime;
-        if (Number.isFinite(remaining) && remaining >= 0) {
-          return Math.round(remaining * 1000);
-        }
-      }
-      if (!Number.isFinite(video.duration) || video.duration <= 0) {
-        return null;
-      }
-      const remaining = video.duration - video.currentTime;
-      if (!Number.isFinite(remaining) || remaining < 0) {
-        return null;
-      }
-      return Math.round(remaining * 1000);
+      return resolveObservedPlaybackLatencyMs({
+        currentTime: video.currentTime,
+        hlsLatencySeconds:
+          runtime.hls && typeof runtime.hls.latency === "number"
+            ? runtime.hls.latency
+            : null,
+        seekableEnd:
+          video.seekable.length > 0
+            ? video.seekable.end(video.seekable.length - 1)
+            : null,
+        bufferedEnd:
+          video.buffered.length > 0
+            ? video.buffered.end(video.buffered.length - 1)
+            : null,
+        duration: Number.isFinite(video.duration) ? video.duration : null,
+      });
     };
 
     const syncTelemetry = () => {
       const latencyMs = readLiveEdgeLatencyMs();
+      const syncDeltaMs = resolvePlaybackSyncDeltaMs(
+        latencyMs,
+        params.presentationDelayMs,
+      );
       setTelemetry({
         liveEdgeLatencyMs: latencyMs,
         playbackUrl: runtime.activeStreamUrl,
@@ -566,6 +736,13 @@ export function HlsPlayerApp() {
         if (!runtime.readySent || runtime.currentStatus !== "playing") {
           markReady();
         }
+        return;
+      }
+      const tooCloseToLiveEdge =
+        runtime.playbackProfile != null &&
+        syncDeltaMs != null &&
+        syncDeltaMs < -runtime.playbackProfile.syncDriftThresholdMs;
+      if (tooCloseToLiveEdge && alignPlaybackToPresentationDelay("sync_drift")) {
         return;
       }
       if (
@@ -890,7 +1067,28 @@ export function HlsPlayerApp() {
         return;
       }
 
-      runtime.hls = new Hls(runtime.playbackProfile.config);
+      const {
+        liveSyncDurationCount: _liveSyncDurationCount,
+        liveMaxLatencyDurationCount: _liveMaxLatencyDurationCount,
+        ...baseHlsConfig
+      } = runtime.playbackProfile.config;
+      const presentationDelaySeconds =
+        params.presentationDelayMs != null && params.presentationDelayMs > 0
+          ? params.presentationDelayMs / 1000
+          : null;
+      const hlsConfig =
+        presentationDelaySeconds != null
+          ? {
+              ...baseHlsConfig,
+              liveSyncDuration: Math.max(0.5, presentationDelaySeconds),
+              liveMaxLatencyDuration: Math.max(
+                presentationDelaySeconds + 2,
+                presentationDelaySeconds * 1.5,
+              ),
+            }
+          : runtime.playbackProfile.config;
+
+      runtime.hls = new Hls(hlsConfig);
       runtime.hls.loadSource(runtime.activeStreamUrl);
       runtime.hls.attachMedia(video);
       startLatencyPolling();
@@ -903,9 +1101,7 @@ export function HlsPlayerApp() {
         runtime.currentStatus = "manifest_ready";
         emitStatus();
         syncTelemetry();
-        if (params.autoplay) {
-          void video.play().catch(() => {});
-        }
+        maybeStartPlayback("manifest_parsed");
       });
 
       runtime.hls.on(Hls.Events.FRAG_BUFFERED, () => {
@@ -922,6 +1118,8 @@ export function HlsPlayerApp() {
         syncTelemetry();
         if (runtime.playbackStarted) {
           markReady();
+        } else {
+          maybeStartPlayback("frag_buffered");
         }
       });
 
@@ -1079,7 +1277,7 @@ function readPlayerQuery(): ParsedPlayerQuery {
       debugEnabled: false,
       deliveryMode: null,
       presentationDelayMs: null,
-      syncToleranceMs: 1_500,
+      syncToleranceMs: DEFAULT_SYNC_TOLERANCE_MS,
     };
   }
   const params = new URLSearchParams(window.location.search);
@@ -1090,7 +1288,9 @@ function readPlayerQuery(): ParsedPlayerQuery {
     debugEnabled: params.get("debug") === "1",
     deliveryMode: params.get("deliveryMode"),
     presentationDelayMs: parsePositiveInt(params.get("presentationDelayMs")),
-    syncToleranceMs: parsePositiveInt(params.get("syncToleranceMs")) ?? 1_500,
+    syncToleranceMs:
+      parsePositiveInt(params.get("syncToleranceMs")) ??
+      DEFAULT_SYNC_TOLERANCE_MS,
   };
 }
 
