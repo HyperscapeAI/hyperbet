@@ -4102,8 +4102,25 @@ async function reportEvmResult(
   const selectedChains = evmKeeperChains.filter((chain) =>
     targetChains.includes(chain.chainKey),
   );
-  if (selectedChains.length === 0 || !data.seed || !data.replayHash) {
+  // Legitimate no-op: no EVM chains configured for this build. Return early
+  // without throwing so Solana-only deployments don't see spurious errors.
+  if (selectedChains.length === 0) {
     return [];
+  }
+
+  // Data-quality preconditions. These used to silently return [] and collapse
+  // into the caller's generic "failed to resolve required parity chains"
+  // freezeReason. Throw specific errors so freezeReason captures the real
+  // root cause.
+  if (!data.seed) {
+    throw new Error(
+      `reportEvmResult: duel ${data.duelId} missing seed; refusing to post an unverifiable EVM result`,
+    );
+  }
+  if (!data.replayHash) {
+    throw new Error(
+      `reportEvmResult: duel ${data.duelId} missing replayHash; refusing to post an unverifiable EVM result`,
+    );
   }
 
   const duelKey = normalizeHex32(data.duelKeyHex);
@@ -4111,7 +4128,9 @@ async function reportEvmResult(
   const winner =
     data.winnerId === data.agent1?.id ? 1 : data.winnerId === data.agent2?.id ? 2 : 0;
   if (winner === 0) {
-    return [];
+    throw new Error(
+      `reportEvmResult: duel ${data.duelId} supplied unknown winner id ${data.winnerId ?? "<null>"}; agent1=${data.agent1?.id ?? "<null>"} agent2=${data.agent2?.id ?? "<null>"}`,
+    );
   }
   const canonicalTimes = deriveCanonicalDuelTimes(data);
   const defaultBetOpenTs = BigInt(canonicalTimes.betOpenTs);
@@ -4941,17 +4960,33 @@ async function maybeFinalizeTrackedProposal(
 
 async function reportRoundResult(
   data: DuelLifecycleEvent,
-): Promise<SolanaResolutionOutcome | null> {
-  const trackedMatch = activeClobMatches.get(data.duelId);
+): Promise<SolanaResolutionOutcome> {
+  // Rehydrate the tracked match from the persisted parity snapshot if the
+  // in-memory map lost it across a restart. Mirrors the lockRound fix so the
+  // resolve path survives the same class of restart window.
+  let trackedMatch = activeClobMatches.get(data.duelId);
+  if (!trackedMatch && marketParitySnapshot) {
+    trackedMatch =
+      deriveTrackedMatchForParitySnapshot(marketParitySnapshot) ?? undefined;
+  }
   if (!trackedMatch) {
-    return null;
+    throw new Error(
+      `reportRoundResult: cannot resolve Solana tracked match for duel ${data.duelId}`,
+    );
   }
 
-  if (!data.seed || !data.replayHash) {
-    console.warn(
-      `[Keeper] duel:completed for ${data.duelId} is missing seed or replayHash; refusing to post an unverifiable oracle result.`,
+  // Data-quality preconditions. These used to return null and collapse into
+  // the caller's generic "failed to report Solana result" freezeReason. Throw
+  // specific errors so freezeReason captures the real root cause.
+  if (!data.seed) {
+    throw new Error(
+      `reportRoundResult: duel ${data.duelId} missing seed; refusing to post an unverifiable oracle result`,
     );
-    return null;
+  }
+  if (!data.replayHash) {
+    throw new Error(
+      `reportRoundResult: duel ${data.duelId} missing replayHash; refusing to post an unverifiable oracle result`,
+    );
   }
 
   const winnerId = data.winnerId;
@@ -4962,20 +4997,18 @@ async function reportRoundResult(
         ? "B"
         : null;
   if (!winnerSide) {
-    console.warn(
-      `[Keeper] duel:completed for ${data.duelId} supplied an unknown winner id; refusing to post oracle result.`,
+    throw new Error(
+      `reportRoundResult: duel ${data.duelId} supplied unknown winner id ${winnerId ?? "<null>"}; agent1=${data.agent1?.id ?? "<null>"} agent2=${data.agent2?.id ?? "<null>"}`,
     );
-    return null;
   }
 
   let replayHashHex: string;
   try {
     replayHashHex = normalizeHex32Raw(data.replayHash);
-  } catch {
-    console.warn(
-      `[Keeper] duel:completed for ${data.duelId} supplied an invalid replayHash; refusing to post oracle result.`,
+  } catch (err) {
+    throw new Error(
+      `reportRoundResult: duel ${data.duelId} supplied invalid replayHash ${data.replayHash}: ${err instanceof Error ? err.message : String(err)}`,
     );
-    return null;
   }
 
   const resolvedSeed = data.seed;
@@ -5408,9 +5441,6 @@ gameClient.onDuelEnd(async (data) => {
         throw new Error("solana parity chain is required for resolution but bot signer funding is below threshold");
       }
       const solanaOutcome = await reportRoundResult(data);
-      if (!solanaOutcome) {
-        throw new Error("failed to report Solana result");
-      }
       markMarketParityChainConfirmed({
         chainKey: "solana",
         transition:
