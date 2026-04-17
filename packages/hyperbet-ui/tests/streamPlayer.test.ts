@@ -3,6 +3,9 @@ import { describe, expect, it } from "bun:test";
 
 import {
   advanceViewerSyncState,
+  RECENT_PLAYER_SIGNAL_THRESHOLD,
+  RECENT_PLAYER_SIGNAL_WINDOW_MS,
+  recordRecentPlaybackSignal,
   resolveHlsPlaybackProfile,
   resolvePlayerDeliveryModeHint,
   shouldTreatPlaybackLatencyAsDrifted,
@@ -143,6 +146,21 @@ describe("resolvePlayerDeliveryModeHint", () => {
         "external_hls",
       ),
     ).toBe("external_hls/llhls");
+  });
+});
+
+describe("recordRecentPlaybackSignal", () => {
+  it("requires three playback faults inside the active window before escalating", () => {
+    const first = recordRecentPlaybackSignal([], 1_000);
+    const second = recordRecentPlaybackSignal(first, 10_000);
+    const third = recordRecentPlaybackSignal(second, 20_000);
+    const expired = recordRecentPlaybackSignal(third, 60_001);
+
+    expect(first.length).toBe(1);
+    expect(second.length).toBe(2);
+    expect(third.length).toBe(RECENT_PLAYER_SIGNAL_THRESHOLD);
+    expect(expired).toEqual([60_001]);
+    expect(RECENT_PLAYER_SIGNAL_WINDOW_MS).toBe(30_000);
   });
 });
 

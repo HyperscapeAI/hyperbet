@@ -4,6 +4,8 @@ import Hls from "hls.js";
 import {
   advanceViewerSyncState,
   isPlaybackLatencyWithinBudget,
+  RECENT_PLAYER_SIGNAL_THRESHOLD,
+  recordRecentPlaybackSignal,
   resolveHlsPlaybackProfile,
   resolvePlayerDeliveryModeHint,
   shouldTreatPlaybackLatencyAsDrifted,
@@ -62,6 +64,8 @@ type RuntimeState = {
   hls: Hls | null;
   activeStreamUrl: string | null;
   llhlsFallbackUsed: boolean;
+  llhlsFallbackFailureTimestamps: number[];
+  waitingSignalTimestamps: number[];
   lastHlsError: {
     type: string | null;
     details: string | null;
@@ -99,6 +103,8 @@ export function HlsPlayerApp() {
     hls: null,
     activeStreamUrl: params.streamUrl,
     llhlsFallbackUsed: false,
+    llhlsFallbackFailureTimestamps: [],
+    waitingSignalTimestamps: [],
     lastHlsError: null,
     lastProgressAt: Date.now(),
     lastCurrentTime: 0,
@@ -441,6 +447,16 @@ export function HlsPlayerApp() {
       if (!standardUrl || standardUrl === runtime.activeStreamUrl) {
         return false;
       }
+      runtime.llhlsFallbackFailureTimestamps = recordRecentPlaybackSignal(
+        runtime.llhlsFallbackFailureTimestamps,
+        Date.now(),
+      );
+      if (
+        runtime.llhlsFallbackFailureTimestamps.length <
+        RECENT_PLAYER_SIGNAL_THRESHOLD
+      ) {
+        return false;
+      }
 
       runtime.llhlsFallbackUsed = true;
       runtime.activeStreamUrl = standardUrl;
@@ -466,6 +482,7 @@ export function HlsPlayerApp() {
         runtime.lastCurrentTime = video.currentTime;
         runtime.lastProgressAt = Date.now();
         runtime.recentVideoErrorRecoveries = 0;
+        runtime.waitingSignalTimestamps = [];
         syncFirstFrameTelemetry();
         setTelemetry({
           firstFrameAt: runtime.telemetry.firstFrameAt,
@@ -710,6 +727,21 @@ export function HlsPlayerApp() {
           }
           runtime.stalledCount += 1;
           setTelemetry({ stallCount: runtime.stalledCount });
+          runtime.waitingSignalTimestamps = recordRecentPlaybackSignal(
+            runtime.waitingSignalTimestamps,
+            now,
+          );
+          const repeatedWaitingSignals =
+            runtime.waitingSignalTimestamps.length >=
+            RECENT_PLAYER_SIGNAL_THRESHOLD;
+          const sustainedIdleWithoutTail =
+            bufferedTailMs == null &&
+            runtime.playbackProfile != null &&
+            idleForMs > runtime.playbackProfile.waitingGraceMs * 2;
+          if (!repeatedWaitingSignals && !sustainedIdleWithoutTail) {
+            syncTelemetry();
+            return;
+          }
           markDegraded(
             "Your playback is catching up to the live edge.",
             "buffering",
@@ -807,6 +839,7 @@ export function HlsPlayerApp() {
       runtime.lastProgressAt = runtime.startupStartedAt;
       runtime.lastCurrentTime = 0;
       runtime.recentVideoErrorRecoveries = 0;
+      runtime.waitingSignalTimestamps = [];
       runtime.fatalErrorCount = 0;
       runtime.recoveryCooldownUntil = 0;
       runtime.consecutiveOutOfSyncPolls = 0;

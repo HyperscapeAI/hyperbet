@@ -105,6 +105,8 @@ const LOW_LATENCY_HLS_CONFIG = {
 } as const;
 
 export const LIVE_EDGE_HLS_CONFIG = LOW_LATENCY_HLS_CONFIG;
+export const RECENT_PLAYER_SIGNAL_WINDOW_MS = 30_000;
+export const RECENT_PLAYER_SIGNAL_THRESHOLD = 3;
 
 const STABLE_LIVE_HLS_CONFIG = {
   enableWorker: true,
@@ -469,6 +471,7 @@ export const StreamPlayer: React.FC<StreamPlayerProps> = ({
     let playbackStarted = false;
     let startupStartedAt = Date.now();
     let playerReady = false;
+    let waitingSignalTimestamps: number[] = [];
     const sourceUrl = streamUrl.trim();
     const playbackProfile = resolveHlsPlaybackProfile(sourceUrl, deliveryMode);
 
@@ -556,6 +559,7 @@ export const StreamPlayer: React.FC<StreamPlayerProps> = ({
         lastCurrentTime = video.currentTime;
         lastProgressAt = Date.now();
         recentVideoErrorRecoveries = 0;
+        waitingSignalTimestamps = [];
         playerReady = true;
         const firstFrameAt = Date.now();
         updateTelemetry((current) => ({
@@ -871,6 +875,19 @@ export const StreamPlayer: React.FC<StreamPlayerProps> = ({
           ...current,
           stallCount: current.stallCount + 1,
         }));
+        waitingSignalTimestamps = recordRecentPlaybackSignal(
+          waitingSignalTimestamps,
+          now,
+        );
+        const repeatedWaitingSignals =
+          waitingSignalTimestamps.length >= RECENT_PLAYER_SIGNAL_THRESHOLD;
+        const sustainedIdleWithoutTail =
+          bufferedTailMs == null &&
+          idleForMs > playbackProfile.waitingGraceMs * 2;
+        if (!repeatedWaitingSignals && !sustainedIdleWithoutTail) {
+          syncLatencyTelemetry();
+          return;
+        }
         markDegraded("Your playback is catching up to the live edge.");
       }, playbackProfile.waitingGraceMs);
     };
@@ -1487,6 +1504,17 @@ export function isPlaybackLatencyWithinBudget(params: {
   }
 
   return params.latencyMs <= params.driftThresholdMs;
+}
+
+export function recordRecentPlaybackSignal(
+  signalTimestamps: number[],
+  now: number,
+  windowMs = RECENT_PLAYER_SIGNAL_WINDOW_MS,
+): number[] {
+  return [
+    ...signalTimestamps.filter((timestamp) => now - timestamp <= windowMs),
+    now,
+  ];
 }
 
 export function shouldTreatPlaybackLatencyAsDrifted(params: {
