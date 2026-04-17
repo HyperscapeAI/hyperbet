@@ -4902,6 +4902,113 @@ async function maybeCatchUpMissedDuelEnd(): Promise<void> {
   writeBotHealthSnapshot();
 }
 
+// Catch up ALL locked-past-betClose duels whose authoritative result is now
+// available in Hyperscapes. The parity-snapshot healing above only addresses
+// the CURRENT bundle; this handles the backlog of older duels that were
+// locked but stranded (a keeper restart dropped duel_ended for them and the
+// snapshot has since been replaced by newer cycles). These duels show up in
+// `unresolvedOracleWarningMatches` — the same set the health snapshot's
+// "awaiting-result" recovery code references. For each such duel we pull the
+// persisted oracle proof and invoke the on-chain proposers directly, without
+// touching the live `marketParitySnapshot` (which is for a different duel).
+async function maybeCatchUpStrandedLockedDuels(): Promise<void> {
+  if (unresolvedOracleWarningMatches.size === 0) return;
+
+  // Snapshot the set so mutations during iteration don't skip entries.
+  const candidates = Array.from(unresolvedOracleWarningMatches);
+
+  for (const duelId of candidates) {
+    // Skip the current parity snapshot's duel — it's handled by
+    // maybeCatchUpMissedDuelEnd, which takes the parity-snapshot path.
+    if (marketParitySnapshot?.duelId === duelId) continue;
+
+    const trackedMatch = activeClobMatches.get(duelId);
+    if (!trackedMatch) {
+      // No local tracked match — catch-up would have no on-chain reference.
+      // Drop the warning entry so we stop flagging it.
+      unresolvedOracleWarningMatches.delete(duelId);
+      continue;
+    }
+
+    const result = await fetchHyperscapesDuelResult(duelId);
+    if (!result) {
+      // Row not in DB yet (or endpoint unreachable). Retry next tick.
+      continue;
+    }
+
+    const expectedDuelKey = normalizedBundleDuelKey(trackedMatch.duelKeyHex);
+    const resultDuelKey = normalizedBundleDuelKey(result.duelKeyHex);
+    if (expectedDuelKey && resultDuelKey && expectedDuelKey !== resultDuelKey) {
+      console.warn("[bot] result_catchup_stranded_duelkey_mismatch", {
+        duelId,
+        expectedDuelKey,
+        resultDuelKey,
+      });
+      continue;
+    }
+
+    const winnerIsAgent1 =
+      result.winnerId === "agent1" || result.winnerId.endsWith(":agent1");
+    const syntheticEvent: DuelLifecycleEvent = {
+      cycleId: result.cycleId,
+      duelId: result.duelId,
+      duelKeyHex: result.duelKeyHex,
+      betOpenTime: null,
+      betCloseTime: null,
+      fightStartTime: null,
+      duelEndTime: result.duelEndTime,
+      phase: "RESOLUTION",
+      winnerId: result.winnerId,
+      seed: result.seed,
+      replayHash: result.replayHash,
+      agent1: {
+        id: winnerIsAgent1 ? result.winnerId : result.loserId,
+        name: winnerIsAgent1 ? result.winnerName : result.loserName,
+      },
+      agent2: {
+        id: winnerIsAgent1 ? result.loserId : result.winnerId,
+        name: winnerIsAgent1 ? result.loserName : result.winnerName,
+      },
+    };
+
+    console.log("[bot] result_catchup_stranded_firing", {
+      duelId,
+      winnerId: result.winnerId,
+      finishedAt: result.finishedAt,
+      backlogSize: unresolvedOracleWarningMatches.size,
+    });
+
+    // Advance on-chain state directly. This does NOT touch the current
+    // marketParitySnapshot (which is for a different duel) — we're just
+    // closing out an orphaned market on-chain so the keeper can stop
+    // flagging it as awaiting authoritative result.
+    try {
+      if (requiredParityChains.includes("solana") && solanaKeeperWriteEnabled) {
+        if (!(await ensureKeeperChainReady())) continue;
+        if (!(await ensureBotSignerFunding())) continue;
+        await reportRoundResult(syntheticEvent);
+      }
+
+      const evmParityChains = requiredEvmParityChains();
+      if (evmParityChains.length > 0 && EVM_KEEPER_ENABLE_LIFECYCLE_WRITES) {
+        await reportEvmResult(syntheticEvent, evmParityChains);
+      }
+
+      unresolvedOracleWarningMatches.delete(duelId);
+      console.log("[bot] result_catchup_stranded_ok", {
+        duelId,
+        remainingBacklog: unresolvedOracleWarningMatches.size,
+      });
+    } catch (err) {
+      console.warn("[bot] result_catchup_stranded_failed", {
+        duelId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      // Leave the duelId in the warning set — retry next tick.
+    }
+  }
+}
+
 async function maybeFinalizePendingEvmParityResolution(): Promise<void> {
   const current = marketParitySnapshot;
   if (!current || isTerminalMarketParityState(current.state) || !current.duelKey) {
@@ -5767,6 +5874,10 @@ async function runMaintenance(): Promise<void> {
   // successfully caught-up bundle flips to RESOLUTION phase and the normal
   // resolve reconcilers can finish it in the same tick.
   await maybeCatchUpMissedDuelEnd();
+  // Drain the backlog of OLDER duels that are locked-but-unresolved on-chain
+  // (tracked in unresolvedOracleWarningMatches). The current-bundle catch-up
+  // above can only ever heal one duel per tick; this handles everything else.
+  await maybeCatchUpStrandedLockedDuels();
   await maybeFinalizePendingSolanaParityResolution();
   await maybeFinalizePendingEvmParityResolution();
 
