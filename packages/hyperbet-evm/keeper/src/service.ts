@@ -4785,7 +4785,32 @@ const server = Bun.serve({
         !syncStatus.enabled ||
         (betSyncConsumerRunning && betSyncLastError == null);
       const botHealthy = Boolean(botSubprocess);
-      const healthy = betSyncHealthy && botHealthy;
+
+      // Canonical stream health: previously /api/health only reflected
+      // bet-sync + bot subprocess liveness, which produces false-positive
+      // `ok: true` responses while the public stream is completely blocked
+      // (e.g. source_unready / provider_not_live / manifest missing).
+      // Route this endpoint through projectPublicStreamState so that when
+      // the canonical stream is not actually serving, /api/health reports
+      // unhealthy and the response body exposes which layer failed.
+      const publicStreamState = currentPublicStreamState(
+        effectiveKeeperBotHealthSnapshot(),
+      );
+      const publicReadinessReady =
+        publicStreamState.publicReadiness?.ready === true;
+      const canonicalAuthorityReady =
+        publicStreamState.canonicalAuthority?.decision === "ready";
+      const sourceRuntimeReady =
+        publicStreamState.sourceRuntime?.ready === true;
+      const rendererHealthReady =
+        publicStreamState.rendererHealth?.ready === true;
+      const streamHealthy =
+        publicReadinessReady &&
+        canonicalAuthorityReady &&
+        sourceRuntimeReady &&
+        rendererHealthReady;
+
+      const healthy = betSyncHealthy && botHealthy && streamHealthy;
       return jsonResponse(
         req,
         {
@@ -4801,6 +4826,23 @@ const server = Bun.serve({
           bot: {
             running: botHealthy,
             exitCode: botExitCode,
+          },
+          stream: {
+            healthy: streamHealthy,
+            publicReadinessReady,
+            publicReadinessReason:
+              publicStreamState.publicReadiness?.reason ?? null,
+            canonicalAuthorityReady,
+            canonicalAuthorityDecision:
+              publicStreamState.canonicalAuthority?.decision ?? null,
+            canonicalAuthorityReason:
+              publicStreamState.canonicalAuthority?.reason ?? null,
+            sourceRuntimeReady,
+            sourceDegradedReason:
+              publicStreamState.sourceRuntime?.degradedReason ?? null,
+            rendererHealthReady,
+            rendererDegradedReason:
+              publicStreamState.rendererHealth?.degradedReason ?? null,
           },
           sseClients: connectedSseCount(),
         },
