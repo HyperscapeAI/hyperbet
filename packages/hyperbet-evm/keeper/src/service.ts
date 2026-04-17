@@ -112,6 +112,7 @@ import {
   normalizePublicPerpsChainKeyParam,
   type PublicPerpsChainKey,
 } from "./publicPerps";
+import { streamCycleAdvancedBeyondPinnedParity } from "./predictionMarketsSurface";
 import { sourceStatePhaseAllowsUnmaskedDuelIdentity } from "./streamPhaseUnmask";
 import {
   isLegacyDerivedPointsWalletKey,
@@ -2478,6 +2479,20 @@ function buildLivePredictionMarketsSurface(
     previousLive?.duel.duelKey,
     previousLive?.duel.duelId,
   );
+  if (
+    streamCycleAdvancedBeyondPinnedParity({
+      streamCycleId: publicStreamState.cycle?.cycleId,
+      previousLiveDuelId: previousLive?.duel.duelId,
+      marketParityDuelId: publicMarketParity.duelId,
+    })
+  ) {
+    return {
+      duel: streamDuel,
+      markets: [],
+      updatedAt: Date.now(),
+      marketParity: publicMarketParity,
+    };
+  }
   const publicDuel: PredictionMarketsSurface["duel"] = streamDuelMatchesParity
     ? streamDuel
     : previousLiveMatchesParity && previousLive
