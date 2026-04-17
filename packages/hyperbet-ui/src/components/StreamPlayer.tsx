@@ -1573,15 +1573,21 @@ export function shouldTreatPlaybackLatencyAsDrifted(params: {
   playbackStarted: boolean;
   ready: boolean;
 }): boolean {
+  const syncDeltaMs = resolvePlaybackSyncDeltaMs(
+    params.latencyMs,
+    params.presentationDelayMs,
+  );
   return (
     params.ready &&
     params.playbackStarted &&
-    !isPlaybackLatencyWithinBudget({
-      driftThresholdMs: params.driftThresholdMs,
-      syncDriftThresholdMs: params.syncDriftThresholdMs,
-      latencyMs: params.latencyMs,
-      presentationDelayMs: params.presentationDelayMs,
-    })
+    (syncDeltaMs != null
+      ? syncDeltaMs > params.syncDriftThresholdMs
+      : !isPlaybackLatencyWithinBudget({
+          driftThresholdMs: params.driftThresholdMs,
+          syncDriftThresholdMs: params.syncDriftThresholdMs,
+          latencyMs: params.latencyMs,
+          presentationDelayMs: params.presentationDelayMs,
+        }))
   );
 }
 
@@ -1650,8 +1656,7 @@ export function advanceViewerSyncState(params: {
   }
 
   const overTolerance =
-    syncDeltaMs != null &&
-    Math.abs(syncDeltaMs) > Math.max(0, params.syncToleranceMs);
+    syncDeltaMs != null && syncDeltaMs > Math.max(0, params.syncToleranceMs);
 
   if (overTolerance) {
     const consecutiveOutOfSyncPolls = params.consecutiveOutOfSyncPolls + 1;

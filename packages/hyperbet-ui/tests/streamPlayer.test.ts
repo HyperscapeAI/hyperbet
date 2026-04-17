@@ -99,6 +99,19 @@ describe("shouldTreatPlaybackLatencyAsDrifted", () => {
       }),
     ).toBe(true);
   });
+
+  it("does not treat ahead-of-target playback as drift that needs recovery", () => {
+    expect(
+      shouldTreatPlaybackLatencyAsDrifted({
+        driftThresholdMs: 12_000,
+        syncDriftThresholdMs: 2_500,
+        latencyMs: 1_000,
+        presentationDelayMs: 4_000,
+        playbackStarted: true,
+        ready: true,
+      }),
+    ).toBe(false);
+  });
 });
 
 describe("resolveHlsPlaybackProfile", () => {
@@ -249,6 +262,23 @@ describe("advanceViewerSyncState", () => {
     });
 
     expect(next.syncDeltaMs).toBeNull();
+    expect(next.syncState).toBe("aligned");
+  });
+
+  it("keeps ahead-of-target playback aligned instead of flagging sync drift", () => {
+    const next = advanceViewerSyncState({
+      previousState: "aligned",
+      consecutiveAlignedPolls: 0,
+      consecutiveOutOfSyncPolls: 0,
+      liveEdgeLatencyMs: 1_000,
+      playbackStarted: true,
+      presentationDelayMs: 4_000,
+      ready: true,
+      status: "playing",
+      syncToleranceMs: 1_500,
+    });
+
+    expect(next.syncDeltaMs).toBe(-3_000);
     expect(next.syncState).toBe("aligned");
   });
 });
