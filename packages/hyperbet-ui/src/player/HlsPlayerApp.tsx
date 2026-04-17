@@ -5,6 +5,7 @@ import {
   advanceViewerSyncState,
   DEFAULT_SYNC_TOLERANCE_MS,
   isPlaybackLatencyWithinBudget,
+  preferHighestViableHlsLevel,
   RECENT_PLAYER_SIGNAL_THRESHOLD,
   recordRecentPlaybackSignal,
   resolveHlsPlaybackProfile,
@@ -1094,6 +1095,9 @@ export function HlsPlayerApp() {
       startLatencyPolling();
 
       runtime.hls.on(Hls.Events.MANIFEST_PARSED, () => {
+        if (runtime.hls) {
+          preferHighestViableHlsLevel(runtime.hls, video);
+        }
         updateLoaderPhase("initializing", {
           overlayMessage: null,
           visible: true,

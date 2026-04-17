@@ -89,6 +89,8 @@ type HlsPlaybackProfile = {
 const LOW_LATENCY_HLS_CONFIG = {
   enableWorker: true,
   lowLatencyMode: true,
+  capLevelToPlayerSize: true,
+  testBandwidth: false,
   liveSyncDurationCount: 3,
   liveMaxLatencyDurationCount: 6,
   liveBackBufferLength: 10,
@@ -109,9 +111,53 @@ export const RECENT_PLAYER_SIGNAL_WINDOW_MS = 30_000;
 export const RECENT_PLAYER_SIGNAL_THRESHOLD = 3;
 export const DEFAULT_SYNC_TOLERANCE_MS = 2_500;
 
+export function preferHighestViableHlsLevel(
+  hls: Hls,
+  video: HTMLVideoElement | null,
+): void {
+  const levels = hls.levels;
+  if (!Array.isArray(levels) || levels.length === 0) {
+    return;
+  }
+
+  hls.capLevelToPlayerSize = true;
+
+  const devicePixelRatio =
+    typeof window !== "undefined" && Number.isFinite(window.devicePixelRatio)
+      ? Math.max(1, window.devicePixelRatio)
+      : 1;
+  const targetWidth =
+    Math.max(video?.clientWidth ?? 0, video?.videoWidth ?? 0, 1) *
+    devicePixelRatio;
+  const targetHeight =
+    Math.max(video?.clientHeight ?? 0, video?.videoHeight ?? 0, 1) *
+    devicePixelRatio;
+  const maxLevel = levels.length - 1;
+  let preferredLevel = maxLevel;
+
+  for (let index = maxLevel; index >= 0; index -= 1) {
+    const level = levels[index];
+    const levelWidth = level?.width ?? 0;
+    const levelHeight = level?.height ?? 0;
+    if (
+      (levelWidth > 0 && levelWidth <= targetWidth * 1.25) ||
+      (levelHeight > 0 && levelHeight <= targetHeight * 1.25)
+    ) {
+      preferredLevel = index;
+      break;
+    }
+  }
+
+  hls.startLevel = preferredLevel;
+  hls.nextLevel = preferredLevel;
+  hls.loadLevel = preferredLevel;
+}
+
 const STABLE_LIVE_HLS_CONFIG = {
   enableWorker: true,
   lowLatencyMode: false,
+  capLevelToPlayerSize: true,
+  testBandwidth: false,
   liveSyncDurationCount: 10,
   liveMaxLatencyDurationCount: 16,
   liveBackBufferLength: 45,
@@ -717,6 +763,7 @@ export const StreamPlayer: React.FC<StreamPlayerProps> = ({
       startLatencyPolling();
 
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
+        preferHighestViableHlsLevel(hls!, video);
         console.log("[StreamPlayer] Manifest parsed, starting playback");
         markDegraded(null);
         syncLatencyTelemetry();
