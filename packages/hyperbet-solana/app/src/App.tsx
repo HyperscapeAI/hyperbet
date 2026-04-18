@@ -761,7 +761,7 @@ export function App() {
   const { state: streamingState } = useStreamingState();
   const {
     session: canonicalStreamSession,
-    playback: canonicalPlayback,
+    playback: _canonicalPlayback,
     rendererHealth: canonicalRendererHealth,
     deliveryHealth: canonicalDeliveryHealth,
     publicReadiness: canonicalPublicReadiness,
@@ -802,7 +802,7 @@ export function App() {
   const streamDeliveryMode = resolveCanonicalPlaybackDeliveryMode(
     canonicalStreamSession,
   );
-  const [streamPlayerStatus, setStreamPlayerStatus] =
+  const [_streamPlayerStatus, setStreamPlayerStatus] =
     useState<StreamPlayerStatus | null>(null);
   const streamPlaceholderMessage = useMemo(() => {
     if (!canonicalStreamSession) {
