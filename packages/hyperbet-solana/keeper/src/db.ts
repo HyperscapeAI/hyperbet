@@ -94,6 +94,15 @@ export type DbPerpsMarketRecord = {
   updatedAt: number;
 };
 
+export type DbBetSyncCheckpoint = {
+  sourceEpoch: number;
+  lastSeenSeq: number;
+  lastAppliedSeq: number;
+  replayMode: string | null;
+  degradedReason: string | null;
+  updatedAt: number;
+};
+
 // ── DB singleton ──────────────────────────────────────────────────────────────
 
 const db = new Database(DB_PATH, { create: true });
@@ -388,6 +397,16 @@ db.run(`CREATE TABLE IF NOT EXISTS perps_markets (
 db.run(`CREATE INDEX IF NOT EXISTS idx_perps_markets_status_seen
   ON perps_markets (status, last_seen_at DESC)`);
 
+db.run(`CREATE TABLE IF NOT EXISTS bet_sync_checkpoint (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  source_epoch INTEGER NOT NULL DEFAULT 0,
+  last_seen_seq INTEGER NOT NULL DEFAULT 0,
+  last_applied_seq INTEGER NOT NULL DEFAULT 0,
+  replay_mode TEXT,
+  degraded_reason TEXT,
+  updated_at INTEGER NOT NULL DEFAULT 0
+)`);
+
 // ── Prepared statements ───────────────────────────────────────────────────────
 
 const insertBet = db.prepare(`INSERT OR IGNORE INTO bets
@@ -491,6 +510,17 @@ const upsertPerpsMarket = db.prepare(`INSERT INTO perps_markets
     deprecated_at = excluded.deprecated_at,
     updated_at = excluded.updated_at`);
 
+const upsertBetSyncCheckpoint = db.prepare(`INSERT INTO bet_sync_checkpoint
+  (id, source_epoch, last_seen_seq, last_applied_seq, replay_mode, degraded_reason, updated_at)
+  VALUES (1, $sourceEpoch, $lastSeenSeq, $lastAppliedSeq, $replayMode, $degradedReason, $updatedAt)
+  ON CONFLICT(id) DO UPDATE SET
+    source_epoch = excluded.source_epoch,
+    last_seen_seq = excluded.last_seen_seq,
+    last_applied_seq = excluded.last_applied_seq,
+    replay_mode = excluded.replay_mode,
+    degraded_reason = excluded.degraded_reason,
+    updated_at = excluded.updated_at`);
+
 // ── Load (hydrate in-memory state from DB at startup) ─────────────────────────
 
 export type HydratedState = {
@@ -507,6 +537,7 @@ export type HydratedState = {
   invitedWalletsByWallet: Map<string, Set<string>>;
   referralFeeShareGoldByWallet: Map<string, number>;
   treasuryFeesFromReferralsByWallet: Map<string, number>;
+  betSyncCheckpoint: DbBetSyncCheckpoint | null;
 };
 
 export function loadAll(betLimit = 5000): HydratedState {
@@ -655,6 +686,30 @@ export function loadAll(betLimit = 5000): HydratedState {
     );
   }
 
+  const checkpointRow = db
+    .prepare(
+      `SELECT source_epoch, last_seen_seq, last_applied_seq, replay_mode, degraded_reason, updated_at
+         FROM bet_sync_checkpoint
+        WHERE id = 1`,
+    )
+    .get() as Record<string, unknown> | null;
+  const betSyncCheckpoint = checkpointRow
+    ? {
+        sourceEpoch: Number(checkpointRow.source_epoch ?? 0),
+        lastSeenSeq: Number(checkpointRow.last_seen_seq ?? 0),
+        lastAppliedSeq: Number(checkpointRow.last_applied_seq ?? 0),
+        replayMode:
+          checkpointRow.replay_mode == null
+            ? null
+            : String(checkpointRow.replay_mode),
+        degradedReason:
+          checkpointRow.degraded_reason == null
+            ? null
+            : String(checkpointRow.degraded_reason),
+        updatedAt: Number(checkpointRow.updated_at ?? 0),
+      }
+    : null;
+
   console.log(
     `[db] loaded ${bets.length} bets, ${walletDisplay.size} wallets, ${pointsByWallet.size} point records from ${DB_PATH}`,
   );
@@ -673,6 +728,7 @@ export function loadAll(betLimit = 5000): HydratedState {
     invitedWalletsByWallet,
     referralFeeShareGoldByWallet,
     treasuryFeesFromReferralsByWallet,
+    betSyncCheckpoint,
   };
 }
 
@@ -792,6 +848,17 @@ export function saveReferralFees(
     $wallet: wallet,
     $feeShareGold: feeShareGold,
     $treasuryFees: treasuryFees,
+  });
+}
+
+export function saveBetSyncCheckpoint(checkpoint: DbBetSyncCheckpoint): void {
+  upsertBetSyncCheckpoint.run({
+    $sourceEpoch: checkpoint.sourceEpoch,
+    $lastSeenSeq: checkpoint.lastSeenSeq,
+    $lastAppliedSeq: checkpoint.lastAppliedSeq,
+    $replayMode: checkpoint.replayMode,
+    $degradedReason: checkpoint.degradedReason,
+    $updatedAt: checkpoint.updatedAt,
   });
 }
 

@@ -1,7 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo } from "react";
 import { Buffer } from "buffer";
 import { SolanaProvider } from "@solana/react-hooks";
-import { watchWalletStandardConnectors } from "@solana/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 import { AppWalletProvider } from "./lib/appWallet";
@@ -19,46 +18,13 @@ if (!(globalThis as { Buffer?: typeof Buffer }).Buffer) {
 const queryClient = new QueryClient();
 
 export default function AppRoot() {
-  const [walletScanVersion, setWalletScanVersion] = useState(0);
   const headlessWallets = useMemo(
     () => createHeadlessWalletConnectorsFromEnv(),
     [],
   );
-  const frameworkClient = useMemo(
-    () => createFrameworkClient(),
-    [walletScanVersion],
-  );
-  const knownConnectorIdsRef = useRef<string>("");
+  const frameworkClient = useMemo(() => createFrameworkClient(), []);
   const autoConnectHeadlessConnectorId =
     headlessWallets.find((entry) => entry.autoConnect)?.connector.id ?? null;
-
-  useEffect(() => {
-    const stopWatchingWallets = watchWalletStandardConnectors((connectors) => {
-      const nextConnectorIds = connectors
-        .map((connector) => connector.id)
-        .sort()
-        .join("|");
-      if (nextConnectorIds === knownConnectorIdsRef.current) return;
-      knownConnectorIdsRef.current = nextConnectorIds;
-
-      const walletStatus = frameworkClient.store.getState().wallet.status;
-      if (walletStatus === "disconnected") {
-        setWalletScanVersion((value) => value + 1);
-      }
-    });
-
-    const delayedRescanId = window.setTimeout(() => {
-      const walletStatus = frameworkClient.store.getState().wallet.status;
-      if (walletStatus === "disconnected") {
-        setWalletScanVersion((value) => value + 1);
-      }
-    }, 500);
-
-    return () => {
-      stopWatchingWallets();
-      window.clearTimeout(delayedRescanId);
-    };
-  }, [frameworkClient]);
 
   return (
     <SolanaProvider

@@ -9,6 +9,7 @@ import {
 } from "../typed-contracts";
 
 const MARKET_KIND_DUEL_WINNER = 0;
+const DUEL_STATUS_SCHEDULED = 1;
 const DUEL_STATUS_BETTING_OPEN = 2;
 const DUEL_STATUS_LOCKED = 3;
 const SIDE_A = 1;
@@ -160,6 +161,101 @@ describe("GoldClob", function () {
     await expect(
       clob.connect(operator).createMarketForDuel(duel, MARKET_KIND_DUEL_WINNER),
     ).to.be.revertedWithCustomError(clob, "MarketExists");
+  });
+
+  it("allows scheduled prestage but keeps the market locked until the oracle opens it", async function () {
+    const { clob, oracle, operator, reporter } = await deployFixture();
+    const duel = duelKey("duel-scheduled");
+    const now = BigInt((await ethers.provider.getBlock("latest"))!.timestamp);
+
+    await oracle
+      .connect(reporter)
+      .upsertDuel(
+        duel,
+        hashParticipant("agent-a"),
+        hashParticipant("agent-b"),
+        now + 30n,
+        now + 90n,
+        now + 150n,
+        "duel-scheduled",
+        DUEL_STATUS_SCHEDULED,
+      );
+
+    await clob
+      .connect(operator)
+      .createMarketForDuel(duel, MARKET_KIND_DUEL_WINNER);
+
+    let market = await clob.getMarket(duel, MARKET_KIND_DUEL_WINNER);
+    expect(market.exists).to.equal(true);
+    expect(market.status).to.equal(2n);
+
+    await oracle
+      .connect(reporter)
+      .upsertDuel(
+        duel,
+        hashParticipant("agent-a"),
+        hashParticipant("agent-b"),
+        now + 30n,
+        now + 90n,
+        now + 150n,
+        "duel-open",
+        DUEL_STATUS_BETTING_OPEN,
+      );
+    await clob.connect(operator).syncMarketFromOracle(duel, MARKET_KIND_DUEL_WINNER);
+
+    market = await clob.getMarket(duel, MARKET_KIND_DUEL_WINNER);
+    expect(market.status).to.equal(1n);
+  });
+
+  it("freezes the scheduled duel manifest after prepare", async function () {
+    const { oracle, reporter } = await deployFixture();
+    const duel = duelKey("duel-scheduled-immutable");
+    const participantA = hashParticipant("agent-a");
+    const participantB = hashParticipant("agent-b");
+    const now = BigInt((await ethers.provider.getBlock("latest"))!.timestamp);
+
+    await oracle
+      .connect(reporter)
+      .upsertDuel(
+        duel,
+        participantA,
+        participantB,
+        now + 30n,
+        now + 90n,
+        now + 150n,
+        "duel-scheduled",
+        DUEL_STATUS_SCHEDULED,
+      );
+
+    await expect(
+      oracle
+        .connect(reporter)
+        .upsertDuel(
+          duel,
+          participantA,
+          participantB,
+          now + 31n,
+          now + 90n,
+          now + 150n,
+          "duel-scheduled-shifted",
+          DUEL_STATUS_SCHEDULED,
+        ),
+    ).to.be.revertedWithCustomError(oracle, "TimingImmutable");
+
+    await expect(
+      oracle
+        .connect(reporter)
+        .upsertDuel(
+          duel,
+          hashParticipant("agent-a-mutated"),
+          participantB,
+          now + 30n,
+          now + 90n,
+          now + 150n,
+          "duel-scheduled-mutated",
+          DUEL_STATUS_SCHEDULED,
+        ),
+    ).to.be.revertedWithCustomError(oracle, "ParticipantHashImmutable");
   });
 
   it("lets the emergency pauser halt new market creation", async function () {

@@ -9,11 +9,13 @@ import {
   Transaction,
 } from "@solana/web3.js";
 import {
+  type BettingChainKey,
   BETTING_EVM_CHAIN_ORDER,
   normalizeSolanaCluster,
   parseBettingEvmChainList,
   resolveBettingEvmRuntimeEnv,
   type BettingEvmChain,
+  type PredictionMarketLifecycleStatus,
   type PredictionMarketWinner,
 } from "@hyperbet/chain-registry";
 import {
@@ -21,7 +23,10 @@ import {
   DEFAULT_MARKET_MAKER_CONFIG,
   evaluateQuoteDecision,
   type KeeperBotHealthSnapshot,
+  type KeeperMarketParitySnapshot,
   type KeeperMarketHealthRecord,
+  type KeeperParityBundleState,
+  type KeeperParityChainReceipt,
   type KeeperRecoveryState,
   type MarketSnapshot,
   type QuotePlan,
@@ -54,13 +59,35 @@ const EVM_KEEPER_DEFER_FINALIZE = process.env.EVM_KEEPER_DEFER_FINALIZE === "tru
 const EVM_KEEPER_ENABLE_LIFECYCLE_WRITES =
   process.env.EVM_KEEPER_ENABLE_LIFECYCLE_WRITES !== "false";
 const EVM_DUEL_STATUS_NULL = 0;
+const EVM_DUEL_STATUS_SCHEDULED = 1;
 const EVM_DUEL_STATUS_BETTING_OPEN = 2;
 const EVM_DUEL_STATUS_LOCKED = 3;
 const EVM_DUEL_STATUS_PROPOSED = 4;
 const EVM_DUEL_STATUS_CHALLENGED = 5;
 const EVM_DUEL_STATUS_RESOLVED = 6;
 const EVM_DUEL_STATUS_CANCELLED = 7;
+const EVM_MARKET_STATUS_NULL = 0;
+const EVM_MARKET_STATUS_OPEN = 1;
+const EVM_MARKET_STATUS_LOCKED = 2;
+const EVM_MARKET_STATUS_RESOLVED = 3;
+const EVM_MARKET_STATUS_CANCELLED = 4;
 const DEFAULT_DUEL_START_DELAY_MS = 60_000;
+const DEFAULT_SOLANA_ORACLE_DISPUTE_WINDOW_SECS = 3600;
+const configuredSolanaOracleDisputeWindowSecs = Number(
+  process.env.SOLANA_ORACLE_DISPUTE_WINDOW_SECS ??
+    DEFAULT_SOLANA_ORACLE_DISPUTE_WINDOW_SECS,
+);
+const SOLANA_ORACLE_DISPUTE_WINDOW_SECS = Number.isFinite(
+  configuredSolanaOracleDisputeWindowSecs,
+)
+  ? Math.max(60, Math.floor(configuredSolanaOracleDisputeWindowSecs))
+  : DEFAULT_SOLANA_ORACLE_DISPUTE_WINDOW_SECS;
+const EVM_DISPUTE_WINDOW_ACTIVE_SELECTOR = "0xe52e798f";
+const DEFAULT_REQUIRED_PARITY_CHAINS: readonly BettingChainKey[] = [
+  "solana",
+  "bsc",
+];
+const DEFAULT_REMOTE_EVM_PARITY_CONFIRMATIONS = 5;
 
 function asNum(value: unknown, fallback = 0): number {
   if (typeof value === "number") return value;
@@ -71,6 +98,20 @@ function asNum(value: unknown, fallback = 0): number {
   }
   return fallback;
 }
+
+function parsePositiveInteger(value: string | undefined): number | null {
+  if (!value) return null;
+  const parsed = Number.parseInt(value.trim(), 10);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
+const configuredEvmParityConfirmations = parsePositiveInteger(
+  process.env.EVM_PARITY_CONFIRMATIONS,
+);
+const evmTxReceiptTimeoutMs = Math.max(
+  30_000,
+  Number(process.env.EVM_TX_RECEIPT_TIMEOUT_MS || 120_000),
+);
 
 function asBigInt(value: unknown, fallback = 0n): bigint {
   if (typeof value === "bigint") return value;
@@ -83,6 +124,72 @@ function asBigInt(value: unknown, fallback = 0n): bigint {
     }
   }
   return fallback;
+}
+
+function isSolanaDisputeWindowActiveError(error: unknown): boolean {
+  const message = (error as Error)?.message ?? "";
+  return /DisputeWindowActive/i.test(message);
+}
+
+async function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  label: string,
+): Promise<T> {
+  let timeout: ReturnType<typeof setTimeout> | null = null;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timeout = setTimeout(() => {
+          reject(new Error(`${label} timed out after ${timeoutMs}ms`));
+        }, timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeout) {
+      clearTimeout(timeout);
+    }
+  }
+}
+
+function asChainKey(value: string): BettingChainKey | null {
+  switch (value.trim().toLowerCase()) {
+    case "solana":
+    case "bsc":
+    case "base":
+    case "avax":
+      return value.trim().toLowerCase() as BettingChainKey;
+    default:
+      return null;
+  }
+}
+
+function parseRequiredParityChains(value: string | undefined): BettingChainKey[] {
+  const requested = (value ?? "")
+    .split(",")
+    .map((entry) => asChainKey(entry))
+    .filter((entry): entry is BettingChainKey => entry != null);
+  const seed =
+    requested.length > 0
+      ? requested
+      : [...DEFAULT_REQUIRED_PARITY_CHAINS];
+  return Array.from(new Set(seed));
+}
+
+function lifecycleStatusFromEvmWriteStatus(
+  status: 1 | 2 | 3,
+): PredictionMarketLifecycleStatus {
+  switch (status) {
+    case 1:
+      return "PENDING";
+    case 2:
+      return "OPEN";
+    case 3:
+      return "LOCKED";
+    default:
+      return "UNKNOWN";
+  }
 }
 
 function clampPerpsOracleSpotIndex(
@@ -116,6 +223,24 @@ function clampPerpsOracleSpotIndex(
 function hashParticipant(agent: { id?: string; name?: string } | null): number[] {
   const id = agent?.id ?? agent?.name ?? "unknown";
   return Array.from(createHash("sha256").update(id).digest());
+}
+
+function toByteArray32(value: unknown): number[] | null {
+  if (Array.isArray(value) && value.length === 32) {
+    const normalized = value.map((entry) => Number(entry));
+    return normalized.every(
+      (entry) => Number.isInteger(entry) && entry >= 0 && entry <= 255,
+    )
+      ? normalized
+      : null;
+  }
+  if (value instanceof Uint8Array && value.length === 32) {
+    return Array.from(value);
+  }
+  if (Buffer.isBuffer(value) && value.length === 32) {
+    return Array.from(value);
+  }
+  return null;
 }
 
 type WinnerSide = "A" | "B";
@@ -198,6 +323,13 @@ const DUEL_OUTCOME_ORACLE_ABI = [
       { type: "string" },
       { type: "uint8" },
     ],
+    outputs: [],
+  },
+  {
+    type: "function",
+    name: "cancelDuel",
+    stateMutability: "nonpayable",
+    inputs: [{ type: "bytes32" }, { type: "string" }],
     outputs: [],
   },
   {
@@ -355,12 +487,22 @@ function isRpcConnectivityError(error: unknown): boolean {
     message.includes("unable to connect") ||
     message.includes("fetch failed") ||
     message.includes("failed to fetch") ||
+    message.includes("aborterror") ||
+    message.includes("aborted") ||
     message.includes("econnrefused") ||
     message.includes("connection refused") ||
     message.includes("connection reset") ||
     message.includes("network request failed") ||
     message.includes("timed out") ||
     message.includes("socket hang up")
+  );
+}
+
+function isEvmDisputeWindowActiveError(error: unknown): boolean {
+  const message = (error as Error)?.message ?? "";
+  return (
+    message.includes("DisputeWindowActive") ||
+    message.includes(EVM_DISPUTE_WINDOW_ACTIVE_SELECTOR)
   );
 }
 
@@ -419,6 +561,11 @@ const args = await yargs(hideBin(process.argv))
     type: "number",
     default: Number(process.env.AUTO_SEED_DELAY_SECONDS || 10),
     describe: "Auto-seed delay for new markets",
+  })
+  .option("result-post-delay-seconds", {
+    type: "number",
+    default: Number(process.env.RESULT_POST_DELAY_SECONDS || 0),
+    describe: "Delay after an authoritative stream result before posting oracle resolution",
   })
   .option("seed-sol", {
     type: "number",
@@ -504,13 +651,17 @@ import { privateKeyToAccount } from "viem/accounts";
 import {
   loadAgentRatings,
   loadPerpsMarkets,
+  saveChainScopedPerpsMarket,
+  saveChainScopedPerpsOracleSnapshot,
   saveAgentRating,
   saveAgentRatings,
   savePerpsMarket,
   savePerpsOracleSnapshot,
+  type EvmPerpsChainKey,
   type DbPerpsMarketRecord,
   type DbPerpsMarketStatus,
 } from "./db";
+import { resolvePublicEvmPerpsChains } from "./publicPerps";
 
 const BPF_LOADER_UPGRADEABLE_PROGRAM_ID = new PublicKey(
   "BPFLoaderUpgradeab1e11111111111111111111111",
@@ -549,8 +700,48 @@ const botKeypair = readKeypair(
     process.env.MARKET_MAKER_KEYPAIR ||
     requireEnv("ORACLE_AUTHORITY_KEYPAIR"),
 );
+function readOptionalKeypair(name: string): Keypair | null {
+  const value = process.env[name]?.trim();
+  return value ? readKeypair(value) : null;
+}
+
+const hasExplicitOracleConfigAuthority = Boolean(
+  process.env.ORACLE_CONFIG_AUTHORITY_KEYPAIR?.trim(),
+);
+const hasExplicitClobConfigAuthority = Boolean(
+  process.env.CLOB_CONFIG_AUTHORITY_KEYPAIR?.trim() ||
+    process.env.CLOB_AUTHORITY_KEYPAIR?.trim(),
+);
+const oracleConfigAuthorityKeypair =
+  readOptionalKeypair("ORACLE_CONFIG_AUTHORITY_KEYPAIR") ||
+  readOptionalKeypair("ORACLE_AUTHORITY_KEYPAIR") ||
+  botKeypair;
+const oracleReporterKeypair =
+  readOptionalKeypair("ORACLE_REPORTER_KEYPAIR") ||
+  readOptionalKeypair("ORACLE_AUTHORITY_KEYPAIR") ||
+  botKeypair;
+const oracleFinalizerKeypair =
+  readOptionalKeypair("ORACLE_FINALIZER_KEYPAIR") ||
+  readOptionalKeypair("ORACLE_AUTHORITY_KEYPAIR") ||
+  oracleReporterKeypair;
+const oracleChallengerKeypair =
+  readOptionalKeypair("ORACLE_CHALLENGER_KEYPAIR") ||
+  readOptionalKeypair("ORACLE_AUTHORITY_KEYPAIR") ||
+  oracleReporterKeypair;
+const clobConfigAuthorityKeypair =
+  readOptionalKeypair("CLOB_CONFIG_AUTHORITY_KEYPAIR") ||
+  readOptionalKeypair("CLOB_AUTHORITY_KEYPAIR") ||
+  readOptionalKeypair("ORACLE_CONFIG_AUTHORITY_KEYPAIR") ||
+  readOptionalKeypair("ORACLE_AUTHORITY_KEYPAIR") ||
+  botKeypair;
+const clobMarketOperatorKeypair =
+  readOptionalKeypair("CLOB_MARKET_OPERATOR_KEYPAIR") ||
+  readOptionalKeypair("MARKET_OPERATOR_KEYPAIR") ||
+  readOptionalKeypair("ORACLE_REPORTER_KEYPAIR") ||
+  readOptionalKeypair("ORACLE_AUTHORITY_KEYPAIR") ||
+  botKeypair;
 const { connection, provider, fightOracle, goldClobMarket, goldPerpsMarket } =
-  createPrograms(botKeypair);
+  createPrograms(botKeypair, { usePollingSendAndConfirm: true });
 const fightProgram = fightOracle as Program<FightOracle>;
 const marketProgram = goldClobMarket as Program<GoldClobMarket>;
 const perpsProgram = goldPerpsMarket as Program<GoldPerpsMarket>;
@@ -686,6 +877,11 @@ const PERPS_MARKET_MAKER_RECYCLE_MIN_SOL = Math.max(
   0,
   Number(process.env.PERPS_MARKET_MAKER_RECYCLE_MIN_SOL || 0.25),
 );
+const PERPS_MAINTENANCE_TIMEOUT_MS = Math.max(
+  5_000,
+  Number(process.env.PERPS_MAINTENANCE_TIMEOUT_MS || 30_000),
+);
+let perpsMaintenancePromise: Promise<void> | null = null;
 
 if (PERPS_ORACLE_ENABLED && !PERPS_LIQUIDATOR_ENABLED) {
   console.warn(
@@ -1029,11 +1225,13 @@ async function maybeArchiveSettledPerpsMarkets(): Promise<void> {
       continue;
     }
 
-    savePerpsMarket({
+    const nextRecord = {
       ...record,
       status: PERPS_MARKET_STATUS_ARCHIVED,
       updatedAt: now,
-    });
+    };
+    savePerpsMarket(nextRecord);
+    savePublicPerpsMarket(nextRecord);
     console.log(
       `[Keeper] Archived perps market ${record.marketId} for ${record.agentId}`,
     );
@@ -1087,12 +1285,14 @@ async function deprecateMissingPerpsMarkets(
       continue;
     }
 
-    savePerpsMarket({
+    const nextRecord = {
       ...record,
       status: PERPS_MARKET_STATUS_CLOSE_ONLY,
       deprecatedAt: now,
       updatedAt: now,
-    });
+    };
+    savePerpsMarket(nextRecord);
+    savePublicPerpsMarket(nextRecord);
     console.log(
       `[Keeper] Deprecated perps market ${record.marketId} for ${record.agentId}`,
     );
@@ -1160,7 +1360,7 @@ async function updatePerpsOracle(
           .rpc(),
       connection,
     );
-    savePerpsOracleSnapshot({
+    const snapshot = {
       agentId,
       marketId,
       spotIndex,
@@ -1168,7 +1368,9 @@ async function updatePerpsOracle(
       mu: rating.mu,
       sigma: rating.sigma,
       recordedAt: Date.now(),
-    });
+    };
+    savePerpsOracleSnapshot(snapshot);
+    savePublicPerpsOracleSnapshot(snapshot);
     await ensurePerpsMarketBootstrapInsurance(marketId);
     await maybeRecyclePerpsMarketMakerFees(marketId);
     console.log(
@@ -1346,9 +1548,14 @@ async function syncPerpsOracles(
       continue;
     }
 
-    savePerpsMarket(
-      toPerpsMarketRecord(entry, PERPS_MARKET_STATUS_ACTIVE, now, previous),
+    const nextRecord = toPerpsMarketRecord(
+      entry,
+      PERPS_MARKET_STATUS_ACTIVE,
+      now,
+      previous,
     );
+    savePerpsMarket(nextRecord);
+    savePublicPerpsMarket(nextRecord);
     agentIdByMarketId.set(
       modelMarketIdFromCharacterId(entry.characterId),
       entry.characterId,
@@ -1482,6 +1689,10 @@ const autoSeedDelayMs = Math.max(
   0,
   Math.floor(Number(args["auto-seed-delay-seconds"]) * 1000),
 );
+const resultPostDelayMs = Math.max(
+  0,
+  Math.floor(Number(args["result-post-delay-seconds"]) * 1000),
+);
 const configuredBidPrice = Math.max(
   1,
   Math.min(999, Math.floor(Number(process.env.MARKET_MAKER_BID_PRICE || 400))),
@@ -1552,6 +1763,34 @@ type EvmOracleDuelState = {
   replayHash: Hex;
   activeProposalId: Hex;
   metadataUri: string;
+};
+
+type EvmResolutionOutcome = {
+  chainKey: BettingChainKey;
+  lifecycleStatus: PredictionMarketLifecycleStatus;
+  finalized: boolean;
+  note: string | null;
+};
+
+type SolanaResolutionOutcome = {
+  lifecycleStatus: PredictionMarketLifecycleStatus;
+  finalized: boolean;
+  note: string | null;
+};
+
+type EvmGoldClobMarketState = {
+  exists: boolean;
+  duelKey: Hex;
+  status: number;
+  winner: number;
+  tradeTreasuryFeeBpsSnapshot: number;
+  tradeMarketMakerFeeBpsSnapshot: number;
+  winningsMarketMakerFeeBpsSnapshot: number;
+  nextOrderId: bigint;
+  bestBid: number;
+  bestAsk: number;
+  totalAShares: bigint;
+  totalBShares: bigint;
 };
 
 function parseAddressEnv(value: string | undefined): Address | null {
@@ -1748,9 +1987,248 @@ const configuredEvmKeeperChains = parseBettingEvmChainList(
   process.env.EVM_KEEPER_CHAINS,
   BETTING_EVM_CHAIN_ORDER,
 );
+const configuredPublicPerpsChains = resolvePublicEvmPerpsChains({
+  configuredChains: configuredEvmKeeperChains,
+  publicChains: process.env.EVM_PUBLIC_PERPS_CHAINS,
+});
 const evmKeeperChains = configuredEvmKeeperChains
   .map((chainKey) => buildEvmRuntime(chainKey))
   .filter((chain): chain is EvmKeeperRuntime => chain !== null);
+const requiredParityChains = parseRequiredParityChains(
+  process.env.MARKET_PARITY_REQUIRED_CHAINS,
+);
+
+function requiredEvmParityChains(): BettingEvmChain[] {
+  return requiredParityChains.filter(
+    (chainKey): chainKey is BettingEvmChain =>
+      chainKey === "bsc" || chainKey === "base" || chainKey === "avax",
+  );
+}
+
+function evmParityConfirmationCount(chain: EvmKeeperRuntime): number {
+  if (configuredEvmParityConfirmations != null) {
+    return configuredEvmParityConfirmations;
+  }
+  return chain.supportsTimeTravel ? 1 : DEFAULT_REMOTE_EVM_PARITY_CONFIRMATIONS;
+}
+
+async function waitForEvmTransactionReceipt(
+  chain: EvmKeeperRuntime,
+  hash: Hex,
+): Promise<void> {
+  await chain.publicClient.waitForTransactionReceipt({
+    hash,
+    confirmations: evmParityConfirmationCount(chain),
+    timeout: evmTxReceiptTimeoutMs,
+  });
+  lastSuccessfulRpcAtMs = Date.now();
+}
+
+async function finalizeEvmDuelResultIfReady(
+  chain: EvmKeeperRuntime,
+  duelKey: Hex,
+  metadata: string,
+): Promise<"resolved" | "proposed"> {
+  if (!chain.finalizer) {
+    throw new Error(
+      `missing finalizer signer for ${chain.chainKey}; set TESTNET_FINALIZER_PRIVATE_KEY or EVM_FINALIZER_PRIVATE_KEY`,
+    );
+  }
+  try {
+    const finalizeHash = await chain.finalizer.walletClient.writeContract({
+      chain: undefined,
+      address: chain.duelOracleAddress,
+      abi: DUEL_OUTCOME_ORACLE_ABI,
+      functionName: "finalizeResult",
+      args: [duelKey, metadata],
+      account: chain.finalizer.account,
+    });
+    await waitForEvmTransactionReceipt(chain, finalizeHash);
+  } catch (error) {
+    if (isEvmDisputeWindowActiveError(error)) {
+      return "proposed";
+    }
+    throw error;
+  }
+
+  const finalizeSyncHash = await chain.operator.walletClient.writeContract({
+    chain: undefined,
+    address: chain.goldClobAddress,
+    abi: EVM_GOLD_CLOB_ADMIN_ABI,
+    functionName: "syncMarketFromOracle",
+    args: [duelKey, EVM_DUEL_WINNER_MARKET_KIND],
+    account: chain.operator.account,
+  });
+  await waitForEvmTransactionReceipt(chain, finalizeSyncHash);
+  return "resolved";
+}
+
+async function readEvmDuelState(
+  chain: EvmKeeperRuntime,
+  duelKey: Hex,
+): Promise<EvmOracleDuelState> {
+  const duel = (await chain.publicClient.readContract({
+    address: chain.duelOracleAddress,
+    abi: DUEL_OUTCOME_ORACLE_ABI,
+    functionName: "getDuel",
+    args: [duelKey],
+  })) as EvmOracleDuelState;
+  lastSuccessfulRpcAtMs = Date.now();
+  return duel;
+}
+
+async function readEvmMarketState(
+  chain: EvmKeeperRuntime,
+  duelKey: Hex,
+): Promise<EvmGoldClobMarketState> {
+  const market = (await chain.publicClient.readContract({
+    address: chain.goldClobAddress,
+    abi: EVM_GOLD_CLOB_ADMIN_ABI,
+    functionName: "getMarket",
+    args: [duelKey, EVM_DUEL_WINNER_MARKET_KIND],
+  })) as EvmGoldClobMarketState;
+  lastSuccessfulRpcAtMs = Date.now();
+  return market;
+}
+
+function expectedMarketStatusForDuelStatus(status: number): number {
+  switch (status) {
+    case EVM_DUEL_STATUS_SCHEDULED:
+      return EVM_MARKET_STATUS_LOCKED;
+    case EVM_DUEL_STATUS_BETTING_OPEN:
+      return EVM_MARKET_STATUS_OPEN;
+    case EVM_DUEL_STATUS_LOCKED:
+    case EVM_DUEL_STATUS_PROPOSED:
+    case EVM_DUEL_STATUS_CHALLENGED:
+      return EVM_MARKET_STATUS_LOCKED;
+    case EVM_DUEL_STATUS_RESOLVED:
+      return EVM_MARKET_STATUS_RESOLVED;
+    case EVM_DUEL_STATUS_CANCELLED:
+      return EVM_MARKET_STATUS_CANCELLED;
+    default:
+      return EVM_MARKET_STATUS_NULL;
+  }
+}
+
+async function verifyEvmLifecycleReadback(params: {
+  chain: EvmKeeperRuntime;
+  duelKey: Hex;
+  duelId: string;
+  minimumDuelStatus: number;
+  expectedMarketStatus: number;
+  participantAHash: Hex;
+  participantBHash: Hex;
+  betOpenTs: bigint;
+  betCloseTs: bigint;
+  duelStartTs: bigint;
+  expectedWinner?: number | null;
+  attempts?: number;
+}): Promise<void> {
+  const {
+    chain,
+    duelKey,
+    duelId,
+    minimumDuelStatus,
+    expectedMarketStatus,
+    participantAHash,
+    participantBHash,
+    betOpenTs,
+    betCloseTs,
+    duelStartTs,
+    expectedWinner = null,
+    attempts = 5,
+  } = params;
+  let lastError: Error | null = null;
+
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      const [duel, market] = await Promise.all([
+        readEvmDuelState(chain, duelKey),
+        readEvmMarketState(chain, duelKey),
+      ]);
+      if (normalizeHex32(duel.duelKey) !== duelKey) {
+        throw new Error("duel key readback mismatch");
+      }
+      if (asNum(duel.status, EVM_DUEL_STATUS_NULL) < minimumDuelStatus) {
+        throw new Error(
+          `duel status ${asNum(duel.status)} below expected ${minimumDuelStatus}`,
+        );
+      }
+      if (normalizeHex32(duel.participantAHash) !== participantAHash) {
+        throw new Error("participant A hash mismatch");
+      }
+      if (normalizeHex32(duel.participantBHash) !== participantBHash) {
+        throw new Error("participant B hash mismatch");
+      }
+      if (asBigInt(duel.betOpenTs) !== betOpenTs) {
+        throw new Error("bet open timestamp mismatch");
+      }
+      if (asBigInt(duel.betCloseTs) !== betCloseTs) {
+        throw new Error("bet close timestamp mismatch");
+      }
+      if (asBigInt(duel.duelStartTs) !== duelStartTs) {
+        throw new Error("duel start timestamp mismatch");
+      }
+      if (expectedWinner != null && asNum(duel.winner) !== expectedWinner) {
+        throw new Error(
+          `winner ${asNum(duel.winner)} did not match expected ${expectedWinner}`,
+        );
+      }
+      if (!market.exists) {
+        throw new Error("market missing after lifecycle write");
+      }
+      if (normalizeHex32(market.duelKey) !== duelKey) {
+        throw new Error("market duel key mismatch");
+      }
+      if (asNum(market.status, EVM_MARKET_STATUS_NULL) !== expectedMarketStatus) {
+        throw new Error(
+          `market status ${asNum(market.status)} did not match expected ${expectedMarketStatus}`,
+        );
+      }
+      return;
+    } catch (error) {
+      lastError =
+        error instanceof Error ? error : new Error(String(error ?? "unknown"));
+      if (attempt < attempts) {
+        await sleep(500);
+      }
+    }
+  }
+
+  throw new Error(
+    `${chain.chainKey} lifecycle readback verification failed for ${duelId}: ${lastError?.message ?? "unknown error"}`,
+  );
+}
+
+function publicPerpsChains(): EvmPerpsChainKey[] {
+  return configuredPublicPerpsChains;
+}
+
+function savePublicPerpsOracleSnapshot(snapshot: {
+  agentId: string;
+  marketId: number;
+  spotIndex: number;
+  conservativeSkill: number;
+  mu: number;
+  sigma: number;
+  recordedAt: number;
+}): void {
+  for (const chainKey of publicPerpsChains()) {
+    saveChainScopedPerpsOracleSnapshot({
+      ...snapshot,
+      chainKey,
+    });
+  }
+}
+
+function savePublicPerpsMarket(record: DbPerpsMarketRecord): void {
+  for (const chainKey of publicPerpsChains()) {
+    saveChainScopedPerpsMarket({
+      ...record,
+      chainKey,
+    });
+  }
+}
 
 const requiredPrograms = [
   {
@@ -1938,6 +2416,10 @@ async function ensureWalletAccountReady(
 }
 
 const ensureOracleReady = async (): Promise<void> => {
+  const expectedAuthority = oracleConfigAuthorityKeypair.publicKey;
+  const expectedReporter = oracleReporterKeypair.publicKey;
+  const expectedFinalizer = oracleFinalizerKeypair.publicKey;
+  const expectedChallenger = oracleChallengerKeypair.publicKey;
   let config =
     await fightProgram.account.oracleConfig.fetchNullable(oracleConfigPda);
   if (!config) {
@@ -1945,18 +2427,19 @@ const ensureOracleReady = async (): Promise<void> => {
       () =>
         fightProgram.methods
           .initializeOracle(
-            botKeypair.publicKey,
-            botKeypair.publicKey,
-            botKeypair.publicKey,
-            new BN(3600),
+            expectedReporter,
+            expectedFinalizer,
+            expectedChallenger,
+            new BN(SOLANA_ORACLE_DISPUTE_WINDOW_SECS),
           )
           .accountsPartial({
-            authority: botKeypair.publicKey,
+            authority: expectedAuthority,
             oracleConfig: oracleConfigPda,
             program: fightProgram.programId,
             programData: deriveProgramDataAddress(fightProgram.programId),
             systemProgram: SystemProgram.programId,
           })
+          .signers([oracleConfigAuthorityKeypair])
           .rpc(),
       connection,
     );
@@ -1968,31 +2451,38 @@ const ensureOracleReady = async (): Promise<void> => {
       `Oracle config ${oracleConfigPda.toBase58()} was not created`,
     );
   }
-  if (!(config.authority as PublicKey).equals(botKeypair.publicKey)) {
+  const actualAuthority = config.authority as PublicKey;
+  if (hasExplicitOracleConfigAuthority && !actualAuthority.equals(expectedAuthority)) {
     throw new Error(
-      `Bot wallet ${botKeypair.publicKey.toBase58()} is not oracle authority`,
+      `Configured oracle authority ${expectedAuthority.toBase58()} does not match on-chain oracle authority ${actualAuthority.toBase58()}`,
     );
   }
   const configNeedsUpdate =
-    !(config.reporter as PublicKey).equals(botKeypair.publicKey) ||
-    !(config.finalizer as PublicKey).equals(botKeypair.publicKey) ||
-    !(config.challenger as PublicKey).equals(botKeypair.publicKey);
+    !(config.reporter as PublicKey).equals(expectedReporter) ||
+    !(config.finalizer as PublicKey).equals(expectedFinalizer) ||
+    !(config.challenger as PublicKey).equals(expectedChallenger) ||
+    asNum(config.disputeWindowSecs) !== SOLANA_ORACLE_DISPUTE_WINDOW_SECS;
   if (configNeedsUpdate) {
-    const disputeWindowSecs = asNum(config.disputeWindowSecs);
+    if (!actualAuthority.equals(expectedAuthority)) {
+      throw new Error(
+        `Oracle role update requires config authority ${actualAuthority.toBase58()}, but keeper has ${expectedAuthority.toBase58()}`,
+      );
+    }
     await runWithRecovery(
       () =>
         fightProgram.methods
           .updateOracleConfig(
-            botKeypair.publicKey,
-            botKeypair.publicKey,
-            botKeypair.publicKey,
-            botKeypair.publicKey,
-            new BN(disputeWindowSecs),
+            expectedAuthority,
+            expectedReporter,
+            expectedFinalizer,
+            expectedChallenger,
+            new BN(SOLANA_ORACLE_DISPUTE_WINDOW_SECS),
           )
           .accountsPartial({
-            authority: botKeypair.publicKey,
+            authority: expectedAuthority,
             oracleConfig: oracleConfigPda,
           })
+          .signers([oracleConfigAuthorityKeypair])
           .rpc(),
       connection,
     );
@@ -2011,6 +2501,8 @@ const ensureMarketConfigReady = async (): Promise<void> => {
   const existingConfig =
     await marketProgram.account.marketConfig.fetchNullable(marketConfigPda);
   const expectedConfig = {
+    authority: clobConfigAuthorityKeypair.publicKey,
+    marketOperator: clobMarketOperatorKeypair.publicKey,
     treasury: configuredTradeTreasuryWallet,
     marketMaker: configuredTradeMarketMakerWallet,
     tradeTreasuryFeeBps,
@@ -2023,7 +2515,7 @@ const ensureMarketConfigReady = async (): Promise<void> => {
       () =>
         marketProgram.methods
           .initializeConfig(
-            botKeypair.publicKey,
+            expectedConfig.marketOperator,
             expectedConfig.treasury,
             expectedConfig.marketMaker,
             expectedConfig.tradeTreasuryFeeBps,
@@ -2031,12 +2523,13 @@ const ensureMarketConfigReady = async (): Promise<void> => {
             expectedConfig.winningsMarketMakerFeeBps,
           )
           .accountsPartial({
-            authority: botKeypair.publicKey,
+            authority: expectedConfig.authority,
             config: marketConfigPda,
             program: marketProgram.programId,
             programData: deriveProgramDataAddress(marketProgram.programId),
             systemProgram: SystemProgram.programId,
           })
+          .signers([clobConfigAuthorityKeypair])
           .rpc(),
       connection,
     );
@@ -2046,7 +2539,17 @@ const ensureMarketConfigReady = async (): Promise<void> => {
     return;
   }
 
+  const actualAuthority = existingConfig.authority as PublicKey;
+  if (hasExplicitClobConfigAuthority && !actualAuthority.equals(expectedConfig.authority)) {
+    throw new Error(
+      `Configured CLOB authority ${expectedConfig.authority.toBase58()} does not match on-chain CLOB authority ${actualAuthority.toBase58()}`,
+    );
+  }
+
   const configNeedsUpdate =
+    !(existingConfig.marketOperator as PublicKey).equals(
+      expectedConfig.marketOperator,
+    ) ||
     !(existingConfig.treasury as PublicKey).equals(expectedConfig.treasury) ||
     !(existingConfig.marketMaker as PublicKey).equals(
       expectedConfig.marketMaker,
@@ -2059,12 +2562,17 @@ const ensureMarketConfigReady = async (): Promise<void> => {
       expectedConfig.winningsMarketMakerFeeBps;
 
   if (configNeedsUpdate) {
+    if (!actualAuthority.equals(expectedConfig.authority)) {
+      throw new Error(
+        `CLOB config update requires authority ${actualAuthority.toBase58()}, but keeper has ${expectedConfig.authority.toBase58()}`,
+      );
+    }
     await runWithRecovery(
       () =>
         marketProgram.methods
           .updateConfig(
-            botKeypair.publicKey,
-            botKeypair.publicKey,
+            expectedConfig.authority,
+            expectedConfig.marketOperator,
             expectedConfig.treasury,
             expectedConfig.marketMaker,
             expectedConfig.tradeTreasuryFeeBps,
@@ -2072,9 +2580,10 @@ const ensureMarketConfigReady = async (): Promise<void> => {
             expectedConfig.winningsMarketMakerFeeBps,
           )
           .accountsPartial({
-            authority: botKeypair.publicKey,
+            authority: expectedConfig.authority,
             config: marketConfigPda,
           })
+          .signers([clobConfigAuthorityKeypair])
           .rpc(),
       connection,
     );
@@ -2094,6 +2603,15 @@ async function getDuelState(
   const duelState = await fightProgram.account.duelState.fetchNullable(duelStatePda);
   markRpcSuccess();
   return duelState;
+}
+
+async function getOracleConfigState(): Promise<
+  Awaited<ReturnType<typeof fightProgram.account.oracleConfig.fetchNullable>>
+> {
+  const oracleConfig =
+    await fightProgram.account.oracleConfig.fetchNullable(oracleConfigPda);
+  markRpcSuccess();
+  return oracleConfig;
 }
 
 async function getClobMarketState(
@@ -2209,13 +2727,21 @@ async function ensureClobVaultReady(vault: PublicKey): Promise<void> {
 }
 
 function buildDuelMetadata(data: DuelLifecycleEvent): string {
-  return JSON.stringify({
-    cycleId: data.cycleId,
-    duelId: data.duelId,
-    duelKeyHex: data.duelKeyHex,
-    agent1: data.agent1?.name ?? "Agent A",
-    agent2: data.agent2?.name ?? "Agent B",
-  });
+  return buildDuelMetadataForDuelKey(data.duelKeyHex, data.duelId);
+}
+
+function buildDuelMetadataForDuelKey(
+  duelKeyHex: string,
+  duelId: string | null,
+): string {
+  const duelKeyRef = duelKeyHex.trim().replace(/^0x/i, "").toLowerCase();
+  const metadataUri = `hyperscapes://duel/${duelKeyRef}`;
+  if (Buffer.byteLength(metadataUri, "utf8") > 200) {
+    throw new Error(
+      `duel metadata URI exceeds Solana oracle limit for duel ${duelId ?? duelKeyRef}`,
+    );
+  }
+  return metadataUri;
 }
 
 function deriveCanonicalDuelTimes(data: DuelLifecycleEvent): {
@@ -2258,30 +2784,42 @@ async function upsertDuelLifecycle(
 ): Promise<PublicKey> {
   const duelKey = duelKeyHexToBytes(data.duelKeyHex);
   const duelState = findDuelStatePda(fightProgram.programId, duelKey);
-  const nowSeconds = Math.floor(Date.now() / 1000);
-  const { betOpenTs, betCloseTs, duelStartTs } = deriveCanonicalDuelTimes(data);
-  const requestedStatus =
-    status === "scheduled" && betOpenTs <= nowSeconds ? "bettingOpen" : status;
+  const existingDuelState = await getDuelState(duelState);
+  const derivedTimes = deriveCanonicalDuelTimes(data);
+  const betOpenTs = existingDuelState
+    ? asNum(existingDuelState.betOpenTs, derivedTimes.betOpenTs)
+    : derivedTimes.betOpenTs;
+  const betCloseTs = existingDuelState
+    ? asNum(existingDuelState.betCloseTs, derivedTimes.betCloseTs)
+    : derivedTimes.betCloseTs;
+  const duelStartTs = existingDuelState
+    ? asNum(existingDuelState.duelStartTs, derivedTimes.duelStartTs)
+    : derivedTimes.duelStartTs;
+  const participantAHash =
+    toByteArray32(existingDuelState?.participantAHash) ?? hashParticipant(data.agent1);
+  const participantBHash =
+    toByteArray32(existingDuelState?.participantBHash) ?? hashParticipant(data.agent2);
 
   await runWithRecovery(
     () =>
       fightProgram.methods
         .upsertDuel(
           Array.from(duelKey),
-          hashParticipant(data.agent1),
-          hashParticipant(data.agent2),
+          participantAHash,
+          participantBHash,
           new BN(betOpenTs),
           new BN(betCloseTs),
           new BN(duelStartTs),
           buildDuelMetadata(data),
-          duelStatusEnum(requestedStatus),
+          duelStatusEnum(status),
         )
         .accountsPartial({
-          reporter: botKeypair.publicKey,
+          reporter: oracleReporterKeypair.publicKey,
           oracleConfig: oracleConfigPda,
           duelState,
           systemProgram: SystemProgram.programId,
         })
+        .signers([oracleReporterKeypair])
         .rpc(),
     connection,
   );
@@ -2663,10 +3201,99 @@ async function ensureManagedClobOrder(
   );
 }
 
-async function createOrSyncRound(
+function buildTrackedMatch(
   data: DuelLifecycleEvent,
+  duelState: PublicKey,
+  marketState: PublicKey,
+  vault: PublicKey,
+): ActiveClobMatch {
+  return buildTrackedMatchFromKeys({
+    duelId: data.duelId,
+    duelKeyHex: data.duelKeyHex,
+    duelState,
+    marketState,
+    vault,
+    createdAt: Date.now(),
+  });
+}
+
+function buildTrackedMatchFromKeys(params: {
+  duelId: string;
+  duelKeyHex: string;
+  duelState: PublicKey;
+  marketState: PublicKey;
+  vault: PublicKey;
+  createdAt?: number | null;
+}): ActiveClobMatch {
+  return {
+    duelId: params.duelId,
+    duelKeyHex: params.duelKeyHex,
+    duelState: params.duelState,
+    marketState: params.marketState,
+    vault: params.vault,
+    createdAt: params.createdAt ?? Date.now(),
+    lastStreamAtMs: Date.now(),
+    lastOracleAtMs: null,
+    lastRpcAtMs: null,
+    lastSyncedAtMs: null,
+    lastResolvedAtMs: null,
+    lastClaimAtMs: null,
+    lastQuoteSnapshot: null,
+    lastQuotePlan: null,
+    winner: "NONE",
+    yesBidOrder: null,
+    noAskOrder: null,
+  };
+}
+
+function deriveTrackedMatchForParitySnapshot(
+  snapshot: KeeperMarketParitySnapshot,
+): ActiveClobMatch | null {
+  const duelKey = normalizedBundleDuelKey(snapshot.duelKey);
+  if (!duelKey) return null;
+
+  const existing = snapshot.duelId
+    ? activeClobMatches.get(snapshot.duelId)
+    : null;
+  if (
+    existing &&
+    normalizedBundleDuelKey(existing.duelKeyHex) === duelKey
+  ) {
+    return existing;
+  }
+
+  const duelKeyBytes = duelKeyHexToBytes(duelKey);
+  const duelState = findDuelStatePda(fightProgram.programId, duelKeyBytes);
+  const marketState = findMarketPda(
+    marketProgram.programId,
+    duelState,
+    SOLANA_DUEL_WINNER_MARKET_KIND,
+  );
+  const vault = findClobVaultPda(marketProgram.programId, marketState);
+  return buildTrackedMatchFromKeys({
+    duelId: snapshot.duelId ?? `parity:${duelKey}`,
+    duelKeyHex: duelKey,
+    duelState,
+    marketState,
+    vault,
+    createdAt: snapshot.openedAtMs ?? snapshot.updatedAtMs,
+  });
+}
+
+function resolvedWinnerFromDuelState(
+  duelState: Record<string, unknown> | null,
+): PredictionMarketWinner {
+  if (!duelState) return "NONE";
+  if (enumIs(duelState.winner, "a")) return "A";
+  if (enumIs(duelState.winner, "b")) return "B";
+  return "NONE";
+}
+
+async function ensureSolanaRound(
+  data: DuelLifecycleEvent,
+  status: "scheduled" | "bettingOpen",
 ): Promise<ActiveClobMatch> {
-  const duelState = await upsertDuelLifecycle(data, "bettingOpen");
+  const duelState = await upsertDuelLifecycle(data, status);
   const marketState = findMarketPda(
     marketProgram.programId,
     duelState,
@@ -2681,13 +3308,14 @@ async function createOrSyncRound(
         marketProgram.methods
           .initializeMarket(Array.from(duelKey), SOLANA_DUEL_WINNER_MARKET_KIND)
           .accountsPartial({
-            operator: botKeypair.publicKey,
+            operator: clobMarketOperatorKeypair.publicKey,
             config: marketConfigPda,
             duelState,
             marketState,
             vault,
             systemProgram: SystemProgram.programId,
           })
+          .signers([clobMarketOperatorKeypair])
           .rpc(),
       connection,
     );
@@ -2700,41 +3328,67 @@ async function createOrSyncRound(
     }
   }
 
-  const trackedMatch: ActiveClobMatch = {
-    duelId: data.duelId,
-    duelKeyHex: data.duelKeyHex,
-    duelState,
-    marketState,
-    vault,
-    createdAt: Date.now(),
-    lastStreamAtMs: Date.now(),
-    lastOracleAtMs: null,
-    lastRpcAtMs: null,
-    lastSyncedAtMs: null,
-    lastResolvedAtMs: null,
-    lastClaimAtMs: null,
-    lastQuoteSnapshot: null,
-    lastQuotePlan: null,
-    winner: "NONE",
-    yesBidOrder: null,
-    noAskOrder: null,
-  };
+  const trackedMatch = buildTrackedMatch(data, duelState, marketState, vault);
   await syncTrackedMarketFromOracle(trackedMatch);
 
   console.log(
-    `[bot] Duel market ready duel=${data.duelId} duelState=${duelState.toBase58()} market=${marketState.toBase58()}`,
+    `[bot] Duel market ${status} duel=${data.duelId} duelState=${duelState.toBase58()} market=${marketState.toBase58()}`,
   );
   return trackedMatch;
 }
 
+async function prepareRound(data: DuelLifecycleEvent): Promise<void> {
+  await ensureSolanaRound(data, "scheduled");
+}
+
+async function createOrSyncRound(
+  data: DuelLifecycleEvent,
+): Promise<ActiveClobMatch> {
+  return ensureSolanaRound(data, "bettingOpen");
+}
+
 async function lockRound(data: DuelLifecycleEvent): Promise<void> {
-  const trackedMatch = activeClobMatches.get(data.duelId);
+  let trackedMatch = activeClobMatches.get(data.duelId);
+  if (!trackedMatch && marketParitySnapshot) {
+    trackedMatch =
+      deriveTrackedMatchForParitySnapshot(marketParitySnapshot) ?? undefined;
+  }
   if (!trackedMatch) {
-    return;
+    throw new Error(
+      `lockRound: cannot resolve Solana tracked match for duel ${data.duelId}`,
+    );
   }
 
   await upsertDuelLifecycle(data, "locked");
   await syncTrackedMarketFromOracle(trackedMatch);
+}
+
+async function cancelRound(
+  trackedMatch: ActiveClobMatch,
+  metadataUri = "atomic-parity-abort",
+): Promise<void> {
+  await cancelManagedClobQuotes(trackedMatch, "atomic-parity-abort");
+
+  await runWithRecovery(
+    () =>
+      fightProgram.methods
+        .cancelDuel(Array.from(duelKeyHexToBytes(trackedMatch.duelKeyHex)), metadataUri)
+        .accountsPartial({
+          authority: botKeypair.publicKey,
+          oracleConfig: oracleConfigPda,
+          duelState: trackedMatch.duelState,
+        })
+        .rpc(),
+    connection,
+  );
+  const cancelledAt = markRpcSuccess(trackedMatch);
+  trackedMatch.lastOracleAtMs = cancelledAt;
+  trackedMatch.lastResolvedAtMs = cancelledAt;
+
+  unresolvedOracleWarningMatches.delete(trackedMatch.duelId);
+  await syncTrackedMarketFromOracle(trackedMatch);
+  await captureSettledClobHealth(trackedMatch, "CANCELLED");
+  activeClobMatches.delete(trackedMatch.duelId);
 }
 
 async function maybeWarnUnresolvedDuel(trackedMatch: ActiveClobMatch): Promise<void> {
@@ -2796,6 +3450,322 @@ if (previousBotHealthSnapshot?.markets.some((market) => market.openOrderCount > 
     .filter((market) => market.openOrderCount > 0)
     .map((market) => market.marketRef ?? market.duelKey ?? market.duelId ?? "unknown")
     .join(", ")}`;
+}
+let marketParityRevision = previousBotHealthSnapshot?.marketParity?.revision ?? 0;
+let marketParitySnapshot: KeeperMarketParitySnapshot | null =
+  previousBotHealthSnapshot?.marketParity ?? null;
+
+function normalizedBundleDuelKey(duelKeyHex: string | null | undefined): string | null {
+  const raw = (duelKeyHex ?? "").trim().replace(/^0x/i, "").toLowerCase();
+  return /^[0-9a-f]{64}$/.test(raw) ? raw : null;
+}
+
+function buildMarketParityBundleId(
+  data: DuelLifecycleEvent,
+  revision: number,
+): string {
+  return [
+    normalizedBundleDuelKey(data.duelKeyHex) ?? data.duelId ?? "unknown-duel",
+    revision.toString(),
+  ].join(":");
+}
+
+function buildMarketParityReceipts(
+  requiredChains: readonly BettingChainKey[],
+): KeeperParityChainReceipt[] {
+  return requiredChains.map((chainKey) => ({
+    chainKey,
+    preparedAtMs: null,
+    openedAtMs: null,
+    lockedAtMs: null,
+    resolvedAtMs: null,
+    cancelledAtMs: null,
+    confirmedAtMs: null,
+    lifecycleStatus: null,
+    txRef: null,
+    note: null,
+  }));
+}
+
+function isTerminalMarketParityState(state: KeeperParityBundleState): boolean {
+  return state === "resolved" || state === "cancelled" || state === "aborted";
+}
+
+function isSameMarketParityBundle(
+  current: KeeperMarketParitySnapshot,
+  data: DuelLifecycleEvent,
+): boolean {
+  return (
+    current.duelKey === normalizedBundleDuelKey(data.duelKeyHex) &&
+    current.duelId === data.duelId
+  );
+}
+
+function shouldFreezeMismatchedMarketParityEvent(
+  current: KeeperMarketParitySnapshot,
+): boolean {
+  if (current.state === "frozen") {
+    return current.openedAtMs != null;
+  }
+  if (current.openedAtMs || current.safeToBet || current.state === "open") {
+    return true;
+  }
+  return false;
+}
+
+function blockMismatchedMarketParityEvent(
+  data: DuelLifecycleEvent,
+  eventName: string,
+): boolean {
+  if (
+    !marketParitySnapshot ||
+    isTerminalMarketParityState(marketParitySnapshot.state) ||
+    isSameMarketParityBundle(marketParitySnapshot, data)
+  ) {
+    return false;
+  }
+
+  const incomingDuelKey = normalizedBundleDuelKey(data.duelKeyHex);
+  const reason = `blocked_${eventName}_for_${incomingDuelKey ?? data.duelId ?? "unknown"}_while_${marketParitySnapshot.bundleId}_is_${marketParitySnapshot.state}`;
+  const shouldFreeze = shouldFreezeMismatchedMarketParityEvent(
+    marketParitySnapshot,
+  );
+  const logBlockedEvent = shouldFreeze ? console.error : console.warn;
+  logBlockedEvent("[bot] market_parity_blocked_event", {
+    eventName,
+    reason,
+    action: shouldFreeze ? "freeze" : "abort",
+    activeBundleId: marketParitySnapshot.bundleId,
+    activeDuelKey: marketParitySnapshot.duelKey,
+    activeDuelId: marketParitySnapshot.duelId,
+    activeState: marketParitySnapshot.state,
+    incomingDuelKey,
+    incomingDuelId: data.duelId,
+  });
+  if (!shouldFreeze) {
+    finalizeMarketParityState("aborted", marketParitySnapshot.phase, {
+      reason,
+    });
+    writeBotHealthSnapshot();
+    return eventName !== "duel_started";
+  }
+  const freezeReason =
+    marketParitySnapshot.state === "frozen"
+      ? marketParitySnapshot.freezeReason ?? reason
+      : reason;
+  finalizeMarketParityState("frozen", marketParitySnapshot.phase, {
+    reason: freezeReason,
+  });
+  writeBotHealthSnapshot();
+  return true;
+}
+
+function requireExistingMarketParityBundle(
+  data: DuelLifecycleEvent,
+  eventName: string,
+): KeeperMarketParitySnapshot | null {
+  if (blockMismatchedMarketParityEvent(data, eventName)) {
+    return null;
+  }
+
+  if (
+    !marketParitySnapshot ||
+    isTerminalMarketParityState(marketParitySnapshot.state) ||
+    !isSameMarketParityBundle(marketParitySnapshot, data)
+  ) {
+    console.warn("[bot] market_parity_dropped_event", {
+      eventName,
+      reason: `dropped_${eventName}_without_existing_public_bundle`,
+      incomingDuelKey: normalizedBundleDuelKey(data.duelKeyHex),
+      incomingDuelId: data.duelId,
+      activeBundleId: marketParitySnapshot?.bundleId ?? null,
+      activeState: marketParitySnapshot?.state ?? null,
+    });
+    writeBotHealthSnapshot();
+    return null;
+  }
+
+  return marketParitySnapshot;
+}
+
+function updateMarketParitySnapshot(
+  updater: (
+    current: KeeperMarketParitySnapshot | null,
+  ) => KeeperMarketParitySnapshot | null,
+): void {
+  marketParitySnapshot = updater(marketParitySnapshot);
+  if (marketParitySnapshot) {
+    marketParitySnapshot = {
+      ...marketParitySnapshot,
+      updatedAtMs: Date.now(),
+    };
+  }
+}
+
+function beginMarketParityBundle(
+  data: DuelLifecycleEvent,
+  phase: string | null,
+): KeeperMarketParitySnapshot {
+  const duelKey = normalizedBundleDuelKey(data.duelKeyHex);
+  if (
+    marketParitySnapshot &&
+    marketParitySnapshot.duelKey === duelKey &&
+    marketParitySnapshot.duelId === data.duelId &&
+    !isTerminalMarketParityState(marketParitySnapshot.state)
+  ) {
+    return marketParitySnapshot;
+  }
+
+  marketParityRevision += 1;
+  marketParitySnapshot = {
+    bundleId: buildMarketParityBundleId(data, marketParityRevision),
+    duelKey,
+    duelId: data.duelId,
+    revision: marketParityRevision,
+    requiredChains: [...requiredParityChains],
+    confirmedChains: [],
+    state: "preparing",
+    phase,
+    safeToBet: false,
+    openedAtMs: null,
+    lockedAtMs: null,
+    resolvedAtMs: null,
+    freezeReason: null,
+    updatedAtMs: Date.now(),
+    receipts: buildMarketParityReceipts(requiredParityChains),
+  };
+  return marketParitySnapshot;
+}
+
+function resetMarketParityConfirmations(
+  nextState: KeeperParityBundleState,
+  phase: string | null,
+  safeToBet: boolean,
+): void {
+  updateMarketParitySnapshot((current) => {
+    if (!current) return current;
+    return {
+      ...current,
+      state: nextState,
+      phase,
+      safeToBet,
+      confirmedChains: [],
+      freezeReason: null,
+    };
+  });
+}
+
+function markMarketParityChainConfirmed(params: {
+  chainKey: BettingChainKey;
+  transition: "prepare" | "open" | "lock" | "propose" | "resolve" | "cancel";
+  lifecycleStatus: PredictionMarketLifecycleStatus | null;
+  countsForQuorum?: boolean;
+  txRef?: string | null;
+  note?: string | null;
+}): void {
+  const now = Date.now();
+  updateMarketParitySnapshot((current) => {
+    if (!current) return current;
+    const receipts = current.receipts.map((receipt) => {
+      if (receipt.chainKey !== params.chainKey) {
+        return receipt;
+      }
+      return {
+        ...receipt,
+        preparedAtMs:
+          params.transition === "prepare" ? now : receipt.preparedAtMs,
+        openedAtMs: params.transition === "open" ? now : receipt.openedAtMs,
+        lockedAtMs: params.transition === "lock" ? now : receipt.lockedAtMs,
+        resolvedAtMs:
+          params.transition === "resolve" ? now : receipt.resolvedAtMs,
+        cancelledAtMs:
+          params.transition === "cancel" ? now : receipt.cancelledAtMs,
+        confirmedAtMs: now,
+        lifecycleStatus: params.lifecycleStatus,
+        txRef: params.txRef ?? receipt.txRef,
+        note: params.note ?? receipt.note,
+      };
+    });
+    const confirmedChains =
+      params.countsForQuorum === false
+        ? current.confirmedChains
+        : current.confirmedChains.includes(params.chainKey)
+          ? current.confirmedChains
+          : [...current.confirmedChains, params.chainKey];
+    return {
+      ...current,
+      confirmedChains,
+      receipts,
+    };
+  });
+}
+
+function allRequiredParityChainsConfirmed(): boolean {
+  return Boolean(
+    marketParitySnapshot &&
+      marketParitySnapshot.requiredChains.length > 0 &&
+      marketParitySnapshot.requiredChains.every((chainKey) =>
+        marketParitySnapshot?.confirmedChains.includes(chainKey),
+      ),
+  );
+}
+
+function hasPendingEvmParityResolution(): boolean {
+  if (!marketParitySnapshot || marketParitySnapshot.phase !== "RESOLUTION") {
+    return false;
+  }
+  const evmParityChains = new Set(requiredEvmParityChains());
+  return marketParitySnapshot.receipts.some(
+    (receipt) =>
+      evmParityChains.has(receipt.chainKey as BettingEvmChain) &&
+      receipt.lifecycleStatus === "PROPOSED",
+  );
+}
+
+function hasPendingParityResolution(): boolean {
+  return Boolean(
+    marketParitySnapshot &&
+      marketParitySnapshot.phase === "RESOLUTION" &&
+      marketParitySnapshot.receipts.some(
+        (receipt) => receipt.lifecycleStatus === "PROPOSED",
+      ),
+  );
+}
+
+function finalizeMarketParityState(
+  nextState: Extract<
+    KeeperParityBundleState,
+    "open" | "locked" | "resolved" | "cancelled" | "frozen" | "aborted"
+  >,
+  phase: string | null,
+  options: {
+    safeToBet?: boolean;
+    reason?: string | null;
+  } = {},
+): void {
+  const now = Date.now();
+  updateMarketParitySnapshot((current) => {
+    if (!current) return current;
+    return {
+      ...current,
+      state: nextState,
+      phase,
+      safeToBet: options.safeToBet === true,
+      freezeReason: options.reason ?? null,
+      openedAtMs:
+        nextState === "open"
+          ? current.openedAtMs ?? now
+          : current.openedAtMs,
+      lockedAtMs:
+        nextState === "locked"
+          ? current.lockedAtMs ?? now
+          : current.lockedAtMs,
+      resolvedAtMs:
+        nextState === "resolved" || nextState === "cancelled"
+          ? current.resolvedAtMs ?? now
+          : current.resolvedAtMs,
+    };
+  });
 }
 
 function trimSettledClobHealth(now = Date.now()): void {
@@ -2976,6 +3946,7 @@ function writeBotHealthSnapshot(): void {
       lastSuccessfulRpcAtMs,
       recovery: buildBotRecoveryStates(),
       markets: [...activeRecords, ...recentSettledRecords],
+      marketParity: marketParitySnapshot,
     };
     fs_node.mkdirSync(path.dirname(BOT_HEALTH_FILE), { recursive: true });
     fs_node.writeFileSync(BOT_HEALTH_FILE, JSON.stringify(snapshot, null, 2));
@@ -2987,8 +3958,14 @@ function writeBotHealthSnapshot(): void {
 async function upsertEvmDuelLifecycle(
   data: DuelLifecycleEvent,
   status: 1 | 2 | 3,
+  targetChains: readonly BettingEvmChain[] = evmKeeperChains.map(
+    (chain) => chain.chainKey,
+  ),
 ): Promise<void> {
-  if (evmKeeperChains.length === 0) {
+  const selectedChains = evmKeeperChains.filter((chain) =>
+    targetChains.includes(chain.chainKey),
+  );
+  if (selectedChains.length === 0) {
     return;
   }
 
@@ -3000,13 +3977,8 @@ async function upsertEvmDuelLifecycle(
   const metadata = buildDuelMetadata(data);
 
   const results = await Promise.allSettled(
-    evmKeeperChains.map(async (chain) => {
-      const existing = (await chain.publicClient.readContract({
-        address: chain.duelOracleAddress,
-        abi: DUEL_OUTCOME_ORACLE_ABI,
-        functionName: "getDuel",
-        args: [duelKey],
-      })) as EvmOracleDuelState;
+    selectedChains.map(async (chain) => {
+      const existing = await readEvmDuelState(chain, duelKey);
       const existingStatus = asNum(existing?.status, EVM_DUEL_STATUS_NULL);
       const participantAHash =
         existingStatus > EVM_DUEL_STATUS_NULL
@@ -3017,15 +3989,15 @@ async function upsertEvmDuelLifecycle(
           ? existing.participantBHash
           : participantHashHex(data.agent2);
       const canonicalBetOpenTs =
-        existingStatus >= EVM_DUEL_STATUS_BETTING_OPEN
+        existingStatus >= EVM_DUEL_STATUS_SCHEDULED
           ? existing.betOpenTs
           : betOpenTs;
       const canonicalBetCloseTs =
-        existingStatus >= EVM_DUEL_STATUS_BETTING_OPEN
+        existingStatus >= EVM_DUEL_STATUS_SCHEDULED
           ? existing.betCloseTs
           : betCloseTs;
       const canonicalDuelStartTs =
-        existingStatus >= EVM_DUEL_STATUS_BETTING_OPEN
+        existingStatus >= EVM_DUEL_STATUS_SCHEDULED
           ? existing.duelStartTs
           : duelStartTs;
       if (status >= 3) {
@@ -3052,17 +4024,9 @@ async function upsertEvmDuelLifecycle(
         ],
         account: chain.reporter.account,
       });
-      await chain.publicClient.waitForTransactionReceipt({
-        hash: upsertHash,
-        confirmations: 1,
-      });
+      await waitForEvmTransactionReceipt(chain, upsertHash);
 
-      const market = (await chain.publicClient.readContract({
-        address: chain.goldClobAddress,
-        abi: EVM_GOLD_CLOB_ADMIN_ABI,
-        functionName: "getMarket",
-        args: [duelKey, EVM_DUEL_WINNER_MARKET_KIND],
-      })) as { exists: boolean };
+      const market = await readEvmMarketState(chain, duelKey);
 
       if (!market.exists) {
         const createHash = await chain.operator.walletClient.writeContract({
@@ -3073,10 +4037,7 @@ async function upsertEvmDuelLifecycle(
           args: [duelKey, EVM_DUEL_WINNER_MARKET_KIND],
           account: chain.operator.account,
         });
-        await chain.publicClient.waitForTransactionReceipt({
-          hash: createHash,
-          confirmations: 1,
-        });
+        await waitForEvmTransactionReceipt(chain, createHash);
       }
 
       const syncHash = await chain.operator.walletClient.writeContract({
@@ -3087,16 +4048,25 @@ async function upsertEvmDuelLifecycle(
         args: [duelKey, EVM_DUEL_WINNER_MARKET_KIND],
         account: chain.operator.account,
       });
-      await chain.publicClient.waitForTransactionReceipt({
-        hash: syncHash,
-        confirmations: 1,
-      });
+      await waitForEvmTransactionReceipt(chain, syncHash);
       lastSuccessfulRpcAtMs = Date.now();
+      await verifyEvmLifecycleReadback({
+        chain,
+        duelKey,
+        duelId: data.duelId,
+        minimumDuelStatus: status,
+        expectedMarketStatus: expectedMarketStatusForDuelStatus(status),
+        participantAHash,
+        participantBHash,
+        betOpenTs: canonicalBetOpenTs,
+        betCloseTs: canonicalBetCloseTs,
+        duelStartTs: canonicalDuelStartTs,
+      });
     }),
   );
 
   const failures = results
-    .map((result, index) => ({ chain: evmKeeperChains[index], result }))
+    .map((result, index) => ({ chain: selectedChains[index], result }))
     .filter(
       (
         entry,
@@ -3123,9 +4093,34 @@ async function upsertEvmDuelLifecycle(
   }
 }
 
-async function reportEvmResult(data: DuelLifecycleEvent): Promise<void> {
-  if (evmKeeperChains.length === 0 || !data.seed || !data.replayHash) {
-    return;
+async function reportEvmResult(
+  data: DuelLifecycleEvent,
+  targetChains: readonly BettingEvmChain[] = evmKeeperChains.map(
+    (chain) => chain.chainKey,
+  ),
+): Promise<Array<EvmResolutionOutcome>> {
+  const selectedChains = evmKeeperChains.filter((chain) =>
+    targetChains.includes(chain.chainKey),
+  );
+  // Legitimate no-op: no EVM chains configured for this build. Return early
+  // without throwing so Solana-only deployments don't see spurious errors.
+  if (selectedChains.length === 0) {
+    return [];
+  }
+
+  // Data-quality preconditions. These used to silently return [] and collapse
+  // into the caller's generic "failed to resolve required parity chains"
+  // freezeReason. Throw specific errors so freezeReason captures the real
+  // root cause.
+  if (!data.seed) {
+    throw new Error(
+      `reportEvmResult: duel ${data.duelId} missing seed; refusing to post an unverifiable EVM result`,
+    );
+  }
+  if (!data.replayHash) {
+    throw new Error(
+      `reportEvmResult: duel ${data.duelId} missing replayHash; refusing to post an unverifiable EVM result`,
+    );
   }
 
   const duelKey = normalizeHex32(data.duelKeyHex);
@@ -3133,7 +4128,9 @@ async function reportEvmResult(data: DuelLifecycleEvent): Promise<void> {
   const winner =
     data.winnerId === data.agent1?.id ? 1 : data.winnerId === data.agent2?.id ? 2 : 0;
   if (winner === 0) {
-    return;
+    throw new Error(
+      `reportEvmResult: duel ${data.duelId} supplied unknown winner id ${data.winnerId ?? "<null>"}; agent1=${data.agent1?.id ?? "<null>"} agent2=${data.agent2?.id ?? "<null>"}`,
+    );
   }
   const canonicalTimes = deriveCanonicalDuelTimes(data);
   const defaultBetOpenTs = BigInt(canonicalTimes.betOpenTs);
@@ -3143,13 +4140,8 @@ async function reportEvmResult(data: DuelLifecycleEvent): Promise<void> {
   const metadata = buildDuelMetadata(data);
 
   const results = await Promise.allSettled(
-    evmKeeperChains.map(async (chain) => {
-      const existing = (await chain.publicClient.readContract({
-        address: chain.duelOracleAddress,
-        abi: DUEL_OUTCOME_ORACLE_ABI,
-        functionName: "getDuel",
-        args: [duelKey],
-      })) as EvmOracleDuelState;
+    selectedChains.map(async (chain): Promise<EvmResolutionOutcome> => {
+      const existing = await readEvmDuelState(chain, duelKey);
       const existingStatus = asNum(existing?.status, EVM_DUEL_STATUS_NULL);
       const participantAHash =
         existingStatus > EVM_DUEL_STATUS_NULL
@@ -3160,23 +4152,30 @@ async function reportEvmResult(data: DuelLifecycleEvent): Promise<void> {
           ? existing.participantBHash
           : participantHashHex(data.agent2);
       const canonicalBetOpenTs =
-        existingStatus >= EVM_DUEL_STATUS_BETTING_OPEN
+        existingStatus >= EVM_DUEL_STATUS_SCHEDULED
           ? existing.betOpenTs
           : defaultBetOpenTs;
       const canonicalBetCloseTs =
-        existingStatus >= EVM_DUEL_STATUS_BETTING_OPEN
+        existingStatus >= EVM_DUEL_STATUS_SCHEDULED
           ? existing.betCloseTs
           : defaultBetCloseTs;
       const canonicalDuelStartTs =
-        existingStatus >= EVM_DUEL_STATUS_BETTING_OPEN
+        existingStatus >= EVM_DUEL_STATUS_SCHEDULED
           ? existing.duelStartTs
           : defaultDuelStartTs;
 
-      if (
-        existingStatus >= EVM_DUEL_STATUS_RESOLVED ||
-        existingStatus === EVM_DUEL_STATUS_CANCELLED
-      ) {
-        return;
+      if (existingStatus === EVM_DUEL_STATUS_CANCELLED) {
+        throw new Error(
+          `${chain.chainKey} duel ${data.duelId} is cancelled and cannot satisfy parity resolution`,
+        );
+      }
+      if (existingStatus >= EVM_DUEL_STATUS_RESOLVED) {
+        return {
+          chainKey: chain.chainKey,
+          lifecycleStatus: "RESOLVED",
+          finalized: true,
+          note: "already-resolved",
+        };
       }
 
       // Fail-closed: if the result proposal has been challenged, sync the
@@ -3192,14 +4191,25 @@ async function reportEvmResult(data: DuelLifecycleEvent): Promise<void> {
           args: [duelKey, EVM_DUEL_WINNER_MARKET_KIND],
           account: chain.operator.account,
         });
-        await chain.publicClient.waitForTransactionReceipt({
-          hash: syncHash,
-          confirmations: 1,
+        await waitForEvmTransactionReceipt(chain, syncHash);
+        await verifyEvmLifecycleReadback({
+          chain,
+          duelKey,
+          duelId: data.duelId,
+          minimumDuelStatus: EVM_DUEL_STATUS_CHALLENGED,
+          expectedMarketStatus: EVM_MARKET_STATUS_LOCKED,
+          participantAHash,
+          participantBHash,
+          betOpenTs: canonicalBetOpenTs,
+          betCloseTs: canonicalBetCloseTs,
+          duelStartTs: canonicalDuelStartTs,
         });
         console.warn(
           `[bot] Duel ${data.duelId} result proposal is challenged on ${chain.chainKey}; leaving market fail-closed until manual resolution.`,
         );
-        return;
+        throw new Error(
+          `${chain.chainKey} duel ${data.duelId} is challenged and cannot satisfy parity resolution`,
+        );
       }
 
       await alignLocalChainTime(
@@ -3226,10 +4236,7 @@ async function reportEvmResult(data: DuelLifecycleEvent): Promise<void> {
           ],
           account: chain.reporter.account,
         });
-        await chain.publicClient.waitForTransactionReceipt({
-          hash: lockHash,
-          confirmations: 1,
-        });
+        await waitForEvmTransactionReceipt(chain, lockHash);
 
         const lockSyncHash = await chain.operator.walletClient.writeContract({
           chain: undefined,
@@ -3239,37 +4246,74 @@ async function reportEvmResult(data: DuelLifecycleEvent): Promise<void> {
           args: [duelKey, EVM_DUEL_WINNER_MARKET_KIND],
           account: chain.operator.account,
         });
-        await chain.publicClient.waitForTransactionReceipt({
-          hash: lockSyncHash,
-          confirmations: 1,
-        });
+        await waitForEvmTransactionReceipt(chain, lockSyncHash);
       }
 
       if (existingStatus === EVM_DUEL_STATUS_PROPOSED) {
         if (EVM_KEEPER_DEFER_FINALIZE) {
-          console.log(
-            `[bot] EVM finalization deferred on ${chain.chainKey}; existing result proposal left pending.`,
-          );
-          return;
+          await verifyEvmLifecycleReadback({
+            chain,
+            duelKey,
+            duelId: data.duelId,
+            minimumDuelStatus: EVM_DUEL_STATUS_PROPOSED,
+            expectedMarketStatus: EVM_MARKET_STATUS_LOCKED,
+            participantAHash,
+            participantBHash,
+            betOpenTs: canonicalBetOpenTs,
+            betCloseTs: canonicalBetCloseTs,
+            duelStartTs: canonicalDuelStartTs,
+          });
+          return {
+            chainKey: chain.chainKey,
+            lifecycleStatus: "PROPOSED",
+            finalized: false,
+            note: "finalization-deferred",
+          };
         }
-        if (!chain.finalizer) {
-          throw new Error(
-            `missing finalizer signer for ${chain.chainKey}; set TESTNET_FINALIZER_PRIVATE_KEY or EVM_FINALIZER_PRIVATE_KEY`,
-          );
+        const finalization = await finalizeEvmDuelResultIfReady(
+          chain,
+          duelKey,
+          metadata,
+        );
+        if (finalization === "proposed") {
+          await verifyEvmLifecycleReadback({
+            chain,
+            duelKey,
+            duelId: data.duelId,
+            minimumDuelStatus: EVM_DUEL_STATUS_PROPOSED,
+            expectedMarketStatus: EVM_MARKET_STATUS_LOCKED,
+            participantAHash,
+            participantBHash,
+            betOpenTs: canonicalBetOpenTs,
+            betCloseTs: canonicalBetCloseTs,
+            duelStartTs: canonicalDuelStartTs,
+          });
+          return {
+            chainKey: chain.chainKey,
+            lifecycleStatus: "PROPOSED",
+            finalized: false,
+            note: "dispute-window-active",
+          };
         }
-        const finalizeHash = await chain.finalizer.walletClient.writeContract({
-          chain: undefined,
-          address: chain.duelOracleAddress,
-          abi: DUEL_OUTCOME_ORACLE_ABI,
-          functionName: "finalizeResult",
-          args: [duelKey, metadata],
-          account: chain.finalizer.account,
+        await verifyEvmLifecycleReadback({
+          chain,
+          duelKey,
+          duelId: data.duelId,
+          minimumDuelStatus: EVM_DUEL_STATUS_RESOLVED,
+          expectedMarketStatus: EVM_MARKET_STATUS_RESOLVED,
+          participantAHash,
+          participantBHash,
+          betOpenTs: canonicalBetOpenTs,
+          betCloseTs: canonicalBetCloseTs,
+          duelStartTs: canonicalDuelStartTs,
+          expectedWinner: winner,
         });
-        await chain.publicClient.waitForTransactionReceipt({
-          hash: finalizeHash,
-          confirmations: 1,
-        });
-        return;
+        return {
+          chainKey: chain.chainKey,
+          lifecycleStatus: "RESOLVED",
+          finalized: true,
+          note: null,
+        };
       }
 
       const proposeHash = await chain.reporter.walletClient.writeContract({
@@ -3293,10 +4337,7 @@ async function reportEvmResult(data: DuelLifecycleEvent): Promise<void> {
         ],
         account: chain.reporter.account,
       });
-      await chain.publicClient.waitForTransactionReceipt({
-        hash: proposeHash,
-        confirmations: 1,
-      });
+      await waitForEvmTransactionReceipt(chain, proposeHash);
 
       const syncHash = await chain.operator.walletClient.writeContract({
         chain: undefined,
@@ -3306,41 +4347,79 @@ async function reportEvmResult(data: DuelLifecycleEvent): Promise<void> {
         args: [duelKey, EVM_DUEL_WINNER_MARKET_KIND],
         account: chain.operator.account,
       });
-      await chain.publicClient.waitForTransactionReceipt({
-        hash: syncHash,
-        confirmations: 1,
-      });
+      await waitForEvmTransactionReceipt(chain, syncHash);
       lastSuccessfulRpcAtMs = Date.now();
 
       if (EVM_KEEPER_DEFER_FINALIZE) {
-        console.log(
-          `[bot] EVM finalization deferred on ${chain.chainKey}; result proposal synced and left pending for staged dispute-window finalization.`,
-        );
-        return;
+        await verifyEvmLifecycleReadback({
+          chain,
+          duelKey,
+          duelId: data.duelId,
+          minimumDuelStatus: EVM_DUEL_STATUS_PROPOSED,
+          expectedMarketStatus: EVM_MARKET_STATUS_LOCKED,
+          participantAHash,
+          participantBHash,
+          betOpenTs: canonicalBetOpenTs,
+          betCloseTs: canonicalBetCloseTs,
+          duelStartTs: canonicalDuelStartTs,
+        });
+        return {
+          chainKey: chain.chainKey,
+          lifecycleStatus: "PROPOSED",
+          finalized: false,
+          note: "finalization-deferred",
+        };
       }
 
-      if (!chain.finalizer) {
-        throw new Error(
-          `missing finalizer signer for ${chain.chainKey}; set TESTNET_FINALIZER_PRIVATE_KEY or EVM_FINALIZER_PRIVATE_KEY`,
-        );
+      const finalization = await finalizeEvmDuelResultIfReady(
+        chain,
+        duelKey,
+        metadata,
+      );
+      if (finalization === "proposed") {
+        await verifyEvmLifecycleReadback({
+          chain,
+          duelKey,
+          duelId: data.duelId,
+          minimumDuelStatus: EVM_DUEL_STATUS_PROPOSED,
+          expectedMarketStatus: EVM_MARKET_STATUS_LOCKED,
+          participantAHash,
+          participantBHash,
+          betOpenTs: canonicalBetOpenTs,
+          betCloseTs: canonicalBetCloseTs,
+          duelStartTs: canonicalDuelStartTs,
+        });
+        return {
+          chainKey: chain.chainKey,
+          lifecycleStatus: "PROPOSED",
+          finalized: false,
+          note: "dispute-window-active",
+        };
       }
-      const finalizeHash = await chain.finalizer.walletClient.writeContract({
-        chain: undefined,
-        address: chain.duelOracleAddress,
-        abi: DUEL_OUTCOME_ORACLE_ABI,
-        functionName: "finalizeResult",
-        args: [duelKey, metadata],
-        account: chain.finalizer.account,
+      await verifyEvmLifecycleReadback({
+        chain,
+        duelKey,
+        duelId: data.duelId,
+        minimumDuelStatus: EVM_DUEL_STATUS_RESOLVED,
+        expectedMarketStatus: EVM_MARKET_STATUS_RESOLVED,
+        participantAHash,
+        participantBHash,
+        betOpenTs: canonicalBetOpenTs,
+        betCloseTs: canonicalBetCloseTs,
+        duelStartTs: canonicalDuelStartTs,
+        expectedWinner: winner,
       });
-      await chain.publicClient.waitForTransactionReceipt({
-        hash: finalizeHash,
-        confirmations: 1,
-      });
+      return {
+        chainKey: chain.chainKey,
+        lifecycleStatus: "RESOLVED",
+        finalized: true,
+        note: null,
+      };
     }),
   );
 
   const failures = results
-    .map((result, index) => ({ chain: evmKeeperChains[index], result }))
+    .map((result, index) => ({ chain: selectedChains[index], result }))
     .filter(
       (
         entry,
@@ -3365,19 +4444,901 @@ async function reportEvmResult(data: DuelLifecycleEvent): Promise<void> {
         .join(", ")}`,
     );
   }
+  return results.map((result) => {
+    if (result.status === "fulfilled") {
+      return result.value;
+    }
+    throw result.reason;
+  });
 }
 
-async function reportRoundResult(data: DuelLifecycleEvent): Promise<void> {
-  const trackedMatch = activeClobMatches.get(data.duelId);
-  if (!trackedMatch) {
+function buildSyntheticLockEvent(
+  snapshot: KeeperMarketParitySnapshot,
+  fallbackDuelKeyHex: string | null = null,
+): DuelLifecycleEvent | null {
+  const duelKey = snapshot.duelKey ?? fallbackDuelKeyHex;
+  if (!duelKey) return null;
+  return {
+    cycleId: snapshot.bundleId,
+    duelId: snapshot.duelId ?? `parity:${duelKey}`,
+    duelKeyHex: duelKey,
+    betOpenTime: null,
+    betCloseTime: null,
+    fightStartTime: null,
+    duelEndTime: null,
+    phase: snapshot.phase ?? "COUNTDOWN",
+    winnerId: null,
+    seed: null,
+    replayHash: null,
+    agent1: null,
+    agent2: null,
+  };
+}
+
+function isPendingParityLock(snapshot: KeeperMarketParitySnapshot): boolean {
+  if (isTerminalMarketParityState(snapshot.state)) return false;
+  if (snapshot.state === "locked") return false;
+  if (!snapshot.openedAtMs) return false;
+  // Check per-chain receipts rather than the top-level lockedAtMs, because
+  // partial success (one chain locked, others still open) can set the top-level
+  // timestamp while leaving some chains unlocked. We keep reconciling until
+  // every required chain's receipt reports LOCKED or a terminal state.
+  return snapshot.requiredChains.some((chainKey) => {
+    const receipt = snapshot.receipts.find((entry) => entry.chainKey === chainKey);
+    if (!receipt) return true;
+    return (
+      receipt.lifecycleStatus !== "LOCKED" &&
+      receipt.lifecycleStatus !== "PROPOSED" &&
+      receipt.lifecycleStatus !== "RESOLVED" &&
+      receipt.lifecycleStatus !== "CANCELLED"
+    );
+  });
+}
+
+async function maybeFinalizePendingSolanaParityLock(): Promise<void> {
+  const current = marketParitySnapshot;
+  if (!current || !isPendingParityLock(current)) {
+    return;
+  }
+  if (!requiredParityChains.includes("solana")) {
     return;
   }
 
-  if (!data.seed || !data.replayHash) {
-    console.warn(
-      `[Keeper] duel:completed for ${data.duelId} is missing seed or replayHash; refusing to post an unverifiable oracle result.`,
-    );
+  const receipt = current.receipts.find((entry) => entry.chainKey === "solana");
+  if (
+    receipt?.lifecycleStatus === "LOCKED" ||
+    receipt?.lifecycleStatus === "RESOLVED"
+  ) {
     return;
+  }
+
+  const trackedMatch = deriveTrackedMatchForParitySnapshot(current);
+  if (!trackedMatch) {
+    console.warn("[bot] market_parity_solana_lock_skip", {
+      reason: "missing-duel-key",
+      duelId: current.duelId,
+      duelKey: current.duelKey,
+    });
+    return;
+  }
+
+  const duelState = await getDuelState(trackedMatch.duelState);
+  if (!duelState) {
+    console.warn("[bot] market_parity_solana_lock_skip", {
+      reason: "duel-state-missing",
+      duelId: current.duelId,
+      duelKey: current.duelKey,
+    });
+    return;
+  }
+
+  if (enumIs(duelState.status, "challenged") || Boolean(duelState.pendingChallenged)) {
+    finalizeMarketParityState("frozen", current.phase, {
+      reason: `solana duel ${current.duelId ?? current.duelKey} is challenged`,
+    });
+    return;
+  }
+
+  if (
+    enumIs(duelState.status, "locked") ||
+    enumIs(duelState.status, "proposed") ||
+    enumIs(duelState.status, "resolved")
+  ) {
+    markMarketParityChainConfirmed({
+      chainKey: "solana",
+      transition: "lock",
+      lifecycleStatus: "LOCKED",
+      note: "locked-on-readback",
+    });
+    if (allRequiredParityChainsConfirmed()) {
+      finalizeMarketParityState("locked", current.phase ?? "COUNTDOWN");
+    }
+    return;
+  }
+
+  if (!enumIs(duelState.status, "bettingOpen")) {
+    console.warn("[bot] market_parity_solana_lock_skip", {
+      reason: "unexpected-status",
+      duelId: current.duelId,
+      duelKey: current.duelKey,
+      status: duelState.status,
+    });
+    return;
+  }
+
+  const betCloseTs = asNum(duelState.betCloseTs, 0);
+  if (betCloseTs > 0 && Date.now() < betCloseTs * 1_000) {
+    return;
+  }
+
+  const syntheticEvent = buildSyntheticLockEvent(current, trackedMatch.duelKeyHex);
+  if (!syntheticEvent) return;
+
+  try {
+    await lockRound(syntheticEvent);
+    markMarketParityChainConfirmed({
+      chainKey: "solana",
+      transition: "lock",
+      lifecycleStatus: "LOCKED",
+      note: "reconciler-lock",
+    });
+    if (allRequiredParityChainsConfirmed()) {
+      finalizeMarketParityState("locked", current.phase ?? "COUNTDOWN");
+    }
+  } catch (error) {
+    console.warn("[bot] market_parity_solana_lock_retry", {
+      duelId: current.duelId,
+      duelKey: current.duelKey,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+async function maybeFinalizePendingEvmParityLock(): Promise<void> {
+  const current = marketParitySnapshot;
+  if (!current || !isPendingParityLock(current) || !current.duelKey) {
+    return;
+  }
+
+  const evmParityChains = requiredEvmParityChains();
+  if (evmParityChains.length === 0) {
+    return;
+  }
+
+  if (!EVM_KEEPER_ENABLE_LIFECYCLE_WRITES) {
+    return;
+  }
+
+  const duelKey = normalizeHex32(current.duelKey);
+  const syntheticEvent = buildSyntheticLockEvent(current);
+  if (!syntheticEvent) return;
+
+  let confirmedHere = false;
+  for (const chain of evmKeeperChains.filter((entry) =>
+    evmParityChains.includes(entry.chainKey),
+  )) {
+    try {
+      const receipt = marketParitySnapshot?.receipts.find(
+        (entry) => entry.chainKey === chain.chainKey,
+      );
+      if (
+        receipt?.lifecycleStatus === "LOCKED" ||
+        receipt?.lifecycleStatus === "RESOLVED"
+      ) {
+        continue;
+      }
+
+      const duel = await readEvmDuelState(chain, duelKey);
+      const status = asNum(duel.status, EVM_DUEL_STATUS_NULL);
+
+      if (status === EVM_DUEL_STATUS_CHALLENGED) {
+        finalizeMarketParityState("frozen", current.phase, {
+          reason: `${chain.chainKey} duel ${current.duelId ?? current.duelKey} is challenged`,
+        });
+        return;
+      }
+
+      if (status >= EVM_DUEL_STATUS_LOCKED) {
+        markMarketParityChainConfirmed({
+          chainKey: chain.chainKey,
+          transition: "lock",
+          lifecycleStatus: lifecycleStatusFromEvmWriteStatus(3),
+          note: "locked-on-readback",
+        });
+        confirmedHere = true;
+        continue;
+      }
+
+      if (status !== EVM_DUEL_STATUS_BETTING_OPEN) {
+        console.warn("[bot] market_parity_evm_lock_skip", {
+          chainKey: chain.chainKey,
+          duelId: current.duelId,
+          duelKey: current.duelKey,
+          status,
+        });
+        continue;
+      }
+
+      const betCloseTs = Number(duel.betCloseTs ?? 0n);
+      if (betCloseTs > 0 && Date.now() < betCloseTs * 1_000) {
+        continue;
+      }
+
+      await upsertEvmDuelLifecycle(syntheticEvent, 3, [chain.chainKey]);
+      markMarketParityChainConfirmed({
+        chainKey: chain.chainKey,
+        transition: "lock",
+        lifecycleStatus: lifecycleStatusFromEvmWriteStatus(3),
+        note: "reconciler-lock",
+      });
+      confirmedHere = true;
+    } catch (error) {
+      console.warn("[bot] market_parity_evm_lock_retry", {
+        chainKey: chain.chainKey,
+        duelId: current.duelId,
+        duelKey: current.duelKey,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  if (confirmedHere && allRequiredParityChainsConfirmed()) {
+    finalizeMarketParityState("locked", current.phase ?? "COUNTDOWN");
+  }
+}
+
+// ── Missed-duel-end catch-up ─────────────────────────────────────────────────
+// If a keeper restart (or WebSocket drop) loses a live `duel_ended` event,
+// the bundle gets stuck in state=locked with phase="COUNTDOWN" — the resolve
+// reconcilers below gate on phase==="RESOLUTION" and never fire, and Solana
+// resolution requires seed+replayHash that only arrive on that event. The
+// Hyperscapes API persists those fields to streaming_duel_history at
+// resolution time and exposes them via GET /api/streaming/results/:duelId
+// (bearer-auth). This helper polls that endpoint for stuck bundles and
+// synthesises a DuelLifecycleEvent the existing onDuelEnd flow can consume.
+
+type HyperscapesDuelResult = {
+  duelId: string;
+  cycleId: string;
+  duelKeyHex: string;
+  duelEndTime: number | null;
+  seed: string;
+  replayHash: string;
+  winnerId: string;
+  winnerName: string;
+  loserId: string;
+  loserName: string;
+  winReason: string;
+  damageWinner: number;
+  damageLoser: number;
+  finishedAt: number;
+};
+
+const RESULT_CATCHUP_BEARER_TOKEN =
+  process.env.HYPERSCAPES_RESULT_LOOKUP_BEARER_TOKEN?.trim() ||
+  process.env.BETTING_FEED_ACCESS_TOKEN?.trim() ||
+  process.env.STREAM_STATE_SOURCE_BEARER_TOKEN?.trim() ||
+  "";
+
+const RESULT_CATCHUP_TIMEOUT_MS = Math.max(
+  1_000,
+  Number(process.env.HYPERSCAPES_RESULT_LOOKUP_TIMEOUT_MS || 5_000),
+);
+
+async function fetchHyperscapesDuelResult(
+  duelId: string,
+): Promise<HyperscapesDuelResult | null> {
+  if (!RESULT_CATCHUP_BEARER_TOKEN) return null;
+
+  const base = args["game-url"];
+  if (!base) return null;
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(
+    () => controller.abort(),
+    RESULT_CATCHUP_TIMEOUT_MS,
+  );
+  try {
+    const res = await fetch(
+      `${base.replace(/\/$/, "")}/api/streaming/results/${encodeURIComponent(duelId)}`,
+      {
+        cache: "no-store",
+        headers: {
+          authorization: `Bearer ${RESULT_CATCHUP_BEARER_TOKEN}`,
+          connection: "close",
+        },
+        signal: controller.signal,
+      },
+    );
+    if (res.status === 404 || res.status === 409) {
+      // 404: result not yet persisted, retry later.
+      // 409: legacy row without oracle proof, can't be used for synthetic replay.
+      try {
+        await res.body?.cancel();
+      } catch {}
+      return null;
+    }
+    if (!res.ok) {
+      try {
+        await res.body?.cancel();
+      } catch {}
+      return null;
+    }
+    return (await res.json()) as HyperscapesDuelResult;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+async function maybeCatchUpMissedDuelEnd(): Promise<void> {
+  const current = marketParitySnapshot;
+  if (!current) return;
+  if (isTerminalMarketParityState(current.state)) return;
+  // Bundle must be past the open window (locked or a post-lock frozen state)
+  // and not already confirmed resolved.
+  if (!current.lockedAtMs) return;
+  if (current.resolvedAtMs) return;
+  if (current.phase === "RESOLUTION") return; // existing reconcilers handle this
+  if (!current.duelId) return;
+
+  const result = await fetchHyperscapesDuelResult(current.duelId);
+  if (!result) return;
+
+  // Reject mismatched catch-up results to avoid resolving with wrong data.
+  const expectedDuelKey = normalizedBundleDuelKey(current.duelKey);
+  const resultDuelKey = normalizedBundleDuelKey(result.duelKeyHex);
+  if (expectedDuelKey && resultDuelKey && expectedDuelKey !== resultDuelKey) {
+    console.warn("[bot] result_catchup_duelkey_mismatch", {
+      duelId: current.duelId,
+      expectedDuelKey,
+      resultDuelKey,
+    });
+    return;
+  }
+
+  const winnerIsAgent1 = result.winnerId === "agent1" || result.winnerId.endsWith(":agent1");
+  const syntheticEvent: DuelLifecycleEvent = {
+    cycleId: result.cycleId,
+    duelId: result.duelId,
+    duelKeyHex: result.duelKeyHex,
+    betOpenTime: null,
+    betCloseTime: null,
+    fightStartTime: null,
+    duelEndTime: result.duelEndTime,
+    phase: "RESOLUTION",
+    winnerId: result.winnerId,
+    seed: result.seed,
+    replayHash: result.replayHash,
+    agent1: {
+      id: winnerIsAgent1 ? result.winnerId : result.loserId,
+      name: winnerIsAgent1 ? result.winnerName : result.loserName,
+    },
+    agent2: {
+      id: winnerIsAgent1 ? result.loserId : result.winnerId,
+      name: winnerIsAgent1 ? result.loserName : result.winnerName,
+    },
+  };
+
+  console.log("[bot] result_catchup_firing_synthetic_duel_end", {
+    duelId: current.duelId,
+    winnerId: result.winnerId,
+    finishedAt: result.finishedAt,
+  });
+
+  // Prime the snapshot for resolution and run the resolve flow directly.
+  // We mirror onDuelEnd's resolve portion, skipping the ratings/monologues
+  // bookkeeping — those are already persisted by Hyperscapes and don't
+  // belong in a catch-up.
+  beginMarketParityBundle(syntheticEvent, "RESOLUTION");
+  resetMarketParityConfirmations("awaiting_confirmations", "RESOLUTION", false);
+  writeBotHealthSnapshot();
+
+  try {
+    if (requiredParityChains.includes("solana")) {
+      if (!solanaKeeperWriteEnabled) {
+        throw new Error(
+          "result_catchup: solana parity required but keeper writes disabled",
+        );
+      }
+      if (!(await ensureKeeperChainReady())) {
+        throw new Error(
+          "result_catchup: solana parity required but keeper chain not ready",
+        );
+      }
+      if (!(await ensureBotSignerFunding())) {
+        throw new Error(
+          "result_catchup: solana parity required but bot signer funding is below threshold",
+        );
+      }
+      const solanaOutcome = await reportRoundResult(syntheticEvent);
+      markMarketParityChainConfirmed({
+        chainKey: "solana",
+        transition:
+          solanaOutcome.lifecycleStatus === "RESOLVED" ? "resolve" : "propose",
+        lifecycleStatus: solanaOutcome.lifecycleStatus,
+        countsForQuorum: solanaOutcome.finalized,
+        note: `catchup:${solanaOutcome.note ?? "ok"}`,
+      });
+      writeBotHealthSnapshot();
+    }
+
+    const evmParityChains = requiredEvmParityChains();
+    if (evmParityChains.length > 0) {
+      if (!EVM_KEEPER_ENABLE_LIFECYCLE_WRITES) {
+        throw new Error(
+          "result_catchup: EVM parity required but lifecycle writes disabled",
+        );
+      }
+      const evmOutcomes = await reportEvmResult(
+        syntheticEvent,
+        evmParityChains,
+      );
+      for (const outcome of evmOutcomes) {
+        markMarketParityChainConfirmed({
+          chainKey: outcome.chainKey,
+          transition:
+            outcome.lifecycleStatus === "RESOLVED" ? "resolve" : "propose",
+          lifecycleStatus: outcome.lifecycleStatus,
+          countsForQuorum: outcome.lifecycleStatus === "RESOLVED",
+          note: `catchup:${outcome.note ?? "ok"}`,
+        });
+      }
+      writeBotHealthSnapshot();
+    }
+
+    if (allRequiredParityChainsConfirmed()) {
+      finalizeMarketParityState("resolved", "RESOLUTION");
+    }
+    // Else: the normal resolve reconcilers will pick up any remaining
+    // dispute-window chains on subsequent maintenance ticks.
+  } catch (err) {
+    finalizeMarketParityState("frozen", "RESOLUTION", {
+      reason: `result_catchup_failed: ${err instanceof Error ? err.message : String(err)}`,
+    });
+    console.error("[bot] result_catchup_failed", err);
+  }
+  writeBotHealthSnapshot();
+}
+
+// Catch up ALL locked-past-betClose duels whose authoritative result is now
+// available in Hyperscapes. The parity-snapshot healing above only addresses
+// the CURRENT bundle; this handles the backlog of older duels that were
+// locked but stranded (a keeper restart dropped duel_ended for them and the
+// snapshot has since been replaced by newer cycles). These duels show up in
+// `unresolvedOracleWarningMatches` — the same set the health snapshot's
+// "awaiting-result" recovery code references. For each such duel we pull the
+// persisted oracle proof and invoke the on-chain proposers directly, without
+// touching the live `marketParitySnapshot` (which is for a different duel).
+async function maybeCatchUpStrandedLockedDuels(): Promise<void> {
+  if (unresolvedOracleWarningMatches.size === 0) return;
+
+  // Snapshot the set so mutations during iteration don't skip entries.
+  const candidates = Array.from(unresolvedOracleWarningMatches);
+
+  for (const duelId of candidates) {
+    // Skip the current parity snapshot's duel — it's handled by
+    // maybeCatchUpMissedDuelEnd, which takes the parity-snapshot path.
+    if (marketParitySnapshot?.duelId === duelId) continue;
+
+    const trackedMatch = activeClobMatches.get(duelId);
+    if (!trackedMatch) {
+      // No local tracked match — catch-up would have no on-chain reference.
+      // Drop the warning entry so we stop flagging it.
+      unresolvedOracleWarningMatches.delete(duelId);
+      continue;
+    }
+
+    const result = await fetchHyperscapesDuelResult(duelId);
+    if (!result) {
+      // Row not in DB yet (or endpoint unreachable). Retry next tick.
+      continue;
+    }
+
+    const expectedDuelKey = normalizedBundleDuelKey(trackedMatch.duelKeyHex);
+    const resultDuelKey = normalizedBundleDuelKey(result.duelKeyHex);
+    if (expectedDuelKey && resultDuelKey && expectedDuelKey !== resultDuelKey) {
+      console.warn("[bot] result_catchup_stranded_duelkey_mismatch", {
+        duelId,
+        expectedDuelKey,
+        resultDuelKey,
+      });
+      continue;
+    }
+
+    const winnerIsAgent1 =
+      result.winnerId === "agent1" || result.winnerId.endsWith(":agent1");
+    const syntheticEvent: DuelLifecycleEvent = {
+      cycleId: result.cycleId,
+      duelId: result.duelId,
+      duelKeyHex: result.duelKeyHex,
+      betOpenTime: null,
+      betCloseTime: null,
+      fightStartTime: null,
+      duelEndTime: result.duelEndTime,
+      phase: "RESOLUTION",
+      winnerId: result.winnerId,
+      seed: result.seed,
+      replayHash: result.replayHash,
+      agent1: {
+        id: winnerIsAgent1 ? result.winnerId : result.loserId,
+        name: winnerIsAgent1 ? result.winnerName : result.loserName,
+      },
+      agent2: {
+        id: winnerIsAgent1 ? result.loserId : result.winnerId,
+        name: winnerIsAgent1 ? result.loserName : result.winnerName,
+      },
+    };
+
+    console.log("[bot] result_catchup_stranded_firing", {
+      duelId,
+      winnerId: result.winnerId,
+      finishedAt: result.finishedAt,
+      backlogSize: unresolvedOracleWarningMatches.size,
+    });
+
+    // Advance on-chain state directly. This does NOT touch the current
+    // marketParitySnapshot (which is for a different duel) — we're just
+    // closing out an orphaned market on-chain so the keeper can stop
+    // flagging it as awaiting authoritative result.
+    try {
+      if (requiredParityChains.includes("solana") && solanaKeeperWriteEnabled) {
+        if (!(await ensureKeeperChainReady())) continue;
+        if (!(await ensureBotSignerFunding())) continue;
+        await reportRoundResult(syntheticEvent);
+      }
+
+      const evmParityChains = requiredEvmParityChains();
+      if (evmParityChains.length > 0 && EVM_KEEPER_ENABLE_LIFECYCLE_WRITES) {
+        await reportEvmResult(syntheticEvent, evmParityChains);
+      }
+
+      unresolvedOracleWarningMatches.delete(duelId);
+      console.log("[bot] result_catchup_stranded_ok", {
+        duelId,
+        remainingBacklog: unresolvedOracleWarningMatches.size,
+      });
+    } catch (err) {
+      console.warn("[bot] result_catchup_stranded_failed", {
+        duelId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      // Leave the duelId in the warning set — retry next tick.
+    }
+  }
+}
+
+async function maybeFinalizePendingEvmParityResolution(): Promise<void> {
+  const current = marketParitySnapshot;
+  if (!current || isTerminalMarketParityState(current.state) || !current.duelKey) {
+    return;
+  }
+  // Phase-independent on-chain readback: even if `onDuelEnd` was missed (so
+  // phase never advanced to "RESOLUTION"), we still want to reconcile when
+  // on-chain state shows the duel has moved past LOCKED. Gate on:
+  //  - phase === "RESOLUTION" (normal flow), OR
+  //  - bundle already reached LOCKED but hasn't been resolved and at least
+  //    one EVM chain receipt is still short of RESOLVED.
+  const hasPendingEvmReceipt =
+    current.lockedAtMs != null &&
+    current.resolvedAtMs == null &&
+    current.receipts.some(
+      (receipt) =>
+        receipt.lifecycleStatus !== "RESOLVED" &&
+        receipt.lifecycleStatus !== "CANCELLED",
+    );
+  if (current.phase !== "RESOLUTION" && !hasPendingEvmReceipt) {
+    return;
+  }
+
+  const duelKey = normalizeHex32(current.duelKey);
+  const metadata = buildDuelMetadataForDuelKey(current.duelKey, current.duelId);
+  const evmParityChains = requiredEvmParityChains();
+  if (evmParityChains.length === 0) {
+    return;
+  }
+
+  for (const chain of evmKeeperChains.filter((entry) =>
+    evmParityChains.includes(entry.chainKey),
+  )) {
+    try {
+      const receipt = marketParitySnapshot?.receipts.find(
+        (entry) => entry.chainKey === chain.chainKey,
+      );
+      if (receipt?.lifecycleStatus === "RESOLVED") {
+        continue;
+      }
+
+      const duel = await readEvmDuelState(chain, duelKey);
+      const status = asNum(duel.status, EVM_DUEL_STATUS_NULL);
+      if (status === EVM_DUEL_STATUS_RESOLVED) {
+        markMarketParityChainConfirmed({
+          chainKey: chain.chainKey,
+          transition: "resolve",
+          lifecycleStatus: "RESOLVED",
+          note: "resolved-on-readback",
+        });
+        continue;
+      }
+      if (status === EVM_DUEL_STATUS_CHALLENGED) {
+        finalizeMarketParityState("frozen", "RESOLUTION", {
+          reason: `${chain.chainKey} duel ${current.duelId ?? current.duelKey} is challenged`,
+        });
+        return;
+      }
+      if (status !== EVM_DUEL_STATUS_PROPOSED) {
+        console.warn("[bot] market_parity_evm_finalize_skip", {
+          chainKey: chain.chainKey,
+          duelId: current.duelId,
+          duelKey: current.duelKey,
+          status,
+        });
+        continue;
+      }
+
+      const finalization = await finalizeEvmDuelResultIfReady(
+        chain,
+        duelKey,
+        metadata,
+      );
+      markMarketParityChainConfirmed({
+        chainKey: chain.chainKey,
+        transition: finalization === "resolved" ? "resolve" : "propose",
+        lifecycleStatus: finalization === "resolved" ? "RESOLVED" : "PROPOSED",
+        countsForQuorum: finalization === "resolved",
+        note:
+          finalization === "resolved"
+            ? "finalized-after-dispute-window"
+            : "dispute-window-active",
+      });
+    } catch (error) {
+      console.warn("[bot] market_parity_evm_finalize_retry", {
+        chainKey: chain.chainKey,
+        duelId: current.duelId,
+        duelKey: current.duelKey,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  if (allRequiredParityChainsConfirmed()) {
+    finalizeMarketParityState("resolved", "RESOLUTION");
+  }
+}
+
+async function maybeFinalizePendingSolanaParityResolution(): Promise<void> {
+  const current = marketParitySnapshot;
+  if (
+    !current ||
+    isTerminalMarketParityState(current.state) ||
+    !requiredParityChains.includes("solana")
+  ) {
+    return;
+  }
+
+  const receipt = current.receipts.find((entry) => entry.chainKey === "solana");
+  if (receipt?.lifecycleStatus === "RESOLVED") {
+    return;
+  }
+
+  // Phase-independent readback: run when phase === "RESOLUTION" (normal flow)
+  // OR when the bundle is already locked on-chain but the Solana receipt
+  // hasn't reached RESOLVED yet. The latter covers the case where
+  // `onDuelEnd` was missed and `reportRoundResult` was never invoked; an
+  // on-chain readback can still promote the receipt to RESOLVED if the
+  // proposal has already been finalized out-of-band, or catch a CHALLENGED
+  // transition.
+  // We already returned above when the Solana receipt is RESOLVED, so from
+  // here the receipt is null/undefined/pending or something earlier in the
+  // lifecycle. Accept phase==="RESOLUTION" (normal flow) OR a bundle that
+  // reached LOCKED on-chain but never got its Solana receipt advanced.
+  const hasPendingSolanaReceipt =
+    current.lockedAtMs != null &&
+    current.resolvedAtMs == null &&
+    receipt?.lifecycleStatus !== "CANCELLED";
+  if (current.phase !== "RESOLUTION" && !hasPendingSolanaReceipt) {
+    return;
+  }
+
+  const trackedMatch = deriveTrackedMatchForParitySnapshot(current);
+  if (!trackedMatch) {
+    console.warn("[bot] market_parity_solana_finalize_skip", {
+      reason: "missing-duel-key",
+      duelId: current.duelId,
+      duelKey: current.duelKey,
+    });
+    return;
+  }
+
+  let duelState = await getDuelState(trackedMatch.duelState);
+  if (!duelState) {
+    console.warn("[bot] market_parity_solana_finalize_skip", {
+      reason: "duel-state-missing",
+      duelId: current.duelId,
+      duelKey: current.duelKey,
+      duelState: trackedMatch.duelState.toBase58(),
+    });
+    return;
+  }
+
+  if (enumIs(duelState.status, "challenged") || Boolean(duelState.pendingChallenged)) {
+    finalizeMarketParityState("frozen", "RESOLUTION", {
+      reason: `solana duel ${current.duelId ?? current.duelKey} is challenged`,
+    });
+    return;
+  }
+
+  if (enumIs(duelState.status, "resolved")) {
+    trackedMatch.winner = resolvedWinnerFromDuelState(duelState);
+    await syncTrackedMarketFromOracle(trackedMatch);
+    await captureSettledClobHealth(trackedMatch, "RESOLVED");
+    if (trackedMatch.duelId) {
+      activeClobMatches.delete(trackedMatch.duelId);
+      unresolvedOracleWarningMatches.delete(trackedMatch.duelId);
+    }
+    markMarketParityChainConfirmed({
+      chainKey: "solana",
+      transition: "resolve",
+      lifecycleStatus: "RESOLVED",
+      note: "resolved-on-readback",
+    });
+    if (allRequiredParityChainsConfirmed()) {
+      finalizeMarketParityState("resolved", "RESOLUTION");
+    }
+    return;
+  }
+
+  if (!enumIs(duelState.status, "proposed")) {
+    console.warn("[bot] market_parity_solana_finalize_skip", {
+      reason: "not-proposed",
+      duelId: current.duelId,
+      duelKey: current.duelKey,
+      status: duelState.status,
+    });
+    return;
+  }
+
+  const metadata = buildDuelMetadataForDuelKey(
+    trackedMatch.duelKeyHex,
+    trackedMatch.duelId,
+  );
+  let finalized = false;
+  try {
+    finalized = await maybeFinalizeTrackedProposal(
+      trackedMatch,
+      duelState,
+      metadata,
+    );
+  } catch (error) {
+    if (!isSolanaDisputeWindowActiveError(error)) {
+      throw error;
+    }
+  }
+
+  if (!finalized) {
+    if (trackedMatch.duelId) {
+      unresolvedOracleWarningMatches.delete(trackedMatch.duelId);
+    }
+    markMarketParityChainConfirmed({
+      chainKey: "solana",
+      transition: "propose",
+      lifecycleStatus: "PROPOSED",
+      countsForQuorum: false,
+      note: "dispute-window-active",
+    });
+    return;
+  }
+
+  duelState = await getDuelState(trackedMatch.duelState);
+  if (!duelState || !enumIs(duelState.status, "resolved")) {
+    console.warn("[bot] market_parity_solana_finalize_skip", {
+      reason: "finalize-readback-not-resolved",
+      duelId: current.duelId,
+      duelKey: current.duelKey,
+      status: duelState?.status ?? null,
+    });
+    return;
+  }
+
+  trackedMatch.winner = resolvedWinnerFromDuelState(duelState);
+  await syncTrackedMarketFromOracle(trackedMatch);
+  await captureSettledClobHealth(trackedMatch, "RESOLVED");
+  if (trackedMatch.duelId) {
+    activeClobMatches.delete(trackedMatch.duelId);
+    unresolvedOracleWarningMatches.delete(trackedMatch.duelId);
+  }
+  markMarketParityChainConfirmed({
+    chainKey: "solana",
+    transition: "resolve",
+    lifecycleStatus: "RESOLVED",
+    note: "finalized-after-dispute-window",
+  });
+  if (allRequiredParityChainsConfirmed()) {
+    finalizeMarketParityState("resolved", "RESOLUTION");
+  }
+}
+
+async function maybeFinalizeTrackedProposal(
+  trackedMatch: ActiveClobMatch,
+  duelState: Awaited<ReturnType<typeof getDuelState>>,
+  metadataUri: string,
+): Promise<boolean> {
+  if (
+    !duelState ||
+    !enumIs(duelState.status, "proposed") ||
+    Boolean(duelState.pendingChallenged)
+  ) {
+    return false;
+  }
+
+  const oracleConfig = await getOracleConfigState();
+  if (!oracleConfig) {
+    throw new Error(`Missing oracle config ${oracleConfigPda.toBase58()}`);
+  }
+
+  const finalizableAt =
+    asNum(duelState.pendingProposedAt) + asNum(oracleConfig.disputeWindowSecs);
+  if (Math.floor(Date.now() / 1000) < finalizableAt) {
+    return false;
+  }
+
+  try {
+    await runWithRecovery(
+      () =>
+        fightProgram.methods
+          .finalizeResult(
+            Array.from(duelKeyHexToBytes(trackedMatch.duelKeyHex)),
+            metadataUri,
+          )
+          .accountsPartial({
+            finalizer: oracleFinalizerKeypair.publicKey,
+            oracleConfig: oracleConfigPda,
+            duelState: trackedMatch.duelState,
+          })
+          .signers([oracleFinalizerKeypair])
+          .rpc(),
+      connection,
+    );
+  } catch (error) {
+    if (isSolanaDisputeWindowActiveError(error)) {
+      return false;
+    }
+    throw error;
+  }
+  markRpcSuccess(trackedMatch);
+  return true;
+}
+
+async function reportRoundResult(
+  data: DuelLifecycleEvent,
+): Promise<SolanaResolutionOutcome> {
+  // Rehydrate the tracked match from the persisted parity snapshot if the
+  // in-memory map lost it across a restart. Mirrors the lockRound fix so the
+  // resolve path survives the same class of restart window.
+  let trackedMatch = activeClobMatches.get(data.duelId);
+  if (!trackedMatch && marketParitySnapshot) {
+    trackedMatch =
+      deriveTrackedMatchForParitySnapshot(marketParitySnapshot) ?? undefined;
+  }
+  if (!trackedMatch) {
+    throw new Error(
+      `reportRoundResult: cannot resolve Solana tracked match for duel ${data.duelId}`,
+    );
+  }
+
+  // Data-quality preconditions. These used to return null and collapse into
+  // the caller's generic "failed to report Solana result" freezeReason. Throw
+  // specific errors so freezeReason captures the real root cause.
+  if (!data.seed) {
+    throw new Error(
+      `reportRoundResult: duel ${data.duelId} missing seed; refusing to post an unverifiable oracle result`,
+    );
+  }
+  if (!data.replayHash) {
+    throw new Error(
+      `reportRoundResult: duel ${data.duelId} missing replayHash; refusing to post an unverifiable oracle result`,
+    );
   }
 
   const winnerId = data.winnerId;
@@ -3388,25 +5349,23 @@ async function reportRoundResult(data: DuelLifecycleEvent): Promise<void> {
         ? "B"
         : null;
   if (!winnerSide) {
-    console.warn(
-      `[Keeper] duel:completed for ${data.duelId} supplied an unknown winner id; refusing to post oracle result.`,
+    throw new Error(
+      `reportRoundResult: duel ${data.duelId} supplied unknown winner id ${winnerId ?? "<null>"}; agent1=${data.agent1?.id ?? "<null>"} agent2=${data.agent2?.id ?? "<null>"}`,
     );
-    return;
   }
 
   let replayHashHex: string;
   try {
     replayHashHex = normalizeHex32Raw(data.replayHash);
-  } catch {
-    console.warn(
-      `[Keeper] duel:completed for ${data.duelId} supplied an invalid replayHash; refusing to post oracle result.`,
+  } catch (err) {
+    throw new Error(
+      `reportRoundResult: duel ${data.duelId} supplied invalid replayHash ${data.replayHash}: ${err instanceof Error ? err.message : String(err)}`,
     );
-    return;
   }
 
   const resolvedSeed = data.seed;
 
-  const duelState = await getDuelState(trackedMatch.duelState);
+  let duelState = await getDuelState(trackedMatch.duelState);
   if (duelState && enumIs(duelState.status, "resolved")) {
     trackedMatch.winner = winnerSide;
     await syncTrackedMarketFromOracle(trackedMatch);
@@ -3415,7 +5374,11 @@ async function reportRoundResult(data: DuelLifecycleEvent): Promise<void> {
     activeClobMatches.delete(data.duelId);
     unresolvedOracleWarningMatches.delete(data.duelId);
     writeBotHealthSnapshot();
-    return;
+    return {
+      lifecycleStatus: "RESOLVED",
+      finalized: true,
+      note: "already-resolved",
+    };
   }
 
   const duelKey = duelKeyHexToBytes(data.duelKeyHex);
@@ -3424,47 +5387,86 @@ async function reportRoundResult(data: DuelLifecycleEvent): Promise<void> {
     duelState ? asNum(duelState.betCloseTs) : 0,
   );
 
-  console.log(
-    `[Keeper] Waiting 15s before posting result for duel ${data.duelId} to sync with stream...`,
-  );
-  await sleep(15_000);
+  if (resultPostDelayMs > 0) {
+    console.log(
+      `[Keeper] Waiting ${Math.ceil(
+        resultPostDelayMs / 1000,
+      )}s before posting result for duel ${data.duelId}...`,
+    );
+    await sleep(resultPostDelayMs);
+  }
 
-  await runWithRecovery(
-    () =>
-      fightProgram.methods
-        .proposeResult(
-          Array.from(duelKey),
-          winnerSide === "A" ? ({ a: {} } as DuelWinner) : ({ b: {} } as DuelWinner),
-          new BN(resolvedSeed),
-          Array.from(Buffer.from(replayHashHex, "hex")),
-          buildResultHash(
-            data.duelKeyHex,
-            winnerSide,
-            resolvedSeed,
-            replayHashHex,
-          ),
-          new BN(duelEndTs),
-          buildDuelMetadata(data),
-        )
-        .accountsPartial({
-          reporter: botKeypair.publicKey,
-          oracleConfig: oracleConfigPda,
-          duelState: trackedMatch.duelState,
-        })
-        .rpc()
-        .then(() =>
-          fightProgram.methods
-            .finalizeResult(Array.from(duelKey), buildDuelMetadata(data))
-            .accountsPartial({
-              finalizer: botKeypair.publicKey,
-              oracleConfig: oracleConfigPda,
-              duelState: trackedMatch.duelState,
-            })
-            .rpc(),
-        ),
-    connection,
-  );
-  const resolutionRecordedAt = markRpcSuccess(trackedMatch);
+  if (duelState && enumIs(duelState.status, "challenged")) {
+    await syncTrackedMarketFromOracle(trackedMatch);
+    unresolvedOracleWarningMatches.delete(data.duelId);
+    console.warn(
+      `[Keeper] Duel ${data.duelId} result proposal is challenged; leaving the market fail-closed until manual resolution.`,
+    );
+    return {
+      lifecycleStatus: "CHALLENGED",
+      finalized: false,
+      note: "proposal-challenged",
+    };
+  }
+
+  if (duelState && enumIs(duelState.status, "locked")) {
+    await runWithRecovery(
+      () =>
+        fightProgram.methods
+          .proposeResult(
+            Array.from(duelKey),
+            winnerSide === "A" ? ({ a: {} } as DuelWinner) : ({ b: {} } as DuelWinner),
+            new BN(resolvedSeed),
+            Array.from(Buffer.from(replayHashHex, "hex")),
+            buildResultHash(
+              data.duelKeyHex,
+              winnerSide,
+              resolvedSeed,
+              replayHashHex,
+            ),
+            new BN(duelEndTs),
+            buildDuelMetadata(data),
+          )
+          .accountsPartial({
+            reporter: oracleReporterKeypair.publicKey,
+            oracleConfig: oracleConfigPda,
+            duelState: trackedMatch.duelState,
+          })
+          .signers([oracleReporterKeypair])
+          .rpc(),
+      connection,
+    );
+    trackedMatch.lastOracleAtMs = markRpcSuccess(trackedMatch);
+    duelState = await getDuelState(trackedMatch.duelState);
+  }
+
+  if (
+    duelState &&
+    enumIs(duelState.status, "proposed") &&
+    !(await maybeFinalizeTrackedProposal(
+      trackedMatch,
+      duelState,
+      buildDuelMetadata(data),
+    ))
+  ) {
+    unresolvedOracleWarningMatches.delete(data.duelId);
+    return {
+      lifecycleStatus: "PROPOSED",
+      finalized: false,
+      note: "dispute-window-active",
+    };
+  }
+
+  duelState = await getDuelState(trackedMatch.duelState);
+  if (!duelState || !enumIs(duelState.status, "resolved")) {
+    return {
+      lifecycleStatus: "UNKNOWN",
+      finalized: false,
+      note: "resolution-not-finalized",
+    };
+  }
+
+  const resolutionRecordedAt = Date.now();
   trackedMatch.lastOracleAtMs = resolutionRecordedAt;
   trackedMatch.lastResolvedAtMs = resolutionRecordedAt;
   trackedMatch.winner = winnerSide;
@@ -3488,6 +5490,11 @@ async function reportRoundResult(data: DuelLifecycleEvent): Promise<void> {
     ),
   );
   writeBotHealthSnapshot();
+  return {
+    lifecycleStatus: "RESOLVED",
+    finalized: true,
+    note: null,
+  };
 }
 
 // Event-driven Logic
@@ -3501,34 +5508,110 @@ gameClient.onDuelStart(async (data) => {
   }
 
   console.log("Duel Started:", data);
-  if (solanaKeeperWriteEnabled) {
-    if (!(await ensureKeeperChainReady())) {
-      console.warn(
-        "[bot] Skipping duel-start market creation because keeper chain is not ready.",
-      );
-    } else if (!(await ensureBotSignerFunding())) {
-      console.warn(
-        "[bot] Skipping duel-start market creation because bot signer funding is below threshold.",
-      );
-    } else {
+  const parityPhase = data.phase || "ANNOUNCEMENT";
+  if (blockMismatchedMarketParityEvent(data, "duel_started")) {
+    return;
+  }
+  beginMarketParityBundle(data, parityPhase);
+  writeBotHealthSnapshot();
+
+  try {
+    if (requiredParityChains.includes("solana")) {
+      if (!solanaKeeperWriteEnabled) {
+        throw new Error("solana parity chain is required but Solana keeper writes are disabled");
+      }
+      if (!(await ensureKeeperChainReady())) {
+        throw new Error("solana parity chain is required but keeper chain is not ready");
+      }
+      if (!(await ensureBotSignerFunding())) {
+        throw new Error("solana parity chain is required but bot signer funding is below threshold");
+      }
+      await ensureMarketConfigReady();
+      await prepareRound(data);
+      markMarketParityChainConfirmed({
+        chainKey: "solana",
+        transition: "prepare",
+        lifecycleStatus: "PENDING",
+      });
+      writeBotHealthSnapshot();
+    }
+
+    const evmParityChains = requiredEvmParityChains();
+    if (evmParityChains.length > 0) {
+      if (!EVM_KEEPER_ENABLE_LIFECYCLE_WRITES) {
+        throw new Error("EVM parity chains are required but EVM lifecycle writes are disabled");
+      }
+      await upsertEvmDuelLifecycle(data, 1, evmParityChains);
+      for (const chainKey of evmParityChains) {
+        markMarketParityChainConfirmed({
+          chainKey,
+          transition: "prepare",
+          lifecycleStatus: lifecycleStatusFromEvmWriteStatus(1),
+        });
+      }
+      writeBotHealthSnapshot();
+    }
+
+    if (!allRequiredParityChainsConfirmed()) {
+      throw new Error("failed to prepare required parity chains");
+    }
+
+    resetMarketParityConfirmations("awaiting_confirmations", parityPhase, false);
+    writeBotHealthSnapshot();
+
+    if (requiredParityChains.includes("solana")) {
+      const trackedMatch = await createOrSyncRound(data);
+      activeClobMatches.set(data.duelId, trackedMatch);
+      await maybeSeedMarket(trackedMatch);
+      markMarketParityChainConfirmed({
+        chainKey: "solana",
+        transition: "open",
+        lifecycleStatus: "OPEN",
+      });
+      console.log(`Created canonical CLOB market for duel ${data.duelId}`);
+      writeBotHealthSnapshot();
+    }
+
+    const evmParityChainsForOpen = requiredEvmParityChains();
+    if (evmParityChainsForOpen.length > 0) {
+      await upsertEvmDuelLifecycle(data, 2, evmParityChainsForOpen);
+      for (const chainKey of evmParityChainsForOpen) {
+        markMarketParityChainConfirmed({
+          chainKey,
+          transition: "open",
+          lifecycleStatus: lifecycleStatusFromEvmWriteStatus(2),
+        });
+      }
+      writeBotHealthSnapshot();
+    }
+
+    if (!allRequiredParityChainsConfirmed()) {
+      throw new Error("failed to open required parity chains");
+    }
+
+    finalizeMarketParityState("open", parityPhase, { safeToBet: true });
+  } catch (err) {
+    let reason = err instanceof Error ? err.message : String(err);
+    const trackedMatch = activeClobMatches.get(data.duelId) ?? null;
+    if (trackedMatch) {
       try {
-        await ensureMarketConfigReady();
-        const trackedMatch = await createOrSyncRound(data);
-        activeClobMatches.set(data.duelId, trackedMatch);
-        await maybeSeedMarket(trackedMatch);
-        console.log(`Created canonical CLOB market for duel ${data.duelId}`);
-      } catch (err) {
-        console.error("Failed to create market for duel:", err);
+        await cancelRound(trackedMatch);
+        markMarketParityChainConfirmed({
+          chainKey: "solana",
+          transition: "cancel",
+          lifecycleStatus: "CANCELLED",
+          note: "aborted-before-public-open",
+        });
+      } catch (cancelErr) {
+        const cancelReason =
+          cancelErr instanceof Error ? cancelErr.message : String(cancelErr);
+        reason = `${reason}; solana_unwind_failed: ${cancelReason}`;
       }
     }
-  }
-
-  if (EVM_KEEPER_ENABLE_LIFECYCLE_WRITES) {
-    try {
-      await upsertEvmDuelLifecycle(data, 2);
-    } catch (err) {
-      console.error("Failed to upsert EVM market lifecycle for duel:", err);
-    }
+    finalizeMarketParityState("aborted", parityPhase, {
+      reason,
+    });
+    console.error("Failed to create atomic parity bundle for duel:", err);
   }
   writeBotHealthSnapshot();
 });
@@ -3541,24 +5624,76 @@ gameClient.onBettingLocked(async (data) => {
   }
 
   await waitUntilTimestamp(data.betCloseTime ?? null, "bet close");
-
-  if (solanaKeeperWriteEnabled) {
-    if ((await ensureKeeperChainReady()) && (await ensureBotSignerFunding())) {
-      try {
-        await lockRound(data);
-        console.log(`Locked duel market for ${data.duelId}`);
-      } catch (error) {
-        console.error("Failed to lock market for duel:", error);
-      }
-    }
+  const activeBundle = requireExistingMarketParityBundle(data, "betting_locked");
+  if (!activeBundle) {
+    return;
+  }
+  if (activeBundle.state !== "open" || !activeBundle.openedAtMs) {
+    const reason = `betting_locked_for_${data.duelId}_before_public_open`;
+    finalizeMarketParityState(
+      activeBundle.openedAtMs ? "frozen" : "aborted",
+      "COUNTDOWN",
+      { reason },
+    );
+    console.warn("[bot] market_parity_dropped_event", {
+      eventName: "betting_locked",
+      reason,
+      activeBundleId: activeBundle.bundleId,
+      activeState: activeBundle.state,
+      activeOpenedAtMs: activeBundle.openedAtMs,
+    });
+    writeBotHealthSnapshot();
+    return;
   }
 
-  if (EVM_KEEPER_ENABLE_LIFECYCLE_WRITES) {
-    try {
-      await upsertEvmDuelLifecycle(data, 3);
-    } catch (error) {
-      console.error("Failed to lock EVM market for duel:", error);
+  try {
+    beginMarketParityBundle(data, "COUNTDOWN");
+    resetMarketParityConfirmations("awaiting_confirmations", "COUNTDOWN", false);
+    writeBotHealthSnapshot();
+
+    if (requiredParityChains.includes("solana")) {
+      if (!solanaKeeperWriteEnabled) {
+        throw new Error("solana parity chain is required for lock but Solana keeper writes are disabled");
+      }
+      if (!(await ensureKeeperChainReady()) || !(await ensureBotSignerFunding())) {
+        throw new Error("solana parity chain is required for lock but Solana keeper is not ready");
+      }
+      await lockRound(data);
+      markMarketParityChainConfirmed({
+        chainKey: "solana",
+        transition: "lock",
+        lifecycleStatus: "LOCKED",
+      });
+      console.log(`Locked duel market for ${data.duelId}`);
+      writeBotHealthSnapshot();
     }
+
+    const evmParityChains = requiredEvmParityChains();
+    if (evmParityChains.length > 0) {
+      if (!EVM_KEEPER_ENABLE_LIFECYCLE_WRITES) {
+        throw new Error("EVM parity chains are required for lock but EVM lifecycle writes are disabled");
+      }
+      await upsertEvmDuelLifecycle(data, 3, evmParityChains);
+      for (const chainKey of evmParityChains) {
+        markMarketParityChainConfirmed({
+          chainKey,
+          transition: "lock",
+          lifecycleStatus: lifecycleStatusFromEvmWriteStatus(3),
+        });
+      }
+      writeBotHealthSnapshot();
+    }
+
+    if (!allRequiredParityChainsConfirmed()) {
+      throw new Error("failed to lock required parity chains");
+    }
+
+    finalizeMarketParityState("locked", "COUNTDOWN");
+  } catch (error) {
+    finalizeMarketParityState("frozen", "COUNTDOWN", {
+      reason: error instanceof Error ? error.message : String(error),
+    });
+    console.error("Failed to lock atomic parity bundle for duel:", error);
   }
   writeBotHealthSnapshot();
 });
@@ -3571,7 +5706,30 @@ gameClient.onDuelEnd(async (data) => {
   }
 
   console.log("Duel Ended:", data);
+  const activeBundle = requireExistingMarketParityBundle(data, "duel_ended");
+  if (!activeBundle) {
+    return;
+  }
+  if (activeBundle.state !== "locked" || !activeBundle.lockedAtMs) {
+    const reason = `duel_ended_for_${data.duelId}_before_parity_lock`;
+    finalizeMarketParityState(
+      activeBundle.openedAtMs ? "frozen" : "aborted",
+      "RESOLUTION",
+      { reason },
+    );
+    console.warn("[bot] market_parity_dropped_event", {
+      eventName: "duel_ended",
+      reason,
+      activeBundleId: activeBundle.bundleId,
+      activeState: activeBundle.state,
+      activeOpenedAtMs: activeBundle.openedAtMs,
+      activeLockedAtMs: activeBundle.lockedAtMs,
+    });
+    writeBotHealthSnapshot();
+    return;
+  }
   try {
+    beginMarketParityBundle(data, "RESOLUTION");
     const winnerId = data.winnerId;
     const isAgent1 = winnerId === data.agent1?.id;
 
@@ -3621,25 +5779,67 @@ gameClient.onDuelEnd(async (data) => {
       );
     }
 
-    if (solanaKeeperWriteEnabled) {
-      if (!(await ensureKeeperChainReady())) {
-        console.warn(
-          "[bot] Skipping duel-end resolution because keeper chain is not ready.",
-        );
-      } else if (!(await ensureBotSignerFunding())) {
-        console.warn(
-          "[bot] Skipping duel-end resolution because bot signer funding is below threshold.",
-        );
-      } else {
-        await reportRoundResult(data);
+    resetMarketParityConfirmations("awaiting_confirmations", "RESOLUTION", false);
+    writeBotHealthSnapshot();
+
+    if (requiredParityChains.includes("solana")) {
+      if (!solanaKeeperWriteEnabled) {
+        throw new Error("solana parity chain is required for resolution but Solana keeper writes are disabled");
       }
+      if (!(await ensureKeeperChainReady())) {
+        throw new Error("solana parity chain is required for resolution but keeper chain is not ready");
+      }
+      if (!(await ensureBotSignerFunding())) {
+        throw new Error("solana parity chain is required for resolution but bot signer funding is below threshold");
+      }
+      const solanaOutcome = await reportRoundResult(data);
+      markMarketParityChainConfirmed({
+        chainKey: "solana",
+        transition:
+          solanaOutcome.lifecycleStatus === "RESOLVED" ? "resolve" : "propose",
+        lifecycleStatus: solanaOutcome.lifecycleStatus,
+        countsForQuorum: solanaOutcome.finalized,
+        note: solanaOutcome.note,
+      });
+      writeBotHealthSnapshot();
     }
 
-    if (EVM_KEEPER_ENABLE_LIFECYCLE_WRITES) {
-      await reportEvmResult(data);
+    const evmParityChains = requiredEvmParityChains();
+    if (evmParityChains.length > 0) {
+      if (!EVM_KEEPER_ENABLE_LIFECYCLE_WRITES) {
+        throw new Error("EVM parity chains are required for resolution but EVM lifecycle writes are disabled");
+      }
+      const evmOutcomes = await reportEvmResult(data, evmParityChains);
+      for (const outcome of evmOutcomes) {
+        markMarketParityChainConfirmed({
+          chainKey: outcome.chainKey,
+          transition:
+            outcome.lifecycleStatus === "RESOLVED" ? "resolve" : "propose",
+          lifecycleStatus: outcome.lifecycleStatus,
+          countsForQuorum: outcome.lifecycleStatus === "RESOLVED",
+          note: outcome.note,
+        });
+      }
       console.log(`Resolved market for duel ${data.duelId}`);
+      writeBotHealthSnapshot();
     }
+
+    if (!allRequiredParityChainsConfirmed()) {
+      if (hasPendingParityResolution()) {
+        console.warn(
+          `[bot] Duel ${data.duelId} resolution is waiting for final confirmation`,
+        );
+        writeBotHealthSnapshot();
+        return;
+      }
+      throw new Error("failed to resolve required parity chains");
+    }
+
+    finalizeMarketParityState("resolved", "RESOLUTION");
   } catch (err) {
+    finalizeMarketParityState("frozen", "RESOLUTION", {
+      reason: err instanceof Error ? err.message : String(err),
+    });
     console.error("Failed to resolve market:", err);
   }
   writeBotHealthSnapshot();
@@ -3667,22 +5867,23 @@ async function runMaintenance(): Promise<void> {
     return;
   }
   await ensureOracleReady();
-  await ensurePerpsConfigReady();
-  // ... (simplified loop for seeing liquidity and resolving old markets)
-  await syncPerpsOraclesFromLeaderboard();
-  if (PERPS_MARKET_MAKER_RECYCLE_ENABLED) {
-    const perpsMarkets = loadPerpsMarkets().filter(
-      (record) => record.status !== PERPS_MARKET_STATUS_ARCHIVED,
-    );
-    for (const record of perpsMarkets) {
-      await maybeRecyclePerpsMarketMakerFees(record.marketId);
-    }
-  }
-  await maybeArchiveSettledPerpsMarkets();
+  await maybeFinalizePendingSolanaParityLock();
+  await maybeFinalizePendingEvmParityLock();
+  // Catch up bundles whose live duel_ended event was missed (keeper restart,
+  // WebSocket drop, etc.). Runs BEFORE the resolve reconcilers so a
+  // successfully caught-up bundle flips to RESOLUTION phase and the normal
+  // resolve reconcilers can finish it in the same tick.
+  await maybeCatchUpMissedDuelEnd();
+  // Drain the backlog of OLDER duels that are locked-but-unresolved on-chain
+  // (tracked in unresolvedOracleWarningMatches). The current-bundle catch-up
+  // above can only ever heal one duel per tick; this handles everything else.
+  await maybeCatchUpStrandedLockedDuels();
+  await maybeFinalizePendingSolanaParityResolution();
+  await maybeFinalizePendingEvmParityResolution();
 
   // Poll only the actively tracked CLOB markets we created.
   for (const [duelId, trackedMatch] of activeClobMatches.entries()) {
-    const duelState = await getDuelState(trackedMatch.duelState);
+    let duelState = await getDuelState(trackedMatch.duelState);
     if (!duelState) {
       continue;
     }
@@ -3700,6 +5901,46 @@ async function runMaintenance(): Promise<void> {
       continue;
     }
 
+    if (enumIs(duelState.status, "challenged")) {
+      finalizeMarketParityState("frozen", "RESOLUTION", {
+        reason: `solana duel ${duelId} is challenged`,
+      });
+      continue;
+    }
+
+    if (enumIs(duelState.status, "proposed")) {
+      const finalized = await maybeFinalizeTrackedProposal(
+        trackedMatch,
+        duelState,
+        buildDuelMetadataForDuelKey(trackedMatch.duelKeyHex, duelId),
+      );
+      if (!finalized) {
+        continue;
+      }
+      duelState = await getDuelState(trackedMatch.duelState);
+      if (
+        marketParitySnapshot?.duelKey ===
+          normalizedBundleDuelKey(trackedMatch.duelKeyHex) &&
+        marketParitySnapshot.phase === "RESOLUTION" &&
+        duelState &&
+        enumIs(duelState.status, "resolved")
+      ) {
+        markMarketParityChainConfirmed({
+          chainKey: "solana",
+          transition: "resolve",
+          lifecycleStatus: "RESOLVED",
+          note: "finalized-after-dispute-window",
+        });
+        if (allRequiredParityChainsConfirmed()) {
+          finalizeMarketParityState("resolved", "RESOLUTION");
+        }
+      }
+    }
+
+    if (!duelState) {
+      continue;
+    }
+
     if (enumIs(duelState.status, "resolved") || enumIs(duelState.status, "cancelled")) {
       trackedMatch.lastResolvedAtMs = trackedMatch.lastResolvedAtMs ?? Date.now();
       await captureSettledClobHealth(
@@ -3713,8 +5954,54 @@ async function runMaintenance(): Promise<void> {
 
   // NOTE: We do NOT create new rounds here anymore.
 
+  // Perps maintenance is intentionally after CLOB/parity lifecycle work so a
+  // slow oracle-directory sync cannot stall public market finality.
+  await maybeRunPerpsMaintenance();
+}
+
+async function runPerpsMaintenance(): Promise<void> {
+  await ensurePerpsConfigReady();
+  await syncPerpsOraclesFromLeaderboard();
+  if (PERPS_MARKET_MAKER_RECYCLE_ENABLED) {
+    const perpsMarkets = loadPerpsMarkets().filter(
+      (record) => record.status !== PERPS_MARKET_STATUS_ARCHIVED,
+    );
+    for (const record of perpsMarkets) {
+      await maybeRecyclePerpsMarketMakerFees(record.marketId);
+    }
+  }
+  await maybeArchiveSettledPerpsMarkets();
+
   if (PERPS_LIQUIDATOR_ENABLED) {
     await runLiquidatorLoop();
+  }
+}
+
+function startPerpsMaintenance(): Promise<void> {
+  const task = (async () => {
+    try {
+      await runPerpsMaintenance();
+    } catch (error) {
+      console.warn("[bot] perps_maintenance_failed", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  })();
+  perpsMaintenancePromise = task.finally(() => {
+    perpsMaintenancePromise = null;
+  });
+  return perpsMaintenancePromise;
+}
+
+async function maybeRunPerpsMaintenance(): Promise<void> {
+  const task = perpsMaintenancePromise ?? startPerpsMaintenance();
+  try {
+    await withTimeout(task, PERPS_MAINTENANCE_TIMEOUT_MS, "perps maintenance");
+  } catch (error) {
+    console.warn("[bot] perps_maintenance_deferred", {
+      timeoutMs: PERPS_MAINTENANCE_TIMEOUT_MS,
+      error: error instanceof Error ? error.message : String(error),
+    });
   }
 }
 

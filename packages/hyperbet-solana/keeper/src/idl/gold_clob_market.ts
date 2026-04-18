@@ -5,7 +5,7 @@
  * IDL can be found at `target/idl/gold_clob_market.json`.
  */
 export type GoldClobMarket = {
-  "address": "3QUVoaKJqo1rg9eXe7vyFewJrY75NWdtH8JZfvTb79Uy",
+  "address": "EHBdndoQUXZXDtoTcb5D5AimJ1x715vKWzbqLH8entTt",
   "metadata": {
     "name": "goldClobMarket",
     "version": "0.1.0",
@@ -439,7 +439,7 @@ export type GoldClobMarket = {
         },
         {
           "name": "program",
-          "address": "3QUVoaKJqo1rg9eXe7vyFewJrY75NWdtH8JZfvTb79Uy"
+          "address": "EHBdndoQUXZXDtoTcb5D5AimJ1x715vKWzbqLH8entTt"
         },
         {
           "name": "programData"

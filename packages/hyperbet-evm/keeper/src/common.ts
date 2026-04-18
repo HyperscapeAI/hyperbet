@@ -6,6 +6,8 @@ import BN from "bn.js";
 import { AnchorProvider, Idl, Program, Wallet } from "@coral-xyz/anchor";
 import {
   Connection,
+  type ConfirmOptions,
+  type FetchFn,
   Keypair,
   PublicKey,
   Transaction,
@@ -45,10 +47,62 @@ dotenv.config({ path: path.join(envRoot, `.env.${envClusterSuffix}`) });
 dotenv.config({ path: path.join(envRoot, ".env") });
 
 type SignableTx = Transaction | VersionedTransaction;
+type CommitmentLevel = "processed" | "confirmed" | "finalized";
+
+type CreateProgramsOptions = {
+  usePollingSendAndConfirm?: boolean;
+  commitment?: CommitmentLevel;
+  preflightCommitment?: CommitmentLevel;
+  confirmTimeoutMs?: number;
+};
 
 type AnchorLikeWallet = Wallet & {
   payer: Keypair;
 };
+
+const DEFAULT_SOLANA_RPC_REQUEST_TIMEOUT_MS = 15_000;
+
+function resolveSolanaRpcRequestTimeoutMs(): number {
+  const configured = Number(process.env.SOLANA_RPC_REQUEST_TIMEOUT_MS);
+  return Number.isFinite(configured) && configured > 0
+    ? Math.floor(configured)
+    : DEFAULT_SOLANA_RPC_REQUEST_TIMEOUT_MS;
+}
+
+function createSolanaRpcFetch(timeoutMs: number): FetchFn {
+  const solanaFetch = (async (input, init) => {
+    const controller = new AbortController();
+    const upstreamSignal = init?.signal ?? null;
+    const abortFromUpstream = () => controller.abort(upstreamSignal?.reason);
+
+    if (upstreamSignal?.aborted) {
+      controller.abort(upstreamSignal.reason);
+    } else {
+      upstreamSignal?.addEventListener("abort", abortFromUpstream, {
+        once: true,
+      });
+    }
+
+    const timeout = setTimeout(() => {
+      controller.abort(
+        new Error(`Solana RPC request timed out after ${timeoutMs}ms`),
+      );
+    }, timeoutMs);
+
+    try {
+      return await fetch(input, {
+        ...(init ?? {}),
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timeout);
+      upstreamSignal?.removeEventListener("abort", abortFromUpstream);
+    }
+  }) as FetchFn;
+
+  solanaFetch.preconnect = fetch.preconnect.bind(fetch);
+  return solanaFetch;
+}
 
 function signTx(tx: SignableTx, signer: Keypair): SignableTx {
   if (tx instanceof VersionedTransaction) {
@@ -71,6 +125,247 @@ function toAnchorWallet(signer: Keypair): AnchorLikeWallet {
       return txs;
     },
   };
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function cloneTransaction(transaction: Transaction): Transaction {
+  const clone = new Transaction();
+  clone.instructions = [...transaction.instructions];
+  clone.feePayer = transaction.feePayer;
+  clone.nonceInfo = transaction.nonceInfo;
+  clone.minNonceContextSlot = transaction.minNonceContextSlot;
+  return clone;
+}
+
+async function getLatestBlockhashWithRetries(
+  connection: Connection,
+  commitment: CommitmentLevel,
+  maxAttempts = 4,
+): Promise<{ blockhash: string; lastValidBlockHeight: number }> {
+  let lastError: unknown = null;
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      return await connection.getLatestBlockhash(commitment);
+    } catch (error) {
+      lastError = error;
+      if (attempt < maxAttempts) {
+        await sleep(Math.min(2_000, 250 * attempt));
+      }
+    }
+  }
+
+  throw new Error(
+    `failed to fetch latest blockhash after ${maxAttempts} attempts: ${String(lastError)}`,
+  );
+}
+
+export async function confirmSignatureByPolling(
+  connection: Connection,
+  signature: string,
+  lastValidBlockHeight?: number,
+  timeoutMs = Number.parseInt(
+    process.env.HYPERBET_SOLANA_CONFIRM_TIMEOUT_MS ?? "180000",
+    10,
+  ),
+  commitment: CommitmentLevel = "confirmed",
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  let lastRpcError: unknown = null;
+  let pollCount = 0;
+
+  while (Date.now() < deadline) {
+    pollCount += 1;
+    try {
+      const statuses = await connection.getSignatureStatuses([signature], {
+        searchTransactionHistory: true,
+      });
+      const status = statuses.value[0];
+
+      if (status?.err) {
+        throw new Error(
+          `transaction ${signature} failed: ${JSON.stringify(status.err)}`,
+        );
+      }
+
+      if (
+        status &&
+        (status.confirmationStatus === "confirmed" ||
+          status.confirmationStatus === "finalized")
+      ) {
+        return;
+      }
+
+      if (lastValidBlockHeight && pollCount % 8 === 0) {
+        const currentBlockHeight = await connection.getBlockHeight(commitment);
+        if (currentBlockHeight > lastValidBlockHeight) {
+          throw new Error(
+            `transaction ${signature} expired at block height ${lastValidBlockHeight}`,
+          );
+        }
+      }
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        (error.message.includes(`transaction ${signature} failed`) ||
+          error.message.includes("expired at block height"))
+      ) {
+        throw error;
+      }
+      lastRpcError = error;
+    }
+
+    await sleep(250);
+  }
+
+  const reason =
+    lastRpcError instanceof Error ? ` (${lastRpcError.message})` : "";
+  throw new Error(
+    `timed out waiting for confirmation for ${signature}${reason}`,
+  );
+}
+
+async function sendAndConfirmWithPolling(
+  provider: AnchorProvider,
+  transaction: Transaction,
+  signers: Keypair[] = [],
+  options?: ConfirmOptions,
+): Promise<string> {
+  const opts = {
+    ...provider.opts,
+    ...options,
+  };
+  const commitment =
+    (opts.preflightCommitment ??
+      opts.commitment ??
+      "confirmed") as CommitmentLevel;
+  let lastError: unknown = null;
+
+  for (let attempt = 1; attempt <= 4; attempt += 1) {
+    try {
+      const tx = cloneTransaction(transaction);
+      tx.feePayer = tx.feePayer ?? provider.wallet.publicKey;
+
+      const { blockhash, lastValidBlockHeight } =
+        await getLatestBlockhashWithRetries(provider.connection, commitment);
+      tx.recentBlockhash = blockhash;
+
+      if (signers.length > 0) {
+        tx.partialSign(...signers);
+      }
+
+      const signedTx = await provider.wallet.signTransaction(tx);
+      const signature = await provider.connection.sendRawTransaction(
+        signedTx.serialize(),
+        {
+          maxRetries: 8,
+          preflightCommitment: commitment,
+          skipPreflight: opts.skipPreflight ?? false,
+        },
+      );
+
+      await confirmSignatureByPolling(
+        provider.connection,
+        signature,
+        lastValidBlockHeight,
+        undefined,
+        commitment,
+      );
+      return signature;
+    } catch (error) {
+      lastError = error;
+      if (attempt < 4) {
+        await sleep(250 * attempt);
+      }
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error(String(lastError));
+}
+
+async function sendVersionedTransactionWithPolling(
+  provider: AnchorProvider,
+  transaction: VersionedTransaction,
+  signers: Keypair[] = [],
+  options?: ConfirmOptions,
+): Promise<string> {
+  const opts = {
+    ...provider.opts,
+    ...options,
+  };
+  const commitment =
+    (opts.preflightCommitment ??
+      opts.commitment ??
+      "confirmed") as CommitmentLevel;
+  let lastError: unknown = null;
+
+  for (let attempt = 1; attempt <= 4; attempt += 1) {
+    try {
+      if (signers.length > 0) {
+        transaction.sign(signers);
+      }
+      const signedTx = await provider.wallet.signTransaction(transaction);
+      const signature = await provider.connection.sendRawTransaction(
+        signedTx.serialize(),
+        {
+          maxRetries: 8,
+          preflightCommitment: commitment,
+          skipPreflight: opts.skipPreflight ?? false,
+        },
+      );
+
+      await confirmSignatureByPolling(
+        provider.connection,
+        signature,
+        undefined,
+        undefined,
+        commitment,
+      );
+      return signature;
+    } catch (error) {
+      lastError = error;
+      if (attempt < 4) {
+        await sleep(250 * attempt);
+      }
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error(String(lastError));
+}
+
+export function createPollingProvider(
+  connection: Connection,
+  wallet: Wallet,
+  options?: Partial<AnchorProvider["opts"]>,
+): AnchorProvider {
+  const provider = new AnchorProvider(connection, wallet, {
+    commitment: "confirmed",
+    preflightCommitment: "confirmed",
+    ...(options ?? {}),
+  });
+  const defaultSendAndConfirm = provider.sendAndConfirm.bind(provider);
+  provider.sendAndConfirm = async (tx, signers, overrideOptions) => {
+    if (tx instanceof VersionedTransaction) {
+      return sendVersionedTransactionWithPolling(
+        provider,
+        tx,
+        (signers ?? []) as Keypair[],
+        overrideOptions,
+      );
+    }
+    if (tx instanceof Transaction) {
+      return sendAndConfirmWithPolling(
+        provider,
+        tx,
+        (signers ?? []) as Keypair[],
+        overrideOptions,
+      );
+    }
+    return defaultSendAndConfirm(tx, signers, overrideOptions);
+  };
+  return provider;
 }
 
 export function getRpcUrl(): string {
@@ -193,7 +488,7 @@ const GOLD_PERPS_MARKET_IDL = ensureIdlAddress(
   GOLD_PERPS_MARKET_PROGRAM_ID,
 );
 
-export function createPrograms(signer: Keypair): {
+export function createPrograms(signer: Keypair, options?: CreateProgramsOptions): {
   connection: Connection;
   provider: AnchorProvider;
   fightOracle: Program<FightOracle>;
@@ -202,14 +497,24 @@ export function createPrograms(signer: Keypair): {
   /** @deprecated Binary market removed. Returns null. */
   goldBinaryMarket: null;
 } {
+  const commitment = options?.commitment ?? "confirmed";
+  const preflightCommitment =
+    options?.preflightCommitment ?? options?.commitment ?? "confirmed";
   const connection = new Connection(getRpcUrl(), {
-    commitment: "confirmed",
+    commitment,
+    confirmTransactionInitialTimeout: options?.confirmTimeoutMs,
+    fetch: createSolanaRpcFetch(resolveSolanaRpcRequestTimeoutMs()),
   });
   const wallet = toAnchorWallet(signer);
-  const provider = new AnchorProvider(connection, wallet, {
-    commitment: "confirmed",
-    preflightCommitment: "confirmed",
-  });
+  const provider = options?.usePollingSendAndConfirm
+    ? createPollingProvider(connection, wallet, {
+        commitment,
+        preflightCommitment,
+      })
+    : new AnchorProvider(connection, wallet, {
+        commitment,
+        preflightCommitment,
+      });
 
   const fightOracle: Program<FightOracle> = new Program(
     FIGHT_ORACLE_IDL,

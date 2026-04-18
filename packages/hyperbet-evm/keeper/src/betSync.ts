@@ -3,6 +3,7 @@ import type {
   PredictionMarketLifecycleStatus,
   PredictionMarketWinner,
 } from "../../../hyperbet-chain-registry/src/index";
+import type { KeeperMarketParitySnapshot } from "../../../hyperbet-mm-core/src/index";
 import {
   normalizePredictionMarketTimestamp,
   normalizePredictionMarketWinner,
@@ -16,15 +17,70 @@ export type BetSyncRendererHealth = {
   updatedAt: number | null;
 };
 
+export type BetSyncHlsManifest = {
+  updatedAt: number | null;
+  mediaSequence: number | null;
+};
+
+export type BetSyncRendererMetrics = {
+  captureFps: number | null;
+  encodeFps: number | null;
+  droppedFrames: number | null;
+  renderTick: number | null;
+  duelStateTick: number | null;
+  latestFrameAt: number | null;
+  latestRenderTickAt: number | null;
+  latestDuelStateTickAt: number | null;
+  latestVisualChangeAt: number | null;
+  visualChangeAgeMs: number | null;
+  hlsManifest: BetSyncHlsManifest | null;
+};
+
+export type BetSyncDelivery = {
+  mode: "self_hls" | "external_hls";
+  provider: string | null;
+  playbackUrl: string | null;
+  hlsUrl: string | null;
+  llhlsUrl: string | null;
+  ingestUrl: string | null;
+};
+
+export type BetSyncBroadcastTimeline = {
+  phase: string | null;
+  betOpenTime: number | null;
+  betCloseTime: number | null;
+  fightStartTime: number | null;
+  duelEndTime: number | null;
+  presentationDelayMs: number;
+  updatedAt: number | null;
+};
+
+export type BetSyncCanonicalAuthority = {
+  providerLive: boolean;
+  playbackProbeReady: boolean;
+  decision: string | null;
+  reason: string | null;
+  revision: number | null;
+  updatedAt: number | null;
+  liveInputId: string | null;
+  videoUid: string | null;
+  lifecycleStatus: string | null;
+  playbackUrl: string | null;
+  playbackProbeStatusCode: number | null;
+  playbackManifestStatus: string | null;
+};
+
 export type BetSyncEvent = {
   schemaVersion: number;
   sourceEpoch: number;
   seq: number;
   emittedAt: number;
+  cycle: JsonRecord | null;
   duelId: string | null;
   duelKey: string | null;
   phase: string | null;
   phaseVersion: number | null;
+  broadcastTimeline: BetSyncBroadcastTimeline | null;
   betOpenTime: number | null;
   betCloseTime: number | null;
   fightStartTime: number | null;
@@ -40,6 +96,16 @@ export type BetSyncEvent = {
   leaderboard: JsonRecord[];
   cameraTarget: string | null;
   rendererHealth: BetSyncRendererHealth | null;
+  rendererMetrics: BetSyncRendererMetrics | null;
+  delivery: BetSyncDelivery | null;
+  sourceRuntime: JsonRecord | null;
+  channel: JsonRecord | null;
+  publicReadiness: JsonRecord | null;
+  canonicalDestination: JsonRecord | null;
+  fallbackDestination: JsonRecord | null;
+  canonicalAuthority: BetSyncCanonicalAuthority | null;
+  deliveryHealth: JsonRecord | null;
+  marketParity?: KeeperMarketParitySnapshot | null;
 };
 
 export type BetSyncBootstrapState = {
@@ -56,6 +122,20 @@ export type StreamState = {
   cameraTarget: string | null;
   seq: number;
   emittedAt: number;
+  phase?: string | null;
+  phaseVersion?: number | null;
+  broadcastTimeline?: BetSyncBroadcastTimeline | null;
+  rendererHealth?: BetSyncRendererHealth | null;
+  rendererMetrics?: BetSyncRendererMetrics | null;
+  delivery?: BetSyncDelivery | null;
+  sourceRuntime?: JsonRecord | null;
+  channel?: JsonRecord | null;
+  publicReadiness?: JsonRecord | null;
+  canonicalDestination?: JsonRecord | null;
+  fallbackDestination?: JsonRecord | null;
+  canonicalAuthority?: BetSyncCanonicalAuthority | null;
+  deliveryHealth?: JsonRecord | null;
+  marketParity?: KeeperMarketParitySnapshot | null;
 };
 
 export type PredictionMarketsDuelSnapshot = {
@@ -72,6 +152,7 @@ export type PredictionMarketsSurface = {
   duel: PredictionMarketsDuelSnapshot;
   markets: PredictionMarketLifecycleRecord[];
   updatedAt: number | null;
+  marketParity?: KeeperMarketParitySnapshot | null;
 };
 
 export type PredictionMarketsOverviewResponse = {
@@ -94,6 +175,82 @@ function asFiniteNumber(value: unknown): number | null {
 
 function asString(value: unknown): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value : null;
+}
+
+function normalizeMarketParity(
+  value: unknown,
+): KeeperMarketParitySnapshot | null {
+  const candidate = asRecord(value);
+  if (!candidate) return null;
+  const bundleId = asString(candidate.bundleId);
+  if (!bundleId) return null;
+  return {
+    bundleId,
+    duelKey: normalizeDuelKey(candidate.duelKey),
+    duelId: asString(candidate.duelId),
+    revision: Math.max(1, asFiniteNumber(candidate.revision) ?? 1),
+    requiredChains: Array.isArray(candidate.requiredChains)
+      ? candidate.requiredChains.filter(
+          (chain): chain is KeeperMarketParitySnapshot["requiredChains"][number] =>
+            typeof chain === "string",
+        )
+      : [],
+    confirmedChains: Array.isArray(candidate.confirmedChains)
+      ? candidate.confirmedChains.filter(
+          (chain): chain is KeeperMarketParitySnapshot["confirmedChains"][number] =>
+            typeof chain === "string",
+        )
+      : [],
+    state: (asString(candidate.state) as KeeperMarketParitySnapshot["state"]) ?? "preparing",
+    phase: asString(candidate.phase),
+    safeToBet: candidate.safeToBet === true,
+    openedAtMs: normalizePredictionMarketTimestamp(candidate.openedAtMs),
+    lockedAtMs: normalizePredictionMarketTimestamp(candidate.lockedAtMs),
+    resolvedAtMs: normalizePredictionMarketTimestamp(candidate.resolvedAtMs),
+    freezeReason: asString(candidate.freezeReason),
+    updatedAtMs: normalizePredictionMarketTimestamp(candidate.updatedAtMs) ?? 0,
+    receipts: Array.isArray(candidate.receipts)
+      ? candidate.receipts
+          .map((receipt) => {
+            const normalized = asRecord(receipt);
+            const chainKey = normalized && typeof normalized.chainKey === "string"
+              ? normalized.chainKey
+              : null;
+            if (!normalized || !chainKey) {
+              return null;
+            }
+            return {
+              chainKey,
+              preparedAtMs: normalizePredictionMarketTimestamp(
+                normalized.preparedAtMs,
+              ),
+              openedAtMs: normalizePredictionMarketTimestamp(normalized.openedAtMs),
+              lockedAtMs: normalizePredictionMarketTimestamp(normalized.lockedAtMs),
+              resolvedAtMs: normalizePredictionMarketTimestamp(
+                normalized.resolvedAtMs,
+              ),
+              cancelledAtMs: normalizePredictionMarketTimestamp(
+                normalized.cancelledAtMs,
+              ),
+              confirmedAtMs: normalizePredictionMarketTimestamp(
+                normalized.confirmedAtMs,
+              ),
+              lifecycleStatus:
+                (asString(normalized.lifecycleStatus) as PredictionMarketLifecycleStatus | null) ??
+                null,
+              txRef: asString(normalized.txRef),
+              note: asString(normalized.note),
+            };
+          })
+          .filter(
+            (
+              receipt,
+            ): receipt is KeeperMarketParitySnapshot["receipts"][number] => {
+              return receipt != null;
+            },
+          )
+      : [],
+  };
 }
 
 function normalizeDuelKey(value: unknown): string | null {
@@ -202,6 +359,98 @@ function normalizeRendererHealth(value: unknown): BetSyncRendererHealth | null {
   };
 }
 
+function normalizeHlsManifest(value: unknown): BetSyncHlsManifest | null {
+  const candidate = asRecord(value);
+  if (!candidate) return null;
+  return {
+    updatedAt: normalizePredictionMarketTimestamp(candidate.updatedAt),
+    mediaSequence: asFiniteNumber(candidate.mediaSequence),
+  };
+}
+
+function normalizeRendererMetrics(
+  value: unknown,
+): BetSyncRendererMetrics | null {
+  const candidate = asRecord(value);
+  if (!candidate) return null;
+  return {
+    captureFps: asFiniteNumber(candidate.captureFps),
+    encodeFps: asFiniteNumber(candidate.encodeFps),
+    droppedFrames: asFiniteNumber(candidate.droppedFrames),
+    renderTick: asFiniteNumber(candidate.renderTick),
+    duelStateTick: asFiniteNumber(candidate.duelStateTick),
+    latestFrameAt: normalizePredictionMarketTimestamp(candidate.latestFrameAt),
+    latestRenderTickAt: normalizePredictionMarketTimestamp(
+      candidate.latestRenderTickAt,
+    ),
+    latestDuelStateTickAt: normalizePredictionMarketTimestamp(
+      candidate.latestDuelStateTickAt,
+    ),
+    latestVisualChangeAt: normalizePredictionMarketTimestamp(
+      candidate.latestVisualChangeAt,
+    ),
+    visualChangeAgeMs: asFiniteNumber(candidate.visualChangeAgeMs),
+    hlsManifest: normalizeHlsManifest(candidate.hlsManifest),
+  };
+}
+
+function normalizeDelivery(value: unknown): BetSyncDelivery | null {
+  const candidate = asRecord(value);
+  if (!candidate) return null;
+  const mode = asString(candidate.mode);
+  if (mode !== "self_hls" && mode !== "external_hls") {
+    return null;
+  }
+  return {
+    mode,
+    provider: asString(candidate.provider),
+    playbackUrl: asString(candidate.playbackUrl),
+    hlsUrl: asString(candidate.hlsUrl),
+    llhlsUrl: asString(candidate.llhlsUrl),
+    ingestUrl: asString(candidate.ingestUrl),
+  };
+}
+
+function normalizeBroadcastTimeline(
+  value: unknown,
+): BetSyncBroadcastTimeline | null {
+  const candidate = asRecord(value);
+  if (!candidate) return null;
+  return {
+    phase: asString(candidate.phase),
+    betOpenTime: normalizePredictionMarketTimestamp(candidate.betOpenTime),
+    betCloseTime: normalizePredictionMarketTimestamp(candidate.betCloseTime),
+    fightStartTime: normalizePredictionMarketTimestamp(candidate.fightStartTime),
+    duelEndTime: normalizePredictionMarketTimestamp(candidate.duelEndTime),
+    presentationDelayMs: Math.max(
+      0,
+      asFiniteNumber(candidate.presentationDelayMs) ?? 0,
+    ),
+    updatedAt: normalizePredictionMarketTimestamp(candidate.updatedAt),
+  };
+}
+
+function normalizeCanonicalAuthority(
+  value: unknown,
+): BetSyncCanonicalAuthority | null {
+  const candidate = asRecord(value);
+  if (!candidate) return null;
+  return {
+    providerLive: candidate.providerLive === true,
+    playbackProbeReady: candidate.playbackProbeReady === true,
+    decision: asString(candidate.decision),
+    reason: asString(candidate.reason),
+    revision: asFiniteNumber(candidate.revision),
+    updatedAt: normalizePredictionMarketTimestamp(candidate.updatedAt),
+    liveInputId: asString(candidate.liveInputId),
+    videoUid: asString(candidate.videoUid),
+    lifecycleStatus: asString(candidate.lifecycleStatus),
+    playbackUrl: asString(candidate.playbackUrl),
+    playbackProbeStatusCode: asFiniteNumber(candidate.playbackProbeStatusCode),
+    playbackManifestStatus: asString(candidate.playbackManifestStatus),
+  };
+}
+
 export function parseBetSyncEvent(payload: unknown): BetSyncEvent | null {
   const candidate = asRecord(payload);
   if (!candidate) return null;
@@ -214,15 +463,21 @@ export function parseBetSyncEvent(payload: unknown): BetSyncEvent | null {
     return null;
   }
 
+  const broadcastTimeline = normalizeBroadcastTimeline(
+    candidate.broadcastTimeline,
+  );
+
   return {
     schemaVersion: asFiniteNumber(candidate.schemaVersion) ?? 1,
     sourceEpoch,
     seq,
     emittedAt,
+    cycle: asRecord(candidate.cycle),
     duelId: asString(candidate.duelId),
     duelKey: normalizeDuelKey(candidate.duelKey),
     phase: asString(candidate.phase),
     phaseVersion: asFiniteNumber(candidate.phaseVersion),
+    broadcastTimeline,
     betOpenTime: normalizePredictionMarketTimestamp(candidate.betOpenTime),
     betCloseTime: normalizePredictionMarketTimestamp(candidate.betCloseTime),
     fightStartTime: normalizePredictionMarketTimestamp(candidate.fightStartTime),
@@ -242,6 +497,16 @@ export function parseBetSyncEvent(payload: unknown): BetSyncEvent | null {
       : [],
     cameraTarget: asString(candidate.cameraTarget),
     rendererHealth: normalizeRendererHealth(candidate.rendererHealth),
+    rendererMetrics: normalizeRendererMetrics(candidate.rendererMetrics),
+    delivery: normalizeDelivery(candidate.delivery),
+    sourceRuntime: asRecord(candidate.sourceRuntime),
+    channel: asRecord(candidate.channel),
+    publicReadiness: asRecord(candidate.publicReadiness),
+    canonicalDestination: asRecord(candidate.canonicalDestination),
+    fallbackDestination: asRecord(candidate.fallbackDestination),
+    canonicalAuthority: normalizeCanonicalAuthority(candidate.canonicalAuthority),
+    deliveryHealth: asRecord(candidate.deliveryHealth),
+    marketParity: normalizeMarketParity(candidate.marketParity),
   };
 }
 
@@ -275,15 +540,21 @@ export function parseBetSyncBootstrapState(
 }
 
 export function toStreamStateFromBetSyncEvent(event: BetSyncEvent): StreamState {
+  const rawCycle = event.cycle;
   return {
     type: "STREAMING_STATE_UPDATE",
     cycle: {
-      cycleId: event.duelId ?? `bet-sync-${event.sourceEpoch}-${event.seq}`,
+      cycleId:
+        asString(rawCycle?.cycleId) ??
+        event.duelId ??
+        `bet-sync-${event.sourceEpoch}-${event.seq}`,
       duelId: event.duelId,
       duelKey: event.duelKey,
       duelKeyHex: event.duelKey ? `0x${event.duelKey}` : null,
       phase: event.phase ?? "IDLE",
       phaseVersion: event.phaseVersion,
+      rawCycle,
+      broadcastTimeline: event.broadcastTimeline,
       betOpenTime: event.betOpenTime,
       betCloseTime: event.betCloseTime,
       fightStartTime: event.fightStartTime,
@@ -302,6 +573,20 @@ export function toStreamStateFromBetSyncEvent(event: BetSyncEvent): StreamState 
     cameraTarget: event.cameraTarget,
     seq: event.seq,
     emittedAt: event.emittedAt,
+    phase: event.phase,
+    phaseVersion: event.phaseVersion,
+    broadcastTimeline: event.broadcastTimeline,
+    rendererHealth: event.rendererHealth,
+    rendererMetrics: event.rendererMetrics,
+    delivery: event.delivery,
+    sourceRuntime: event.sourceRuntime,
+    channel: event.channel,
+    publicReadiness: event.publicReadiness,
+    canonicalDestination: event.canonicalDestination,
+    fallbackDestination: event.fallbackDestination,
+    canonicalAuthority: event.canonicalAuthority,
+    deliveryHealth: event.deliveryHealth,
+    marketParity: event.marketParity ?? null,
   };
 }
 
@@ -329,6 +614,7 @@ export function parsePredictionMarketsSurface(
         Boolean(market) && typeof market === "object",
     ) as PredictionMarketLifecycleRecord[],
     updatedAt: normalizePredictionMarketTimestamp(candidate.updatedAt),
+    marketParity: normalizeMarketParity(candidate.marketParity),
   };
 }
 
@@ -388,6 +674,7 @@ export function mergePredictionMarketsSurface(
     duel: mergeDuelSnapshot(previous.duel, next.duel),
     markets: Array.from(byChain.values()),
     updatedAt: next.updatedAt,
+    marketParity: next.marketParity ?? previous.marketParity ?? null,
   };
 }
 

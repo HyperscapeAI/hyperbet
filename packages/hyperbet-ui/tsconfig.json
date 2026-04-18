@@ -16,7 +16,7 @@
       "@hyperbet/ui": ["./src/index.ts"],
       "@hyperbet/ui/*": ["./src/*"]
     },
-    "types": ["bun-types"]
+    "types": ["bun-types", "vite/client"]
   },
   "include": ["src", "tests", "stories", ".storybook"]
 }

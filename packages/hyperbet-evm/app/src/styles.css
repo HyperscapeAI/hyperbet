@@ -3121,6 +3121,48 @@ select:focus-visible {
   text-shadow: 0 0 16px var(--hm-gold-glow-subtle);
 }
 
+.hm-stream-degraded-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 7;
+  pointer-events: none;
+}
+
+.hm-stream-degraded-backdrop {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(
+      ellipse 52% 42% at 50% 52%,
+      rgba(232, 65, 66, 0.12) 0%,
+      rgba(232, 65, 66, 0) 68%
+    ),
+    linear-gradient(180deg, rgba(5, 6, 7, 0.42) 0%, rgba(5, 6, 7, 0.68) 100%);
+  backdrop-filter: blur(4px);
+}
+
+.hm-stream-degraded-message {
+  position: relative;
+  max-width: min(70%, 440px);
+  padding: 16px 20px;
+  border: 1px solid var(--hm-gold-border-light);
+  background: rgba(10, 10, 12, 0.86);
+  color: var(--hm-accent-gold);
+  font-family: var(--hm-font-display);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  line-height: 1.55;
+  text-align: center;
+  text-transform: uppercase;
+  box-shadow:
+    0 18px 40px rgba(0, 0, 0, 0.38),
+    0 0 22px var(--hm-gold-glow-subtle);
+}
+
 .hm-stream-controls {
   position: absolute;
   bottom: 12px;

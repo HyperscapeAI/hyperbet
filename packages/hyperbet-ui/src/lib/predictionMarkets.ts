@@ -12,6 +12,10 @@ import {
 } from "@hyperbet/chain-registry";
 
 import { GAME_API_URL } from "./config";
+import {
+  parseMarketParity,
+  type MarketParityInfo,
+} from "./marketParity";
 
 const ACTIVE_PREDICTION_MARKETS_URL = `${GAME_API_URL.replace(/\/$/, "")}/api/arena/prediction-markets/active`;
 const OVERVIEW_PREDICTION_MARKETS_URL = `${GAME_API_URL.replace(/\/$/, "")}/api/arena/prediction-markets/overview`;
@@ -32,6 +36,7 @@ export type PredictionMarketsResponse = {
   duel: PredictionMarketsDuelSnapshot;
   markets: PredictionMarketLifecycleRecord[];
   updatedAt: number | null;
+  marketParity?: MarketParityInfo | null;
 };
 
 export type PredictionMarketsOverviewResponse = {
@@ -104,6 +109,7 @@ export function parsePredictionMarketsResponse(
       .map((market) => normalizePredictionMarketLifecycleRecord(market))
       .filter((market): market is PredictionMarketLifecycleRecord => market !== null),
     updatedAt: normalizePredictionMarketTimestamp(candidate.updatedAt),
+    marketParity: parseMarketParity(candidate.marketParity),
   };
 }
 
@@ -332,6 +338,7 @@ export function usePredictionMarketLifecycle(
     data,
     duel: data?.duel ?? null,
     market,
+    marketParity: data?.marketParity ?? null,
     isLoading,
     error,
     refresh,
@@ -419,6 +426,7 @@ export function usePredictionMarketOverview(
     live,
     recentSettlement,
     liveDuel: data?.live?.duel ?? null,
+    liveMarketParity: data?.live?.marketParity ?? null,
     recentSettlementDuel: data?.recentSettlement?.duel ?? null,
     liveMarket: live,
     recentSettlementMarket: recentSettlement,

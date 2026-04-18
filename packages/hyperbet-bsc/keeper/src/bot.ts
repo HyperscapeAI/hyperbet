@@ -1122,6 +1122,7 @@ async function updatePerpsOracle(
       connection,
     );
     savePerpsOracleSnapshot({
+      chainKey: "bsc",
       agentId,
       marketId,
       spotIndex,
@@ -1240,6 +1241,7 @@ function toPerpsMarketRecord(
   previous?: DbPerpsMarketRecord,
 ): DbPerpsMarketRecord {
   return {
+    chainKey: "bsc",
     agentId: entry.characterId,
     marketId: modelMarketIdFromCharacterId(entry.characterId),
     rank: entry.rank,
@@ -2012,7 +2014,6 @@ async function upsertDuelLifecycle(
 ): Promise<PublicKey> {
   const duelKey = duelKeyHexToBytes(data.duelKeyHex);
   const duelState = findDuelStatePda(fightProgram.programId, duelKey);
-  const nowSeconds = Math.floor(Date.now() / 1000);
   const betOpenTs = Math.floor((data.betOpenTime ?? Date.now()) / 1000);
   const betCloseTs = Math.max(
     betOpenTs + 1,
@@ -2024,9 +2025,6 @@ async function upsertDuelLifecycle(
     betCloseTs,
     Math.floor((data.fightStartTime ?? data.betCloseTime ?? Date.now()) / 1000),
   );
-  const requestedStatus =
-    status === "scheduled" && betOpenTs <= nowSeconds ? "bettingOpen" : status;
-
   await runWithRecovery(
     () =>
       fightProgram.methods
@@ -2038,7 +2036,7 @@ async function upsertDuelLifecycle(
           new BN(betCloseTs),
           new BN(duelStartTs),
           buildDuelMetadata(data),
-          duelStatusEnum(requestedStatus) as any,
+          duelStatusEnum(status) as any,
         )
         .accountsPartial({
           reporter: botKeypair.publicKey,

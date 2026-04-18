@@ -84,6 +84,7 @@ export class GameClient {
 
   private lastCycleId: string | null = null;
   private lastPhase: string | null = null;
+  private lastStartedCycleId: string | null = null;
   private lastLockedCycleId: string | null = null;
   private lastResolutionEventKey: string | null = null;
 
@@ -139,6 +140,14 @@ export class GameClient {
     );
   }
 
+  private isPrelockPhase(phase: string | null): boolean {
+    return phase === "ANNOUNCEMENT" || phase === "BETTING";
+  }
+
+  private hasStartedCycle(cycleId: string): boolean {
+    return this.lastStartedCycleId === cycleId;
+  }
+
   private resolutionEventKey(event: DuelLifecycleEvent): string {
     return [
       event.cycleId,
@@ -152,6 +161,17 @@ export class GameClient {
     if (this.onDuelStartCb) {
       await this.onDuelStartCb(event);
     }
+  }
+
+  private async emitDuelStartIfEligible(
+    event: DuelLifecycleEvent,
+    phase: string | null,
+  ) {
+    if (this.hasStartedCycle(event.cycleId) || !this.isPrelockPhase(phase)) {
+      return;
+    }
+    this.lastStartedCycleId = event.cycleId;
+    await this.emitDuelStart(event);
   }
 
   private async emitBettingLocked(event: DuelLifecycleEvent) {
@@ -219,27 +239,30 @@ export class GameClient {
         this.lastResolutionEventKey = null;
 
         if (lifecycleEvent) {
-          await this.emitDuelStart(lifecycleEvent);
-          if (this.isLockedPhase(currentPhase)) {
-            await this.emitBettingLocked(lifecycleEvent);
-          }
-          if (currentPhase === "RESOLUTION") {
-            await this.emitDuelEnd(lifecycleEvent);
-          }
+          await this.emitDuelStartIfEligible(lifecycleEvent, currentPhase);
         }
 
         return;
       }
 
+      if (lifecycleEvent) {
+        await this.emitDuelStartIfEligible(lifecycleEvent, currentPhase);
+      }
+
       const transitionedToLocked =
         lifecycleEvent &&
+        this.hasStartedCycle(currentCycle.cycleId) &&
         this.isLockedPhase(currentPhase) &&
         !this.isLockedPhase(this.lastPhase);
       if (transitionedToLocked) {
         await this.emitBettingLocked(lifecycleEvent);
       }
 
-      if (lifecycleEvent && currentPhase === "RESOLUTION") {
+      if (
+        lifecycleEvent &&
+        this.hasStartedCycle(currentCycle.cycleId) &&
+        currentPhase === "RESOLUTION"
+      ) {
         await this.emitDuelEnd(lifecycleEvent);
       }
 

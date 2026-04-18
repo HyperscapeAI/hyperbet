@@ -14,7 +14,6 @@ import {
   Line,
   LineChart,
   ReferenceLine,
-  ResponsiveContainer,
   Tooltip,
   XAxis,
   YAxis,
@@ -25,11 +24,14 @@ import goldPerpsIdl from "../idl/gold_perps_market.json";
 import { useChain } from "../lib/ChainContext";
 import { CONFIG, GAME_API_URL } from "../lib/config";
 import {
+  buildPerpsMarketsEndpoint,
+  buildPerpsOracleHistoryEndpoint,
   modelMarketIdFromCharacterId,
   sanitizePerpsOracleHistoryResponse,
   sanitizePerpsMarketsResponse,
   toWinRatePercent,
   type PerpsMarketDirectoryEntry,
+  type PerpsChainKey,
   type PerpsOracleHistorySnapshot,
   type PerpsMarketsResponse,
 } from "../lib/modelMarkets";
@@ -45,6 +47,7 @@ import {
   resolveUiLocale,
   type UiLocale,
 } from "@hyperbet/ui/i18n";
+import { useMeasuredContentBox } from "../lib/useMeasuredContentBox";
 
 const PROGRAM_ID = new PublicKey(
   CONFIG.goldPerpsMarketProgramId || goldPerpsIdl.address,
@@ -60,6 +63,7 @@ const ORACLE_HISTORY_POLL_INTERVAL_MS = 15_000;
 const ORACLE_HISTORY_LIMIT = 120;
 const TOTAL_TRADE_FEE_RATE = 50 / 10_000;
 const IS_E2E_MODE = import.meta.env.MODE === "e2e";
+const SOLANA_PERPS_CHAIN_KEY: PerpsChainKey = "solana";
 
 function readE2eString(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
@@ -74,26 +78,33 @@ function readE2eNumber(value: unknown, fallback: number): number {
 
 type TradeDirection = "LONG" | "SHORT";
 
-interface ModelsMarketViewProps {
+export interface ModelsMarketViewProps {
   activeMatchup: string;
   connectionOverride?: Connection;
   walletOverride?: ModelsWalletLike;
   walletModalOverride?: ModelsWalletModalLike;
 }
 
-type ModelsWalletLike = {
+export type ModelsWalletLike = {
   connected: boolean;
   publicKey: PublicKey | null;
-  signAllTransactions?: <T extends Array<Transaction | VersionedTransaction>>(
-    txs: T,
-  ) => Promise<T>;
-  signTransaction?: <T extends Transaction | VersionedTransaction>(
-    tx: T,
-  ) => Promise<T>;
+  signAllTransactions?: (
+    txs: Array<Transaction | VersionedTransaction>,
+  ) => Promise<Array<Transaction | VersionedTransaction>>;
+  signTransaction?: (
+    tx: Transaction | VersionedTransaction,
+  ) => Promise<Transaction | VersionedTransaction>;
 };
 
-type ModelsWalletModalLike = {
+export type ModelsWalletModalLike = {
   setVisible: (visible: boolean) => void;
+};
+
+type ModelsMarketViewRuntimeProps = {
+  activeMatchup: string;
+  connection: Connection;
+  wallet: ModelsWalletLike;
+  setWalletModalVisible: (visible: boolean) => void;
 };
 
 interface ConfigAccountState {
@@ -544,6 +555,7 @@ const E2E_MODEL_MARKET_ID = E2E_MODEL_CHARACTER_ID
 const E2E_MODEL_ENTRY: PerpsMarketDirectoryEntry | null =
   IS_E2E_MODE && E2E_MODEL_CHARACTER_ID
     ? {
+      chainKey: "solana",
       rank: 1,
       characterId: E2E_MODEL_CHARACTER_ID,
       marketId: E2E_MODEL_MARKET_ID,
@@ -663,15 +675,29 @@ export function ModelsMarketView({
   walletOverride,
   walletModalOverride,
 }: ModelsMarketViewProps) {
-  const locale = resolveUiLocale();
-  const copy = getModelsMarketCopy(locale);
   const adapterConnection = useConnection();
   const adapterWallet = useWallet();
   const adapterWalletModal = useWalletModal();
-  const connection = connectionOverride ?? adapterConnection.connection;
-  const wallet = walletOverride ?? adapterWallet;
-  const setWalletModalVisible =
-    walletModalOverride?.setVisible ?? adapterWalletModal.setVisible;
+  return (
+    <ModelsMarketViewRuntime
+      activeMatchup={activeMatchup}
+      connection={connectionOverride ?? adapterConnection.connection}
+      wallet={walletOverride ?? adapterWallet}
+      setWalletModalVisible={
+        walletModalOverride?.setVisible ?? adapterWalletModal.setVisible
+      }
+    />
+  );
+}
+
+export function ModelsMarketViewRuntime({
+  activeMatchup,
+  connection,
+  wallet,
+  setWalletModalVisible,
+}: ModelsMarketViewRuntimeProps) {
+  const locale = resolveUiLocale();
+  const copy = getModelsMarketCopy(locale);
   const { activeChain, setActiveChain } = useChain();
 
   const [data, setData] = React.useState<PerpsMarketsResponse | null>(null);
@@ -720,6 +746,12 @@ export function ModelsMarketView({
   const [oracleHistoryError, setOracleHistoryError] = React.useState<
     string | null
   >(null);
+  const oracleHistoryChartRef = React.useRef<HTMLDivElement | null>(null);
+  const oracleHistoryChartSize = useMeasuredContentBox(
+    oracleHistoryChartRef,
+    true,
+    2,
+  );
   const effectiveLeverage = Math.min(
     configuredMaxLeverage,
     Math.max(1, Math.round(leverage)),
@@ -740,6 +772,7 @@ export function ModelsMarketView({
   React.useEffect(() => {
     if (E2E_MODEL_ENTRY) {
       setData({
+        chainKey: "solana",
         markets: [E2E_MODEL_ENTRY],
         updatedAt: Date.now(),
       });
@@ -756,16 +789,22 @@ export function ModelsMarketView({
       inFlight = new AbortController();
 
       try {
-        const response = await fetch(`${GAME_API_URL}/api/perps/markets`, {
-          cache: "no-store",
-          signal: inFlight.signal,
-        });
+        const response = await fetch(
+          buildPerpsMarketsEndpoint(GAME_API_URL, SOLANA_PERPS_CHAIN_KEY),
+          {
+            cache: "no-store",
+            signal: inFlight.signal,
+          },
+        );
 
         if (!response.ok) {
           throw new Error(`HTTP ${response.status}`);
         }
 
-        const payload = sanitizePerpsMarketsResponse(await response.json());
+        const payload = sanitizePerpsMarketsResponse(
+          await response.json(),
+          SOLANA_PERPS_CHAIN_KEY,
+        );
         if (!mounted) return;
 
         setData(payload);
@@ -848,7 +887,12 @@ export function ModelsMarketView({
 
       try {
         const response = await fetch(
-          `${GAME_API_URL}/api/perps/oracle-history?characterId=${encodeURIComponent(selectedCharacterId)}&limit=${ORACLE_HISTORY_LIMIT}`,
+          buildPerpsOracleHistoryEndpoint({
+            gameApiUrl: GAME_API_URL,
+            chainKey: SOLANA_PERPS_CHAIN_KEY,
+            characterId: selectedCharacterId,
+            limit: ORACLE_HISTORY_LIMIT,
+          }),
           {
             cache: "no-store",
             signal: inFlight.signal,
@@ -861,6 +905,7 @@ export function ModelsMarketView({
         const payload = sanitizePerpsOracleHistoryResponse(
           await response.json(),
           selectedCharacterId,
+          SOLANA_PERPS_CHAIN_KEY,
         );
         if (!mounted) return;
 
@@ -1245,6 +1290,7 @@ export function ModelsMarketView({
   const refreshChainState = React.useCallback(async () => {
     if (!data?.markets.length) return;
     const freshResponse = sanitizePerpsMarketsResponse({
+      chainKey: data.chainKey ?? "solana",
       markets: data.markets,
       updatedAt: Date.now(),
     });
@@ -1756,7 +1802,10 @@ export function ModelsMarketView({
                   </span>
                 </div>
 
-                <div className="models-market-history-chart">
+                <div
+                  className="models-market-history-chart"
+                  ref={oracleHistoryChartRef}
+                >
                   {oracleHistoryError ? (
                     <div className="models-market-empty">
                       {copy.oracleHistoryError(oracleHistoryError)}
@@ -1769,81 +1818,82 @@ export function ModelsMarketView({
                     <div className="models-market-empty">
                       {copy.waitingForSnapshots}
                     </div>
-                  ) : (
-                    <ResponsiveContainer width="100%" height="100%">
-                      <LineChart data={oracleHistory}>
-                        <XAxis
-                          dataKey="label"
-                          tick={{
-                            fill: "rgba(255,255,255,0.45)",
-                            fontSize: 11,
-                          }}
-                          tickLine={false}
-                          axisLine={{ stroke: "rgba(255,255,255,0.08)" }}
-                        />
-                        <YAxis
-                          tick={{
-                            fill: "rgba(255,255,255,0.45)",
-                            fontSize: 11,
-                          }}
-                          tickLine={false}
-                          axisLine={{ stroke: "rgba(255,255,255,0.08)" }}
-                          width={48}
-                          tickFormatter={(value: number) =>
-                            formatUsd(value, locale, 0)
-                          }
-                        />
-                        <Tooltip
-                          content={({ active, payload }) => {
-                            if (!active || !payload?.length) return null;
-                            const point = payload[0]
-                              ?.payload as OracleHistoryPoint;
-                            return (
-                              <div className="models-market-tooltip">
-                                <strong>{formatUsd(point.spotIndex, locale)}</strong>
-                                <span>
-                                  {copy.skill}{" "}
-                                  {formatLocaleNumber(
-                                    point.conservativeSkill,
-                                    locale,
-                                    {
-                                      minimumFractionDigits: 2,
-                                      maximumFractionDigits: 2,
-                                    },
-                                  )}{" "}
-                                  · μ{" "}
-                                  {formatLocaleNumber(point.mu, locale, {
+                  ) : oracleHistoryChartSize ? (
+                    <LineChart
+                      data={oracleHistory}
+                      width={oracleHistoryChartSize.width}
+                      height={oracleHistoryChartSize.height}
+                    >
+                      <XAxis
+                        dataKey="label"
+                        tick={{
+                          fill: "rgba(255,255,255,0.45)",
+                          fontSize: 11,
+                        }}
+                        tickLine={false}
+                        axisLine={{ stroke: "rgba(255,255,255,0.08)" }}
+                      />
+                      <YAxis
+                        tick={{
+                          fill: "rgba(255,255,255,0.45)",
+                          fontSize: 11,
+                        }}
+                        tickLine={false}
+                        axisLine={{ stroke: "rgba(255,255,255,0.08)" }}
+                        width={48}
+                        tickFormatter={(value: number) =>
+                          formatUsd(value, locale, 0)
+                        }
+                      />
+                      <Tooltip
+                        content={({ active, payload }) => {
+                          if (!active || !payload?.length) return null;
+                          const point = payload[0]?.payload as OracleHistoryPoint;
+                          return (
+                            <div className="models-market-tooltip">
+                              <strong>{formatUsd(point.spotIndex, locale)}</strong>
+                              <span>
+                                {copy.skill}{" "}
+                                {formatLocaleNumber(
+                                  point.conservativeSkill,
+                                  locale,
+                                  {
                                     minimumFractionDigits: 2,
                                     maximumFractionDigits: 2,
-                                  })}{" "}
-                                  · σ{" "}
-                                  {formatLocaleNumber(point.sigma, locale, {
-                                    minimumFractionDigits: 2,
-                                    maximumFractionDigits: 2,
-                                  })}
-                                </span>
-                              </div>
-                            );
-                          }}
+                                  },
+                                )}{" "}
+                                · μ{" "}
+                                {formatLocaleNumber(point.mu, locale, {
+                                  minimumFractionDigits: 2,
+                                  maximumFractionDigits: 2,
+                                })}{" "}
+                                · σ{" "}
+                                {formatLocaleNumber(point.sigma, locale, {
+                                  minimumFractionDigits: 2,
+                                  maximumFractionDigits: 2,
+                                })}
+                              </span>
+                            </div>
+                          );
+                        }}
+                      />
+                      {selectedMarket?.spotIndex && (
+                        <ReferenceLine
+                          y={selectedMarket.spotIndex}
+                          stroke="rgba(229,184,74,0.2)"
+                          strokeDasharray="4 4"
                         />
-                        {selectedMarket?.spotIndex && (
-                          <ReferenceLine
-                            y={selectedMarket.spotIndex}
-                            stroke="rgba(229,184,74,0.2)"
-                            strokeDasharray="4 4"
-                          />
-                        )}
-                        <Line
-                          type="monotone"
-                          dataKey="spotIndex"
-                          stroke="#e5b84a"
-                          strokeWidth={2}
-                          dot={false}
-                          isAnimationActive={false}
-                        />
-                      </LineChart>
-                    </ResponsiveContainer>
-                  )}
+                      )}
+                      <Line
+                        type="monotone"
+                        dataKey="spotIndex"
+                        stroke="#e5b84a"
+                        strokeWidth={2}
+                        dot={false}
+                        isAnimationActive={false}
+                      />
+                    </LineChart>
+                  ) : null}
                 </div>
               </div>
 
