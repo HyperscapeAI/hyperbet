@@ -1580,7 +1580,14 @@ function handlePerpsMarkets(req: Request, url: URL): Response {
 }
 
 function handleDuelContext(req: Request): Response {
+  // Commit 2b (viewer-aligned-bet-state): emit both source-time and
+  // server-time anchors so the hyperbet-ui viewer-clock selector can
+  // key duel-context history independently from staleness budgets.
+  // See docs/frontier_duel_bet_stream_sync_prd_sow.md.
   const state = toStreamStateFromCanonicalSession(canonicalStreamSession);
+  const sourceEmittedAt =
+    typeof state.emittedAt === "number" ? state.emittedAt : null;
+  const serverEmittedAt = Date.now();
   return jsonResponse(
     req,
     {
@@ -1588,7 +1595,9 @@ function handleDuelContext(req: Request): Response {
       cycle: state.cycle,
       leaderboard: state.leaderboard,
       cameraTarget: state.cameraTarget,
-      updatedAt: state.emittedAt,
+      updatedAt: sourceEmittedAt,
+      sourceEmittedAt,
+      serverEmittedAt,
     },
     200,
     {
@@ -1908,6 +1917,12 @@ function handlePredictionMarkets(req: Request): Response {
       ? streamState.cycle.phase
       : resolvePhaseFromLifecycleStatus(fallbackMarket?.lifecycleStatus);
   const cycleWinner = currentWinnerFromCycle();
+  // Commit 2b: `sourceEmittedAt` is the stream frame we observed when
+  // deriving this surface (selector key); `serverEmittedAt` is the
+  // wall clock at emission (staleness key).
+  const sourceEmittedAt =
+    typeof streamState.emittedAt === "number" ? streamState.emittedAt : null;
+  const serverEmittedAt = Date.now();
   return jsonResponse(
     req,
     {
@@ -1922,7 +1937,9 @@ function handlePredictionMarkets(req: Request): Response {
         betCloseTime: currentBetCloseTime() ?? fallbackMarket?.betCloseTime ?? null,
       },
       markets,
-      updatedAt: Date.now(),
+      updatedAt: serverEmittedAt,
+      sourceEmittedAt,
+      serverEmittedAt,
     },
     200,
     {
