@@ -49,6 +49,9 @@ import { PointsDisplay } from "@hyperbet/ui/components/PointsDisplay";
 import { useCanonicalStreamSession } from "@hyperbet/ui/spectator/useCanonicalStreamSession";
 import {
   logViewerAlignmentDivergence,
+  projectCanonicalSessionToSourceTimeline,
+  projectDuelContextToSourceTimeline,
+  resolveAlignedSessionPhase,
   useViewerAlignedBetState,
 } from "@hyperbet/ui/lib/viewerAlignment";
 import type { SolanaClobMarketSnapshot } from "@hyperbet/ui/components/SolanaClobPanel";
@@ -775,7 +778,7 @@ export function App() {
     presentationDelayMs: canonicalPresentationDelayMs,
   } = useCanonicalStreamSession();
   const { context: duelContext } = useDuelContext();
-  const liveCycle = streamingState?.cycle ?? null;
+  const freshestCycle = streamingState?.cycle ?? null;
   const { data: lifecyclePayload, market: lifecycleMarket } =
     usePredictionMarketLifecycle("solana");
   const runtimeE2eOverride = useMemo(
@@ -830,6 +833,12 @@ export function App() {
     latestDuelContext: duelContext,
     sessionPresentationDelayMs: canonicalPresentationDelayMs,
     streamPlayerStatus,
+    currentDisplayPhase:
+      canonicalStreamSession?.cycle.broadcastTimeline?.phase ??
+      canonicalStreamSession?.phase ??
+      freshestCycle?.phase ??
+      null,
+    extractAlignedPhase: resolveAlignedSessionPhase,
     onDivergence: logViewerAlignmentDivergence,
   });
   const alignedLifecyclePayload = viewerAligned.enabled
@@ -842,6 +851,20 @@ export function App() {
         "solana",
       )
     : null;
+  const alignedSession = viewerAligned.enabled
+    ? projectCanonicalSessionToSourceTimeline(
+        viewerAligned.session ?? canonicalStreamSession,
+      )
+    : null;
+  const displaySession = alignedSession ?? canonicalStreamSession;
+  const displayDuelContext = viewerAligned.enabled
+    ? projectDuelContextToSourceTimeline(
+        viewerAligned.duelContext ?? duelContext,
+      ) ?? duelContext
+    : duelContext;
+  const liveCycle =
+    (displaySession?.cycle as typeof freshestCycle) ?? freshestCycle;
+  const displayLifecycleMarket = alignedLifecycleMarket ?? lifecycleMarket ?? null;
 
   const streamPlaceholderMessage = useMemo(() => {
     if (!canonicalStreamSession) {
@@ -1223,8 +1246,8 @@ export function App() {
     return "rgba(255,255,255,0.78)";
   })();
   const effStatus = status;
-  const contextAgent1 = duelContext?.cycle.agent1 ?? null;
-  const contextAgent2 = duelContext?.cycle.agent2 ?? null;
+  const contextAgent1 = displayDuelContext?.cycle.agent1 ?? null;
+  const contextAgent2 = displayDuelContext?.cycle.agent2 ?? null;
 
   // Agent context from live SSE + duel-context polling
   const effA1 = {
@@ -1302,10 +1325,10 @@ export function App() {
 
   const activeLifecycleMarket =
     runtimeE2eOverride.duelKey &&
-    normalizePredictionMarketDuelKeyHex(lifecycleMarket?.duelKey ?? null) !==
+    normalizePredictionMarketDuelKeyHex(displayLifecycleMarket?.duelKey ?? null) !==
       runtimeE2eOverride.duelKey
       ? null
-      : lifecycleMarket;
+      : displayLifecycleMarket;
   const marketStatusText = _getMarketStatusLabel(
     activeLifecycleMarket?.lifecycleStatus ?? solanaClobSnapshot.marketStatus,
     copy,

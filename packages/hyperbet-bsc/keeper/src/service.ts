@@ -98,6 +98,7 @@ type StreamState = {
   phase?: string | null;
   phaseVersion?: number | null;
   broadcastTimeline?: Record<string, unknown> | null;
+  sourceTimeline?: Record<string, unknown> | null;
   rendererHealth?: Record<string, unknown> | null;
   channel?: Record<string, unknown> | null;
   publicReadiness?: Record<string, unknown> | null;
@@ -2200,6 +2201,7 @@ function toStreamState(payload: any): StreamState | null {
         ? candidate.phaseVersion
         : null,
     broadcastTimeline: asRecord(candidate.broadcastTimeline),
+    sourceTimeline: asRecord(candidate.sourceTimeline),
     rendererHealth: asRecord(candidate.rendererHealth),
     canonicalAuthority: asRecord(candidate.canonicalAuthority),
     sourceRuntime: asRecord(candidate.sourceRuntime),

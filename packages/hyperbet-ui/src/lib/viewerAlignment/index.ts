@@ -73,6 +73,11 @@ export {
   logViewerAlignmentDivergence,
   type UseViewerAlignedBetStateInputs,
 } from "./useViewerAlignedBetState";
+export {
+  projectCanonicalSessionToSourceTimeline,
+  projectDuelContextToSourceTimeline,
+  resolveAlignedSessionPhase,
+} from "./sourceTimeline";
 export type {
   ClockOffsetConfidence,
   ClockOffsetEstimator,

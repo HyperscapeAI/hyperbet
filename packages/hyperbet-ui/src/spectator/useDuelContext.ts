@@ -46,6 +46,14 @@ export type DuelContextState = {
       presentationDelayMs?: number;
       updatedAt?: number | null;
     } | null;
+    sourceTimeline?: {
+      phase?: string | null;
+      betOpenTime?: number | null;
+      betCloseTime?: number | null;
+      fightStartTime?: number | null;
+      duelEndTime?: number | null;
+      updatedAt?: number | null;
+    } | null;
     betOpenTime?: number | null;
     betCloseTime?: number | null;
     fightStartTime?: number | null;
@@ -116,6 +124,10 @@ function normalizeDuelContext(raw: unknown): DuelContextState | null {
     cycle.broadcastTimeline && typeof cycle.broadcastTimeline === "object"
       ? (cycle.broadcastTimeline as Record<string, unknown>)
       : null;
+  const sourceTimeline =
+    cycle.sourceTimeline && typeof cycle.sourceTimeline === "object"
+      ? (cycle.sourceTimeline as Record<string, unknown>)
+      : null;
   return {
     type: typeof r.type === "string" ? r.type : "STREAMING_DUEL_CONTEXT",
     cycle: {
@@ -160,6 +172,35 @@ function normalizeDuelContext(raw: unknown): DuelContextState | null {
             updatedAt:
               typeof broadcastTimeline.updatedAt === "number"
                 ? broadcastTimeline.updatedAt
+                : null,
+          }
+        : null,
+      sourceTimeline: sourceTimeline
+        ? {
+            phase:
+              typeof sourceTimeline.phase === "string" ||
+              sourceTimeline.phase === null
+                ? (sourceTimeline.phase as string | null)
+                : null,
+            betOpenTime:
+              typeof sourceTimeline.betOpenTime === "number"
+                ? sourceTimeline.betOpenTime
+                : null,
+            betCloseTime:
+              typeof sourceTimeline.betCloseTime === "number"
+                ? sourceTimeline.betCloseTime
+                : null,
+            fightStartTime:
+              typeof sourceTimeline.fightStartTime === "number"
+                ? sourceTimeline.fightStartTime
+                : null,
+            duelEndTime:
+              typeof sourceTimeline.duelEndTime === "number"
+                ? sourceTimeline.duelEndTime
+                : null,
+            updatedAt:
+              typeof sourceTimeline.updatedAt === "number"
+                ? sourceTimeline.updatedAt
                 : null,
           }
         : null,
