@@ -36,6 +36,20 @@ export type PredictionMarketsResponse = {
   duel: PredictionMarketsDuelSnapshot;
   markets: PredictionMarketLifecycleRecord[];
   updatedAt: number | null;
+  /**
+   * Source-time emission anchor for this surface — mirrors the upstream
+   * stream frame that drove its derivation. Nullable for backward
+   * compatibility with keeper builds that predate the commit-2 contract
+   * in `docs/frontier_duel_bet_stream_sync_prd_sow.md`. The viewer-clock
+   * selector (commit 3) keys snapshot history off this field.
+   */
+  sourceEmittedAt: number | null;
+  /**
+   * Server-clock timestamp at which the keeper built this surface.
+   * Staleness / max-age budgets key off this field; selectors key off
+   * `sourceEmittedAt`.
+   */
+  serverEmittedAt: number | null;
   marketParity?: MarketParityInfo | null;
 };
 
@@ -43,6 +57,16 @@ export type PredictionMarketsOverviewResponse = {
   live: PredictionMarketsResponse | null;
   recentSettlement: PredictionMarketsResponse | null;
   updatedAt: number | null;
+  /**
+   * Envelope-level convenience: newest source emission across `live`
+   * and `recentSettlement`. Consumers doing per-surface alignment read
+   * the per-surface fields directly.
+   */
+  sourceEmittedAt: number | null;
+  /**
+   * Server-clock timestamp at which the keeper emitted this envelope.
+   */
+  serverEmittedAt: number | null;
 };
 
 export type PredictionMarketRendererHealth = {
@@ -93,6 +117,13 @@ export function parsePredictionMarketsResponse(
     return null;
   }
 
+  const parsedUpdatedAt = normalizePredictionMarketTimestamp(candidate.updatedAt);
+  const parsedSourceEmittedAt = normalizePredictionMarketTimestamp(
+    candidate.sourceEmittedAt,
+  );
+  const parsedServerEmittedAt = normalizePredictionMarketTimestamp(
+    candidate.serverEmittedAt,
+  );
   return {
     duel: {
       duelKey: normalizePredictionMarketDuelKeyHex(
@@ -108,7 +139,13 @@ export function parsePredictionMarketsResponse(
     markets: candidate.markets
       .map((market) => normalizePredictionMarketLifecycleRecord(market))
       .filter((market): market is PredictionMarketLifecycleRecord => market !== null),
-    updatedAt: normalizePredictionMarketTimestamp(candidate.updatedAt),
+    updatedAt: parsedUpdatedAt,
+    // Backfill for legacy keeper builds (pre-commit-2): when the new
+    // source/server fields are missing, derive from `updatedAt` so the
+    // selector always has a defined anchor. Rolls forward safely once
+    // keepers are upgraded.
+    sourceEmittedAt: parsedSourceEmittedAt ?? parsedUpdatedAt,
+    serverEmittedAt: parsedServerEmittedAt ?? parsedUpdatedAt,
     marketParity: parseMarketParity(candidate.marketParity),
   };
 }
@@ -130,10 +167,30 @@ export function parsePredictionMarketsOverviewResponse(
     ? parsePredictionMarketsResponse(candidate.recentSettlement)
     : null;
 
+  const parsedUpdatedAt = normalizePredictionMarketTimestamp(candidate.updatedAt);
+  const parsedSourceEmittedAt = normalizePredictionMarketTimestamp(
+    candidate.sourceEmittedAt,
+  );
+  const parsedServerEmittedAt = normalizePredictionMarketTimestamp(
+    candidate.serverEmittedAt,
+  );
+  // Envelope backfill over per-surface values when legacy payloads
+  // omit the top-level source/server fields.
+  const envelopeSourceCandidates = [
+    parsedSourceEmittedAt,
+    live?.sourceEmittedAt,
+    recentSettlement?.sourceEmittedAt,
+  ].filter((value): value is number => typeof value === "number");
+
   return {
     live,
     recentSettlement,
-    updatedAt: normalizePredictionMarketTimestamp(candidate.updatedAt),
+    updatedAt: parsedUpdatedAt,
+    sourceEmittedAt:
+      envelopeSourceCandidates.length > 0
+        ? Math.max(...envelopeSourceCandidates)
+        : null,
+    serverEmittedAt: parsedServerEmittedAt ?? parsedUpdatedAt,
   };
 }
 
@@ -238,6 +295,11 @@ export async function fetchPredictionMarketsOverview(
     live,
     recentSettlement: null,
     updatedAt: live.updatedAt,
+    // Synthesized envelope when the keeper only returned the legacy
+    // `active` response shape. Mirror the live surface's anchors up to
+    // the envelope so downstream consumers see a consistent contract.
+    sourceEmittedAt: live.sourceEmittedAt,
+    serverEmittedAt: live.serverEmittedAt,
   };
 }
 

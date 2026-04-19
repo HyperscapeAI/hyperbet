@@ -413,12 +413,26 @@ describe("bet-sync helpers", () => {
         },
         markets: [],
         updatedAt: 11,
+        sourceEmittedAt: 11,
+        serverEmittedAt: 11,
       },
       11,
     );
 
     expect(next.live?.duel.duelId).toBe("duel-next");
     expect(next.recentSettlement?.duel.duelId).toBe("duel-live");
+    // recentSettlement.sourceEmittedAt must be preserved from the
+    // previous live surface — rolling forward does not re-stamp the
+    // source anchor. The selector in commit 3 depends on this invariant
+    // to place recentSettlement at the right point on the viewer's
+    // playback timeline.
+    expect(next.recentSettlement?.sourceEmittedAt).toBe(10);
+    // live.sourceEmittedAt comes from the new live surface.
+    expect(next.live?.sourceEmittedAt).toBe(11);
+    // Envelope max over the two surfaces.
+    expect(next.sourceEmittedAt).toBe(11);
+    // serverEmittedAt tracks the roll wall-clock.
+    expect(next.serverEmittedAt).toBe(11);
   });
 
   test("preserves stronger lifecycle state when the same duel refresh weakens", () => {
@@ -452,6 +466,8 @@ describe("bet-sync helpers", () => {
           },
         ],
         updatedAt: 100,
+        sourceEmittedAt: 100,
+        serverEmittedAt: 100,
       },
       {
         duel: {
@@ -481,6 +497,8 @@ describe("bet-sync helpers", () => {
           },
         ],
         updatedAt: 200,
+        sourceEmittedAt: 200,
+        serverEmittedAt: 200,
       },
     );
 

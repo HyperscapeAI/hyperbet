@@ -151,12 +151,45 @@ export type PredictionMarketsDuelSnapshot = {
 export type PredictionMarketsSurface = {
   duel: PredictionMarketsDuelSnapshot;
   markets: PredictionMarketLifecycleRecord[];
+  /**
+   * Legacy wall-clock timestamp: when the keeper built / last updated this
+   * surface. Retained for backwards compatibility with consumers that pre-
+   * date the source/server split. Prefer `serverEmittedAt` going forward.
+   */
   updatedAt: number | null;
+  /**
+   * Source-time emission anchor — the upstream `streamState.emittedAt`
+   * of the stream frame used to derive this surface. Preserved across
+   * `rollPredictionMarketsOverview` forward-rolls so a `recentSettlement`
+   * surface retains its original source anchor even as wall-clock
+   * `serverEmittedAt` advances. Selector keys (commit 3) use this field
+   * to align surface history against the viewer's playback clock.
+   */
+  sourceEmittedAt: number | null;
+  /**
+   * Server-clock timestamp at which this surface was (re)built by the
+   * keeper. Staleness / max-age budgets key off this field; selectors
+   * key off `sourceEmittedAt`.
+   */
+  serverEmittedAt: number;
   marketParity?: KeeperMarketParitySnapshot | null;
 };
 
 export type PredictionMarketsOverviewResponse = {
   updatedAt: number | null;
+  /**
+   * Envelope-level convenience: the newest source emission across
+   * `live` and `recentSettlement`. Consumers doing per-surface
+   * alignment should read the per-surface fields directly; this is
+   * just a top-level summary.
+   */
+  sourceEmittedAt: number | null;
+  /**
+   * Server-clock timestamp at which the keeper emitted this envelope.
+   * Distinct from `updatedAt` (kept for legacy compatibility); always
+   * set to `Date.now()` at the moment the response is constructed.
+   */
+  serverEmittedAt: number;
   live: PredictionMarketsSurface | null;
   recentSettlement: PredictionMarketsSurface | null;
 };
@@ -599,6 +632,13 @@ export function parsePredictionMarketsSurface(
     return null;
   }
 
+  const parsedUpdatedAt = normalizePredictionMarketTimestamp(candidate.updatedAt);
+  const parsedSourceEmittedAt = normalizePredictionMarketTimestamp(
+    candidate.sourceEmittedAt,
+  );
+  const parsedServerEmittedAt = normalizePredictionMarketTimestamp(
+    candidate.serverEmittedAt,
+  );
   return {
     duel: {
       duelKey: normalizeDuelKey(duel.duelKey),
@@ -613,7 +653,14 @@ export function parsePredictionMarketsSurface(
       (market): market is PredictionMarketLifecycleRecord =>
         Boolean(market) && typeof market === "object",
     ) as PredictionMarketLifecycleRecord[],
-    updatedAt: normalizePredictionMarketTimestamp(candidate.updatedAt),
+    updatedAt: parsedUpdatedAt,
+    // Backfill rules for snapshots parsed from legacy payloads (pre-
+    // commit-2 keeper builds): when the new fields are absent, derive
+    // them from `updatedAt` so the surface still has the fields the
+    // selector expects. This keeps downstream buffers safe against
+    // mixed-version environments during rollout.
+    sourceEmittedAt: parsedSourceEmittedAt ?? parsedUpdatedAt ?? null,
+    serverEmittedAt: parsedServerEmittedAt ?? parsedUpdatedAt ?? 0,
     marketParity: normalizeMarketParity(candidate.marketParity),
   };
 }
@@ -623,10 +670,34 @@ export function parsePredictionMarketsOverview(
 ): PredictionMarketsOverviewResponse | null {
   const candidate = asRecord(payload);
   if (!candidate) return null;
+  const parsedUpdatedAt = normalizePredictionMarketTimestamp(candidate.updatedAt);
+  const parsedSourceEmittedAt = normalizePredictionMarketTimestamp(
+    candidate.sourceEmittedAt,
+  );
+  const parsedServerEmittedAt = normalizePredictionMarketTimestamp(
+    candidate.serverEmittedAt,
+  );
+  const live = parsePredictionMarketsSurface(candidate.live);
+  const recentSettlement = parsePredictionMarketsSurface(
+    candidate.recentSettlement,
+  );
+  // Envelope backfill: if the top-level source/server fields are
+  // absent on legacy payloads, derive from per-surface values so
+  // consumers see a coherent envelope.
+  const envelopeSourceCandidates = [
+    parsedSourceEmittedAt,
+    live?.sourceEmittedAt,
+    recentSettlement?.sourceEmittedAt,
+  ].filter((value): value is number => typeof value === "number");
   return {
-    updatedAt: normalizePredictionMarketTimestamp(candidate.updatedAt),
-    live: parsePredictionMarketsSurface(candidate.live),
-    recentSettlement: parsePredictionMarketsSurface(candidate.recentSettlement),
+    updatedAt: parsedUpdatedAt,
+    sourceEmittedAt:
+      envelopeSourceCandidates.length > 0
+        ? Math.max(...envelopeSourceCandidates)
+        : null,
+    serverEmittedAt: parsedServerEmittedAt ?? parsedUpdatedAt ?? 0,
+    live,
+    recentSettlement,
   };
 }
 
@@ -674,6 +745,14 @@ export function mergePredictionMarketsSurface(
     duel: mergeDuelSnapshot(previous.duel, next.duel),
     markets: Array.from(byChain.values()),
     updatedAt: next.updatedAt,
+    // Merge semantics for source/server emission: both come from the
+    // NEXT surface (the newer build). `sourceEmittedAt` follows the
+    // newer source anchor; `serverEmittedAt` follows the newer build
+    // clock. Falling back to `previous` only when `next` is missing the
+    // field (transitional safety during rollout before every caller is
+    // updated to pass these fields).
+    sourceEmittedAt: next.sourceEmittedAt ?? previous.sourceEmittedAt ?? null,
+    serverEmittedAt: next.serverEmittedAt ?? previous.serverEmittedAt,
     marketParity: next.marketParity ?? previous.marketParity ?? null,
   };
 }
@@ -691,11 +770,32 @@ export function rollPredictionMarketsOverview(
     hasMeaningfulSurface(nextLive) &&
     !sameDuelIdentity(previous?.live, nextLive)
   ) {
+    // Roll the previous live surface forward into recentSettlement. We
+    // deliberately keep the surface object intact — including its
+    // original `sourceEmittedAt` — because that anchor ties the surface
+    // back to the stream frame that produced it. Downstream selectors
+    // (commit 3) rely on this to place recentSettlement at the right
+    // point on the viewer's playback timeline.
     recentSettlement = previous?.live ?? null;
   }
 
+  // Envelope-level `sourceEmittedAt` is max over present surfaces.
+  // Null only when BOTH surfaces are missing or both lack a source
+  // anchor — which only happens transitionally during rollout before
+  // upstream `streamState.emittedAt` is populated.
+  const envelopeSourceCandidates = [
+    nextLive?.sourceEmittedAt,
+    recentSettlement?.sourceEmittedAt,
+  ].filter((value): value is number => typeof value === "number");
+  const sourceEmittedAt =
+    envelopeSourceCandidates.length > 0
+      ? Math.max(...envelopeSourceCandidates)
+      : null;
+
   return {
     updatedAt,
+    sourceEmittedAt,
+    serverEmittedAt: updatedAt,
     live: nextLive,
     recentSettlement,
   };
