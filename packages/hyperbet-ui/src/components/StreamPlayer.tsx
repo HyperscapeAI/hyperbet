@@ -118,17 +118,30 @@ type HlsVariantDescriptor = {
   bitrate: number;
 };
 
-function resolvePlaybackTargetSize(video: HTMLVideoElement | null) {
+export function resolvePlaybackTargetSize(video: HTMLVideoElement | null) {
   const devicePixelRatio =
     typeof window !== "undefined" && Number.isFinite(window.devicePixelRatio)
       ? Math.max(1, window.devicePixelRatio)
       : 1;
+  const viewportWidth =
+    typeof window !== "undefined" && Number.isFinite(window.innerWidth)
+      ? Math.max(0, window.innerWidth)
+      : 0;
+  const viewportHeight =
+    typeof window !== "undefined" && Number.isFinite(window.innerHeight)
+      ? Math.max(0, window.innerHeight)
+      : 0;
   return {
     targetWidth:
-      Math.max(video?.clientWidth ?? 0, video?.videoWidth ?? 0, 1) *
+      Math.max(viewportWidth, video?.clientWidth ?? 0, video?.videoWidth ?? 0, 1) *
       devicePixelRatio,
     targetHeight:
-      Math.max(video?.clientHeight ?? 0, video?.videoHeight ?? 0, 1) *
+      Math.max(
+        viewportHeight,
+        video?.clientHeight ?? 0,
+        video?.videoHeight ?? 0,
+        1,
+      ) *
       devicePixelRatio,
   };
 }
@@ -253,10 +266,18 @@ export function preferHighestViableHlsLevel(
   );
 
   hls.autoLevelCapping = preferredLevel;
+  hls.nextLoadLevel = preferredLevel;
   hls.nextAutoLevel = preferredLevel;
   hls.startLevel = preferredLevel;
   hls.nextLevel = preferredLevel;
   hls.loadLevel = preferredLevel;
+  if ("manualLevel" in hls) {
+    try {
+      (hls as Hls & { manualLevel: number }).manualLevel = preferredLevel;
+    } catch {
+      // Ignore manualLevel assignment failures on older hls.js shims.
+    }
+  }
   try {
     hls.currentLevel = preferredLevel;
   } catch {

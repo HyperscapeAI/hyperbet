@@ -5,6 +5,7 @@ import { buildHlsPlayerEmbedUrl } from "../src/components/StreamPlayer";
 import {
   resolveBufferedPresentationDelayTarget,
   resolveObservedPlaybackLatencyMs,
+  shouldPreferNativeHlsPlayback,
 } from "../src/player/HlsPlayerApp";
 import {
   advanceViewerLoaderState,
@@ -137,5 +138,95 @@ describe("resolveObservedPlaybackLatencyMs", () => {
         duration: Number.NaN,
       }),
     ).toBe(650);
+  });
+});
+
+describe("shouldPreferNativeHlsPlayback", () => {
+  it("keeps desktop Chrome on the managed hls.js path", () => {
+    const originalUserAgent = navigator.userAgent;
+    const originalPlatform = navigator.platform;
+    const originalMaxTouchPoints = navigator.maxTouchPoints;
+
+    try {
+      Object.defineProperty(navigator, "userAgent", {
+        configurable: true,
+        value:
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36",
+      });
+      Object.defineProperty(navigator, "platform", {
+        configurable: true,
+        value: "MacIntel",
+      });
+      Object.defineProperty(navigator, "maxTouchPoints", {
+        configurable: true,
+        value: 0,
+      });
+
+      expect(shouldPreferNativeHlsPlayback()).toBe(false);
+    } finally {
+      Object.defineProperty(navigator, "userAgent", {
+        configurable: true,
+        value: originalUserAgent,
+      });
+      Object.defineProperty(navigator, "platform", {
+        configurable: true,
+        value: originalPlatform,
+      });
+      Object.defineProperty(navigator, "maxTouchPoints", {
+        configurable: true,
+        value: originalMaxTouchPoints,
+      });
+    }
+  });
+
+  it("preserves native playback for Safari and iOS WebKit", () => {
+    const originalUserAgent = navigator.userAgent;
+    const originalPlatform = navigator.platform;
+    const originalMaxTouchPoints = navigator.maxTouchPoints;
+
+    try {
+      Object.defineProperty(navigator, "userAgent", {
+        configurable: true,
+        value:
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15",
+      });
+      Object.defineProperty(navigator, "platform", {
+        configurable: true,
+        value: "MacIntel",
+      });
+      Object.defineProperty(navigator, "maxTouchPoints", {
+        configurable: true,
+        value: 0,
+      });
+      expect(shouldPreferNativeHlsPlayback()).toBe(true);
+
+      Object.defineProperty(navigator, "userAgent", {
+        configurable: true,
+        value:
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/145.0.0.0 Mobile/15E148 Safari/604.1",
+      });
+      Object.defineProperty(navigator, "platform", {
+        configurable: true,
+        value: "MacIntel",
+      });
+      Object.defineProperty(navigator, "maxTouchPoints", {
+        configurable: true,
+        value: 5,
+      });
+      expect(shouldPreferNativeHlsPlayback()).toBe(true);
+    } finally {
+      Object.defineProperty(navigator, "userAgent", {
+        configurable: true,
+        value: originalUserAgent,
+      });
+      Object.defineProperty(navigator, "platform", {
+        configurable: true,
+        value: originalPlatform,
+      });
+      Object.defineProperty(navigator, "maxTouchPoints", {
+        configurable: true,
+        value: originalMaxTouchPoints,
+      });
+    }
   });
 });

@@ -8,6 +8,7 @@ import {
   RECENT_PLAYER_SIGNAL_WINDOW_MS,
   recordRecentPlaybackSignal,
   resolveHlsPlaybackProfile,
+  resolvePlaybackTargetSize,
   resolvePlayerDeliveryModeHint,
   selectPreferredHlsStartLevelFromManifest,
   shouldTreatPlaybackLatencyAsDrifted,
@@ -165,6 +166,42 @@ describe("resolvePlayerDeliveryModeHint", () => {
 });
 
 describe("preferHighestViableHlsLevel", () => {
+  it("uses the iframe viewport when the video element has not laid out yet", () => {
+    const originalInnerWidth = window.innerWidth;
+    const originalInnerHeight = window.innerHeight;
+    try {
+      Object.defineProperty(window, "innerWidth", {
+        configurable: true,
+        value: 1280,
+      });
+      Object.defineProperty(window, "innerHeight", {
+        configurable: true,
+        value: 720,
+      });
+
+      expect(
+        resolvePlaybackTargetSize({
+          clientHeight: 0,
+          clientWidth: 0,
+          videoHeight: 0,
+          videoWidth: 0,
+        } as HTMLVideoElement),
+      ).toEqual({
+        targetHeight: 720,
+        targetWidth: 1280,
+      });
+    } finally {
+      Object.defineProperty(window, "innerWidth", {
+        configurable: true,
+        value: originalInnerWidth,
+      });
+      Object.defineProperty(window, "innerHeight", {
+        configurable: true,
+        value: originalInnerHeight,
+      });
+    }
+  });
+
   it("picks the highest fitting rendition by resolution instead of trusting manifest order", () => {
     const hls = {
       autoLevelCapping: -1,
@@ -178,7 +215,9 @@ describe("preferHighestViableHlsLevel", () => {
         { width: 426, height: 240, bitrate: 700_000 },
       ],
       loadLevel: -1,
+      manualLevel: -1,
       nextAutoLevel: -1,
+      nextLoadLevel: -1,
       nextLevel: -1,
       startLevel: -1,
     } as unknown as {
@@ -187,7 +226,9 @@ describe("preferHighestViableHlsLevel", () => {
       capLevelToPlayerSize: boolean;
       levels: Array<{ width: number; height: number; bitrate: number }>;
       loadLevel: number;
+      manualLevel: number;
       nextAutoLevel: number;
+      nextLoadLevel: number;
       nextLevel: number;
       startLevel: number;
     };
@@ -203,6 +244,8 @@ describe("preferHighestViableHlsLevel", () => {
     expect(hls.capLevelToPlayerSize).toBe(true);
     expect(hls.autoLevelCapping).toBe(1);
     expect(hls.nextAutoLevel).toBe(1);
+    expect(hls.nextLoadLevel).toBe(1);
+    expect(hls.manualLevel).toBe(1);
     expect(hls.currentLevel).toBe(1);
     expect(hls.startLevel).toBe(1);
     expect(hls.nextLevel).toBe(1);
@@ -210,6 +253,8 @@ describe("preferHighestViableHlsLevel", () => {
   });
 
   it("falls back to the best available rendition when nothing fits the player size", () => {
+    const originalInnerWidth = window.innerWidth;
+    const originalInnerHeight = window.innerHeight;
     const hls = {
       autoLevelCapping: -1,
       currentLevel: -1,
@@ -222,7 +267,9 @@ describe("preferHighestViableHlsLevel", () => {
         { width: 426, height: 240, bitrate: 700_000 },
       ],
       loadLevel: -1,
+      manualLevel: -1,
       nextAutoLevel: -1,
+      nextLoadLevel: -1,
       nextLevel: -1,
       startLevel: -1,
     } as unknown as {
@@ -231,7 +278,9 @@ describe("preferHighestViableHlsLevel", () => {
       capLevelToPlayerSize: boolean;
       levels: Array<{ width: number; height: number; bitrate: number }>;
       loadLevel: number;
+      manualLevel: number;
       nextAutoLevel: number;
+      nextLoadLevel: number;
       nextLevel: number;
       startLevel: number;
     };
@@ -242,14 +291,36 @@ describe("preferHighestViableHlsLevel", () => {
       videoWidth: 0,
     } as HTMLVideoElement;
 
-    preferHighestViableHlsLevel(hls as never, video);
+    try {
+      Object.defineProperty(window, "innerWidth", {
+        configurable: true,
+        value: 160,
+      });
+      Object.defineProperty(window, "innerHeight", {
+        configurable: true,
+        value: 120,
+      });
 
-    expect(hls.autoLevelCapping).toBe(1);
-    expect(hls.nextAutoLevel).toBe(1);
-    expect(hls.currentLevel).toBe(1);
-    expect(hls.startLevel).toBe(1);
-    expect(hls.nextLevel).toBe(1);
-    expect(hls.loadLevel).toBe(1);
+      preferHighestViableHlsLevel(hls as never, video);
+
+      expect(hls.autoLevelCapping).toBe(1);
+      expect(hls.nextAutoLevel).toBe(1);
+      expect(hls.nextLoadLevel).toBe(1);
+      expect(hls.manualLevel).toBe(1);
+      expect(hls.currentLevel).toBe(1);
+      expect(hls.startLevel).toBe(1);
+      expect(hls.nextLevel).toBe(1);
+      expect(hls.loadLevel).toBe(1);
+    } finally {
+      Object.defineProperty(window, "innerWidth", {
+        configurable: true,
+        value: originalInnerWidth,
+      });
+      Object.defineProperty(window, "innerHeight", {
+        configurable: true,
+        value: originalInnerHeight,
+      });
+    }
   });
 });
 

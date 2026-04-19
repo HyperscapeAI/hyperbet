@@ -9,6 +9,7 @@ import {
   RECENT_PLAYER_SIGNAL_THRESHOLD,
   recordRecentPlaybackSignal,
   resolveHlsPlaybackProfile,
+  resolvePlaybackTargetSize,
   resolvePlaybackSyncDeltaMs,
   resolvePlayerDeliveryModeHint,
   selectPreferredHlsStartLevelFromManifest,
@@ -91,6 +92,9 @@ type RuntimeState = {
   syncState: ViewerSyncState;
   consecutiveOutOfSyncPolls: number;
   consecutiveAlignedPolls: number;
+  debugPreferredStartLevel: number | null;
+  debugTargetWidth: number | null;
+  debugTargetHeight: number | null;
   telemetry: StreamPlayerStatus;
   loader: ViewerLoaderState;
 };
@@ -129,6 +133,23 @@ export function resolveBufferedPresentationDelayTarget(params: {
   }
 
   return Math.min(maxTarget, Math.max(minTarget, desiredTarget));
+}
+
+export function shouldPreferNativeHlsPlayback(): boolean {
+  if (typeof navigator === "undefined") {
+    return false;
+  }
+  const userAgent = navigator.userAgent || "";
+  const platform = navigator.platform || "";
+  const maxTouchPoints =
+    typeof navigator.maxTouchPoints === "number" ? navigator.maxTouchPoints : 0;
+  const isIosWebKit =
+    /iPad|iPhone|iPod/i.test(userAgent) ||
+    (platform === "MacIntel" && maxTouchPoints > 1);
+  const isSafariDesktop =
+    /Safari\//.test(userAgent) &&
+    !/Chrome\/|Chromium\/|CriOS\/|Edg\/|OPR\/|Firefox\/|FxiOS\//.test(userAgent);
+  return isIosWebKit || isSafariDesktop;
 }
 
 export function resolveObservedPlaybackLatencyMs(params: {
@@ -219,6 +240,9 @@ export function HlsPlayerApp() {
     syncState: "starting",
     consecutiveOutOfSyncPolls: 0,
     consecutiveAlignedPolls: 0,
+    debugPreferredStartLevel: null,
+    debugTargetWidth: null,
+    debugTargetHeight: null,
     telemetry: createInitialTelemetry(params),
     loader: createInitialViewerLoaderState(),
   });
@@ -318,6 +342,15 @@ export function HlsPlayerApp() {
             `buffered ${formatBufferedLabel(runtime.telemetry.lastBufferedFragmentAt)}`,
             runtime.telemetry.deliveryMode
               ? `mode ${runtime.telemetry.deliveryMode}`
+              : null,
+            runtime.debugPreferredStartLevel != null
+              ? `pref ${runtime.debugPreferredStartLevel}`
+              : null,
+            runtime.debugTargetWidth != null && runtime.debugTargetHeight != null
+              ? `target ${runtime.debugTargetWidth}x${runtime.debugTargetHeight}`
+              : null,
+            runtime.hls != null
+              ? `levels c${runtime.hls.currentLevel} n${runtime.hls.nextLevel} nl${runtime.hls.nextLoadLevel} a${runtime.hls.autoLevelCapping}`
               : null,
             `sync ${runtime.telemetry.syncState}`,
             `boot ${runtime.loader.phase}`,
@@ -855,6 +888,9 @@ export function HlsPlayerApp() {
 
     const attachCommonVideoEvents = () => {
       video.addEventListener("loadedmetadata", () => {
+        if (runtime.hls) {
+          preferHighestViableHlsLevel(runtime.hls, video);
+        }
         if (!runtime.readySent) {
           updateLoaderPhase("finalizing", { overlayMessage: null, visible: true });
         }
@@ -865,6 +901,9 @@ export function HlsPlayerApp() {
         }
       });
       video.addEventListener("loadeddata", () => {
+        if (runtime.hls) {
+          preferHighestViableHlsLevel(runtime.hls, video);
+        }
         if (!runtime.readySent) {
           updateLoaderPhase("finalizing", { overlayMessage: null, visible: true });
         }
@@ -875,6 +914,9 @@ export function HlsPlayerApp() {
         }
       });
       video.addEventListener("canplay", () => {
+        if (runtime.hls) {
+          preferHighestViableHlsLevel(runtime.hls, video);
+        }
         if (!runtime.readySent) {
           updateLoaderPhase("finalizing", { overlayMessage: null, visible: true });
         }
@@ -1037,13 +1079,13 @@ export function HlsPlayerApp() {
           return null;
         }
         const manifestText = await response.text();
-        const devicePixelRatio = Number.isFinite(window.devicePixelRatio)
-          ? Math.max(1, window.devicePixelRatio)
-          : 1;
+        const { targetHeight, targetWidth } = resolvePlaybackTargetSize(video);
+        runtime.debugTargetWidth = targetWidth;
+        runtime.debugTargetHeight = targetHeight;
         return selectPreferredHlsStartLevelFromManifest(
           manifestText,
-          Math.max(video.clientWidth, video.videoWidth, 1) * devicePixelRatio,
-          Math.max(video.clientHeight, video.videoHeight, 1) * devicePixelRatio,
+          targetWidth,
+          targetHeight,
         );
       } catch {
         return null;
@@ -1102,7 +1144,9 @@ export function HlsPlayerApp() {
         return;
       }
 
-      if (video.canPlayType("application/vnd.apple.mpegurl")) {
+      const canUseNativeHls =
+        video.canPlayType("application/vnd.apple.mpegurl") !== "";
+      if (canUseNativeHls && shouldPreferNativeHlsPlayback()) {
         video.src = runtime.activeStreamUrl;
         startLatencyPolling();
         syncTelemetry();
@@ -1152,6 +1196,7 @@ export function HlsPlayerApp() {
           sourceUrl: runtime.activeStreamUrl,
         });
       }
+      runtime.debugPreferredStartLevel = preferredStartLevel;
       setDebugState({
         preferredStartLevel,
         sourceUrl: runtime.activeStreamUrl,
