@@ -1132,6 +1132,12 @@ export function HlsPlayerApp() {
       if (disposed) {
         return;
       }
+      if (params.debugEnabled) {
+        console.info("[hls-player] resolved preferred startup level", {
+          preferredStartLevel,
+          sourceUrl: runtime.activeStreamUrl,
+        });
+      }
       runtime.hls = new Hls({
         ...hlsConfig,
         startLevel: preferredStartLevel ?? undefined,
@@ -1147,6 +1153,21 @@ export function HlsPlayerApp() {
       startLatencyPolling();
 
       runtime.hls.on(Hls.Events.MANIFEST_PARSED, () => {
+        if (params.debugEnabled && runtime.hls) {
+          console.info("[hls-player] manifest levels", {
+            autoLevelCapping: runtime.hls.autoLevelCapping,
+            currentLevel: runtime.hls.currentLevel,
+            firstLevel: runtime.hls.firstLevel,
+            levels: runtime.hls.levels.map((level, index) => ({
+              bitrate: level.bitrate ?? 0,
+              height: level.height ?? 0,
+              index,
+              width: level.width ?? 0,
+            })),
+            nextAutoLevel: runtime.hls.nextAutoLevel,
+            startLevel: runtime.hls.startLevel,
+          });
+        }
         if (runtime.hls) {
           preferHighestViableHlsLevel(runtime.hls, video);
         }
@@ -1180,6 +1201,24 @@ export function HlsPlayerApp() {
       });
 
       runtime.hls.on(Hls.Events.LEVEL_UPDATED, syncTelemetry);
+      runtime.hls.on(Hls.Events.FRAG_LOADING, (_event, data) => {
+        if (!params.debugEnabled) {
+          return;
+        }
+        console.info("[hls-player] loading fragment", {
+          level: data.frag?.level ?? null,
+          sn: data.frag?.sn ?? null,
+          type: data.frag?.type ?? null,
+        });
+      });
+      runtime.hls.on(Hls.Events.LEVEL_SWITCHED, (_event, data) => {
+        if (!params.debugEnabled) {
+          return;
+        }
+        console.info("[hls-player] switched level", {
+          level: data.level ?? null,
+        });
+      });
       runtime.hls.on(Hls.Events.ERROR, (_event, data) => {
         runtime.lastHlsError = {
           type: data.type || null,
