@@ -1855,6 +1855,15 @@ async function handlePerpsMarkets(req: Request, url: URL): Promise<Response> {
 }
 
 function handleDuelContext(req: Request): Response {
+  // `sourceEmittedAt` anchors this response to the stream frame we last
+  // observed — the selector key viewer-clock alignment will use.
+  // `serverEmittedAt` is the wall-clock moment we emit this response —
+  // the staleness key for max-age budgets. Legacy `updatedAt` is kept
+  // equal to the source anchor for backwards compatibility with
+  // consumers that pre-date the split.
+  const sourceEmittedAt =
+    typeof streamState.emittedAt === "number" ? streamState.emittedAt : null;
+  const serverEmittedAt = Date.now();
   return jsonResponse(
     req,
     {
@@ -1862,7 +1871,9 @@ function handleDuelContext(req: Request): Response {
       cycle: streamState.cycle,
       leaderboard: streamState.leaderboard,
       cameraTarget: streamState.cameraTarget,
-      updatedAt: streamState.emittedAt,
+      updatedAt: sourceEmittedAt,
+      sourceEmittedAt,
+      serverEmittedAt,
     },
     200,
     {
@@ -2441,6 +2452,11 @@ function buildLivePredictionMarketsSurface(
   const streamDuelId = streamDuel.duelId;
   const cyclePhase = streamDuel.phase;
   const previousLive = previousOverview?.live ?? null;
+  // Source-time anchor: the upstream stream frame that drove this
+  // surface derivation. Threaded through every surface return below.
+  const liveSourceEmittedAt =
+    typeof sourceState.emittedAt === "number" ? sourceState.emittedAt : null;
+  const nowMs = Date.now();
 
   if (
     !publicMarketParity ||
@@ -2449,7 +2465,9 @@ function buildLivePredictionMarketsSurface(
     return {
       duel: streamDuel,
       markets: [],
-      updatedAt: Date.now(),
+      updatedAt: nowMs,
+      sourceEmittedAt: liveSourceEmittedAt,
+      serverEmittedAt: nowMs,
       marketParity: publicMarketParity,
     };
   }
@@ -2466,6 +2484,7 @@ function buildLivePredictionMarketsSurface(
       previousLive.duel,
       effectiveBotHealth,
       previousLive,
+      liveSourceEmittedAt,
     );
   }
 
@@ -2489,7 +2508,9 @@ function buildLivePredictionMarketsSurface(
     return {
       duel: streamDuel,
       markets: [],
-      updatedAt: Date.now(),
+      updatedAt: nowMs,
+      sourceEmittedAt: liveSourceEmittedAt,
+      serverEmittedAt: nowMs,
       marketParity: publicMarketParity,
     };
   }
@@ -2541,16 +2562,28 @@ function buildLivePredictionMarketsSurface(
         null,
     },
     markets: filterEnabledPredictionMarkets(markets),
-    updatedAt: Date.now(),
+    updatedAt: nowMs,
+    sourceEmittedAt: liveSourceEmittedAt,
+    serverEmittedAt: nowMs,
     marketParity: publicMarketParity,
   };
 }
 
+/**
+ * Build a surface for a specific duel identity, using the given source
+ * emission anchor. `sourceEmittedAt` is the upstream
+ * `streamState.emittedAt` that drove this derivation; pass `null` only
+ * when the caller genuinely lacks a source anchor (e.g. preservation
+ * paths restoring a previous surface whose anchor should be kept intact
+ * via merge semantics).
+ */
 function buildPredictionMarketsSurfaceForDuel(
   duel: PredictionMarketsSurface["duel"],
   botHealthSnapshot: KeeperBotHealthSnapshot | null,
   previous: PredictionMarketsSurface | null,
+  sourceEmittedAt: number | null,
 ): PredictionMarketsSurface {
+  const nowMs = Date.now();
   const nextSurface: PredictionMarketsSurface = {
     duel,
     markets: filterPredictionMarketsForDuel(
@@ -2562,7 +2595,9 @@ function buildPredictionMarketsSurfaceForDuel(
       duelId: duel.duelId ?? market.duelId ?? null,
       betCloseTime: duel.betCloseTime ?? market.betCloseTime ?? null,
     })),
-    updatedAt: Date.now(),
+    updatedAt: nowMs,
+    sourceEmittedAt,
+    serverEmittedAt: nowMs,
     marketParity: botHealthSnapshot?.marketParity ?? null,
   };
   const merged = mergePredictionMarketsSurface(previous, nextSurface) ?? nextSurface;
@@ -2584,26 +2619,46 @@ function derivePredictionMarketsOverview(
     sourceState,
     previousOverview,
   );
+  const rolledAt = Date.now();
   const rolled = rollPredictionMarketsOverview(
     previousOverview,
     live,
-    Date.now(),
+    rolledAt,
   );
+  // When refreshing the rolled recentSettlement for market updates
+  // (lifecycle records / parity receipts may have changed), preserve
+  // the surface's ORIGINAL `sourceEmittedAt` — that anchor ties the
+  // surface back to the source frame that produced it. Re-stamping
+  // with the live source would lie about when that settlement
+  // originated from the keeper's perspective.
   const refreshedRecentSettlement = rolled.recentSettlement
     ? buildPredictionMarketsSurfaceForDuel(
         rolled.recentSettlement.duel,
         effectiveBotHealth,
         rolled.recentSettlement,
+        rolled.recentSettlement.sourceEmittedAt,
       )
     : null;
+  // Recompute envelope `sourceEmittedAt` since the refreshed
+  // settlement may carry a different anchor than what `rolled`
+  // computed before the refresh.
+  const finalRecentSettlement =
+    refreshedRecentSettlement && sameDuelIdentity(refreshedRecentSettlement, live)
+      ? null
+      : refreshedRecentSettlement;
+  const envelopeSourceCandidates = [
+    live?.sourceEmittedAt,
+    finalRecentSettlement?.sourceEmittedAt,
+  ].filter((value): value is number => typeof value === "number");
   const next: PredictionMarketsOverviewResponse = {
-    updatedAt: Date.now(),
+    updatedAt: rolledAt,
+    sourceEmittedAt:
+      envelopeSourceCandidates.length > 0
+        ? Math.max(...envelopeSourceCandidates)
+        : null,
+    serverEmittedAt: rolledAt,
     live,
-    recentSettlement:
-      refreshedRecentSettlement &&
-      sameDuelIdentity(refreshedRecentSettlement, live)
-        ? null
-        : refreshedRecentSettlement,
+    recentSettlement: finalRecentSettlement,
   };
   return next;
 }

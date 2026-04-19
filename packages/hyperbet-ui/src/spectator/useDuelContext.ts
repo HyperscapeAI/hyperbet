@@ -59,6 +59,24 @@ export type DuelContextState = {
   };
   leaderboard: unknown[];
   cameraTarget: string | null;
+  /**
+   * Source-time emission anchor for this context response — the upstream
+   * `streamState.emittedAt` of the frame we last observed. The viewer-clock
+   * selector (commit 3) keys duel-context history off this field.
+   * Nullable for backward compatibility with keeper builds that predate
+   * the commit-2 contract.
+   */
+  sourceEmittedAt?: number | null;
+  /**
+   * Server-clock timestamp at which the keeper emitted this response.
+   * Staleness / max-age budgets key off this field.
+   */
+  serverEmittedAt?: number | null;
+  /**
+   * Legacy top-level wall-clock stamp (equal to `sourceEmittedAt` on
+   * keeper builds that carry it). Kept for backwards compatibility.
+   */
+  updatedAt?: number | null;
 };
 
 const POLL_INTERVAL_MS = 3000;
@@ -201,6 +219,21 @@ function normalizeDuelContext(raw: unknown): DuelContextState | null {
       typeof r.cameraTarget === "string" || r.cameraTarget === null
         ? (r.cameraTarget as string | null)
         : null,
+    // Commit-2 contract fields. Backfill source → updatedAt when the
+    // keeper predates the contract so the selector always has an anchor.
+    sourceEmittedAt:
+      typeof r.sourceEmittedAt === "number"
+        ? r.sourceEmittedAt
+        : typeof r.updatedAt === "number"
+          ? r.updatedAt
+          : null,
+    serverEmittedAt:
+      typeof r.serverEmittedAt === "number"
+        ? r.serverEmittedAt
+        : typeof r.updatedAt === "number"
+          ? r.updatedAt
+          : null,
+    updatedAt: typeof r.updatedAt === "number" ? r.updatedAt : null,
   };
 }
 
