@@ -111,45 +111,46 @@ export const RECENT_PLAYER_SIGNAL_WINDOW_MS = 30_000;
 export const RECENT_PLAYER_SIGNAL_THRESHOLD = 3;
 export const DEFAULT_SYNC_TOLERANCE_MS = 2_500;
 
-export function preferHighestViableHlsLevel(
-  hls: Hls,
-  video: HTMLVideoElement | null,
-): void {
-  const levels = hls.levels;
-  if (!Array.isArray(levels) || levels.length === 0) {
-    return;
-  }
+type HlsVariantDescriptor = {
+  index: number;
+  width: number;
+  height: number;
+  bitrate: number;
+};
 
-  hls.capLevelToPlayerSize = true;
-
+function resolvePlaybackTargetSize(video: HTMLVideoElement | null) {
   const devicePixelRatio =
     typeof window !== "undefined" && Number.isFinite(window.devicePixelRatio)
       ? Math.max(1, window.devicePixelRatio)
       : 1;
-  const targetWidth =
-    Math.max(video?.clientWidth ?? 0, video?.videoWidth ?? 0, 1) *
-    devicePixelRatio;
-  const targetHeight =
-    Math.max(video?.clientHeight ?? 0, video?.videoHeight ?? 0, 1) *
-    devicePixelRatio;
+  return {
+    targetWidth:
+      Math.max(video?.clientWidth ?? 0, video?.videoWidth ?? 0, 1) *
+      devicePixelRatio,
+    targetHeight:
+      Math.max(video?.clientHeight ?? 0, video?.videoHeight ?? 0, 1) *
+      devicePixelRatio,
+  };
+}
+
+function selectPreferredHlsVariantIndex(
+  variants: HlsVariantDescriptor[],
+  targetWidth: number,
+  targetHeight: number,
+): number {
   const sizeBudgetWidth = targetWidth * 1.25;
   const sizeBudgetHeight = targetHeight * 1.25;
-  const rankedLevels = levels
-    .map((level, index) => {
-      const width = level?.width ?? 0;
-      const height = level?.height ?? 0;
-      const bitrate = level?.bitrate ?? 0;
-      const hasWidth = width > 0;
-      const hasHeight = height > 0;
-      const fitsWidth = !hasWidth || width <= sizeBudgetWidth;
-      const fitsHeight = !hasHeight || height <= sizeBudgetHeight;
-      const fitsPlayerSize =
-        (hasWidth || hasHeight) && fitsWidth && fitsHeight;
+  const rankedLevels = variants
+    .map((variant) => {
+      const hasWidth = variant.width > 0;
+      const hasHeight = variant.height > 0;
+      const fitsWidth = !hasWidth || variant.width <= sizeBudgetWidth;
+      const fitsHeight = !hasHeight || variant.height <= sizeBudgetHeight;
+      const fitsPlayerSize = (hasWidth || hasHeight) && fitsWidth && fitsHeight;
       return {
-        index,
-        bitrate,
+        ...variant,
         fitsPlayerSize,
-        pixelCount: width * height,
+        pixelCount: variant.width * variant.height,
       };
     })
     .sort((left, right) => {
@@ -164,7 +165,72 @@ export function preferHighestViableHlsLevel(
       }
       return left.index - right.index;
     });
-  const preferredLevel = rankedLevels[0]?.index ?? 0;
+  return rankedLevels[0]?.index ?? 0;
+}
+
+export function selectPreferredHlsStartLevelFromManifest(
+  manifestText: string,
+  targetWidth: number,
+  targetHeight: number,
+): number | null {
+  const variants: HlsVariantDescriptor[] = [];
+  let pendingStreamInf: string | null = null;
+
+  for (const rawLine of manifestText.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line) {
+      continue;
+    }
+    if (line.startsWith("#EXT-X-STREAM-INF:")) {
+      pendingStreamInf = line.slice("#EXT-X-STREAM-INF:".length);
+      continue;
+    }
+    if (pendingStreamInf == null || line.startsWith("#")) {
+      continue;
+    }
+
+    const resolutionMatch = pendingStreamInf.match(/RESOLUTION=(\d+)x(\d+)/i);
+    const bandwidthMatch = pendingStreamInf.match(/BANDWIDTH=(\d+)/i);
+    variants.push({
+      index: variants.length,
+      width: resolutionMatch ? Number.parseInt(resolutionMatch[1] ?? "0", 10) : 0,
+      height: resolutionMatch
+        ? Number.parseInt(resolutionMatch[2] ?? "0", 10)
+        : 0,
+      bitrate: bandwidthMatch ? Number.parseInt(bandwidthMatch[1] ?? "0", 10) : 0,
+    });
+    pendingStreamInf = null;
+  }
+
+  if (variants.length === 0) {
+    return null;
+  }
+
+  return selectPreferredHlsVariantIndex(variants, targetWidth, targetHeight);
+}
+
+export function preferHighestViableHlsLevel(
+  hls: Hls,
+  video: HTMLVideoElement | null,
+): void {
+  const levels = hls.levels;
+  if (!Array.isArray(levels) || levels.length === 0) {
+    return;
+  }
+
+  hls.capLevelToPlayerSize = true;
+
+  const { targetWidth, targetHeight } = resolvePlaybackTargetSize(video);
+  const preferredLevel = selectPreferredHlsVariantIndex(
+    levels.map((level, index) => ({
+      index,
+      width: level?.width ?? 0,
+      height: level?.height ?? 0,
+      bitrate: level?.bitrate ?? 0,
+    })),
+    targetWidth,
+    targetHeight,
+  );
 
   hls.autoLevelCapping = preferredLevel;
   hls.nextAutoLevel = preferredLevel;

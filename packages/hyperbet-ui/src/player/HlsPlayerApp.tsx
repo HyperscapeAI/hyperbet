@@ -11,6 +11,7 @@ import {
   resolveHlsPlaybackProfile,
   resolvePlaybackSyncDeltaMs,
   resolvePlayerDeliveryModeHint,
+  selectPreferredHlsStartLevelFromManifest,
   shouldTreatPlaybackLatencyAsDrifted,
   type StreamPlayerStatus,
   type ViewerSyncState,
@@ -229,6 +230,7 @@ export function HlsPlayerApp() {
       return;
     }
 
+    let disposed = false;
     const runtime = runtimeRef.current;
 
     const setLoaderStateAndRemember = (next: ViewerLoaderState) => {
@@ -1008,7 +1010,33 @@ export function HlsPlayerApp() {
       });
     };
 
-    const initPlayer = () => {
+    const resolvePreferredStartLevel = async (sourceUrl: string) => {
+      try {
+        const controller = new AbortController();
+        const timeout = window.setTimeout(() => controller.abort(), 4000);
+        const response = await fetch(sourceUrl, {
+          cache: "no-store",
+          signal: controller.signal,
+        });
+        window.clearTimeout(timeout);
+        if (!response.ok) {
+          return null;
+        }
+        const manifestText = await response.text();
+        const devicePixelRatio = Number.isFinite(window.devicePixelRatio)
+          ? Math.max(1, window.devicePixelRatio)
+          : 1;
+        return selectPreferredHlsStartLevelFromManifest(
+          manifestText,
+          Math.max(video.clientWidth, video.videoWidth, 1) * devicePixelRatio,
+          Math.max(video.clientHeight, video.videoHeight, 1) * devicePixelRatio,
+        );
+      } catch {
+        return null;
+      }
+    };
+
+    const initPlayer = async () => {
       destroyPlayer();
       runtime.playbackProfile = resolveHlsPlaybackProfile(
         runtime.activeStreamUrl || "",
@@ -1098,8 +1126,22 @@ export function HlsPlayerApp() {
               ),
             }
           : runtime.playbackProfile.config;
-
-      runtime.hls = new Hls(hlsConfig);
+      const preferredStartLevel = runtime.activeStreamUrl
+        ? await resolvePreferredStartLevel(runtime.activeStreamUrl)
+        : null;
+      if (disposed) {
+        return;
+      }
+      runtime.hls = new Hls({
+        ...hlsConfig,
+        startLevel: preferredStartLevel ?? undefined,
+      });
+      if (preferredStartLevel != null) {
+        runtime.hls.firstLevel = preferredStartLevel;
+        runtime.hls.startLevel = preferredStartLevel;
+        runtime.hls.autoLevelCapping = preferredStartLevel;
+        runtime.hls.nextAutoLevel = preferredStartLevel;
+      }
       runtime.hls.loadSource(runtime.activeStreamUrl);
       runtime.hls.attachMedia(video);
       startLatencyPolling();
@@ -1255,6 +1297,7 @@ export function HlsPlayerApp() {
     initPlayer();
 
     return () => {
+      disposed = true;
       destroyPlayer();
     };
   }, [params]);

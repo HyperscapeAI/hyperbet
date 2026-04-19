@@ -9,6 +9,7 @@ import {
   recordRecentPlaybackSignal,
   resolveHlsPlaybackProfile,
   resolvePlayerDeliveryModeHint,
+  selectPreferredHlsStartLevelFromManifest,
   shouldTreatPlaybackLatencyAsDrifted,
   shouldTreatPlaybackStartupAsPending,
 } from "../src/components/StreamPlayer";
@@ -249,6 +250,38 @@ describe("preferHighestViableHlsLevel", () => {
     expect(hls.startLevel).toBe(1);
     expect(hls.nextLevel).toBe(1);
     expect(hls.loadLevel).toBe(1);
+  });
+});
+
+describe("selectPreferredHlsStartLevelFromManifest", () => {
+  const cloudflareMasterManifest = `#EXTM3U
+#EXT-X-VERSION:6
+#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="group_audio",NAME="original",LANGUAGE="en-0f817925",DEFAULT=YES,AUTOSELECT=YES,URI="stream_t0f8179256ccba8265f345779d51d8234_r1570586493.m3u8?protocol=llhls&llhlsHBs=0.5&useExposeMetadata=true&blockReload=true"
+#EXT-X-STREAM-INF:RESOLUTION=1280x720,CODECS="avc1.64001f,mp4a.40.2",BANDWIDTH=3101821,AVERAGE-BANDWIDTH=3101821,SCORE=4.0,FRAME-RATE=24.000,AUDIO="group_audio"
+stream_t43322e00a1dfcad9a7b8f4609800c461_r1570586491.m3u8?protocol=llhls&llhlsHBs=0.5&useExposeMetadata=true&blockReload=true
+#EXT-X-STREAM-INF:RESOLUTION=1920x1080,CODECS="avc1.640028,mp4a.40.2",BANDWIDTH=3694794,AVERAGE-BANDWIDTH=3694794,SCORE=5.0,FRAME-RATE=24.000,AUDIO="group_audio"
+stream_t43322e00a1dfcad9a7b8f4609800c461_r1570586492.m3u8?protocol=llhls&llhlsHBs=0.5&useExposeMetadata=true&blockReload=true
+#EXT-X-STREAM-INF:RESOLUTION=854x480,CODECS="avc1.64001e,mp4a.40.2",BANDWIDTH=2607677,AVERAGE-BANDWIDTH=2607677,SCORE=3.0,FRAME-RATE=24.000,AUDIO="group_audio"
+stream_t43322e00a1dfcad9a7b8f4609800c461_r1570586490.m3u8?protocol=llhls&llhlsHBs=0.5&useExposeMetadata=true&blockReload=true
+#EXT-X-STREAM-INF:RESOLUTION=640x360,CODECS="avc1.4d401e,mp4a.40.2",BANDWIDTH=1525654,AVERAGE-BANDWIDTH=1525654,SCORE=2.0,FRAME-RATE=24.000,AUDIO="group_audio"
+stream_t43322e00a1dfcad9a7b8f4609800c461_r1570586489.m3u8?protocol=llhls&llhlsHBs=0.5&useExposeMetadata=true&blockReload=true
+#EXT-X-STREAM-INF:RESOLUTION=426x240,CODECS="avc1.42c015,mp4a.40.2",BANDWIDTH=197407,AVERAGE-BANDWIDTH=197407,SCORE=1.0,FRAME-RATE=24.000,AUDIO="group_audio"
+stream_t43322e00a1dfcad9a7b8f4609800c461_r1570586488.m3u8?protocol=llhls&llhlsHBs=0.5&useExposeMetadata=true&blockReload=true`;
+
+  it("chooses the best fitting startup level from an unsorted master manifest", () => {
+    expect(
+      selectPreferredHlsStartLevelFromManifest(
+        cloudflareMasterManifest,
+        1600,
+        900,
+      ),
+    ).toBe(1);
+  });
+
+  it("falls back to the highest quality startup level when nothing fits", () => {
+    expect(
+      selectPreferredHlsStartLevelFromManifest(cloudflareMasterManifest, 160, 120),
+    ).toBe(1);
   });
 });
 
