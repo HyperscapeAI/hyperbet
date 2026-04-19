@@ -68,6 +68,11 @@ export {
   type ViewerAlignedState,
   type UseViewerAlignedStateInputs,
 } from "./useViewerAlignedState";
+export {
+  useViewerAlignedBetState,
+  logViewerAlignmentDivergence,
+  type UseViewerAlignedBetStateInputs,
+} from "./useViewerAlignedBetState";
 export type {
   ClockOffsetConfidence,
   ClockOffsetEstimator,

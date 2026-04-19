@@ -84,6 +84,10 @@ import {
   getEvmChainConfig,
   getEnabledEvmChains,
 } from "@hyperbet/ui/lib/chainConfig";
+import {
+  logViewerAlignmentDivergence,
+  useViewerAlignedBetState,
+} from "@hyperbet/ui/lib/viewerAlignment";
 
 // ── Shared UI utilities ──────────────────────────────────────────────────────
 function formatGold(v: number, locale: UiLocale): string {
@@ -651,6 +655,7 @@ export function App() {
   const { state: streamingState } = useStreamingState();
   const { context: duelContext } = useDuelContext();
   const {
+    data: marketOverviewPayload,
     live: liveOverviewMarket,
     liveDuel: liveOverviewDuel,
     liveMarketParity,
@@ -684,6 +689,21 @@ export function App() {
   useEffect(() => {
     setStreamPlayerStatus(null);
   }, [mountedStreamUrl]);
+
+  // Viewer-alignment shadow composition. Inert unless
+  // `VITE_ENABLE_VIEWER_ALIGNED_BET_STATE === "true"` — when disabled
+  // the inner hook runs no timers and returns a passthrough shape, so
+  // the render cost is ≈ one ref + one useMemo. Divergence events are
+  // emitted as `[viewer-align]` shadow-logs only; current UI gating
+  // logic still reads from the canonical hooks above until C5 flips.
+  useViewerAlignedBetState({
+    latestSession: canonicalStreamSession,
+    latestMarket: marketOverviewPayload,
+    latestDuelContext: duelContext,
+    sessionPresentationDelayMs: canonicalPresentationDelayMs,
+    streamPlayerStatus,
+    onDivergence: logViewerAlignmentDivergence,
+  });
   const streamPlaceholderMessage = useMemo(() => {
     if (!canonicalStreamSession) {
       return "Connecting to live session...";

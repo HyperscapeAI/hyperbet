@@ -50,6 +50,10 @@ import { useChain } from "./lib/ChainContext";
 import { useCanonicalStreamSession } from "@hyperbet/ui/spectator/useCanonicalStreamSession";
 import { useStreamingState } from "@hyperbet/ui/spectator/useStreamingState";
 import { useDuelContext } from "@hyperbet/ui/spectator/useDuelContext";
+import {
+  logViewerAlignmentDivergence,
+  useViewerAlignedBetState,
+} from "@hyperbet/ui/lib/viewerAlignment";
 import { useMeasuredContentBox } from "@hyperbet/ui/lib/useMeasuredContentBox";
 import { useResizePanel, useIsMobile } from "@hyperbet/ui/lib/useResizePanel";
 import { ResizeHandle } from "@hyperbet/ui/components/ResizeHandle";
@@ -754,6 +758,7 @@ export function App() {
       ? activeChain
       : "solana";
   const {
+    data: lifecyclePayload,
     duel: lifecycleDuel,
     market: lifecycleMarket,
     refresh: refreshLifecycle,
@@ -783,6 +788,22 @@ export function App() {
   );
   const [streamPlayerStatus, setStreamPlayerStatus] =
     useState<StreamPlayerStatus | null>(null);
+
+  // Viewer-alignment shadow composition. Inert unless
+  // `VITE_ENABLE_VIEWER_ALIGNED_BET_STATE === "true"` — when disabled
+  // the inner hook runs no timers and returns a passthrough shape, so
+  // the render cost is ≈ one ref + one useMemo. Divergence events are
+  // emitted as `[viewer-align]` shadow-logs only; current UI gating
+  // logic still reads from the canonical hooks above until C5 flips.
+  useViewerAlignedBetState({
+    latestSession: canonicalStreamSession,
+    latestMarket: lifecyclePayload,
+    latestDuelContext: duelContext,
+    sessionPresentationDelayMs: canonicalPresentationDelayMs,
+    streamPlayerStatus,
+    onDivergence: logViewerAlignmentDivergence,
+  });
+
   const streamPlaceholderMessage = useMemo(() => {
     if (!canonicalStreamSession) {
       return "Connecting to live session...";
