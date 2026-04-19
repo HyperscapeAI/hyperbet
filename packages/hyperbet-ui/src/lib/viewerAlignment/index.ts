@@ -45,6 +45,29 @@ export {
   type MarketSnapshotBuffer,
   type DuelContextSnapshotBuffer,
 } from "./railBuffers";
+export {
+  pickSnapshotAtOrBefore,
+  selectAlignedRailSnapshot,
+  resolveTradeGate,
+  type RailSelection,
+  type SelectAlignedRailSnapshotInputs,
+  type TradeGate,
+  type TradeGateReason,
+  type ResolveTradeGateInputs,
+} from "./selector";
+export {
+  detectDivergence,
+  DIVERGENCE_SKEW_THRESHOLD_MS,
+  DIVERGENCE_BASELINE_SAMPLE_RATE,
+  type DivergenceEvent,
+  type DivergenceReason,
+  type DetectDivergenceInputs,
+} from "./divergenceLog";
+export {
+  useViewerAlignedState,
+  type ViewerAlignedState,
+  type UseViewerAlignedStateInputs,
+} from "./useViewerAlignedState";
 export type {
   ClockOffsetConfidence,
   ClockOffsetEstimator,
