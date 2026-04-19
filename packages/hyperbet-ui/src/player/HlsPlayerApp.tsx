@@ -55,6 +55,10 @@ type ParsedPlayerQuery = {
   syncToleranceMs: number;
 };
 
+type DebugWindow = Window & {
+  __HB_HLS_DEBUG?: Record<string, unknown>;
+};
+
 type RuntimeState = {
   readySent: boolean;
   currentStatus: string;
@@ -232,6 +236,16 @@ export function HlsPlayerApp() {
 
     let disposed = false;
     const runtime = runtimeRef.current;
+    const setDebugState = (patch: Record<string, unknown>) => {
+      if (!params.debugEnabled) {
+        return;
+      }
+      const debugWindow = window as DebugWindow;
+      debugWindow.__HB_HLS_DEBUG = {
+        ...(debugWindow.__HB_HLS_DEBUG ?? {}),
+        ...patch,
+      };
+    };
 
     const setLoaderStateAndRemember = (next: ViewerLoaderState) => {
       runtime.loader = next;
@@ -1138,6 +1152,10 @@ export function HlsPlayerApp() {
           sourceUrl: runtime.activeStreamUrl,
         });
       }
+      setDebugState({
+        preferredStartLevel,
+        sourceUrl: runtime.activeStreamUrl,
+      });
       runtime.hls = new Hls({
         ...hlsConfig,
         startLevel: preferredStartLevel ?? undefined,
@@ -1153,6 +1171,14 @@ export function HlsPlayerApp() {
       startLatencyPolling();
 
       runtime.hls.on(Hls.Events.MANIFEST_PARSED, () => {
+        setDebugState({
+          manifestLevels: runtime.hls?.levels.map((level, index) => ({
+            bitrate: level.bitrate ?? 0,
+            height: level.height ?? 0,
+            index,
+            width: level.width ?? 0,
+          })),
+        });
         if (params.debugEnabled && runtime.hls) {
           console.info("[hls-player] manifest levels", {
             autoLevelCapping: runtime.hls.autoLevelCapping,
@@ -1170,6 +1196,12 @@ export function HlsPlayerApp() {
         }
         if (runtime.hls) {
           preferHighestViableHlsLevel(runtime.hls, video);
+          setDebugState({
+            postPreferAutoLevelCapping: runtime.hls.autoLevelCapping,
+            postPreferCurrentLevel: runtime.hls.currentLevel,
+            postPreferNextAutoLevel: runtime.hls.nextAutoLevel,
+            postPreferStartLevel: runtime.hls.startLevel,
+          });
         }
         updateLoaderPhase("initializing", {
           overlayMessage: null,
@@ -1202,6 +1234,11 @@ export function HlsPlayerApp() {
 
       runtime.hls.on(Hls.Events.LEVEL_UPDATED, syncTelemetry);
       runtime.hls.on(Hls.Events.FRAG_LOADING, (_event, data) => {
+        setDebugState({
+          fragLevel: data.frag?.level ?? null,
+          fragSn: data.frag?.sn ?? null,
+          fragType: data.frag?.type ?? null,
+        });
         if (!params.debugEnabled) {
           return;
         }
@@ -1212,6 +1249,9 @@ export function HlsPlayerApp() {
         });
       });
       runtime.hls.on(Hls.Events.LEVEL_SWITCHED, (_event, data) => {
+        setDebugState({
+          switchedLevel: data.level ?? null,
+        });
         if (!params.debugEnabled) {
           return;
         }
