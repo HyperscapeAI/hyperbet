@@ -552,7 +552,9 @@ export function HlsPlayerApp() {
       }
 
       runtime.lastProgressAt = Date.now();
-      updateLoaderPhase("finalizing", { overlayMessage: null, visible: true });
+      if (!runtime.readySent) {
+        updateLoaderPhase("finalizing", { overlayMessage: null, visible: true });
+      }
       syncTelemetry();
       console.info(`[hls-player] promoting buffered startup via ${reason}`, {
         target,
@@ -576,10 +578,12 @@ export function HlsPlayerApp() {
         return;
       }
       if (!hasBufferedPresentationDelay()) {
-        updateLoaderPhase("buffering_media", {
-          overlayMessage: null,
-          visible: true,
-        });
+        if (!runtime.readySent) {
+          updateLoaderPhase("buffering_media", {
+            overlayMessage: null,
+            visible: true,
+          });
+        }
         syncTelemetry();
         return;
       }
@@ -835,7 +839,9 @@ export function HlsPlayerApp() {
 
     const attachCommonVideoEvents = () => {
       video.addEventListener("loadedmetadata", () => {
-        updateLoaderPhase("finalizing", { overlayMessage: null, visible: true });
+        if (!runtime.readySent) {
+          updateLoaderPhase("finalizing", { overlayMessage: null, visible: true });
+        }
         promoteBufferedStartup("loadedmetadata");
         revealDecodedFrame("loadedmetadata");
         if (runtime.playbackStarted) {
@@ -843,7 +849,9 @@ export function HlsPlayerApp() {
         }
       });
       video.addEventListener("loadeddata", () => {
-        updateLoaderPhase("finalizing", { overlayMessage: null, visible: true });
+        if (!runtime.readySent) {
+          updateLoaderPhase("finalizing", { overlayMessage: null, visible: true });
+        }
         promoteBufferedStartup("loadeddata");
         revealDecodedFrame("loadeddata");
         if (runtime.playbackStarted) {
@@ -851,7 +859,9 @@ export function HlsPlayerApp() {
         }
       });
       video.addEventListener("canplay", () => {
-        updateLoaderPhase("finalizing", { overlayMessage: null, visible: true });
+        if (!runtime.readySent) {
+          updateLoaderPhase("finalizing", { overlayMessage: null, visible: true });
+        }
         promoteBufferedStartup("canplay");
         revealDecodedFrame("canplay");
         if (runtime.playbackStarted) {

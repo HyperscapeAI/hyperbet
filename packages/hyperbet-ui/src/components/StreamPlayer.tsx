@@ -166,9 +166,16 @@ export function preferHighestViableHlsLevel(
     });
   const preferredLevel = rankedLevels[0]?.index ?? 0;
 
+  hls.autoLevelCapping = preferredLevel;
+  hls.nextAutoLevel = preferredLevel;
   hls.startLevel = preferredLevel;
   hls.nextLevel = preferredLevel;
   hls.loadLevel = preferredLevel;
+  try {
+    hls.currentLevel = preferredLevel;
+  } catch {
+    // Ignore early currentLevel assignment failures before the media controller is ready.
+  }
 }
 
 const STABLE_LIVE_HLS_CONFIG = {

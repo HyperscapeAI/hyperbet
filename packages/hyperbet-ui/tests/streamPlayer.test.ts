@@ -166,6 +166,8 @@ describe("resolvePlayerDeliveryModeHint", () => {
 describe("preferHighestViableHlsLevel", () => {
   it("picks the highest fitting rendition by resolution instead of trusting manifest order", () => {
     const hls = {
+      autoLevelCapping: -1,
+      currentLevel: -1,
       capLevelToPlayerSize: false,
       levels: [
         { width: 1280, height: 720, bitrate: 3_100_000 },
@@ -175,12 +177,16 @@ describe("preferHighestViableHlsLevel", () => {
         { width: 426, height: 240, bitrate: 700_000 },
       ],
       loadLevel: -1,
+      nextAutoLevel: -1,
       nextLevel: -1,
       startLevel: -1,
     } as unknown as {
+      autoLevelCapping: number;
+      currentLevel: number;
       capLevelToPlayerSize: boolean;
       levels: Array<{ width: number; height: number; bitrate: number }>;
       loadLevel: number;
+      nextAutoLevel: number;
       nextLevel: number;
       startLevel: number;
     };
@@ -194,6 +200,9 @@ describe("preferHighestViableHlsLevel", () => {
     preferHighestViableHlsLevel(hls as never, video);
 
     expect(hls.capLevelToPlayerSize).toBe(true);
+    expect(hls.autoLevelCapping).toBe(1);
+    expect(hls.nextAutoLevel).toBe(1);
+    expect(hls.currentLevel).toBe(1);
     expect(hls.startLevel).toBe(1);
     expect(hls.nextLevel).toBe(1);
     expect(hls.loadLevel).toBe(1);
@@ -201,6 +210,8 @@ describe("preferHighestViableHlsLevel", () => {
 
   it("falls back to the best available rendition when nothing fits the player size", () => {
     const hls = {
+      autoLevelCapping: -1,
+      currentLevel: -1,
       capLevelToPlayerSize: false,
       levels: [
         { width: 1280, height: 720, bitrate: 3_100_000 },
@@ -210,12 +221,16 @@ describe("preferHighestViableHlsLevel", () => {
         { width: 426, height: 240, bitrate: 700_000 },
       ],
       loadLevel: -1,
+      nextAutoLevel: -1,
       nextLevel: -1,
       startLevel: -1,
     } as unknown as {
+      autoLevelCapping: number;
+      currentLevel: number;
       capLevelToPlayerSize: boolean;
       levels: Array<{ width: number; height: number; bitrate: number }>;
       loadLevel: number;
+      nextAutoLevel: number;
       nextLevel: number;
       startLevel: number;
     };
@@ -228,6 +243,9 @@ describe("preferHighestViableHlsLevel", () => {
 
     preferHighestViableHlsLevel(hls as never, video);
 
+    expect(hls.autoLevelCapping).toBe(1);
+    expect(hls.nextAutoLevel).toBe(1);
+    expect(hls.currentLevel).toBe(1);
     expect(hls.startLevel).toBe(1);
     expect(hls.nextLevel).toBe(1);
     expect(hls.loadLevel).toBe(1);
