@@ -144,11 +144,53 @@ describe("market parity helpers", () => {
       bundleId: "pending:4",
       duelKey: null,
       duelId: null,
+      state: "preparing",
       freezeReason: null,
     });
     expect(redacted?.receipts[0]).toMatchObject({
       txRef: null,
       note: null,
+    });
+  });
+
+  test("keeps post-open confirmation gaps public while downgrading masked pre-open placeholders", () => {
+    const preOpenAwaiting: KeeperMarketParitySnapshot = {
+      bundleId: "bundle-pre-open-awaiting",
+      duelKey: "ef".repeat(32),
+      duelId: "duel-secret",
+      revision: 8,
+      requiredChains: ["solana", "bsc"],
+      confirmedChains: ["solana"],
+      state: "awaiting_confirmations",
+      phase: "ANNOUNCEMENT",
+      safeToBet: false,
+      openedAtMs: null,
+      lockedAtMs: null,
+      resolvedAtMs: null,
+      freezeReason: null,
+      updatedAtMs: 1_700_000_000_000,
+      receipts: [
+        {
+          chainKey: "solana",
+          preparedAtMs: 1_700_000_000_000,
+          openedAtMs: 1_700_000_000_000,
+          lockedAtMs: null,
+          resolvedAtMs: null,
+          cancelledAtMs: null,
+          confirmedAtMs: 1_700_000_000_000,
+          lifecycleStatus: "OPEN",
+          txRef: "sol-tx",
+          note: "prepared",
+        },
+      ],
+    };
+
+    expect(redactPendingMarketParity(preOpenAwaiting)).toMatchObject({
+      bundleId: "pending:8",
+      duelKey: null,
+      duelId: null,
+      state: "preparing",
+      safeToBet: false,
     });
   });
 

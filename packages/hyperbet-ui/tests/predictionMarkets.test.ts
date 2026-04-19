@@ -9,6 +9,7 @@ import {
   selectPredictionMarketOverviewRecord,
   selectPredictionMarketLifecycleRecord,
 } from "../src/lib/predictionMarkets";
+import { deriveMarketParityLabel } from "../src/lib/marketParity";
 import {
   derivePredictionMarketUiState,
   EMPTY_PREDICTION_MARKET_WALLET_SNAPSHOT,
@@ -125,6 +126,38 @@ describe("prediction market lifecycle helpers", () => {
       lifecycleStatus: "PENDING",
       txRef: "sol-tx",
     });
+  });
+
+  it("treats masked awaiting-confirmations parity as preparing in the UI copy", () => {
+    expect(
+      deriveMarketParityLabel(
+        {
+          bundleId: "pending:0",
+          duelKey: null,
+          duelId: null,
+          revision: 1,
+          requiredChains: ["solana", "bsc"],
+          confirmedChains: ["solana"],
+          state: "awaiting_confirmations",
+          phase: "ANNOUNCEMENT",
+          safeToBet: false,
+          openedAtMs: null,
+          lockedAtMs: null,
+          resolvedAtMs: null,
+          freezeReason: null,
+          updatedAtMs: 123,
+          receipts: [],
+        },
+        {
+          parityPreparing: "Preparing next match",
+          parityAwaitingConfirmations: "Awaiting final confirmations",
+          parityBettingOpen: "Betting open",
+          parityLocked: "Locked",
+          parityResolved: "Resolved",
+          parityFrozen: "Frozen",
+        },
+      ),
+    ).toBe("Preparing next match");
   });
 
   it("selects the lifecycle record for a target chain", () => {

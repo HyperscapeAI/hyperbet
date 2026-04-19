@@ -160,11 +160,17 @@ export function deriveMarketParityLabel(
   marketParity: MarketParityInfo | null | undefined,
   copy: MarketParityCopy,
 ): string | null {
+  const awaitingConfirmationsIsPublic = isPublicMarketParityState(
+    marketParity?.state,
+    marketParity?.openedAtMs,
+  );
   switch (marketParity?.state) {
     case "preparing":
       return copy.parityPreparing;
     case "awaiting_confirmations":
-      return copy.parityAwaitingConfirmations;
+      return awaitingConfirmationsIsPublic
+        ? copy.parityAwaitingConfirmations
+        : copy.parityPreparing;
     case "open":
       return copy.parityBettingOpen;
     case "locked":
