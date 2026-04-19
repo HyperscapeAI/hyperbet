@@ -111,6 +111,137 @@ export const RECENT_PLAYER_SIGNAL_WINDOW_MS = 30_000;
 export const RECENT_PLAYER_SIGNAL_THRESHOLD = 3;
 export const DEFAULT_SYNC_TOLERANCE_MS = 2_500;
 
+type HlsVariantDescriptor = {
+  index: number;
+  width: number;
+  height: number;
+  bitrate: number;
+};
+
+export function resolvePlaybackTargetSize(video: HTMLVideoElement | null) {
+  const devicePixelRatio =
+    typeof window !== "undefined" && Number.isFinite(window.devicePixelRatio)
+      ? Math.max(1, window.devicePixelRatio)
+      : 1;
+  const viewportWidth =
+    typeof window !== "undefined" && Number.isFinite(window.innerWidth)
+      ? Math.max(0, window.innerWidth)
+      : 0;
+  const viewportHeight =
+    typeof window !== "undefined" && Number.isFinite(window.innerHeight)
+      ? Math.max(0, window.innerHeight)
+      : 0;
+  return {
+    targetWidth:
+      Math.max(viewportWidth, video?.clientWidth ?? 0, video?.videoWidth ?? 0, 1) *
+      devicePixelRatio,
+    targetHeight:
+      Math.max(
+        viewportHeight,
+        video?.clientHeight ?? 0,
+        video?.videoHeight ?? 0,
+        1,
+      ) *
+      devicePixelRatio,
+  };
+}
+
+function selectPreferredHlsVariantIndex(
+  variants: HlsVariantDescriptor[],
+  targetWidth: number,
+  targetHeight: number,
+): number {
+  const sizeBudgetWidth = targetWidth * 1.25;
+  const sizeBudgetHeight = targetHeight * 1.25;
+  const rankedLevels = variants
+    .map((variant) => {
+      const hasWidth = variant.width > 0;
+      const hasHeight = variant.height > 0;
+      const fitsWidth = !hasWidth || variant.width <= sizeBudgetWidth;
+      const fitsHeight = !hasHeight || variant.height <= sizeBudgetHeight;
+      const fitsPlayerSize = (hasWidth || hasHeight) && fitsWidth && fitsHeight;
+      return {
+        ...variant,
+        fitsPlayerSize,
+        pixelCount: variant.width * variant.height,
+      };
+    })
+    .sort((left, right) => {
+      if (left.fitsPlayerSize !== right.fitsPlayerSize) {
+        return left.fitsPlayerSize ? -1 : 1;
+      }
+      if (left.pixelCount !== right.pixelCount) {
+        return right.pixelCount - left.pixelCount;
+      }
+      if (left.bitrate !== right.bitrate) {
+        return right.bitrate - left.bitrate;
+      }
+      return left.index - right.index;
+    });
+  return rankedLevels[0]?.index ?? 0;
+}
+
+export function selectPreferredHlsStartLevelFromManifest(
+  manifestText: string,
+  targetWidth: number,
+  targetHeight: number,
+): number | null {
+  const variants: HlsVariantDescriptor[] = [];
+  let pendingStreamInf: string | null = null;
+
+  for (const rawLine of manifestText.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line) {
+      continue;
+    }
+    if (line.startsWith("#EXT-X-STREAM-INF:")) {
+      pendingStreamInf = line.slice("#EXT-X-STREAM-INF:".length);
+      continue;
+    }
+    if (pendingStreamInf == null || line.startsWith("#")) {
+      continue;
+    }
+
+    const resolutionMatch = pendingStreamInf.match(/RESOLUTION=(\d+)x(\d+)/i);
+    const bandwidthMatch = pendingStreamInf.match(/BANDWIDTH=(\d+)/i);
+    variants.push({
+      index: variants.length,
+      width: resolutionMatch ? Number.parseInt(resolutionMatch[1] ?? "0", 10) : 0,
+      height: resolutionMatch
+        ? Number.parseInt(resolutionMatch[2] ?? "0", 10)
+        : 0,
+      bitrate: bandwidthMatch ? Number.parseInt(bandwidthMatch[1] ?? "0", 10) : 0,
+    });
+    pendingStreamInf = null;
+  }
+
+  if (variants.length === 0) {
+    return null;
+  }
+
+  const preferredManifestIndex = selectPreferredHlsVariantIndex(
+    variants,
+    targetWidth,
+    targetHeight,
+  );
+  const sortedVariants = [...variants].sort((left, right) => {
+    if (left.width !== right.width) {
+      return left.width - right.width;
+    }
+    if (left.height !== right.height) {
+      return left.height - right.height;
+    }
+    if (left.bitrate !== right.bitrate) {
+      return left.bitrate - right.bitrate;
+    }
+    return left.index - right.index;
+  });
+  const preferredSortedIndex = sortedVariants.findIndex(
+    (variant) => variant.index === preferredManifestIndex,
+  );
+  return preferredSortedIndex >= 0 ? preferredSortedIndex : null;
+}
+
 export function preferHighestViableHlsLevel(
   hls: Hls,
   video: HTMLVideoElement | null,
@@ -122,35 +253,36 @@ export function preferHighestViableHlsLevel(
 
   hls.capLevelToPlayerSize = true;
 
-  const devicePixelRatio =
-    typeof window !== "undefined" && Number.isFinite(window.devicePixelRatio)
-      ? Math.max(1, window.devicePixelRatio)
-      : 1;
-  const targetWidth =
-    Math.max(video?.clientWidth ?? 0, video?.videoWidth ?? 0, 1) *
-    devicePixelRatio;
-  const targetHeight =
-    Math.max(video?.clientHeight ?? 0, video?.videoHeight ?? 0, 1) *
-    devicePixelRatio;
-  const maxLevel = levels.length - 1;
-  let preferredLevel = maxLevel;
+  const { targetWidth, targetHeight } = resolvePlaybackTargetSize(video);
+  const preferredLevel = selectPreferredHlsVariantIndex(
+    levels.map((level, index) => ({
+      index,
+      width: level?.width ?? 0,
+      height: level?.height ?? 0,
+      bitrate: level?.bitrate ?? 0,
+    })),
+    targetWidth,
+    targetHeight,
+  );
 
-  for (let index = maxLevel; index >= 0; index -= 1) {
-    const level = levels[index];
-    const levelWidth = level?.width ?? 0;
-    const levelHeight = level?.height ?? 0;
-    if (
-      (levelWidth > 0 && levelWidth <= targetWidth * 1.25) ||
-      (levelHeight > 0 && levelHeight <= targetHeight * 1.25)
-    ) {
-      preferredLevel = index;
-      break;
-    }
-  }
-
+  hls.autoLevelCapping = preferredLevel;
+  hls.nextLoadLevel = preferredLevel;
+  hls.nextAutoLevel = preferredLevel;
   hls.startLevel = preferredLevel;
   hls.nextLevel = preferredLevel;
   hls.loadLevel = preferredLevel;
+  if ("manualLevel" in hls) {
+    try {
+      (hls as Hls & { manualLevel: number }).manualLevel = preferredLevel;
+    } catch {
+      // Ignore manualLevel assignment failures on older hls.js shims.
+    }
+  }
+  try {
+    hls.currentLevel = preferredLevel;
+  } catch {
+    // Ignore early currentLevel assignment failures before the media controller is ready.
+  }
 }
 
 const STABLE_LIVE_HLS_CONFIG = {

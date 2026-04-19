@@ -185,12 +185,18 @@ export function redactPendingMarketParity(
   if (isPublicMarketParitySnapshot(snapshot)) {
     return snapshot;
   }
+  const publicPlaceholderState =
+    snapshot.state === "awaiting_confirmations" && snapshot.openedAtMs == null
+      ? "preparing"
+      : snapshot.state === "frozen"
+        ? "aborted"
+        : snapshot.state;
   return {
     ...snapshot,
     bundleId: `pending:${snapshot.revision}`,
     duelKey: null,
     duelId: null,
-    state: snapshot.state === "frozen" ? "aborted" : snapshot.state,
+    state: publicPlaceholderState,
     safeToBet: false,
     freezeReason: null,
     receipts: snapshot.receipts.map(redactedReceipt),

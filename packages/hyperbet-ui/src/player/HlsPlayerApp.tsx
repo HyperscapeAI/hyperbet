@@ -9,8 +9,10 @@ import {
   RECENT_PLAYER_SIGNAL_THRESHOLD,
   recordRecentPlaybackSignal,
   resolveHlsPlaybackProfile,
+  resolvePlaybackTargetSize,
   resolvePlaybackSyncDeltaMs,
   resolvePlayerDeliveryModeHint,
+  selectPreferredHlsStartLevelFromManifest,
   shouldTreatPlaybackLatencyAsDrifted,
   type StreamPlayerStatus,
   type ViewerSyncState,
@@ -54,6 +56,10 @@ type ParsedPlayerQuery = {
   syncToleranceMs: number;
 };
 
+type DebugWindow = Window & {
+  __HB_HLS_DEBUG?: Record<string, unknown>;
+};
+
 type RuntimeState = {
   readySent: boolean;
   currentStatus: string;
@@ -86,9 +92,29 @@ type RuntimeState = {
   syncState: ViewerSyncState;
   consecutiveOutOfSyncPolls: number;
   consecutiveAlignedPolls: number;
+  debugPreferredStartLevel: number | null;
+  debugTargetWidth: number | null;
+  debugTargetHeight: number | null;
   telemetry: StreamPlayerStatus;
   loader: ViewerLoaderState;
 };
+
+function buildStandardHlsUrl(url: string | null): string | null {
+  if (!url) return url;
+  try {
+    const parsed = new URL(url);
+    if (
+      (parsed.searchParams.get("protocol") || "").trim().toLowerCase() !==
+      "llhls"
+    ) {
+      return parsed.toString();
+    }
+    parsed.searchParams.delete("protocol");
+    return parsed.toString();
+  } catch {
+    return url;
+  }
+}
 
 export function resolveBufferedPresentationDelayTarget(params: {
   bufferedStart: number;
@@ -124,6 +150,45 @@ export function resolveBufferedPresentationDelayTarget(params: {
   }
 
   return Math.min(maxTarget, Math.max(minTarget, desiredTarget));
+}
+
+export function shouldPreferNativeHlsPlayback(): boolean {
+  if (typeof navigator === "undefined") {
+    return false;
+  }
+  const userAgent = navigator.userAgent || "";
+  const platform = navigator.platform || "";
+  const maxTouchPoints =
+    typeof navigator.maxTouchPoints === "number" ? navigator.maxTouchPoints : 0;
+  const isIosWebKit =
+    /iPad|iPhone|iPod/i.test(userAgent) ||
+    (platform === "MacIntel" && maxTouchPoints > 1);
+  const isSafariDesktop =
+    /Safari\//.test(userAgent) &&
+    !/Chrome\/|Chromium\/|CriOS\/|Edg\/|OPR\/|Firefox\/|FxiOS\//.test(userAgent);
+  return isIosWebKit || isSafariDesktop;
+}
+
+export function normalizeManagedPlaybackQuery(
+  params: ParsedPlayerQuery,
+): ParsedPlayerQuery {
+  const deliveryMode = resolvePlayerDeliveryModeHint(
+    params.streamUrl || "",
+    params.deliveryMode,
+  );
+  if (
+    deliveryMode !== "external_hls/llhls" ||
+    shouldPreferNativeHlsPlayback()
+  ) {
+    return params;
+  }
+
+  const standardUrl = buildStandardHlsUrl(params.streamUrl);
+  return {
+    ...params,
+    streamUrl: standardUrl,
+    deliveryMode: standardUrl ? "external_hls/hls" : params.deliveryMode,
+  };
 }
 
 export function resolveObservedPlaybackLatencyMs(params: {
@@ -186,7 +251,10 @@ export function resolveObservedPlaybackLatencyMs(params: {
 }
 
 export function HlsPlayerApp() {
-  const params = useMemo(readPlayerQuery, []);
+  const params = useMemo(
+    () => normalizeManagedPlaybackQuery(readPlayerQuery()),
+    [],
+  );
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const runtimeRef = useRef<RuntimeState>({
     readySent: false,
@@ -214,6 +282,9 @@ export function HlsPlayerApp() {
     syncState: "starting",
     consecutiveOutOfSyncPolls: 0,
     consecutiveAlignedPolls: 0,
+    debugPreferredStartLevel: null,
+    debugTargetWidth: null,
+    debugTargetHeight: null,
     telemetry: createInitialTelemetry(params),
     loader: createInitialViewerLoaderState(),
   });
@@ -229,7 +300,18 @@ export function HlsPlayerApp() {
       return;
     }
 
+    let disposed = false;
     const runtime = runtimeRef.current;
+    const setDebugState = (patch: Record<string, unknown>) => {
+      if (!params.debugEnabled) {
+        return;
+      }
+      const debugWindow = window as DebugWindow;
+      debugWindow.__HB_HLS_DEBUG = {
+        ...(debugWindow.__HB_HLS_DEBUG ?? {}),
+        ...patch,
+      };
+    };
 
     const setLoaderStateAndRemember = (next: ViewerLoaderState) => {
       runtime.loader = next;
@@ -302,6 +384,15 @@ export function HlsPlayerApp() {
             `buffered ${formatBufferedLabel(runtime.telemetry.lastBufferedFragmentAt)}`,
             runtime.telemetry.deliveryMode
               ? `mode ${runtime.telemetry.deliveryMode}`
+              : null,
+            runtime.debugPreferredStartLevel != null
+              ? `pref ${runtime.debugPreferredStartLevel}`
+              : null,
+            runtime.debugTargetWidth != null && runtime.debugTargetHeight != null
+              ? `target ${runtime.debugTargetWidth}x${runtime.debugTargetHeight}`
+              : null,
+            runtime.hls != null
+              ? `levels c${runtime.hls.currentLevel} n${runtime.hls.nextLevel} nl${runtime.hls.nextLoadLevel} a${runtime.hls.autoLevelCapping}`
               : null,
             `sync ${runtime.telemetry.syncState}`,
             `boot ${runtime.loader.phase}`,
@@ -552,7 +643,9 @@ export function HlsPlayerApp() {
       }
 
       runtime.lastProgressAt = Date.now();
-      updateLoaderPhase("finalizing", { overlayMessage: null, visible: true });
+      if (!runtime.readySent) {
+        updateLoaderPhase("finalizing", { overlayMessage: null, visible: true });
+      }
       syncTelemetry();
       console.info(`[hls-player] promoting buffered startup via ${reason}`, {
         target,
@@ -576,10 +669,12 @@ export function HlsPlayerApp() {
         return;
       }
       if (!hasBufferedPresentationDelay()) {
-        updateLoaderPhase("buffering_media", {
-          overlayMessage: null,
-          visible: true,
-        });
+        if (!runtime.readySent) {
+          updateLoaderPhase("buffering_media", {
+            overlayMessage: null,
+            visible: true,
+          });
+        }
         syncTelemetry();
         return;
       }
@@ -600,23 +695,6 @@ export function HlsPlayerApp() {
       });
       markReady();
       return true;
-    };
-
-    const buildStandardHlsUrl = (url: string | null) => {
-      if (!url) return url;
-      try {
-        const parsed = new URL(url);
-        if (
-          (parsed.searchParams.get("protocol") || "").trim().toLowerCase() !==
-          "llhls"
-        ) {
-          return parsed.toString();
-        }
-        parsed.searchParams.delete("protocol");
-        return parsed.toString();
-      } catch {
-        return url;
-      }
     };
 
     const fallbackToStandardHls = (reason: string) => {
@@ -835,7 +913,12 @@ export function HlsPlayerApp() {
 
     const attachCommonVideoEvents = () => {
       video.addEventListener("loadedmetadata", () => {
-        updateLoaderPhase("finalizing", { overlayMessage: null, visible: true });
+        if (runtime.hls) {
+          preferHighestViableHlsLevel(runtime.hls, video);
+        }
+        if (!runtime.readySent) {
+          updateLoaderPhase("finalizing", { overlayMessage: null, visible: true });
+        }
         promoteBufferedStartup("loadedmetadata");
         revealDecodedFrame("loadedmetadata");
         if (runtime.playbackStarted) {
@@ -843,7 +926,12 @@ export function HlsPlayerApp() {
         }
       });
       video.addEventListener("loadeddata", () => {
-        updateLoaderPhase("finalizing", { overlayMessage: null, visible: true });
+        if (runtime.hls) {
+          preferHighestViableHlsLevel(runtime.hls, video);
+        }
+        if (!runtime.readySent) {
+          updateLoaderPhase("finalizing", { overlayMessage: null, visible: true });
+        }
         promoteBufferedStartup("loadeddata");
         revealDecodedFrame("loadeddata");
         if (runtime.playbackStarted) {
@@ -851,7 +939,12 @@ export function HlsPlayerApp() {
         }
       });
       video.addEventListener("canplay", () => {
-        updateLoaderPhase("finalizing", { overlayMessage: null, visible: true });
+        if (runtime.hls) {
+          preferHighestViableHlsLevel(runtime.hls, video);
+        }
+        if (!runtime.readySent) {
+          updateLoaderPhase("finalizing", { overlayMessage: null, visible: true });
+        }
         promoteBufferedStartup("canplay");
         revealDecodedFrame("canplay");
         if (runtime.playbackStarted) {
@@ -998,7 +1091,33 @@ export function HlsPlayerApp() {
       });
     };
 
-    const initPlayer = () => {
+    const resolvePreferredStartLevel = async (sourceUrl: string) => {
+      try {
+        const controller = new AbortController();
+        const timeout = window.setTimeout(() => controller.abort(), 4000);
+        const response = await fetch(sourceUrl, {
+          cache: "no-store",
+          signal: controller.signal,
+        });
+        window.clearTimeout(timeout);
+        if (!response.ok) {
+          return null;
+        }
+        const manifestText = await response.text();
+        const { targetHeight, targetWidth } = resolvePlaybackTargetSize(video);
+        runtime.debugTargetWidth = targetWidth;
+        runtime.debugTargetHeight = targetHeight;
+        return selectPreferredHlsStartLevelFromManifest(
+          manifestText,
+          targetWidth,
+          targetHeight,
+        );
+      } catch {
+        return null;
+      }
+    };
+
+    const initPlayer = async () => {
       destroyPlayer();
       runtime.playbackProfile = resolveHlsPlaybackProfile(
         runtime.activeStreamUrl || "",
@@ -1050,7 +1169,9 @@ export function HlsPlayerApp() {
         return;
       }
 
-      if (video.canPlayType("application/vnd.apple.mpegurl")) {
+      const canUseNativeHls =
+        video.canPlayType("application/vnd.apple.mpegurl") !== "";
+      if (canUseNativeHls && shouldPreferNativeHlsPlayback()) {
         video.src = runtime.activeStreamUrl;
         startLatencyPolling();
         syncTelemetry();
@@ -1088,15 +1209,69 @@ export function HlsPlayerApp() {
               ),
             }
           : runtime.playbackProfile.config;
-
-      runtime.hls = new Hls(hlsConfig);
+      const preferredStartLevel = runtime.activeStreamUrl
+        ? await resolvePreferredStartLevel(runtime.activeStreamUrl)
+        : null;
+      if (disposed) {
+        return;
+      }
+      if (params.debugEnabled) {
+        console.info("[hls-player] resolved preferred startup level", {
+          preferredStartLevel,
+          sourceUrl: runtime.activeStreamUrl,
+        });
+      }
+      runtime.debugPreferredStartLevel = preferredStartLevel;
+      setDebugState({
+        preferredStartLevel,
+        sourceUrl: runtime.activeStreamUrl,
+      });
+      runtime.hls = new Hls({
+        ...hlsConfig,
+        startLevel: preferredStartLevel ?? undefined,
+      });
+      if (preferredStartLevel != null) {
+        runtime.hls.firstLevel = preferredStartLevel;
+        runtime.hls.startLevel = preferredStartLevel;
+        runtime.hls.autoLevelCapping = preferredStartLevel;
+        runtime.hls.nextAutoLevel = preferredStartLevel;
+      }
       runtime.hls.loadSource(runtime.activeStreamUrl);
       runtime.hls.attachMedia(video);
       startLatencyPolling();
 
       runtime.hls.on(Hls.Events.MANIFEST_PARSED, () => {
+        setDebugState({
+          manifestLevels: runtime.hls?.levels.map((level, index) => ({
+            bitrate: level.bitrate ?? 0,
+            height: level.height ?? 0,
+            index,
+            width: level.width ?? 0,
+          })),
+        });
+        if (params.debugEnabled && runtime.hls) {
+          console.info("[hls-player] manifest levels", {
+            autoLevelCapping: runtime.hls.autoLevelCapping,
+            currentLevel: runtime.hls.currentLevel,
+            firstLevel: runtime.hls.firstLevel,
+            levels: runtime.hls.levels.map((level, index) => ({
+              bitrate: level.bitrate ?? 0,
+              height: level.height ?? 0,
+              index,
+              width: level.width ?? 0,
+            })),
+            nextAutoLevel: runtime.hls.nextAutoLevel,
+            startLevel: runtime.hls.startLevel,
+          });
+        }
         if (runtime.hls) {
           preferHighestViableHlsLevel(runtime.hls, video);
+          setDebugState({
+            postPreferAutoLevelCapping: runtime.hls.autoLevelCapping,
+            postPreferCurrentLevel: runtime.hls.currentLevel,
+            postPreferNextAutoLevel: runtime.hls.nextAutoLevel,
+            postPreferStartLevel: runtime.hls.startLevel,
+          });
         }
         updateLoaderPhase("initializing", {
           overlayMessage: null,
@@ -1128,6 +1303,32 @@ export function HlsPlayerApp() {
       });
 
       runtime.hls.on(Hls.Events.LEVEL_UPDATED, syncTelemetry);
+      runtime.hls.on(Hls.Events.FRAG_LOADING, (_event, data) => {
+        setDebugState({
+          fragLevel: data.frag?.level ?? null,
+          fragSn: data.frag?.sn ?? null,
+          fragType: data.frag?.type ?? null,
+        });
+        if (!params.debugEnabled) {
+          return;
+        }
+        console.info("[hls-player] loading fragment", {
+          level: data.frag?.level ?? null,
+          sn: data.frag?.sn ?? null,
+          type: data.frag?.type ?? null,
+        });
+      });
+      runtime.hls.on(Hls.Events.LEVEL_SWITCHED, (_event, data) => {
+        setDebugState({
+          switchedLevel: data.level ?? null,
+        });
+        if (!params.debugEnabled) {
+          return;
+        }
+        console.info("[hls-player] switched level", {
+          level: data.level ?? null,
+        });
+      });
       runtime.hls.on(Hls.Events.ERROR, (_event, data) => {
         runtime.lastHlsError = {
           type: data.type || null,
@@ -1245,6 +1446,7 @@ export function HlsPlayerApp() {
     initPlayer();
 
     return () => {
+      disposed = true;
       destroyPlayer();
     };
   }, [params]);
