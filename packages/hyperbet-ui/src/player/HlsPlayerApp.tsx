@@ -99,6 +99,23 @@ type RuntimeState = {
   loader: ViewerLoaderState;
 };
 
+function buildStandardHlsUrl(url: string | null): string | null {
+  if (!url) return url;
+  try {
+    const parsed = new URL(url);
+    if (
+      (parsed.searchParams.get("protocol") || "").trim().toLowerCase() !==
+      "llhls"
+    ) {
+      return parsed.toString();
+    }
+    parsed.searchParams.delete("protocol");
+    return parsed.toString();
+  } catch {
+    return url;
+  }
+}
+
 export function resolveBufferedPresentationDelayTarget(params: {
   bufferedStart: number;
   bufferedEnd: number;
@@ -150,6 +167,28 @@ export function shouldPreferNativeHlsPlayback(): boolean {
     /Safari\//.test(userAgent) &&
     !/Chrome\/|Chromium\/|CriOS\/|Edg\/|OPR\/|Firefox\/|FxiOS\//.test(userAgent);
   return isIosWebKit || isSafariDesktop;
+}
+
+export function normalizeManagedPlaybackQuery(
+  params: ParsedPlayerQuery,
+): ParsedPlayerQuery {
+  const deliveryMode = resolvePlayerDeliveryModeHint(
+    params.streamUrl || "",
+    params.deliveryMode,
+  );
+  if (
+    deliveryMode !== "external_hls/llhls" ||
+    shouldPreferNativeHlsPlayback()
+  ) {
+    return params;
+  }
+
+  const standardUrl = buildStandardHlsUrl(params.streamUrl);
+  return {
+    ...params,
+    streamUrl: standardUrl,
+    deliveryMode: standardUrl ? "external_hls/hls" : params.deliveryMode,
+  };
 }
 
 export function resolveObservedPlaybackLatencyMs(params: {
@@ -212,7 +251,10 @@ export function resolveObservedPlaybackLatencyMs(params: {
 }
 
 export function HlsPlayerApp() {
-  const params = useMemo(readPlayerQuery, []);
+  const params = useMemo(
+    () => normalizeManagedPlaybackQuery(readPlayerQuery()),
+    [],
+  );
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const runtimeRef = useRef<RuntimeState>({
     readySent: false,
@@ -653,23 +695,6 @@ export function HlsPlayerApp() {
       });
       markReady();
       return true;
-    };
-
-    const buildStandardHlsUrl = (url: string | null) => {
-      if (!url) return url;
-      try {
-        const parsed = new URL(url);
-        if (
-          (parsed.searchParams.get("protocol") || "").trim().toLowerCase() !==
-          "llhls"
-        ) {
-          return parsed.toString();
-        }
-        parsed.searchParams.delete("protocol");
-        return parsed.toString();
-      } catch {
-        return url;
-      }
     };
 
     const fallbackToStandardHls = (reason: string) => {

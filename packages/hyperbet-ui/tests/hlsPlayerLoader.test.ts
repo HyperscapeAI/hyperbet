@@ -3,6 +3,7 @@ import { describe, expect, it } from "bun:test";
 
 import { buildHlsPlayerEmbedUrl } from "../src/components/StreamPlayer";
 import {
+  normalizeManagedPlaybackQuery,
   resolveBufferedPresentationDelayTarget,
   resolveObservedPlaybackLatencyMs,
   shouldPreferNativeHlsPlayback,
@@ -214,6 +215,121 @@ describe("shouldPreferNativeHlsPlayback", () => {
         value: 5,
       });
       expect(shouldPreferNativeHlsPlayback()).toBe(true);
+    } finally {
+      Object.defineProperty(navigator, "userAgent", {
+        configurable: true,
+        value: originalUserAgent,
+      });
+      Object.defineProperty(navigator, "platform", {
+        configurable: true,
+        value: originalPlatform,
+      });
+      Object.defineProperty(navigator, "maxTouchPoints", {
+        configurable: true,
+        value: originalMaxTouchPoints,
+      });
+    }
+  });
+});
+
+describe("normalizeManagedPlaybackQuery", () => {
+  it("moves desktop Chrome off the llhls rail while keeping managed playback", () => {
+    const originalUserAgent = navigator.userAgent;
+    const originalPlatform = navigator.platform;
+    const originalMaxTouchPoints = navigator.maxTouchPoints;
+
+    try {
+      Object.defineProperty(navigator, "userAgent", {
+        configurable: true,
+        value:
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36",
+      });
+      Object.defineProperty(navigator, "platform", {
+        configurable: true,
+        value: "MacIntel",
+      });
+      Object.defineProperty(navigator, "maxTouchPoints", {
+        configurable: true,
+        value: 0,
+      });
+
+      expect(
+        normalizeManagedPlaybackQuery({
+          streamUrl:
+            "https://videodelivery.net/example/manifest/video.m3u8?protocol=llhls",
+          autoplay: true,
+          muted: true,
+          debugEnabled: false,
+          deliveryMode: "external_hls/llhls",
+          presentationDelayMs: 4_000,
+          syncToleranceMs: 2_500,
+        }),
+      ).toEqual({
+        streamUrl: "https://videodelivery.net/example/manifest/video.m3u8",
+        autoplay: true,
+        muted: true,
+        debugEnabled: false,
+        deliveryMode: "external_hls/hls",
+        presentationDelayMs: 4_000,
+        syncToleranceMs: 2_500,
+      });
+    } finally {
+      Object.defineProperty(navigator, "userAgent", {
+        configurable: true,
+        value: originalUserAgent,
+      });
+      Object.defineProperty(navigator, "platform", {
+        configurable: true,
+        value: originalPlatform,
+      });
+      Object.defineProperty(navigator, "maxTouchPoints", {
+        configurable: true,
+        value: originalMaxTouchPoints,
+      });
+    }
+  });
+
+  it("keeps Safari on the llhls rail", () => {
+    const originalUserAgent = navigator.userAgent;
+    const originalPlatform = navigator.platform;
+    const originalMaxTouchPoints = navigator.maxTouchPoints;
+
+    try {
+      Object.defineProperty(navigator, "userAgent", {
+        configurable: true,
+        value:
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15",
+      });
+      Object.defineProperty(navigator, "platform", {
+        configurable: true,
+        value: "MacIntel",
+      });
+      Object.defineProperty(navigator, "maxTouchPoints", {
+        configurable: true,
+        value: 0,
+      });
+
+      expect(
+        normalizeManagedPlaybackQuery({
+          streamUrl:
+            "https://videodelivery.net/example/manifest/video.m3u8?protocol=llhls",
+          autoplay: true,
+          muted: true,
+          debugEnabled: false,
+          deliveryMode: "external_hls/llhls",
+          presentationDelayMs: 4_000,
+          syncToleranceMs: 2_500,
+        }),
+      ).toEqual({
+        streamUrl:
+          "https://videodelivery.net/example/manifest/video.m3u8?protocol=llhls",
+        autoplay: true,
+        muted: true,
+        debugEnabled: false,
+        deliveryMode: "external_hls/llhls",
+        presentationDelayMs: 4_000,
+        syncToleranceMs: 2_500,
+      });
     } finally {
       Object.defineProperty(navigator, "userAgent", {
         configurable: true,
