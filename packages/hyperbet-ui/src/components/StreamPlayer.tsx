@@ -206,7 +206,27 @@ export function selectPreferredHlsStartLevelFromManifest(
     return null;
   }
 
-  return selectPreferredHlsVariantIndex(variants, targetWidth, targetHeight);
+  const preferredManifestIndex = selectPreferredHlsVariantIndex(
+    variants,
+    targetWidth,
+    targetHeight,
+  );
+  const sortedVariants = [...variants].sort((left, right) => {
+    if (left.width !== right.width) {
+      return left.width - right.width;
+    }
+    if (left.height !== right.height) {
+      return left.height - right.height;
+    }
+    if (left.bitrate !== right.bitrate) {
+      return left.bitrate - right.bitrate;
+    }
+    return left.index - right.index;
+  });
+  const preferredSortedIndex = sortedVariants.findIndex(
+    (variant) => variant.index === preferredManifestIndex,
+  );
+  return preferredSortedIndex >= 0 ? preferredSortedIndex : null;
 }
 
 export function preferHighestViableHlsLevel(

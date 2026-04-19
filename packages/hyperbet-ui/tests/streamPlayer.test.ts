@@ -275,13 +275,13 @@ stream_t43322e00a1dfcad9a7b8f4609800c461_r1570586488.m3u8?protocol=llhls&llhlsHB
         1600,
         900,
       ),
-    ).toBe(1);
+    ).toBe(4);
   });
 
   it("falls back to the highest quality startup level when nothing fits", () => {
     expect(
       selectPreferredHlsStartLevelFromManifest(cloudflareMasterManifest, 160, 120),
-    ).toBe(1);
+    ).toBe(4);
   });
 });
 
