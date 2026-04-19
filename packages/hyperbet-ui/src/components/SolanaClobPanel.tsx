@@ -49,9 +49,11 @@ import {
 } from "../lib/solanaRpc";
 import { CONFIG } from "../lib/config";
 import {
+  type PredictionMarketsDuelSnapshot,
   normalizePredictionMarketDuelKeyHex,
   usePredictionMarketLifecycle,
 } from "../lib/predictionMarkets";
+import type { PredictionMarketLifecycleRecord } from "@hyperbet/chain-registry";
 import {
   derivePredictionMarketUiState,
   EMPTY_PREDICTION_MARKET_WALLET_SNAPSHOT,
@@ -350,6 +352,17 @@ interface SolanaClobPanelProps {
   locale?: UiLocale;
   connectionOverride: Connection;
   walletOverride: SigningWalletLike;
+  /**
+   * Optional lifecycle overrides. When the app shell is running the
+   * viewer-aligned-bet-state path (`VITE_ENABLE_VIEWER_ALIGNED_BET_STATE`),
+   * the App passes in the selected aligned duel/market records so the
+   * panel's display-gating reflects the viewer's video frame rather
+   * than the freshest-by-wall-clock keeper response. The overrides are
+   * always optional — when omitted, the panel's internal
+   * `usePredictionMarketLifecycle` hook wins.
+   */
+  lifecycleDuelOverride?: PredictionMarketsDuelSnapshot | null;
+  lifecycleMarketOverride?: PredictionMarketLifecycleRecord | null;
 }
 
 export interface SolanaClobMarketSnapshot {
@@ -371,6 +384,8 @@ export function SolanaClobPanel({
   locale,
   connectionOverride,
   walletOverride,
+  lifecycleDuelOverride = null,
+  lifecycleMarketOverride = null,
 }: SolanaClobPanelProps) {
   const resolvedLocale = resolveUiLocale(locale);
   const isE2eMode = import.meta.env.MODE === "e2e" || import.meta.env.DEV;
@@ -441,10 +456,20 @@ export function SolanaClobPanel({
   const streamedDuelKeyHex =
     typeof cycle?.duelKeyHex === "string" ? cycle.duelKeyHex : null;
   const streamedDuelId = typeof cycle?.duelId === "string" ? cycle.duelId : null;
-  const { duel: lifecycleDuel, market: lifecycleMarket } =
-    usePredictionMarketLifecycle("solana", {
-      pollIntervalMs: SOLANA_REFRESH_INTERVAL_MS,
-    });
+  const {
+    duel: fetchedLifecycleDuel,
+    market: fetchedLifecycleMarket,
+  } = usePredictionMarketLifecycle("solana", {
+    pollIntervalMs: SOLANA_REFRESH_INTERVAL_MS,
+  });
+  // App shell supplies aligned overrides when
+  // `VITE_ENABLE_VIEWER_ALIGNED_BET_STATE` is on — the override wins so
+  // that the panel's display-gating copy reflects the viewer's video
+  // frame rather than the freshest keeper response. When the flag is
+  // off, both overrides are null and the panel falls through to the
+  // direct hook values exactly as before (preserves current behavior).
+  const lifecycleDuel = lifecycleDuelOverride ?? fetchedLifecycleDuel;
+  const lifecycleMarket = lifecycleMarketOverride ?? fetchedLifecycleMarket;
   const runtimeE2eOverride = useMemo(
     () =>
       isE2eMode
