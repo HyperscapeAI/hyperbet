@@ -2299,6 +2299,44 @@ function maskNonPublicStreamChannel(
   };
 }
 
+function sanitizeSourceTimeline(
+  value: unknown,
+): Record<string, unknown> | null {
+  const candidate = asJsonRecord(value);
+  if (!candidate) return null;
+  return {
+    phase:
+      typeof candidate.phase === "string" || candidate.phase === null
+        ? candidate.phase
+        : null,
+    betOpenTime:
+      typeof candidate.betOpenTime === "number" &&
+      Number.isFinite(candidate.betOpenTime)
+        ? candidate.betOpenTime
+        : null,
+    betCloseTime:
+      typeof candidate.betCloseTime === "number" &&
+      Number.isFinite(candidate.betCloseTime)
+        ? candidate.betCloseTime
+        : null,
+    fightStartTime:
+      typeof candidate.fightStartTime === "number" &&
+      Number.isFinite(candidate.fightStartTime)
+        ? candidate.fightStartTime
+        : null,
+    duelEndTime:
+      typeof candidate.duelEndTime === "number" &&
+      Number.isFinite(candidate.duelEndTime)
+        ? candidate.duelEndTime
+        : null,
+    updatedAt:
+      typeof candidate.updatedAt === "number" &&
+      Number.isFinite(candidate.updatedAt)
+        ? candidate.updatedAt
+        : null,
+  };
+}
+
 function projectPublicStreamState(
   sourceState: StreamState,
   botHealthSnapshot: KeeperBotHealthSnapshot | null,
@@ -2324,6 +2362,9 @@ function projectPublicStreamState(
   const existingTimeline =
     asJsonRecord(cycle.broadcastTimeline) ??
     asJsonRecord(sourceState.broadcastTimeline);
+  const sourceTimeline =
+    sanitizeSourceTimeline(cycle.sourceTimeline) ??
+    sanitizeSourceTimeline(sourceState.sourceTimeline);
   const unmaskDuelIdentity =
     sourceStatePhaseAllowsUnmaskedDuelIdentity(sourceState);
   const effectivePhase = unmaskDuelIdentity
@@ -2364,6 +2405,7 @@ function projectPublicStreamState(
       rawCycle: null,
       phase: effectivePhase,
       broadcastTimeline: maskedTimeline,
+      ...(sourceTimeline ? { sourceTimeline } : {}),
       betOpenTime: null,
       betCloseTime: null,
       fightStartTime: null,
@@ -2937,6 +2979,9 @@ function toStreamState(payload: unknown): StreamState | null {
         : null,
     broadcastTimeline: asJsonRecord(candidate.broadcastTimeline) as
       | StreamState["broadcastTimeline"]
+      | null,
+    sourceTimeline: asJsonRecord(candidate.sourceTimeline) as
+      | StreamState["sourceTimeline"]
       | null,
     rendererHealth: asJsonRecord(candidate.rendererHealth) as
       | StreamState["rendererHealth"]

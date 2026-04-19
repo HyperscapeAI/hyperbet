@@ -344,6 +344,61 @@ describe("normalizeCanonicalStreamSession", () => {
     });
   });
 
+  it("preserves sourceTimeline without changing the dark-path projected phase", () => {
+    const session = normalizeCanonicalStreamSession({
+      schemaVersion: 3,
+      seq: 11,
+      emittedAt: 1234567892,
+      cycle: {
+        cycleId: "cycle-3",
+        phase: "FIGHTING",
+        betOpenTime: 1000,
+        betCloseTime: 2000,
+        fightStartTime: 3000,
+        duelEndTime: 9000,
+        broadcastTimeline: {
+          phase: "COUNTDOWN",
+          betOpenTime: 5000,
+          betCloseTime: 6000,
+          fightStartTime: 7000,
+          duelEndTime: 13000,
+          presentationDelayMs: 4000,
+          updatedAt: 1234567892,
+        },
+        sourceTimeline: {
+          phase: "FIGHTING",
+          betOpenTime: 1000,
+          betCloseTime: 2000,
+          fightStartTime: 3000,
+          duelEndTime: 9000,
+          updatedAt: 1234563892,
+        },
+      },
+      channel: makeCanonicalChannel(),
+      sourceRuntime: makeSourceRuntime(),
+    });
+
+    expect(session?.phase).toBe("COUNTDOWN");
+    expect(session?.cycle.broadcastTimeline?.phase).toBe("COUNTDOWN");
+    expect(session?.cycle.sourceTimeline).toEqual({
+      phase: "FIGHTING",
+      betOpenTime: 1000,
+      betCloseTime: 2000,
+      fightStartTime: 3000,
+      duelEndTime: 9000,
+      updatedAt: 1234563892,
+    });
+
+    expect(canonicalSessionToStreamingState(session!).cycle.sourceTimeline).toEqual({
+      phase: "FIGHTING",
+      betOpenTime: 1000,
+      betCloseTime: 2000,
+      fightStartTime: 3000,
+      duelEndTime: 9000,
+      updatedAt: 1234563892,
+    });
+  });
+
   it("preserves legacy timing fields when broadcastTimeline is sparse", () => {
     const session = normalizeCanonicalStreamSession({
       schemaVersion: 3,

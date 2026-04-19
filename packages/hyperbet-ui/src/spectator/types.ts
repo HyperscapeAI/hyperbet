@@ -164,6 +164,15 @@ export interface BroadcastTimeline {
   updatedAt: number | null;
 }
 
+export interface SourceTimeline {
+  phase: StreamingPhase | null;
+  betOpenTime: number | null;
+  betCloseTime: number | null;
+  fightStartTime: number | null;
+  duelEndTime: number | null;
+  updatedAt: number | null;
+}
+
 export interface StreamingCycle {
   cycleId: string;
   phase: StreamingPhase;
@@ -178,6 +187,7 @@ export interface StreamingCycle {
   duelKeyHex?: string | null;
   rawCycle?: Record<string, unknown> | null;
   broadcastTimeline?: BroadcastTimeline | null;
+  sourceTimeline?: SourceTimeline | null;
   betOpenTime?: number | null;
   betCloseTime?: number | null;
   countdown: number | null;

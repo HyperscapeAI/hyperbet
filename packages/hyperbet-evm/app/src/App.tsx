@@ -88,6 +88,9 @@ import {
 } from "@hyperbet/ui/lib/chainConfig";
 import {
   logViewerAlignmentDivergence,
+  projectCanonicalSessionToSourceTimeline,
+  projectDuelContextToSourceTimeline,
+  resolveAlignedSessionPhase,
   useViewerAlignedBetState,
 } from "@hyperbet/ui/lib/viewerAlignment";
 
@@ -674,7 +677,7 @@ export function App() {
   const requestOverviewRefresh = useCallback(async () => {
     await refreshMarketOverview();
   }, [refreshMarketOverview]);
-  const liveCycle = streamingState?.cycle ?? null;
+  const freshestCycle = streamingState?.cycle ?? null;
   const { activeStreamUrl, preloadStreamUrl } = selectBetSurfaceStreamUrl({
     authorityHealth: canonicalAuthorityHealth,
     fallbackStreamIndex: 0,
@@ -710,6 +713,12 @@ export function App() {
     latestDuelContext: duelContext,
     sessionPresentationDelayMs: canonicalPresentationDelayMs,
     streamPlayerStatus,
+    currentDisplayPhase:
+      canonicalStreamSession?.cycle.broadcastTimeline?.phase ??
+      canonicalStreamSession?.phase ??
+      freshestCycle?.phase ??
+      null,
+    extractAlignedPhase: resolveAlignedSessionPhase,
     onDivergence: logViewerAlignmentDivergence,
   });
   const alignedOverview = viewerAligned.enabled
@@ -721,6 +730,23 @@ export function App() {
     : null;
   const alignedLifecycleMarketParity =
     alignedOverview?.live?.marketParity ?? null;
+  const alignedSession = viewerAligned.enabled
+    ? projectCanonicalSessionToSourceTimeline(
+        viewerAligned.session ?? canonicalStreamSession,
+      )
+    : null;
+  const displaySession = alignedSession ?? canonicalStreamSession;
+  const displayDuelContext = viewerAligned.enabled
+    ? projectDuelContextToSourceTimeline(
+        viewerAligned.duelContext ?? duelContext,
+      ) ?? duelContext
+    : duelContext;
+  const liveCycle =
+    (displaySession?.cycle as typeof freshestCycle) ??
+    freshestCycle;
+  const displayOverviewDuel = alignedLifecycleDuel ?? liveOverviewDuel ?? null;
+  const displayOverviewMarket =
+    alignedLifecycleMarket ?? liveOverviewMarket ?? null;
   const streamPlaceholderMessage = useMemo(() => {
     if (!canonicalStreamSession) {
       return "Connecting to live session...";
@@ -760,40 +786,44 @@ export function App() {
     () =>
       deriveBettorLiveStatus({
         copy,
-        session: canonicalStreamSession,
+        session: displaySession,
         fallbackPhase: liveCycle?.phase ?? null,
         countdown: liveCycle?.countdown ?? null,
-        marketLifecycleStatus: liveOverviewMarket?.lifecycleStatus ?? null,
-        marketWinner: liveOverviewMarket?.winner ?? null,
+        marketLifecycleStatus: displayOverviewMarket?.lifecycleStatus ?? null,
+        marketWinner: displayOverviewMarket?.winner ?? null,
         agent1Name:
           liveCycle?.agent1?.name?.trim() ||
-          liveOverviewDuel?.agent1Name?.trim() ||
+          displayOverviewDuel?.agent1Name?.trim() ||
           "Agent A",
         agent2Name:
           liveCycle?.agent2?.name?.trim() ||
-          liveOverviewDuel?.agent2Name?.trim() ||
+          displayOverviewDuel?.agent2Name?.trim() ||
           "Agent B",
-        marketPhase: liveOverviewDuel?.phase ?? null,
-        marketDuelId: liveOverviewDuel?.duelId ?? liveOverviewMarket?.duelId ?? null,
+        marketPhase: displayOverviewDuel?.phase ?? null,
+        marketDuelId:
+          displayOverviewDuel?.duelId ?? displayOverviewMarket?.duelId ?? null,
       }),
     [
-      canonicalStreamSession,
+      displaySession,
       copy,
       liveCycle?.agent1?.name,
       liveCycle?.agent2?.name,
       liveCycle?.countdown,
       liveCycle?.phase,
-      liveOverviewDuel?.agent1Name,
-      liveOverviewDuel?.agent2Name,
-      liveOverviewDuel?.duelId,
-      liveOverviewDuel?.phase,
-      liveOverviewMarket?.duelId,
-      liveOverviewMarket?.lifecycleStatus,
-      liveOverviewMarket?.winner,
+      displayOverviewDuel?.agent1Name,
+      displayOverviewDuel?.agent2Name,
+      displayOverviewDuel?.duelId,
+      displayOverviewDuel?.phase,
+      displayOverviewMarket?.duelId,
+      displayOverviewMarket?.lifecycleStatus,
+      displayOverviewMarket?.winner,
     ],
   );
   const effectiveMarketParity =
-    canonicalStreamSession?.marketParity ?? liveMarketParity ?? null;
+    displaySession?.marketParity ??
+    alignedLifecycleMarketParity ??
+    liveMarketParity ??
+    null;
   const marketParityStatusText = useMemo(
     () => deriveMarketParityLabel(effectiveMarketParity, copy),
     [copy, effectiveMarketParity],
@@ -1086,8 +1116,8 @@ export function App() {
     currentMatch?.agent2Name ?? liveAgent2Name ?? mockAgent2Name ?? "Agent B";
   const effStatusColor = status ? "#fda4af" : "rgba(255,255,255,0.78)";
   const effStatus = status;
-  const contextAgent1 = duelContext?.cycle.agent1 ?? null;
-  const contextAgent2 = duelContext?.cycle.agent2 ?? null;
+  const contextAgent1 = displayDuelContext?.cycle.agent1 ?? null;
+  const contextAgent2 = displayDuelContext?.cycle.agent2 ?? null;
 
   // Agent context from live SSE + duel-context polling
   const effA1 = {

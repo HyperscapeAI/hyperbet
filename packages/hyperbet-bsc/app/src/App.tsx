@@ -54,6 +54,9 @@ import { useStreamingState } from "@hyperbet/ui/spectator/useStreamingState";
 import { useDuelContext } from "@hyperbet/ui/spectator/useDuelContext";
 import {
   logViewerAlignmentDivergence,
+  projectCanonicalSessionToSourceTimeline,
+  projectDuelContextToSourceTimeline,
+  resolveAlignedSessionPhase,
   useViewerAlignedBetState,
 } from "@hyperbet/ui/lib/viewerAlignment";
 import { useMeasuredContentBox } from "@hyperbet/ui/lib/useMeasuredContentBox";
@@ -754,7 +757,7 @@ export function App() {
     presentationDelayMs: canonicalPresentationDelayMs,
   } = useCanonicalStreamSession();
   const { context: duelContext } = useDuelContext();
-  const liveCycle = streamingState?.cycle ?? null;
+  const freshestCycle = streamingState?.cycle ?? null;
   const lifecycleChainKey =
     activeChain === "bsc" || activeChain === "base" || activeChain === "avax"
       ? activeChain
@@ -809,6 +812,12 @@ export function App() {
     latestDuelContext: duelContext,
     sessionPresentationDelayMs: canonicalPresentationDelayMs,
     streamPlayerStatus,
+    currentDisplayPhase:
+      canonicalStreamSession?.cycle.broadcastTimeline?.phase ??
+      canonicalStreamSession?.phase ??
+      freshestCycle?.phase ??
+      null,
+    extractAlignedPhase: resolveAlignedSessionPhase,
     onDivergence: logViewerAlignmentDivergence,
   });
   const alignedLifecyclePayload = viewerAligned.enabled
@@ -821,6 +830,20 @@ export function App() {
         lifecycleChainKey,
       )
     : null;
+  const alignedSession = viewerAligned.enabled
+    ? projectCanonicalSessionToSourceTimeline(
+        viewerAligned.session ?? canonicalStreamSession,
+      )
+    : null;
+  const displaySession = alignedSession ?? canonicalStreamSession;
+  const displayDuelContext = viewerAligned.enabled
+    ? projectDuelContextToSourceTimeline(
+        viewerAligned.duelContext ?? duelContext,
+      ) ?? duelContext
+    : duelContext;
+  const liveCycle =
+    (displaySession?.cycle as typeof freshestCycle) ?? freshestCycle;
+  const displayLifecycleMarket = alignedLifecycleMarket ?? lifecycleMarket ?? null;
 
   const streamPlaceholderMessage = useMemo(() => {
     if (!canonicalStreamSession) {
@@ -1039,8 +1062,8 @@ export function App() {
   const effAgent1Name = currentMatch?.agent1Name ?? liveAgent1Name ?? "Agent A";
   const effAgent2Name = currentMatch?.agent2Name ?? liveAgent2Name ?? "Agent B";
 
-  const contextAgent1 = duelContext?.cycle.agent1 ?? null;
-  const contextAgent2 = duelContext?.cycle.agent2 ?? null;
+  const contextAgent1 = displayDuelContext?.cycle.agent1 ?? null;
+  const contextAgent2 = displayDuelContext?.cycle.agent2 ?? null;
 
   // Agent context from live SSE + duel-context polling
   const effA1 = {
@@ -1111,7 +1134,7 @@ export function App() {
 
   const streamPhaseText = liveCycle?.phase ?? null;
   const marketStatusText = getMarketStatusLabel(
-    lifecycleMarket?.lifecycleStatus ??
+    displayLifecycleMarket?.lifecycleStatus ??
       currentMatch?.status ??
       streamPhaseText ??
       copy.phaseLive,

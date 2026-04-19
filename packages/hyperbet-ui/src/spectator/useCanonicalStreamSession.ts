@@ -17,6 +17,7 @@ import type {
   LeaderboardEntry,
   RendererHealthInfo,
   RendererMetricsInfo,
+  SourceTimeline,
   SourceRuntimeInfo,
   StreamChannelState,
   StreamDeliveryInfo,
@@ -426,6 +427,20 @@ function normalizeBroadcastTimeline(value: unknown): BroadcastTimeline | null {
   };
 }
 
+function normalizeSourceTimeline(value: unknown): SourceTimeline | null {
+  const candidate = asRecord(value);
+  if (!candidate) return null;
+
+  return {
+    phase: (asString(candidate.phase) as StreamingPhase | null) ?? null,
+    betOpenTime: asFiniteNumber(candidate.betOpenTime),
+    betCloseTime: asFiniteNumber(candidate.betCloseTime),
+    fightStartTime: asFiniteNumber(candidate.fightStartTime),
+    duelEndTime: asFiniteNumber(candidate.duelEndTime),
+    updatedAt: asFiniteNumber(candidate.updatedAt),
+  };
+}
+
 function normalizeCycle(
   value: unknown,
   topLevelCandidate?: Record<string, unknown> | null,
@@ -435,6 +450,9 @@ function normalizeCycle(
   const broadcastTimeline =
     normalizeBroadcastTimeline(candidate.broadcastTimeline) ??
     normalizeBroadcastTimeline(topLevelCandidate?.broadcastTimeline);
+  const sourceTimeline =
+    normalizeSourceTimeline(candidate.sourceTimeline) ??
+    normalizeSourceTimeline(topLevelCandidate?.sourceTimeline);
 
   return {
     cycleId: asString(candidate.cycleId) ?? "cycle-0",
@@ -463,6 +481,7 @@ function normalizeCycle(
         ? (candidate.duelKeyHex as string | null)
         : null,
     broadcastTimeline,
+    sourceTimeline,
     betOpenTime:
       asFiniteNumber(topLevelCandidate?.betOpenTime) ??
       broadcastTimeline?.betOpenTime ??
@@ -677,6 +696,7 @@ export function canonicalSessionToStreamingState(
     phase: session.phase ?? session.cycle.phase,
     phaseVersion: session.phaseVersion ?? session.cycle.phaseVersion ?? null,
     broadcastTimeline: session.cycle.broadcastTimeline ?? null,
+    sourceTimeline: session.cycle.sourceTimeline ?? null,
     rendererHealth:
       session.rendererHealth ?? session.cycle.rendererHealth ?? null,
   };
