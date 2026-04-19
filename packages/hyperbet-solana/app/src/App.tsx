@@ -45,6 +45,10 @@ import {
 } from "@hyperbet/ui/components/StreamPlayer";
 import { PointsDisplay } from "@hyperbet/ui/components/PointsDisplay";
 import { useCanonicalStreamSession } from "@hyperbet/ui/spectator/useCanonicalStreamSession";
+import {
+  logViewerAlignmentDivergence,
+  useViewerAlignedBetState,
+} from "@hyperbet/ui/lib/viewerAlignment";
 import type { SolanaClobMarketSnapshot } from "@hyperbet/ui/components/SolanaClobPanel";
 import { getDuelStateDecoder } from "./generated/fight-oracle/accounts";
 import {
@@ -770,7 +774,8 @@ export function App() {
   } = useCanonicalStreamSession();
   const { context: duelContext } = useDuelContext();
   const liveCycle = streamingState?.cycle ?? null;
-  const { market: lifecycleMarket } = usePredictionMarketLifecycle("solana");
+  const { data: lifecyclePayload, market: lifecycleMarket } =
+    usePredictionMarketLifecycle("solana");
   const runtimeE2eOverride = useMemo(
     () =>
       isE2eMode
@@ -804,6 +809,22 @@ export function App() {
   );
   const [_streamPlayerStatus, setStreamPlayerStatus] =
     useState<StreamPlayerStatus | null>(null);
+
+  // Viewer-alignment shadow composition. Inert unless
+  // `VITE_ENABLE_VIEWER_ALIGNED_BET_STATE === "true"` — when disabled
+  // the inner hook runs no timers and returns a passthrough shape, so
+  // the render cost is ≈ one ref + one useMemo. Divergence events are
+  // emitted as `[viewer-align]` shadow-logs only; current UI gating
+  // logic still reads from the canonical hooks above until C5 flips.
+  useViewerAlignedBetState({
+    latestSession: canonicalStreamSession,
+    latestMarket: lifecyclePayload,
+    latestDuelContext: duelContext,
+    sessionPresentationDelayMs: canonicalPresentationDelayMs,
+    streamPlayerStatus,
+    onDivergence: logViewerAlignmentDivergence,
+  });
+
   const streamPlaceholderMessage = useMemo(() => {
     if (!canonicalStreamSession) {
       return "Connecting to live session...";
