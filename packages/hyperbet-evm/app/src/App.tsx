@@ -76,7 +76,9 @@ import {
 } from "@hyperbet/ui/lib/evmClient";
 import {
   normalizePredictionMarketDuelKeyHex,
+  selectPredictionMarketOverviewRecord,
   usePredictionMarketOverview,
+  type PredictionMarketsOverviewResponse,
 } from "@hyperbet/ui/lib/predictionMarkets";
 import {
   CHAIN_DISPLAY,
@@ -689,13 +691,19 @@ export function App() {
     setStreamPlayerStatus(null);
   }, [mountedStreamUrl]);
 
-  // Viewer-alignment shadow composition. Inert unless
-  // `VITE_ENABLE_VIEWER_ALIGNED_BET_STATE === "true"` — when disabled
-  // the inner hook runs no timers and returns a passthrough shape, so
-  // the render cost is ≈ one ref + one useMemo. Divergence events are
-  // emitted as `[viewer-align]` shadow-logs only; current UI gating
-  // logic still reads from the canonical hooks above until C5 flips.
-  useViewerAlignedBetState({
+  // Viewer-alignment shadow composition. When
+  // `VITE_ENABLE_VIEWER_ALIGNED_BET_STATE` is off the inner hook is a
+  // passthrough (no timers, no buffer pushes) and the panel sees the
+  // canonical live overrides unchanged. When the flag is on, the
+  // aligned envelope's `live.duel` / selected market / market parity
+  // are used as the panel's override payloads so display copy tracks
+  // the viewer's video frame rather than the freshest keeper response.
+  // Divergence events are emitted as `[viewer-align]` shadow-logs.
+  const viewerAligned = useViewerAlignedBetState<
+    typeof canonicalStreamSession,
+    PredictionMarketsOverviewResponse | null,
+    typeof duelContext
+  >({
     latestSession: canonicalStreamSession,
     latestMarket: marketOverviewPayload,
     latestDuelContext: duelContext,
@@ -703,6 +711,15 @@ export function App() {
     streamPlayerStatus,
     onDivergence: logViewerAlignmentDivergence,
   });
+  const alignedOverview = viewerAligned.enabled
+    ? viewerAligned.marketOverview ?? null
+    : null;
+  const alignedLifecycleDuel = alignedOverview?.live?.duel ?? null;
+  const alignedLifecycleMarket = alignedOverview
+    ? selectPredictionMarketOverviewRecord(alignedOverview, activeChain, "live")
+    : null;
+  const alignedLifecycleMarketParity =
+    alignedOverview?.live?.marketParity ?? null;
   const streamPlaceholderMessage = useMemo(() => {
     if (!canonicalStreamSession) {
       return "Connecting to live session...";
@@ -1200,6 +1217,10 @@ export function App() {
           locale={locale}
           connectionOverride={solanaConnection}
           walletOverride={solanaWallet as any}
+          lifecycleDuelOverride={alignedLifecycleDuel ?? liveOverviewDuel}
+          lifecycleMarketOverride={
+            alignedLifecycleMarket ?? liveOverviewMarket
+          }
         />
       ) : (
         <EvmBettingPanel
@@ -1207,9 +1228,13 @@ export function App() {
           agent2Name={effAgent2Name}
           compact
           locale={locale}
-          lifecycleDuelOverride={liveOverviewDuel}
-          lifecycleMarketOverride={liveOverviewMarket}
-          lifecycleMarketParityOverride={effectiveMarketParity}
+          lifecycleDuelOverride={alignedLifecycleDuel ?? liveOverviewDuel}
+          lifecycleMarketOverride={
+            alignedLifecycleMarket ?? liveOverviewMarket
+          }
+          lifecycleMarketParityOverride={
+            alignedLifecycleMarketParity ?? effectiveMarketParity
+          }
           onLifecycleRefreshRequested={requestOverviewRefresh}
         />
       )}

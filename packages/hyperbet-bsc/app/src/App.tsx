@@ -33,7 +33,9 @@ import {
 import { ENABLE_STREAM_SOURCE_OVERRIDE } from "@hyperbet/ui/lib/config";
 import {
   normalizePredictionMarketDuelKeyHex,
+  selectPredictionMarketLifecycleRecord,
   usePredictionMarketLifecycle,
+  type PredictionMarketsResponse,
 } from "@hyperbet/ui/lib/predictionMarkets";
 import {
   describeCanonicalRendererDegradedReason,
@@ -788,13 +790,19 @@ export function App() {
   const [_streamPlayerStatus, setStreamPlayerStatus] =
     useState<StreamPlayerStatus | null>(null);
 
-  // Viewer-alignment shadow composition. Inert unless
-  // `VITE_ENABLE_VIEWER_ALIGNED_BET_STATE === "true"` — when disabled
-  // the inner hook runs no timers and returns a passthrough shape, so
-  // the render cost is ≈ one ref + one useMemo. Divergence events are
-  // emitted as `[viewer-align]` shadow-logs only; current UI gating
-  // logic still reads from the canonical hooks above until C5 flips.
-  useViewerAlignedBetState({
+  // Viewer-alignment shadow composition. When
+  // `VITE_ENABLE_VIEWER_ALIGNED_BET_STATE` is off the inner hook is a
+  // passthrough (no timers, no buffer pushes) and the panel sees the
+  // canonical live overrides unchanged. When the flag is on, the
+  // aligned envelope's `duel` / selected market are used as the
+  // panel's override payloads so display copy tracks the viewer's
+  // video frame. Divergence events are emitted as `[viewer-align]`
+  // shadow-logs.
+  const viewerAligned = useViewerAlignedBetState<
+    typeof canonicalStreamSession,
+    PredictionMarketsResponse | null,
+    typeof duelContext
+  >({
     latestSession: canonicalStreamSession,
     latestMarket: lifecyclePayload,
     latestDuelContext: duelContext,
@@ -802,6 +810,16 @@ export function App() {
     streamPlayerStatus,
     onDivergence: logViewerAlignmentDivergence,
   });
+  const alignedLifecyclePayload = viewerAligned.enabled
+    ? viewerAligned.marketOverview ?? null
+    : null;
+  const alignedLifecycleDuel = alignedLifecyclePayload?.duel ?? null;
+  const alignedLifecycleMarket = alignedLifecyclePayload
+    ? selectPredictionMarketLifecycleRecord(
+        alignedLifecyclePayload,
+        lifecycleChainKey,
+      )
+    : null;
 
   const streamPlaceholderMessage = useMemo(() => {
     if (!canonicalStreamSession) {
@@ -2164,8 +2182,12 @@ export function App() {
                       agent2Name={effAgent2Name}
                       compact
                       locale={locale}
-                      lifecycleDuelOverride={lifecycleDuel}
-                      lifecycleMarketOverride={lifecycleMarket}
+                      lifecycleDuelOverride={
+                        alignedLifecycleDuel ?? lifecycleDuel
+                      }
+                      lifecycleMarketOverride={
+                        alignedLifecycleMarket ?? lifecycleMarket
+                      }
                       onLifecycleRefreshRequested={() => void refreshLifecycle()}
                     />
                   </Suspense>
