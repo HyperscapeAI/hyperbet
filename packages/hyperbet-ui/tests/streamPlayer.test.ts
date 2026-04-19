@@ -3,6 +3,7 @@ import { describe, expect, it } from "bun:test";
 
 import {
   advanceViewerSyncState,
+  preferHighestViableHlsLevel,
   RECENT_PLAYER_SIGNAL_THRESHOLD,
   RECENT_PLAYER_SIGNAL_WINDOW_MS,
   recordRecentPlaybackSignal,
@@ -159,6 +160,77 @@ describe("resolvePlayerDeliveryModeHint", () => {
         "external_hls",
       ),
     ).toBe("external_hls/llhls");
+  });
+});
+
+describe("preferHighestViableHlsLevel", () => {
+  it("picks the highest fitting rendition by resolution instead of trusting manifest order", () => {
+    const hls = {
+      capLevelToPlayerSize: false,
+      levels: [
+        { width: 1280, height: 720, bitrate: 3_100_000 },
+        { width: 1920, height: 1080, bitrate: 3_690_000 },
+        { width: 854, height: 480, bitrate: 1_900_000 },
+        { width: 640, height: 360, bitrate: 1_100_000 },
+        { width: 426, height: 240, bitrate: 700_000 },
+      ],
+      loadLevel: -1,
+      nextLevel: -1,
+      startLevel: -1,
+    } as unknown as {
+      capLevelToPlayerSize: boolean;
+      levels: Array<{ width: number; height: number; bitrate: number }>;
+      loadLevel: number;
+      nextLevel: number;
+      startLevel: number;
+    };
+    const video = {
+      clientHeight: 900,
+      clientWidth: 1600,
+      videoHeight: 0,
+      videoWidth: 0,
+    } as HTMLVideoElement;
+
+    preferHighestViableHlsLevel(hls as never, video);
+
+    expect(hls.capLevelToPlayerSize).toBe(true);
+    expect(hls.startLevel).toBe(1);
+    expect(hls.nextLevel).toBe(1);
+    expect(hls.loadLevel).toBe(1);
+  });
+
+  it("falls back to the best available rendition when nothing fits the player size", () => {
+    const hls = {
+      capLevelToPlayerSize: false,
+      levels: [
+        { width: 1280, height: 720, bitrate: 3_100_000 },
+        { width: 1920, height: 1080, bitrate: 3_690_000 },
+        { width: 854, height: 480, bitrate: 1_900_000 },
+        { width: 640, height: 360, bitrate: 1_100_000 },
+        { width: 426, height: 240, bitrate: 700_000 },
+      ],
+      loadLevel: -1,
+      nextLevel: -1,
+      startLevel: -1,
+    } as unknown as {
+      capLevelToPlayerSize: boolean;
+      levels: Array<{ width: number; height: number; bitrate: number }>;
+      loadLevel: number;
+      nextLevel: number;
+      startLevel: number;
+    };
+    const video = {
+      clientHeight: 120,
+      clientWidth: 160,
+      videoHeight: 0,
+      videoWidth: 0,
+    } as HTMLVideoElement;
+
+    preferHighestViableHlsLevel(hls as never, video);
+
+    expect(hls.startLevel).toBe(1);
+    expect(hls.nextLevel).toBe(1);
+    expect(hls.loadLevel).toBe(1);
   });
 });
 

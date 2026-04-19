@@ -132,21 +132,39 @@ export function preferHighestViableHlsLevel(
   const targetHeight =
     Math.max(video?.clientHeight ?? 0, video?.videoHeight ?? 0, 1) *
     devicePixelRatio;
-  const maxLevel = levels.length - 1;
-  let preferredLevel = maxLevel;
-
-  for (let index = maxLevel; index >= 0; index -= 1) {
-    const level = levels[index];
-    const levelWidth = level?.width ?? 0;
-    const levelHeight = level?.height ?? 0;
-    if (
-      (levelWidth > 0 && levelWidth <= targetWidth * 1.25) ||
-      (levelHeight > 0 && levelHeight <= targetHeight * 1.25)
-    ) {
-      preferredLevel = index;
-      break;
-    }
-  }
+  const sizeBudgetWidth = targetWidth * 1.25;
+  const sizeBudgetHeight = targetHeight * 1.25;
+  const rankedLevels = levels
+    .map((level, index) => {
+      const width = level?.width ?? 0;
+      const height = level?.height ?? 0;
+      const bitrate = level?.bitrate ?? 0;
+      const hasWidth = width > 0;
+      const hasHeight = height > 0;
+      const fitsWidth = !hasWidth || width <= sizeBudgetWidth;
+      const fitsHeight = !hasHeight || height <= sizeBudgetHeight;
+      const fitsPlayerSize =
+        (hasWidth || hasHeight) && fitsWidth && fitsHeight;
+      return {
+        index,
+        bitrate,
+        fitsPlayerSize,
+        pixelCount: width * height,
+      };
+    })
+    .sort((left, right) => {
+      if (left.fitsPlayerSize !== right.fitsPlayerSize) {
+        return left.fitsPlayerSize ? -1 : 1;
+      }
+      if (left.pixelCount !== right.pixelCount) {
+        return right.pixelCount - left.pixelCount;
+      }
+      if (left.bitrate !== right.bitrate) {
+        return right.bitrate - left.bitrate;
+      }
+      return left.index - right.index;
+    });
+  const preferredLevel = rankedLevels[0]?.index ?? 0;
 
   hls.startLevel = preferredLevel;
   hls.nextLevel = preferredLevel;
