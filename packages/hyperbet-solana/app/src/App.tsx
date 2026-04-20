@@ -771,6 +771,7 @@ export function App() {
   const {
     session: canonicalStreamSession,
     playback: _canonicalPlayback,
+    rawSession: rawCanonicalStreamSession,
     rendererHealth: canonicalRendererHealth,
     deliveryHealth: canonicalDeliveryHealth,
     publicReadiness: canonicalPublicReadiness,
@@ -828,7 +829,7 @@ export function App() {
     PredictionMarketsResponse | null,
     typeof duelContext
   >({
-    latestSession: canonicalStreamSession,
+    latestSession: rawCanonicalStreamSession ?? canonicalStreamSession,
     latestMarket: lifecyclePayload,
     latestDuelContext: duelContext,
     sessionPresentationDelayMs: canonicalPresentationDelayMs,

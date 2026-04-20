@@ -801,6 +801,8 @@ export function useCanonicalStreamSession(
 ) {
   const { disabled = false } = options;
   const [session, setSession] = useState<CanonicalStreamSession | null>(null);
+  const [rawSession, setRawSession] =
+    useState<CanonicalStreamSession | null>(null);
   const [isConnected, setIsConnected] = useState(false);
   const pollTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const applyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -851,6 +853,12 @@ export function useCanonicalStreamSession(
     if (nextSession.seq > lastEventIdRef.current) {
       lastEventIdRef.current = nextSession.seq;
     }
+    setRawSession((current) => {
+      if (current && current.seq > nextSession.seq) {
+        return current;
+      }
+      return nextSession;
+    });
 
     queuedSessionsRef.current = queueCanonicalStreamSession(
       queuedSessionsRef.current,
@@ -953,6 +961,7 @@ export function useCanonicalStreamSession(
         eventSourceRef.current = null;
       }
       queuedSessionsRef.current = [];
+      setRawSession(null);
     }
 
     return () => {
@@ -964,6 +973,7 @@ export function useCanonicalStreamSession(
         eventSourceRef.current = null;
       }
       queuedSessionsRef.current = [];
+      setRawSession(null);
     };
   }, [connectSse, disabled, poll]);
 
@@ -975,7 +985,7 @@ export function useCanonicalStreamSession(
   const authorityHealth = session?.authorityHealth ?? null;
   const phase = session?.phase ?? session?.cycle.phase ?? null;
   const duelId = session?.duelId ?? session?.cycle.duelId ?? null;
-  const presentationDelayMs = sessionPlaybackDelayMs(session);
+  const presentationDelayMs = sessionPlaybackDelayMs(rawSession ?? session);
   const canonicalPlaybackUrl =
     playback?.url ?? channel?.publicPlaybackUrl ?? session?.delivery?.playbackUrl ?? null;
   const rendererPlaybackReady = useMemo(
@@ -1018,6 +1028,7 @@ export function useCanonicalStreamSession(
 
   return {
     session,
+    rawSession,
     playback,
     rendererHealth,
     deliveryHealth,

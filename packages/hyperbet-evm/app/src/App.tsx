@@ -667,6 +667,7 @@ export function App() {
   } = usePredictionMarketOverview(activeChain);
   const {
     session: canonicalStreamSession,
+    rawSession: rawCanonicalStreamSession,
     rendererHealth: canonicalRendererHealth,
     deliveryHealth: canonicalDeliveryHealth,
     publicReadiness: canonicalPublicReadiness,
@@ -707,7 +708,7 @@ export function App() {
     PredictionMarketsOverviewResponse | null,
     typeof duelContext
   >({
-    latestSession: canonicalStreamSession,
+    latestSession: rawCanonicalStreamSession ?? canonicalStreamSession,
     latestMarket: marketOverviewPayload,
     latestDuelContext: duelContext,
     sessionPresentationDelayMs: canonicalPresentationDelayMs,
