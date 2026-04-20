@@ -187,3 +187,30 @@ export function deriveMarketParityLabel(
       return null;
   }
 }
+
+export function shouldMarketParityGatePhaseLabel(
+  marketParity: MarketParityInfo | null | undefined,
+  viewerPhase: string | null | undefined,
+): boolean {
+  if (marketParity == null) {
+    return false;
+  }
+
+  const normalizedPhase =
+    viewerPhase?.trim().toUpperCase() ??
+    marketParity.phase?.trim().toUpperCase() ??
+    null;
+
+  if (
+    normalizedPhase === "COUNTDOWN" ||
+    normalizedPhase === "FIGHTING" ||
+    normalizedPhase === "RESOLUTION"
+  ) {
+    return false;
+  }
+
+  return !isPublicMarketParityState(
+    marketParity.state,
+    marketParity.openedAtMs,
+  );
+}
