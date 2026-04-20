@@ -150,9 +150,11 @@ const DEFAULT_TICK_INTERVAL_MS = 250;
  * derivation, selector execution, and divergence detection. Returns
  * the aligned view on each tick / prop change.
  *
- * Safe to mount with `enabled=false`: the hook registers no effects
- * beyond a single useState/useRef, so it is effectively a no-op
- * until the flag flips.
+ * Safe to mount with `enabled=false`: callers still receive the
+ * passthrough state shape, but if an `onDivergence` sink is provided
+ * the hook continues to buffer/select in shadow mode so staging can
+ * collect `[viewer-align]` logs before the aligned state is promoted
+ * to user-visible gating.
  */
 export function useViewerAlignedState<S, M, D>(
   inputs: UseViewerAlignedStateInputs<S, M, D>,
@@ -185,6 +187,7 @@ export function useViewerAlignedState<S, M, D>(
   const lastSessionSourceRef = useRef<number | null>(null);
   const lastMarketSourceRef = useRef<number | null>(null);
   const lastDuelContextSourceRef = useRef<number | null>(null);
+  const shadowEnabled = enabled || typeof onDivergence === "function";
 
   if (sessionBufferRef.current == null) {
     sessionBufferRef.current = createSessionSnapshotBuffer<S>();
@@ -200,20 +203,20 @@ export function useViewerAlignedState<S, M, D>(
   const [tick, setTick] = useState(0);
 
   useEffect(() => {
-    if (!enabled) return;
+    if (!shadowEnabled) return;
     const intervalMs = tickIntervalMs ?? DEFAULT_TICK_INTERVAL_MS;
     const handle = setInterval(() => {
       setTick((t) => (t + 1) & 0x3fffffff);
     }, intervalMs);
     return () => clearInterval(handle);
-  }, [enabled, tickIntervalMs]);
+  }, [shadowEnabled, tickIntervalMs]);
 
   // ── Ingest: push new payloads into their rail buffers ────────────
   // We run these inline during render (React is fine with that for
   // ref updates; no state mutations here). They're guarded by
   // same-source-time deduplication so re-renders with stable props
   // don't double-push.
-  if (enabled && sessionBufferRef.current && offsetEstimatorRef.current) {
+  if (shadowEnabled && sessionBufferRef.current && offsetEstimatorRef.current) {
     const sessionSource = extractSessionSourceEmittedAt(latestSession);
     if (
       sessionSource != null &&
@@ -234,7 +237,7 @@ export function useViewerAlignedState<S, M, D>(
       lastSessionSourceRef.current = sessionSource;
     }
   }
-  if (enabled && marketBufferRef.current) {
+  if (shadowEnabled && marketBufferRef.current) {
     const marketSource = extractMarketSourceEmittedAt(latestMarket);
     if (
       marketSource != null &&
@@ -248,7 +251,7 @@ export function useViewerAlignedState<S, M, D>(
       lastMarketSourceRef.current = marketSource;
     }
   }
-  if (enabled && duelContextBufferRef.current) {
+  if (shadowEnabled && duelContextBufferRef.current) {
     const ctxSource = extractDuelContextSourceEmittedAt(latestDuelContext);
     if (
       ctxSource != null &&
@@ -268,7 +271,7 @@ export function useViewerAlignedState<S, M, D>(
   // dep array (via the re-render cycle) so the timer-driven ticks
   // cause the clock to advance even when props are stable.
   const result = useMemo(() => {
-    if (!enabled) {
+    if (!shadowEnabled) {
       return buildPassthroughState<S, M, D>(
         latestSession,
         latestMarket,
@@ -348,7 +351,7 @@ export function useViewerAlignedState<S, M, D>(
     if (marketSelection.stale) staleRails.push("market");
     if (duelContextSelection.stale) staleRails.push("duelContext");
 
-    return {
+    const alignedState = {
       enabled: true,
       viewerClock: clock,
       session: sessionSelection.snapshot,
@@ -369,12 +372,23 @@ export function useViewerAlignedState<S, M, D>(
         duelContextBufferSize: duelContextBuffer.size(),
       },
     } satisfies ViewerAlignedState<S, M, D>;
+
+    if (!enabled) {
+      return buildPassthroughState<S, M, D>(
+        latestSession,
+        latestMarket,
+        latestDuelContext,
+      );
+    }
+
+    return alignedState;
     // `tick` is intentionally included to force a recompute on each
     // clock-tick interval. We don't read it inside the memo body —
     // it's a dep-only trigger.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     enabled,
+    shadowEnabled,
     latestSession,
     latestMarket,
     latestDuelContext,
