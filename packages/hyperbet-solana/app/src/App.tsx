@@ -813,7 +813,7 @@ export function App() {
   const streamDeliveryMode = resolveCanonicalPlaybackDeliveryMode(
     canonicalStreamSession,
   );
-  const [_streamPlayerStatus, setStreamPlayerStatus] =
+  const [streamPlayerStatus, setStreamPlayerStatus] =
     useState<StreamPlayerStatus | null>(null);
 
   // Viewer-alignment shadow composition. When
