@@ -13,9 +13,9 @@ import {
  */
 
 describe("max-age budget constants", () => {
-  it("market = 10s, duel-context = 8s per PRD decision", () => {
+  it("market = 10s, duel-context = 10s per rollout tuning", () => {
     expect(MARKET_MAX_AGE_MS).toBe(10_000);
-    expect(DUEL_CONTEXT_MAX_AGE_MS).toBe(8_000);
+    expect(DUEL_CONTEXT_MAX_AGE_MS).toBe(10_000);
   });
 });
 

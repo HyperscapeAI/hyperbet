@@ -7,7 +7,7 @@
  * `hyperbet-ui` budgets in commit 3's scope:
  *
  *   - market         → 10s
- *   - duel-context   → 8s
+ *   - duel-context   → 10s
  *
  * Session has no built-in max-age at this layer — the clock module
  * already owns telemetry-staleness rules; session freshness is
@@ -17,8 +17,18 @@
 /** Market overview/lifecycle max-age budget. See PRD decision 3. */
 export const MARKET_MAX_AGE_MS = 10_000;
 
-/** Duel-context max-age budget. See PRD decision 3. */
-export const DUEL_CONTEXT_MAX_AGE_MS = 8_000;
+/**
+ * Duel-context max-age budget.
+ *
+ * Kept equal to market at 10s rather than tighter:
+ * the rail is still client-polled at 3s, and in practice the viewer
+ * clock often sits ~5-6s behind live on staging. An 8s budget makes a
+ * healthy startup selection flap stale simply because
+ * `viewerLatency + one poll gap > 8s`. 10s preserves the "one missed
+ * poll + normal viewer delay" envelope without masking genuinely old
+ * context.
+ */
+export const DUEL_CONTEXT_MAX_AGE_MS = 10_000;
 
 /**
  * Returns true when the given snapshot server-emission timestamp is
