@@ -16,7 +16,7 @@ describe("resolveResultCatchupBearerToken", () => {
     });
   });
 
-  test("accepts the provider-side oracle proof alias", () => {
+  test("does not accept the provider-side alias", () => {
     expect(
       resolveResultCatchupBearerToken({
         NODE_ENV: "production",
@@ -24,12 +24,12 @@ describe("resolveResultCatchupBearerToken", () => {
         BETTING_FEED_ACCESS_TOKEN: "feed-secret",
       }),
     ).toEqual({
-      token: "oracle-secret",
-      source: "oracle-proof-alias",
+      token: null,
+      source: null,
     });
   });
 
-  test("does not fall back to broad feed tokens in production", () => {
+  test("does not fall back to broad feed tokens", () => {
     expect(
       resolveResultCatchupBearerToken({
         NODE_ENV: "production",
@@ -40,9 +40,6 @@ describe("resolveResultCatchupBearerToken", () => {
       token: null,
       source: null,
     });
-  });
-
-  test("keeps broad-token fallbacks outside production for local migration", () => {
     expect(
       resolveResultCatchupBearerToken({
         NODE_ENV: "development",
@@ -50,8 +47,8 @@ describe("resolveResultCatchupBearerToken", () => {
         STREAM_STATE_SOURCE_BEARER_TOKEN: "stream-secret",
       }),
     ).toEqual({
-      token: "feed-secret",
-      source: "betting-feed",
+      token: null,
+      source: null,
     });
 
     expect(
@@ -60,8 +57,8 @@ describe("resolveResultCatchupBearerToken", () => {
         STREAM_STATE_SOURCE_BEARER_TOKEN: "stream-secret",
       }),
     ).toEqual({
-      token: "stream-secret",
-      source: "stream-state",
+      token: null,
+      source: null,
     });
   });
 });

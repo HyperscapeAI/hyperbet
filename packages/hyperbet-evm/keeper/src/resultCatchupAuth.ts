@@ -1,8 +1,5 @@
 export type ResultCatchupBearerTokenSource =
   | "hyperscapes-result"
-  | "oracle-proof-alias"
-  | "betting-feed"
-  | "stream-state"
   | null;
 
 export type ResultCatchupBearerTokenResolution = {
@@ -19,10 +16,10 @@ function nonEmptyEnv(env: EnvLike, key: string): string | null {
 /**
  * Resolve the bearer token used by the missed-duel-result catch-up path.
  *
- * Hyperscape production only accepts a dedicated oracle-proof/result token for
- * `/api/streaming/results/:duelId`; broad betting-feed/source tokens are kept
- * as non-production fallbacks only so local and staging migrations fail
- * visibly instead of relying on a token the provider will reject in prod.
+ * Hyperscape only accepts a dedicated result lookup token for
+ * `/api/streaming/results/:duelId`. Broad betting-feed/source tokens are
+ * intentionally not accepted here because this endpoint returns settlement
+ * proof material (`duelKeyHex`, `seed`, `replayHash`).
  */
 export function resolveResultCatchupBearerToken(
   env: EnvLike,
@@ -37,38 +34,6 @@ export function resolveResultCatchupBearerToken(
       source: "hyperscapes-result",
     };
   }
-
-  const oracleProofAlias = nonEmptyEnv(env, "STREAMING_ORACLE_PROOF_TOKEN");
-  if (oracleProofAlias) {
-    return {
-      token: oracleProofAlias,
-      source: "oracle-proof-alias",
-    };
-  }
-
-  if (env.NODE_ENV === "production") {
-    return {
-      token: null,
-      source: null,
-    };
-  }
-
-  const bettingFeedToken = nonEmptyEnv(env, "BETTING_FEED_ACCESS_TOKEN");
-  if (bettingFeedToken) {
-    return {
-      token: bettingFeedToken,
-      source: "betting-feed",
-    };
-  }
-
-  const streamStateToken = nonEmptyEnv(env, "STREAM_STATE_SOURCE_BEARER_TOKEN");
-  if (streamStateToken) {
-    return {
-      token: streamStateToken,
-      source: "stream-state",
-    };
-  }
-
   return {
     token: null,
     source: null,
