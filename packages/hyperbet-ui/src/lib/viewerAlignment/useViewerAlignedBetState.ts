@@ -32,6 +32,9 @@ import {
  *
  * Kept deliberately thin: the callers supply the rail payloads and
  * optionally an `onDivergence` sink; everything else is derived.
+ * Divergence emission is shadow-only: once the aligned UI is enabled,
+ * the adapter suppresses the sink so post-cutover logs do not compare
+ * against a pre-alignment phase source and produce false positives.
  */
 
 export interface UseViewerAlignedBetStateInputs<S, M, D>
@@ -69,7 +72,9 @@ export function useViewerAlignedBetState<S, M, D>(
 ): ViewerAlignedState<S, M, D> {
   const { enabledOverride, streamPlayerStatus, ...rest } = inputs;
   const enabled = enabledOverride ?? readViewerAlignmentEnvFlag();
-  const shadowEnabled = enabled || typeof rest.onDivergence === "function";
+  const shadowDivergenceSink =
+    enabled ? undefined : rest.onDivergence;
+  const shadowEnabled = enabled || typeof shadowDivergenceSink === "function";
 
   const [playerStatusReceivedAtMs, setPlayerStatusReceivedAtMs] = useState<
     number | null
@@ -114,6 +119,7 @@ export function useViewerAlignedBetState<S, M, D>(
   return useViewerAlignedState<S, M, D>({
     ...rest,
     enabled,
+    onDivergence: shadowDivergenceSink,
     playerStatus: telemetry,
     playerStatusReceivedAtMs,
     lastAdvancingPlayerStatusAtMs,

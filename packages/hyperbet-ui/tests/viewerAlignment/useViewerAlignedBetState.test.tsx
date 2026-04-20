@@ -192,4 +192,44 @@ describe("useViewerAlignedBetState — adapter passthrough", () => {
       unmount();
     }
   });
+
+  it("suppresses divergence callbacks once viewer alignment is enabled", async () => {
+    const events: DivergenceEvent[] = [];
+    const captured: CapturedState<
+      { emittedAt: number },
+      { sourceEmittedAt: number; serverEmittedAt: number },
+      unknown
+    > = { value: null };
+    const baseNow = Date.now();
+    const { unmount } = render(
+      <BetStateProbe
+        captured={captured}
+        inputs={{
+          enabledOverride: true,
+          latestSession: { emittedAt: baseNow - 500 },
+          latestMarket: {
+            sourceEmittedAt: baseNow - 20_000,
+            serverEmittedAt: baseNow - 20_000,
+          },
+          latestDuelContext: null,
+          sessionPresentationDelayMs: 4_000,
+          streamPlayerStatus: makeStreamPlayerStatus({
+            liveEdgeLatencyMs: 1_250,
+            lastBufferedFragmentAt: baseNow,
+          }),
+          onDivergence: (event) => events.push(event),
+          tickIntervalMs: 1,
+        }}
+      />,
+    );
+    try {
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      });
+      expect(captured.value?.enabled).toBe(true);
+      expect(events.length).toBe(0);
+    } finally {
+      unmount();
+    }
+  });
 });
