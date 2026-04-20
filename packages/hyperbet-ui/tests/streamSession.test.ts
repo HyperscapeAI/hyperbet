@@ -684,6 +684,94 @@ describe("useCanonicalStreamSession", () => {
     );
     expect(fetchMock).toHaveBeenCalled();
   });
+
+  it("exposes rawSession before the presentation-delay queue applies session", async () => {
+    const emittedAt = Date.now();
+    const fetchMock = mock(() =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({
+            seq: 77,
+            emittedAt,
+            cycle: {
+              cycleId: "cycle-raw",
+              phase: "FIGHTING",
+              duelId: "duel-raw",
+              duelKeyHex: "deadbeef",
+              rendererHealth: {
+                ready: true,
+                degradedReason: null,
+                updatedAt: emittedAt,
+              },
+            },
+            rendererHealth: {
+              ready: true,
+              degradedReason: null,
+              updatedAt: emittedAt,
+            },
+            sourceRuntime: makeSourceRuntime(),
+            channel: makeCanonicalChannel({ presentationDelayMs: 4_000 }),
+            playback: {
+              url: "https://video.example/raw.m3u8?protocol=llhls",
+              kind: "llhls",
+              renderSessionId: "render-raw",
+              presentationDelayMs: 4_000,
+            },
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          },
+        ),
+      ),
+    );
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    class HangingEventSource {
+      onopen: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+
+      constructor(_url: string) { }
+
+      addEventListener() { }
+
+      close() { }
+    }
+
+    window.EventSource = HangingEventSource as unknown as typeof window.EventSource;
+
+    function Probe() {
+      const { session, rawSession } = useCanonicalStreamSession();
+      return createElement(
+        "div",
+        null,
+        createElement(
+          "div",
+          { "data-testid": "delayed-session-seq" },
+          session ? String(session.seq) : "none",
+        ),
+        createElement(
+          "div",
+          { "data-testid": "raw-session-seq" },
+          rawSession ? String(rawSession.seq) : "none",
+        ),
+      );
+    }
+
+    const view = render(createElement(Probe));
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(
+      view.container.querySelector("[data-testid='delayed-session-seq']")?.textContent,
+    ).toBe("none");
+    expect(
+      view.container.querySelector("[data-testid='raw-session-seq']")?.textContent,
+    ).toBe("77");
+    expect(fetchMock).toHaveBeenCalled();
+  });
 });
 
 describe("selectBetSurfaceStreamUrl", () => {
