@@ -1431,6 +1431,19 @@ function applyCors(req: Request, headers: Headers): void {
   headers.set("access-control-max-age", "86400");
 }
 
+function buildSseHeaders(req: Request): Headers {
+  const headers = new Headers({
+    "content-type": "text/event-stream; charset=utf-8",
+    "cache-control":
+      "no-store, no-cache, must-revalidate, proxy-revalidate, no-transform",
+    pragma: "no-cache",
+    "x-accel-buffering": "no",
+    ...securityHeaders(),
+  });
+  applyCors(req, headers);
+  return headers;
+}
+
 function jsonResponse(
   req: Request,
   body: unknown,
@@ -5014,15 +5027,10 @@ const server = Bun.serve({
         },
       });
 
-      const headers = new Headers({
-        "content-type": "text/event-stream; charset=utf-8",
-        "cache-control":
-          "no-store, no-cache, must-revalidate, proxy-revalidate",
-        connection: "keep-alive",
-        ...securityHeaders(),
+      return new Response(stream, {
+        status: 200,
+        headers: buildSseHeaders(req),
       });
-      applyCors(req, headers);
-      return new Response(stream, { status: 200, headers });
     }
 
     if (
