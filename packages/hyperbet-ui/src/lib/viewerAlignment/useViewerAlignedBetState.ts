@@ -69,6 +69,7 @@ export function useViewerAlignedBetState<S, M, D>(
 ): ViewerAlignedState<S, M, D> {
   const { enabledOverride, streamPlayerStatus, ...rest } = inputs;
   const enabled = enabledOverride ?? readViewerAlignmentEnvFlag();
+  const shadowEnabled = enabled || typeof rest.onDivergence === "function";
 
   const [playerStatusReceivedAtMs, setPlayerStatusReceivedAtMs] = useState<
     number | null
@@ -78,7 +79,7 @@ export function useViewerAlignedBetState<S, M, D>(
   const previousBufferedFragmentAtRef = useRef<number | null>(null);
 
   useEffect(() => {
-    if (!enabled) return;
+    if (!shadowEnabled) return;
     if (!streamPlayerStatus) return;
     const now = Date.now();
     setPlayerStatusReceivedAtMs(now);
@@ -97,7 +98,7 @@ export function useViewerAlignedBetState<S, M, D>(
       setLastAdvancingPlayerStatusAtMs(now);
     }
     previousBufferedFragmentAtRef.current = nextBuffered;
-  }, [enabled, streamPlayerStatus]);
+  }, [shadowEnabled, streamPlayerStatus]);
 
   const telemetry = useMemo<StreamPlayerTelemetrySnapshot | null>(() => {
     if (!streamPlayerStatus) return null;

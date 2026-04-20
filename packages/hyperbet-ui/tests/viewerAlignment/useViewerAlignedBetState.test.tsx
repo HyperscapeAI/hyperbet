@@ -1,9 +1,10 @@
 import "../setup";
 import { describe, expect, it } from "bun:test";
-import { useEffect } from "react";
+import { act, useEffect } from "react";
 
 import type { StreamPlayerStatus } from "../../src/components/StreamPlayer";
 import {
+  type DivergenceEvent,
   useViewerAlignedBetState,
   type ViewerAlignedState,
 } from "../../src/lib/viewerAlignment";
@@ -141,6 +142,52 @@ describe("useViewerAlignedBetState — adapter passthrough", () => {
       expect(captured.value?.diagnostics.latencySource).toBe(
         "session-presentation-delay",
       );
+    } finally {
+      unmount();
+    }
+  });
+
+  it("keeps player telemetry alive in shadow mode when enabledOverride is false", async () => {
+    const events: DivergenceEvent[] = [];
+    const captured: CapturedState<
+      { emittedAt: number },
+      { sourceEmittedAt: number; serverEmittedAt: number },
+      unknown
+    > = { value: null };
+    const baseNow = Date.now();
+    const { unmount } = render(
+      <BetStateProbe
+        captured={captured}
+        inputs={{
+          enabledOverride: false,
+          latestSession: { emittedAt: baseNow - 500 },
+          latestMarket: {
+            sourceEmittedAt: baseNow - 20_000,
+            serverEmittedAt: baseNow - 20_000,
+          },
+          latestDuelContext: null,
+          sessionPresentationDelayMs: 4_000,
+          streamPlayerStatus: makeStreamPlayerStatus({
+            liveEdgeLatencyMs: 1_250,
+            lastBufferedFragmentAt: baseNow,
+          }),
+          onDivergence: (event) => events.push(event),
+          tickIntervalMs: 1,
+        }}
+      />,
+    );
+    try {
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      });
+      expect(captured.value?.enabled).toBe(false);
+      const liveEdgeEvent = events.find(
+        (event) =>
+          event.reason === "market-stale" &&
+          event.viewerClock.latencySource === "player-live-edge",
+      );
+      expect(liveEdgeEvent).not.toBeUndefined();
+      expect(liveEdgeEvent?.viewerClock.latencyMs).toBe(1_250);
     } finally {
       unmount();
     }
