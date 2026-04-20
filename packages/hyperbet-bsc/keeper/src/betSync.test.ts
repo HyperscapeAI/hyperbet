@@ -202,6 +202,48 @@ describe("parseBetSyncEvent", () => {
       updatedAt: 1_712_345_679_000,
     });
   });
+
+  test("preserves sourceTimeline alongside the projected timeline", () => {
+    const event = parseBetSyncEvent({
+      schemaVersion: 3,
+      sourceEpoch: 8,
+      seq: 14,
+      emittedAt: 1_712_345_680_000,
+      duelId: "duel-3",
+      duelKey: "33".repeat(32),
+      phase: "COUNTDOWN",
+      broadcastTimeline: {
+        phase: "COUNTDOWN",
+        betOpenTime: 5_000,
+        betCloseTime: 6_000,
+        fightStartTime: 7_000,
+        duelEndTime: 13_000,
+        presentationDelayMs: 4_000,
+        updatedAt: 1_712_345_680_000,
+      },
+      sourceTimeline: {
+        phase: "FIGHTING",
+        betOpenTime: 1_000,
+        betCloseTime: 2_000,
+        fightStartTime: 3_000,
+        duelEndTime: 9_000,
+        updatedAt: 1_712_345_676_000,
+      },
+    });
+
+    expect(event?.sourceTimeline).toEqual({
+      phase: "FIGHTING",
+      betOpenTime: 1_000,
+      betCloseTime: 2_000,
+      fightStartTime: 3_000,
+      duelEndTime: 9_000,
+      updatedAt: 1_712_345_676_000,
+    });
+
+    const nextState = toStreamStateFromBetSyncEvent(event!);
+    expect(nextState.cycle.sourceTimeline).toEqual(event?.sourceTimeline);
+    expect(nextState.sourceTimeline).toEqual(event?.sourceTimeline);
+  });
 });
 
 describe("parseBetSyncBootstrapState", () => {

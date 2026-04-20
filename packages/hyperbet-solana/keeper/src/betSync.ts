@@ -54,6 +54,15 @@ export type BetSyncBroadcastTimeline = {
   updatedAt: number | null;
 };
 
+export type BetSyncSourceTimeline = {
+  phase: string | null;
+  betOpenTime: number | null;
+  betCloseTime: number | null;
+  fightStartTime: number | null;
+  duelEndTime: number | null;
+  updatedAt: number | null;
+};
+
 export type BetSyncCanonicalAuthority = {
   providerLive: boolean;
   playbackProbeReady: boolean;
@@ -80,6 +89,7 @@ export type BetSyncEvent = {
   phase: string | null;
   phaseVersion: number | null;
   broadcastTimeline: BetSyncBroadcastTimeline | null;
+  sourceTimeline: BetSyncSourceTimeline | null;
   betOpenTime: number | null;
   betCloseTime: number | null;
   fightStartTime: number | null;
@@ -123,6 +133,7 @@ export type StreamState = {
   phase?: string | null;
   phaseVersion?: number | null;
   broadcastTimeline?: BetSyncBroadcastTimeline | null;
+  sourceTimeline?: BetSyncSourceTimeline | null;
   rendererHealth?: BetSyncRendererHealth | null;
   canonicalAuthority?: BetSyncCanonicalAuthority | null;
   sourceRuntime?: JsonRecord | null;
@@ -336,6 +347,20 @@ function normalizeBroadcastTimeline(
   };
 }
 
+function normalizeSourceTimeline(value: unknown): BetSyncSourceTimeline | null {
+  const candidate = asRecord(value);
+  if (!candidate) return null;
+
+  return {
+    phase: asString(candidate.phase),
+    betOpenTime: normalizePredictionMarketTimestamp(candidate.betOpenTime),
+    betCloseTime: normalizePredictionMarketTimestamp(candidate.betCloseTime),
+    fightStartTime: normalizePredictionMarketTimestamp(candidate.fightStartTime),
+    duelEndTime: normalizePredictionMarketTimestamp(candidate.duelEndTime),
+    updatedAt: normalizePredictionMarketTimestamp(candidate.updatedAt),
+  };
+}
+
 function normalizeCanonicalAuthority(
   value: unknown,
 ): BetSyncCanonicalAuthority | null {
@@ -373,6 +398,7 @@ export function parseBetSyncEvent(payload: unknown): BetSyncEvent | null {
   const broadcastTimeline = normalizeBroadcastTimeline(
     candidate.broadcastTimeline,
   );
+  const sourceTimeline = normalizeSourceTimeline(candidate.sourceTimeline);
 
   return {
     schemaVersion: asFiniteNumber(candidate.schemaVersion) ?? 1,
@@ -385,6 +411,7 @@ export function parseBetSyncEvent(payload: unknown): BetSyncEvent | null {
     phase: asString(candidate.phase),
     phaseVersion: asFiniteNumber(candidate.phaseVersion),
     broadcastTimeline,
+    sourceTimeline,
     betOpenTime: normalizePredictionMarketTimestamp(candidate.betOpenTime),
     betCloseTime: normalizePredictionMarketTimestamp(candidate.betCloseTime),
     fightStartTime: normalizePredictionMarketTimestamp(candidate.fightStartTime),
@@ -461,6 +488,7 @@ export function toStreamStateFromBetSyncEvent(event: BetSyncEvent): StreamState 
       phaseVersion: event.phaseVersion,
       rawCycle,
       broadcastTimeline: event.broadcastTimeline,
+      sourceTimeline: event.sourceTimeline,
       betOpenTime: event.betOpenTime,
       betCloseTime: event.betCloseTime,
       fightStartTime: event.fightStartTime,
@@ -482,6 +510,7 @@ export function toStreamStateFromBetSyncEvent(event: BetSyncEvent): StreamState 
     phase: event.phase,
     phaseVersion: event.phaseVersion,
     broadcastTimeline: event.broadcastTimeline,
+    sourceTimeline: event.sourceTimeline,
     rendererHealth: event.rendererHealth,
     canonicalAuthority: event.canonicalAuthority,
     sourceRuntime: event.sourceRuntime,
