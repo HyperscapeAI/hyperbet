@@ -74,6 +74,48 @@ describe("useViewerAlignedState — passthrough mode", () => {
       unmount();
     }
   });
+
+  it("still emits divergence events in shadow mode when disabled", () => {
+    const events: DivergenceEvent[] = [];
+    const captured: CapturedState<
+      { emittedAt: number },
+      { sourceEmittedAt: number; serverEmittedAt: number },
+      unknown
+    > = { value: null };
+    const baseNow = Date.now();
+
+    render(
+      <HookProbe
+        captured={captured}
+        hookInputs={{
+          enabled: false,
+          latestSession: { emittedAt: baseNow - 500 },
+          latestMarket: {
+            sourceEmittedAt: baseNow - 20_000,
+            serverEmittedAt: baseNow - 20_000,
+          },
+          latestDuelContext: null,
+          sessionPresentationDelayMs: 4_000,
+          playerStatus: {
+            liveEdgeLatencyMs: 500,
+            playbackStarted: true,
+          },
+          playerStatusReceivedAtMs: baseNow,
+          lastAdvancingPlayerStatusAtMs: baseNow,
+          onDivergence: (event) => events.push(event),
+          tickIntervalMs: 1_000_000,
+        }}
+      />,
+    );
+
+    expect(captured.value?.enabled).toBe(false);
+    expect(captured.value?.session).toEqual({ emittedAt: baseNow - 500 });
+    const staleEvents = events.filter(
+      (event) => event.reason === "market-stale",
+    );
+    expect(staleEvents.length).toBeGreaterThan(0);
+    expect(staleEvents[0].staleRails).toContain("market");
+  });
 });
 
 describe("useViewerAlignedState — enabled mode buffer ingestion", () => {
