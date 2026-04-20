@@ -181,6 +181,23 @@ describe("normalizeCanonicalStreamSession", () => {
     });
   });
 
+  it("accepts x11_nvenc source runtime capture mode", () => {
+    const session = normalizeCanonicalStreamSession({
+      seq: 43,
+      emittedAt: 1234567891,
+      cycle: {
+        cycleId: "cycle-1",
+        phase: "ANNOUNCEMENT",
+      },
+      sourceRuntime: makeSourceRuntime({
+        captureMode: "x11_nvenc",
+      }),
+    });
+
+    expect(session?.sourceRuntime?.captureMode).toBe("x11_nvenc");
+    expect(session?.status.sourceRuntime?.captureMode).toBe("x11_nvenc");
+  });
+
   it("parses canonical authority reconciliation metadata when present", () => {
     const session = normalizeCanonicalStreamSession({
       seq: 8,

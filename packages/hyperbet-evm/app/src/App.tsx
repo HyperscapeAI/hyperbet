@@ -1251,6 +1251,9 @@ export function App() {
           lifecycleMarketOverride={
             alignedLifecycleMarket ?? liveOverviewMarket
           }
+          viewerAlignmentTradeGate={
+            viewerAligned.enabled ? viewerAligned.tradeGate : null
+          }
         />
       ) : (
         <EvmBettingPanel
@@ -1264,6 +1267,9 @@ export function App() {
           }
           lifecycleMarketParityOverride={
             alignedLifecycleMarketParity ?? effectiveMarketParity
+          }
+          viewerAlignmentTradeGate={
+            viewerAligned.enabled ? viewerAligned.tradeGate : null
           }
           onLifecycleRefreshRequested={requestOverviewRefresh}
         />

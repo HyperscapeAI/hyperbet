@@ -23,10 +23,12 @@ import {
  *          telemetry we observed (drives telemetry staleness).
  *        - `lastAdvancingPlayerStatusAtMs`: wall-clock at the most
  *          recent telemetry that showed evidence the media clock moved
- *          forward. We proxy "media clock advanced" via the iframe's
- *          `lastBufferedFragmentAt` monotonically increasing — when the
- *          player freezes the iframe stops reporting new fragments and
- *          this stamp stops advancing, which lets
+ *          forward. We derive this from the iframe's
+ *          `lastPlaybackProgressAt` stamp, which only advances when
+ *          `video.currentTime` itself advances. That avoids false
+ *          "freeze" detection when HLS continues buffering fragments
+ *          while the visible media clock is still healthy.
+ *          This stamp lets
  *          `resolveViewerClock` pin `sourceNowMs` at the freeze edge
  *          per PRD decision 2.
  *
@@ -81,28 +83,26 @@ export function useViewerAlignedBetState<S, M, D>(
   >(null);
   const [lastAdvancingPlayerStatusAtMs, setLastAdvancingPlayerStatusAtMs] =
     useState<number | null>(null);
-  const previousBufferedFragmentAtRef = useRef<number | null>(null);
+  const previousPlaybackProgressAtRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (!shadowEnabled) return;
     if (!streamPlayerStatus) return;
     const now = Date.now();
     setPlayerStatusReceivedAtMs(now);
-    // Treat a monotonic bump in `lastBufferedFragmentAt` as evidence
-    // the media clock is advancing. This is a conservative proxy: an
-    // iframe that stops emitting status messages (true freeze) leaves
-    // this stamp stale, and `resolveViewerClock` pins `sourceNowMs` at
-    // `lastAdvancingPlayerStatusAtMs + serverOffsetMs - latencyMs`
-    // once the gap exceeds `PLAYER_FREEZE_THRESHOLD_MS`.
-    const nextBuffered = streamPlayerStatus.lastBufferedFragmentAt ?? null;
-    const prevBuffered = previousBufferedFragmentAtRef.current;
+    const nextPlaybackProgress =
+      streamPlayerStatus.lastPlaybackProgressAt ??
+      streamPlayerStatus.lastBufferedFragmentAt ??
+      null;
+    const prevPlaybackProgress = previousPlaybackProgressAtRef.current;
     if (
-      nextBuffered != null &&
-      (prevBuffered == null || nextBuffered > prevBuffered)
+      nextPlaybackProgress != null &&
+      (prevPlaybackProgress == null ||
+        nextPlaybackProgress > prevPlaybackProgress)
     ) {
       setLastAdvancingPlayerStatusAtMs(now);
     }
-    previousBufferedFragmentAtRef.current = nextBuffered;
+    previousPlaybackProgressAtRef.current = nextPlaybackProgress;
   }, [shadowEnabled, streamPlayerStatus]);
 
   const telemetry = useMemo<StreamPlayerTelemetrySnapshot | null>(() => {
@@ -113,6 +113,7 @@ export function useViewerAlignedBetState<S, M, D>(
       syncState: streamPlayerStatus.syncState ?? null,
       firstFrameAt: streamPlayerStatus.firstFrameAt,
       playbackStarted: streamPlayerStatus.playbackStarted,
+      lastPlaybackProgressAt: streamPlayerStatus.lastPlaybackProgressAt,
     };
   }, [streamPlayerStatus]);
 

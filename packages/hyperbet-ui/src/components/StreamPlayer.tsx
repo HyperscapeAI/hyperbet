@@ -39,6 +39,7 @@ export type StreamPlayerStatus = {
   stallCount: number;
   rebuildCount: number;
   lastBufferedFragmentAt: number | null;
+  lastPlaybackProgressAt: number | null;
   playbackUrl: string | null;
   deliveryMode: string | null;
   firstFrameAt: number | null;
@@ -59,6 +60,7 @@ type EmbedStatusPayload = {
   stallCount?: number | null;
   rebuildCount?: number | null;
   lastBufferedFragmentAt?: number | null;
+  lastPlaybackProgressAt?: number | null;
   playbackUrl?: string | null;
   deliveryMode?: string | null;
   firstFrameAt?: number | null;
@@ -549,6 +551,11 @@ export const StreamPlayer: React.FC<StreamPlayerProps> = ({
           Number.isFinite(payload.lastBufferedFragmentAt)
             ? payload.lastBufferedFragmentAt
             : current.lastBufferedFragmentAt,
+        lastPlaybackProgressAt:
+          typeof payload.lastPlaybackProgressAt === "number" &&
+          Number.isFinite(payload.lastPlaybackProgressAt)
+            ? payload.lastPlaybackProgressAt
+            : current.lastPlaybackProgressAt,
         playbackUrl:
           typeof payload.playbackUrl === "string" && payload.playbackUrl.trim().length > 0
             ? payload.playbackUrl.trim()
@@ -747,6 +754,7 @@ export const StreamPlayer: React.FC<StreamPlayerProps> = ({
           firstFrameAt: current.firstFrameAt ?? firstFrameAt,
           startupDurationMs:
             current.startupDurationMs ?? firstFrameAt - startupStartedAt,
+          lastPlaybackProgressAt: lastProgressAt,
         }));
         markDegraded(null);
         markReady();
@@ -857,6 +865,7 @@ export const StreamPlayer: React.FC<StreamPlayerProps> = ({
         ...current,
         liveEdgeLatencyMs: null,
         lastBufferedFragmentAt: null,
+        lastPlaybackProgressAt: null,
         playbackUrl: sourceUrl,
         deliveryMode: resolvePlayerDeliveryModeHint(sourceUrl, deliveryMode),
         firstFrameAt: null,
@@ -1348,6 +1357,7 @@ function createInitialPlayerStatus(params: {
     stallCount: 0,
     rebuildCount: 0,
     lastBufferedFragmentAt: null,
+    lastPlaybackProgressAt: null,
     playbackUrl: params.streamUrl.trim() || null,
     deliveryMode: resolvePlayerDeliveryModeHint(
       params.streamUrl,

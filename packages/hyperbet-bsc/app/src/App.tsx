@@ -2213,6 +2213,9 @@ export function App() {
                       lifecycleMarketOverride={
                         alignedLifecycleMarket ?? lifecycleMarket
                       }
+                      viewerAlignmentTradeGate={
+                        viewerAligned.enabled ? viewerAligned.tradeGate : null
+                      }
                       onLifecycleRefreshRequested={() => void refreshLifecycle()}
                     />
                   </Suspense>

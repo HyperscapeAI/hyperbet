@@ -2417,6 +2417,9 @@ export function App() {
                       onMarketSnapshot={handleSolanaClobSnapshot}
                       lifecycleDuelOverride={alignedLifecycleDuel}
                       lifecycleMarketOverride={alignedLifecycleMarket}
+                      viewerAlignmentTradeGate={
+                        viewerAligned.enabled ? viewerAligned.tradeGate : null
+                      }
                     />
                   </Suspense>
                 </div>

@@ -93,6 +93,7 @@ export interface StreamPlayerTelemetrySnapshot {
   firstFrameAt?: number | null;
   currentTime?: number | null;
   playbackStarted?: boolean | null;
+  lastPlaybackProgressAt?: number | null;
 }
 
 /**

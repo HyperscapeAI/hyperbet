@@ -61,6 +61,7 @@ import {
   deriveMarketParityLabel,
   type MarketParityInfo,
 } from "../lib/marketParity";
+import type { TradeGate } from "../lib/viewerAlignment";
 import { selectConfiguredEvmPrivateKey } from "../lib/evmPrivateKey";
 import {
   derivePredictionMarketUiState,
@@ -209,6 +210,7 @@ interface EvmBettingPanelProps {
   lifecycleDuelOverride?: PredictionMarketsDuelSnapshot | null;
   lifecycleMarketOverride?: PredictionMarketLifecycleRecord | null;
   lifecycleMarketParityOverride?: MarketParityInfo | null;
+  viewerAlignmentTradeGate?: TradeGate | null;
   onLifecycleRefreshRequested?: (() => void | Promise<void>) | null;
 }
 
@@ -234,6 +236,8 @@ function getEvmPanelCopy(locale: UiLocale) {
       parityAborted: "启动已中止",
       refreshFailed: (message: string) => `刷新失败：${message}`,
       streamDriftDetected: "即将开放下注",
+      streamSyncing: "正在同步直播画面",
+      streamVerifying: "正在校验市场状态",
       walletNotConnected: "钱包未连接",
       amountTooLow: "数量必须大于 0",
       placingOrder: "正在下单...",
@@ -300,6 +304,8 @@ function getEvmPanelCopy(locale: UiLocale) {
     parityAborted: "Start aborted",
     refreshFailed: (message: string) => `Refresh failed: ${message}`,
     streamDriftDetected: "Betting starts soon",
+    streamSyncing: "Syncing stream...",
+    streamVerifying: "Verifying market state...",
     walletNotConnected: "Wallet not connected",
     amountTooLow: "Amount must be greater than zero",
     placingOrder: "Placing order...",
@@ -448,6 +454,23 @@ function describeRefreshError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+function describeViewerAlignmentTradeGate(
+  tradeGate: TradeGate | null | undefined,
+  copy: ReturnType<typeof getEvmPanelCopy>,
+): string | null {
+  switch (tradeGate?.reason) {
+    case "clock-confidence-low":
+    case "clock-frozen":
+      return copy.streamSyncing;
+    case "market-stale":
+    case "market-missing":
+    case "session-missing":
+      return copy.streamVerifying;
+    default:
+      return null;
+  }
+}
+
 export function EvmBettingPanel({
   agent1Name,
   agent2Name,
@@ -456,6 +479,7 @@ export function EvmBettingPanel({
   lifecycleDuelOverride = null,
   lifecycleMarketOverride = null,
   lifecycleMarketParityOverride = null,
+  viewerAlignmentTradeGate = null,
   onLifecycleRefreshRequested = null,
 }: EvmBettingPanelProps) {
   const resolvedLocale = resolveUiLocale(locale);
@@ -701,6 +725,16 @@ export function EvmBettingPanel({
       ),
     [activeLifecycleMarket, marketMeta, walletSnapshot],
   );
+  const viewerAlignmentStatusLabel = useMemo(
+    () => describeViewerAlignmentTradeGate(viewerAlignmentTradeGate, copy),
+    [copy, viewerAlignmentTradeGate],
+  );
+  const viewerAlignmentBlocksDisplay =
+    viewerAlignmentTradeGate?.canDisplayOpen === false &&
+    uiState.lifecycleStatus !== "RESOLVED" &&
+    uiState.lifecycleStatus !== "CANCELLED";
+  const viewerAlignmentBlocksSubmit =
+    viewerAlignmentTradeGate?.canSubmitTrade === false;
   const lifecycleStatusLabel = useMemo(
     () =>
       getLifecycleStatusLabel(
@@ -718,12 +752,20 @@ export function EvmBettingPanel({
   );
   const baseStatusLabel = useMemo(
     () =>
-      deriveEvmPanelBaseStatus({
-        parityStatusLabel,
-        lifecycleStatusLabel,
-        fallback: copy.waitingForLiveDuel,
-      }),
-    [copy.waitingForLiveDuel, lifecycleStatusLabel, parityStatusLabel],
+      viewerAlignmentBlocksDisplay && viewerAlignmentStatusLabel
+        ? viewerAlignmentStatusLabel
+        : deriveEvmPanelBaseStatus({
+            parityStatusLabel,
+            lifecycleStatusLabel,
+            fallback: copy.waitingForLiveDuel,
+          }),
+    [
+      copy.waitingForLiveDuel,
+      lifecycleStatusLabel,
+      parityStatusLabel,
+      viewerAlignmentBlocksDisplay,
+      viewerAlignmentStatusLabel,
+    ],
   );
   const lastLifecycleMismatchSignatureRef = useRef<string | null>(null);
 
@@ -1157,6 +1199,10 @@ export function EvmBettingPanel({
 
 
   const handlePlaceOrder = useCallback(async () => {
+    if (viewerAlignmentBlocksSubmit) {
+      setTransientStatus(viewerAlignmentStatusLabel ?? copy.streamVerifying);
+      return;
+    }
     if (isSubmitting) return;
     if (
       !effectiveWalletClient ||
@@ -1268,6 +1314,8 @@ export function EvmBettingPanel({
     activeLifecycleMarket?.marketRef,
     marketMeta?.marketKey,
     duelId,
+    viewerAlignmentBlocksSubmit,
+    viewerAlignmentStatusLabel,
   ]);
 
 
@@ -1357,10 +1405,16 @@ export function EvmBettingPanel({
       ? `${formatCompactTokenAmount(uiState.claimableAmount, nativeDecimals)} ${nativeSymbol}`
       : null;
   const programsReady = Boolean(
-    chainConfig && duelKeyHex && uiState.canTrade && !streamDriftDetected,
+    chainConfig &&
+      duelKeyHex &&
+      uiState.canTrade &&
+      !streamDriftDetected &&
+      !viewerAlignmentBlocksSubmit,
   );
   const panelStatusNote =
-    !streamDriftDetected && lastRefreshError != null
+    viewerAlignmentBlocksDisplay || viewerAlignmentBlocksSubmit
+      ? viewerAlignmentStatusLabel
+      : !streamDriftDetected && lastRefreshError != null
       ? copy.refreshFailed(lastRefreshError ?? "unknown")
       : null;
   const e2eWalletDebug = isE2eMode
@@ -1419,6 +1473,7 @@ export function EvmBettingPanel({
           marketWinner: marketMeta?.winner ?? null,
           marketKey: marketMeta?.marketKey ?? null,
           streamAligned: !streamDriftDetected,
+          viewerAlignmentReason: viewerAlignmentTradeGate?.reason ?? null,
           canClaim: uiState.canClaim,
           claimKind: uiState.claimKind,
         }
@@ -1441,6 +1496,7 @@ export function EvmBettingPanel({
     marketMeta?.status,
     marketMeta?.winner,
     streamDriftDetected,
+    viewerAlignmentTradeGate?.reason,
     uiState.canClaim,
     uiState.claimKind,
   ]);

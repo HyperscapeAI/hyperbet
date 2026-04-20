@@ -61,6 +61,7 @@ import {
 } from "../lib/predictionMarketUiState";
 import { derivePredictionMarketClaimUi } from "../lib/predictionMarketClaimUi";
 import { recordPredictionMarketTrade } from "../lib/predictionMarketTracking";
+import type { TradeGate } from "../lib/viewerAlignment";
 import { useStreamingState } from "../spectator/useStreamingState";
 import {
   PredictionMarketPanel,
@@ -306,6 +307,24 @@ function parsePublicKeyOrNull(
   }
 }
 
+function describeSolanaViewerAlignmentTradeGate(params: {
+  tradeGate: TradeGate | null | undefined;
+  syncingCopy: string;
+  verifyingCopy: string;
+}): string | null {
+  switch (params.tradeGate?.reason) {
+    case "clock-confidence-low":
+    case "clock-frozen":
+      return params.syncingCopy;
+    case "market-stale":
+    case "market-missing":
+    case "session-missing":
+      return params.verifyingCopy;
+    default:
+      return null;
+  }
+}
+
 function readSolanaE2eRuntimeOverride(): {
   duelKey: string | null;
   duelId: string | null;
@@ -360,9 +379,10 @@ interface SolanaClobPanelProps {
    * than the freshest-by-wall-clock keeper response. The overrides are
    * always optional — when omitted, the panel's internal
    * `usePredictionMarketLifecycle` hook wins.
-   */
+  */
   lifecycleDuelOverride?: PredictionMarketsDuelSnapshot | null;
   lifecycleMarketOverride?: PredictionMarketLifecycleRecord | null;
+  viewerAlignmentTradeGate?: TradeGate | null;
 }
 
 export interface SolanaClobMarketSnapshot {
@@ -386,6 +406,7 @@ export function SolanaClobPanel({
   walletOverride,
   lifecycleDuelOverride = null,
   lifecycleMarketOverride = null,
+  viewerAlignmentTradeGate = null,
 }: SolanaClobPanelProps) {
   const resolvedLocale = resolveUiLocale(locale);
   const isE2eMode = import.meta.env.MODE === "e2e" || import.meta.env.DEV;
@@ -529,6 +550,8 @@ export function SolanaClobPanel({
         resolutionChallenged: "结果已被挑战，结算已暂停",
         marketOpen: "市场开放中",
         refreshFailed: (message: string) => `刷新失败：${message}`,
+        streamSyncing: "正在同步直播画面",
+        streamVerifying: "正在校验市场状态",
         connectWalletToTrade: "连接钱包后即可交易",
         amountTooLow: "数量必须大于 0",
         orderPlaced: "订单已提交",
@@ -576,6 +599,8 @@ export function SolanaClobPanel({
         resolutionChallenged: "Result challenged; settlement paused",
         marketOpen: "Market open",
         refreshFailed: (message: string) => `Refresh failed: ${message}`,
+        streamSyncing: "Syncing stream...",
+        streamVerifying: "Verifying market state...",
         connectWalletToTrade: "Connect wallet to trade",
         amountTooLow: "Amount must be greater than zero",
         orderPlaced: "Order placed",
@@ -633,6 +658,21 @@ export function SolanaClobPanel({
       ),
     [activeLifecycleMarket, activeMarket, walletSnapshot],
   );
+  const viewerAlignmentStatusLabel = useMemo(
+    () =>
+      describeSolanaViewerAlignmentTradeGate({
+        tradeGate: viewerAlignmentTradeGate,
+        syncingCopy: copy.streamSyncing,
+        verifyingCopy: copy.streamVerifying,
+      }),
+    [copy.streamSyncing, copy.streamVerifying, viewerAlignmentTradeGate],
+  );
+  const viewerAlignmentBlocksDisplay =
+    viewerAlignmentTradeGate?.canDisplayOpen === false &&
+    uiState.lifecycleStatus !== "RESOLVED" &&
+    uiState.lifecycleStatus !== "CANCELLED";
+  const viewerAlignmentBlocksSubmit =
+    viewerAlignmentTradeGate?.canSubmitTrade === false;
   const lifecycleStatusLabel = useMemo(() => {
     switch (uiState.lifecycleStatus) {
       case "RESOLVED":
@@ -662,6 +702,8 @@ export function SolanaClobPanel({
     uiState.lifecycleStatus,
     uiState.winner,
   ]);
+  const liveStatusOverride =
+    viewerAlignmentBlocksDisplay ? viewerAlignmentStatusLabel : null;
 
   const updateChartAndTrades = useCallback(
     (nextYes: bigint, nextNo: bigint) => {
@@ -848,7 +890,8 @@ export function SolanaClobPanel({
         bLockedLamports: 0n,
       });
       setStatus(
-        lifecycleStatusLabel ??
+        liveStatusOverride ??
+          lifecycleStatusLabel ??
           getCycleDuelStatusLabel(cycle?.phase, duelKeyHex, resolvedLocale),
       );
       return;
@@ -907,13 +950,13 @@ export function SolanaClobPanel({
       ]);
 
     if (!duelAccount) {
-      setStatus(lifecycleStatusLabel ?? copy.waitingOracleReporter);
+      setStatus(liveStatusOverride ?? lifecycleStatusLabel ?? copy.waitingOracleReporter);
       setActiveMarket(null);
       return;
     }
 
     if (!marketAccount) {
-      setStatus(lifecycleStatusLabel ?? copy.waitingMarketOperator);
+      setStatus(liveStatusOverride ?? lifecycleStatusLabel ?? copy.waitingMarketOperator);
       setActiveMarket(null);
       return;
     }
@@ -1055,7 +1098,7 @@ export function SolanaClobPanel({
       resolvedLocale,
       marketStatus,
     );
-    setStatus(nextStatusLabel);
+    setStatus(liveStatusOverride ?? nextStatusLabel);
   }, [
     cycle?.betCloseTime,
     cycle?.phase,
@@ -1066,6 +1109,7 @@ export function SolanaClobPanel({
     effectiveAgent2,
     activeLifecycleDuel?.betCloseTime,
     activeLifecycleDuel?.phase,
+    liveStatusOverride,
     lifecycleMarketRef,
     lifecycleStatusLabel,
     readonlyPrograms.fightOracle,
@@ -1262,6 +1306,12 @@ export function SolanaClobPanel({
 
 
   const handlePlaceOrder = useCallback(async () => {
+    if (viewerAlignmentBlocksSubmit) {
+      setLastPlaceOrderDebug("blocked viewer-alignment trade gate");
+      setLastPlaceOrderError(viewerAlignmentStatusLabel ?? copy.streamVerifying);
+      setStatus(viewerAlignmentStatusLabel ?? copy.streamVerifying);
+      return;
+    }
     const clobProgram: any = writablePrograms?.goldClobMarket;
     const marketRef = activeMarket?.marketState.toBase58() ?? "-";
     const duelRef = duelId ?? "-";
@@ -1409,6 +1459,8 @@ export function SolanaClobPanel({
     refreshData,
     side,
     submitTransaction,
+    viewerAlignmentBlocksSubmit,
+    viewerAlignmentStatusLabel,
     wallet.publicKey,
     writablePrograms,
   ]);
@@ -1581,7 +1633,11 @@ export function SolanaClobPanel({
         setAmountInput={setAmountInput}
         onPlaceBet={() => void handlePlaceOrder()}
         isWalletReady={walletReady(wallet)}
-        programsReady={Boolean(activeMarket) && uiState.canTrade}
+        programsReady={
+          Boolean(activeMarket) &&
+          uiState.canTrade &&
+          !viewerAlignmentBlocksSubmit
+        }
         agent1Name={effectiveAgent1}
         agent2Name={effectiveAgent2}
         isEvm={false}
