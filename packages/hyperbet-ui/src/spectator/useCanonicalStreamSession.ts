@@ -115,6 +115,7 @@ function normalizeSourceRuntime(value: unknown): SourceRuntimeInfo | null {
     captureMode !== "cdp" &&
     captureMode !== "webcodecs" &&
     captureMode !== "mediarecorder" &&
+    captureMode !== "x11_nvenc" &&
     captureMode !== "none"
   ) {
     return null;

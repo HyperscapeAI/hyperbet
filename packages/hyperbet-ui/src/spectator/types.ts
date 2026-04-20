@@ -35,6 +35,7 @@ export type SourceRuntimeCaptureMode =
   | "cdp"
   | "webcodecs"
   | "mediarecorder"
+  | "x11_nvenc"
   | "none";
 
 export type SourceRuntimeDegradedReason =

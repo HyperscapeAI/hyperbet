@@ -34,6 +34,7 @@ type EmbedStatusPayload = {
   stallCount: number;
   rebuildCount: number;
   lastBufferedFragmentAt: number | null;
+  lastPlaybackProgressAt: number | null;
   playbackUrl: string | null;
   deliveryMode: string | null;
   firstFrameAt: number | null;
@@ -412,6 +413,7 @@ export function HlsPlayerApp() {
             stallCount: runtime.telemetry.stallCount,
             rebuildCount: runtime.telemetry.rebuildCount,
             lastBufferedFragmentAt: runtime.telemetry.lastBufferedFragmentAt,
+            lastPlaybackProgressAt: runtime.telemetry.lastPlaybackProgressAt,
             playbackUrl: runtime.telemetry.playbackUrl,
             deliveryMode: runtime.telemetry.deliveryMode,
             firstFrameAt: runtime.telemetry.firstFrameAt,
@@ -746,6 +748,7 @@ export function HlsPlayerApp() {
           firstFrameAt: runtime.telemetry.firstFrameAt,
           startupDurationMs: runtime.telemetry.startupDurationMs,
           playbackStarted: true,
+          lastPlaybackProgressAt: runtime.lastProgressAt,
         });
         markReady();
       }
@@ -1510,6 +1513,7 @@ function createInitialTelemetry(
     stallCount: 0,
     rebuildCount: 0,
     lastBufferedFragmentAt: null,
+    lastPlaybackProgressAt: null,
     playbackUrl: params.streamUrl,
     deliveryMode: resolvePlayerDeliveryModeHint(
       params.streamUrl || "",

@@ -30,6 +30,7 @@ function makeStreamPlayerStatus(
     stallCount: 0,
     rebuildCount: 0,
     lastBufferedFragmentAt: Date.now(),
+    lastPlaybackProgressAt: Date.now(),
     playbackUrl: null,
     deliveryMode: null,
     firstFrameAt: Date.now() - 2_000,
