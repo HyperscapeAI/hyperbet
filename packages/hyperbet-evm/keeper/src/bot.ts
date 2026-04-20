@@ -53,6 +53,7 @@ import {
   readKeypair,
   requireEnv,
 } from "./common";
+import { resolveResultCatchupBearerToken } from "./resultCatchupAuth";
 
 const EVM_DUEL_WINNER_MARKET_KIND = 0;
 const EVM_KEEPER_DEFER_FINALIZE = process.env.EVM_KEEPER_DEFER_FINALIZE === "true";
@@ -4715,10 +4716,7 @@ type HyperscapesDuelResult = {
 };
 
 const RESULT_CATCHUP_BEARER_TOKEN =
-  process.env.HYPERSCAPES_RESULT_LOOKUP_BEARER_TOKEN?.trim() ||
-  process.env.BETTING_FEED_ACCESS_TOKEN?.trim() ||
-  process.env.STREAM_STATE_SOURCE_BEARER_TOKEN?.trim() ||
-  "";
+  resolveResultCatchupBearerToken(process.env).token ?? "";
 
 const RESULT_CATCHUP_TIMEOUT_MS = Math.max(
   1_000,
