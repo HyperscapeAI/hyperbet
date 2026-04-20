@@ -9,7 +9,10 @@ import {
   selectPredictionMarketOverviewRecord,
   selectPredictionMarketLifecycleRecord,
 } from "../src/lib/predictionMarkets";
-import { deriveMarketParityLabel } from "../src/lib/marketParity";
+import {
+  deriveMarketParityLabel,
+  shouldMarketParityGatePhaseLabel,
+} from "../src/lib/marketParity";
 import {
   derivePredictionMarketUiState,
   EMPTY_PREDICTION_MARKET_WALLET_SNAPSHOT,
@@ -158,6 +161,56 @@ describe("prediction market lifecycle helpers", () => {
         },
       ),
     ).toBe("Preparing next match");
+  });
+
+  it("does not let non-public parity override an active live phase", () => {
+    expect(
+      shouldMarketParityGatePhaseLabel(
+        {
+          bundleId: "pending:1",
+          duelKey: null,
+          duelId: null,
+          revision: 1,
+          requiredChains: ["solana", "bsc"],
+          confirmedChains: ["solana"],
+          state: "preparing",
+          phase: "FIGHTING",
+          safeToBet: false,
+          openedAtMs: null,
+          lockedAtMs: null,
+          resolvedAtMs: null,
+          freezeReason: null,
+          updatedAtMs: 123,
+          receipts: [],
+        },
+        "FIGHTING",
+      ),
+    ).toBe(false);
+  });
+
+  it("still lets non-public parity gate pre-fight phases", () => {
+    expect(
+      shouldMarketParityGatePhaseLabel(
+        {
+          bundleId: "pending:2",
+          duelKey: null,
+          duelId: null,
+          revision: 1,
+          requiredChains: ["solana", "bsc"],
+          confirmedChains: [],
+          state: "preparing",
+          phase: "ANNOUNCEMENT",
+          safeToBet: false,
+          openedAtMs: null,
+          lockedAtMs: null,
+          resolvedAtMs: null,
+          freezeReason: null,
+          updatedAtMs: 123,
+          receipts: [],
+        },
+        "ANNOUNCEMENT",
+      ),
+    ).toBe(true);
   });
 
   it("selects the lifecycle record for a target chain", () => {

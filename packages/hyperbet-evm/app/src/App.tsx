@@ -40,7 +40,7 @@ import {
 } from "@hyperbet/ui/lib/bettorLiveStatus";
 import {
   deriveMarketParityLabel,
-  isPublicMarketParityState,
+  shouldMarketParityGatePhaseLabel,
 } from "@hyperbet/ui/lib/marketParity";
 import { deriveBettorStreamUiState } from "@hyperbet/ui/lib/bettorStreamUi";
 import {
@@ -1185,12 +1185,10 @@ export function App() {
   const effTotalPool =
     (typeof effYesPot === "number" ? effYesPot : 0) +
     (typeof effNoPot === "number" ? effNoPot : 0);
-  const parityGatesPublicPhase =
-    effectiveMarketParity != null &&
-    !isPublicMarketParityState(
-      effectiveMarketParity.state,
-      effectiveMarketParity.openedAtMs,
-    );
+  const parityGatesPublicPhase = shouldMarketParityGatePhaseLabel(
+    effectiveMarketParity,
+    canonicalPhase ?? liveCycle?.phase ?? null,
+  );
   const effPhaseLabel =
     parityGatesPublicPhase && marketParityStatusText
       ? marketParityStatusText
