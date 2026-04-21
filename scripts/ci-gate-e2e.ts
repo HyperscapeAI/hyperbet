@@ -58,7 +58,7 @@ const appRoot =
     : path.join(rootDir, `packages/hyperbet-${chain}/app`);
 const anchorRoot = path.join(rootDir, "packages/hyperbet-solana/anchor");
 const evmRoot =
-  chain === "solana"
+  surface !== "unified" && chain === "solana"
     ? null
     : path.join(rootDir, "packages/evm-contracts");
 const statePath = path.join(appRoot, "tests/e2e/state.json");
