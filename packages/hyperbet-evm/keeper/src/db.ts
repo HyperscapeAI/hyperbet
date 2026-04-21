@@ -75,6 +75,7 @@ export type DbPerpsOracleSnapshot = {
 };
 
 export type DbPerpsMarketStatus = "ACTIVE" | "CLOSE_ONLY" | "ARCHIVED";
+export type EvmPerpsChainKey = "bsc" | "base" | "avax";
 
 export type DbPerpsMarketRecord = {
   agentId: string;
@@ -92,6 +93,14 @@ export type DbPerpsMarketRecord = {
   lastSeenAt: number;
   deprecatedAt: number | null;
   updatedAt: number;
+};
+
+export type DbChainScopedPerpsOracleSnapshot = DbPerpsOracleSnapshot & {
+  chainKey: EvmPerpsChainKey;
+};
+
+export type DbChainScopedPerpsMarketRecord = DbPerpsMarketRecord & {
+  chainKey: EvmPerpsChainKey;
 };
 
 export type DbBetSyncCheckpoint = {
@@ -135,6 +144,20 @@ db.run("PRAGMA journal_mode = WAL");
 db.run("PRAGMA synchronous = NORMAL");
 db.run("PRAGMA foreign_keys = ON");
 db.run("PRAGMA auto_vacuum = INCREMENTAL");
+db.run(
+  `PRAGMA busy_timeout = ${Math.max(
+    0,
+    Math.floor(Number(process.env.KEEPER_DB_BUSY_TIMEOUT_MS || 5_000)),
+  )}`,
+);
+
+function isSqliteBusyError(error: unknown): boolean {
+  const candidate = error as { code?: unknown; message?: unknown };
+  const code = typeof candidate?.code === "string" ? candidate.code : "";
+  const message =
+    typeof candidate?.message === "string" ? candidate.message : String(error);
+  return code === "SQLITE_BUSY" || /database is (?:locked|busy)/i.test(message);
+}
 
 // ── Schema ────────────────────────────────────────────────────────────────────
 
@@ -422,6 +445,44 @@ db.run(`CREATE TABLE IF NOT EXISTS perps_markets (
 
 db.run(`CREATE INDEX IF NOT EXISTS idx_perps_markets_status_seen
   ON perps_markets (status, last_seen_at DESC)`);
+db.run(`CREATE TABLE IF NOT EXISTS perps_oracle_snapshots_v2 (
+  chain_key TEXT NOT NULL,
+  agent_id TEXT NOT NULL,
+  market_id INTEGER NOT NULL,
+  spot_index REAL NOT NULL,
+  conservative_skill REAL NOT NULL,
+  mu REAL NOT NULL,
+  sigma REAL NOT NULL,
+  recorded_at INTEGER NOT NULL,
+  CHECK (chain_key IN ('bsc', 'base', 'avax'))
+)`);
+db.run(`CREATE INDEX IF NOT EXISTS idx_perps_oracle_snapshots_v2_chain_agent_time
+  ON perps_oracle_snapshots_v2 (chain_key, agent_id, recorded_at DESC)`);
+db.run(`CREATE INDEX IF NOT EXISTS idx_perps_oracle_snapshots_v2_chain_market_time
+  ON perps_oracle_snapshots_v2 (chain_key, market_id, recorded_at DESC)`);
+db.run(`CREATE TABLE IF NOT EXISTS perps_markets_v2 (
+  chain_key TEXT NOT NULL,
+  agent_id TEXT NOT NULL,
+  market_id INTEGER NOT NULL,
+  rank INTEGER,
+  name TEXT NOT NULL DEFAULT '',
+  provider TEXT NOT NULL DEFAULT '',
+  model TEXT NOT NULL DEFAULT '',
+  wins INTEGER NOT NULL DEFAULT 0,
+  losses INTEGER NOT NULL DEFAULT 0,
+  win_rate REAL NOT NULL DEFAULT 0,
+  combat_level INTEGER NOT NULL DEFAULT 0,
+  current_streak INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'ACTIVE',
+  last_seen_at INTEGER NOT NULL,
+  deprecated_at INTEGER,
+  updated_at INTEGER NOT NULL,
+  UNIQUE(chain_key, agent_id),
+  UNIQUE(chain_key, market_id),
+  CHECK (chain_key IN ('bsc', 'base', 'avax'))
+)`);
+db.run(`CREATE INDEX IF NOT EXISTS idx_perps_markets_v2_chain_status_seen
+  ON perps_markets_v2 (chain_key, status, last_seen_at DESC)`);
 
 db.run(`CREATE TABLE IF NOT EXISTS bet_sync_checkpoint (
   id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -545,6 +606,9 @@ const upsertAgentRating = db.prepare(`INSERT INTO agent_ratings
 const insertPerpsOracleSnapshot = db.prepare(`INSERT INTO perps_oracle_snapshots
   (agent_id, market_id, spot_index, conservative_skill, mu, sigma, recorded_at)
   VALUES ($agentId, $marketId, $spotIndex, $conservativeSkill, $mu, $sigma, $recordedAt)`);
+const insertPerpsOracleSnapshotV2 = db.prepare(`INSERT INTO perps_oracle_snapshots_v2
+  (chain_key, agent_id, market_id, spot_index, conservative_skill, mu, sigma, recorded_at)
+  VALUES ($chainKey, $agentId, $marketId, $spotIndex, $conservativeSkill, $mu, $sigma, $recordedAt)`);
 
 const upsertPerpsMarket = db.prepare(`INSERT INTO perps_markets
   (agent_id, market_id, rank, name, provider, model, wins, losses, win_rate,
@@ -552,6 +616,26 @@ const upsertPerpsMarket = db.prepare(`INSERT INTO perps_markets
   VALUES ($agentId, $marketId, $rank, $name, $provider, $model, $wins, $losses, $winRate,
           $combatLevel, $currentStreak, $status, $lastSeenAt, $deprecatedAt, $updatedAt)
   ON CONFLICT(agent_id) DO UPDATE SET
+    market_id = excluded.market_id,
+    rank = excluded.rank,
+    name = excluded.name,
+    provider = excluded.provider,
+    model = excluded.model,
+    wins = excluded.wins,
+    losses = excluded.losses,
+    win_rate = excluded.win_rate,
+    combat_level = excluded.combat_level,
+    current_streak = excluded.current_streak,
+    status = excluded.status,
+    last_seen_at = excluded.last_seen_at,
+    deprecated_at = excluded.deprecated_at,
+    updated_at = excluded.updated_at`);
+const upsertPerpsMarketV2 = db.prepare(`INSERT INTO perps_markets_v2
+  (chain_key, agent_id, market_id, rank, name, provider, model, wins, losses, win_rate,
+   combat_level, current_streak, status, last_seen_at, deprecated_at, updated_at)
+  VALUES ($chainKey, $agentId, $marketId, $rank, $name, $provider, $model, $wins, $losses, $winRate,
+          $combatLevel, $currentStreak, $status, $lastSeenAt, $deprecatedAt, $updatedAt)
+  ON CONFLICT(chain_key, agent_id) DO UPDATE SET
     market_id = excluded.market_id,
     rank = excluded.rank,
     name = excluded.name,
@@ -1067,6 +1151,99 @@ export function loadPerpsMarkets(
   );
 }
 
+export function loadChainScopedPerpsOracleSnapshots(
+  chainKey: EvmPerpsChainKey,
+  agentId?: string,
+  limit = 100,
+): DbChainScopedPerpsOracleSnapshot[] {
+  const rows = agentId
+    ? (db
+        .prepare(
+          `SELECT chain_key, agent_id, market_id, spot_index, conservative_skill, mu, sigma, recorded_at
+             FROM perps_oracle_snapshots_v2
+            WHERE chain_key = ? AND agent_id = ?
+            ORDER BY recorded_at DESC
+            LIMIT ?`,
+        )
+        .all(chainKey, agentId, limit) as Array<Record<string, unknown>>)
+    : (db
+        .prepare(
+          `SELECT chain_key, agent_id, market_id, spot_index, conservative_skill, mu, sigma, recorded_at
+             FROM perps_oracle_snapshots_v2
+            WHERE chain_key = ?
+            ORDER BY recorded_at DESC
+            LIMIT ?`,
+        )
+        .all(chainKey, limit) as Array<Record<string, unknown>>);
+
+  return rows.map(
+    (row): DbChainScopedPerpsOracleSnapshot => ({
+      chainKey: String(row.chain_key) as EvmPerpsChainKey,
+      agentId: String(row.agent_id),
+      marketId: Number(row.market_id),
+      spotIndex: Number(row.spot_index),
+      conservativeSkill: Number(row.conservative_skill),
+      mu: Number(row.mu),
+      sigma: Number(row.sigma),
+      recordedAt: Number(row.recorded_at),
+    }),
+  );
+}
+
+export function loadChainScopedPerpsMarkets(
+  chainKey: EvmPerpsChainKey,
+  status?: DbPerpsMarketStatus,
+): DbChainScopedPerpsMarketRecord[] {
+  const rows = status
+    ? (db
+        .prepare(
+          `SELECT chain_key, agent_id, market_id, rank, name, provider, model, wins, losses, win_rate,
+                  combat_level, current_streak, status, last_seen_at, deprecated_at, updated_at
+             FROM perps_markets_v2
+            WHERE chain_key = ? AND status = ?
+            ORDER BY COALESCE(rank, 2147483647) ASC, name ASC`,
+        )
+        .all(chainKey, status) as Array<Record<string, unknown>>)
+    : (db
+        .prepare(
+          `SELECT chain_key, agent_id, market_id, rank, name, provider, model, wins, losses, win_rate,
+                  combat_level, current_streak, status, last_seen_at, deprecated_at, updated_at
+             FROM perps_markets_v2
+            WHERE chain_key = ?
+            ORDER BY
+              CASE status
+                WHEN 'ACTIVE' THEN 0
+                WHEN 'CLOSE_ONLY' THEN 1
+                ELSE 2
+              END,
+              COALESCE(rank, 2147483647) ASC,
+              name ASC`,
+        )
+        .all(chainKey) as Array<Record<string, unknown>>);
+
+  return rows.map(
+    (row): DbChainScopedPerpsMarketRecord => ({
+      chainKey: String(row.chain_key) as EvmPerpsChainKey,
+      agentId: String(row.agent_id),
+      marketId: Number(row.market_id),
+      rank: row.rank == null ? null : Number(row.rank),
+      name: String(row.name ?? ""),
+      provider: String(row.provider ?? ""),
+      model: String(row.model ?? ""),
+      wins: Number(row.wins ?? 0),
+      losses: Number(row.losses ?? 0),
+      winRate: Number(row.win_rate ?? 0),
+      combatLevel: Number(row.combat_level ?? 0),
+      currentStreak: Number(row.current_streak ?? 0),
+      status: String(row.status) as DbPerpsMarketStatus,
+      lastSeenAt: Number(row.last_seen_at ?? 0),
+      deprecatedAt:
+        row.deprecated_at == null ? null : Number(row.deprecated_at),
+      updatedAt: Number(row.updated_at ?? 0),
+    }),
+  );
+}
+
 export function saveAgentRating(
   agentId: string,
   rating: AgentRating,
@@ -1134,6 +1311,44 @@ export function savePerpsMarket(record: DbPerpsMarketRecord): void {
   });
 }
 
+export function saveChainScopedPerpsOracleSnapshot(
+  snapshot: DbChainScopedPerpsOracleSnapshot,
+): void {
+  insertPerpsOracleSnapshotV2.run({
+    $chainKey: snapshot.chainKey,
+    $agentId: snapshot.agentId,
+    $marketId: snapshot.marketId,
+    $spotIndex: snapshot.spotIndex,
+    $conservativeSkill: snapshot.conservativeSkill,
+    $mu: snapshot.mu,
+    $sigma: snapshot.sigma,
+    $recordedAt: snapshot.recordedAt,
+  });
+}
+
+export function saveChainScopedPerpsMarket(
+  record: DbChainScopedPerpsMarketRecord,
+): void {
+  upsertPerpsMarketV2.run({
+    $chainKey: record.chainKey,
+    $agentId: record.agentId,
+    $marketId: record.marketId,
+    $rank: record.rank,
+    $name: record.name,
+    $provider: record.provider,
+    $model: record.model,
+    $wins: record.wins,
+    $losses: record.losses,
+    $winRate: record.winRate,
+    $combatLevel: record.combatLevel,
+    $currentStreak: record.currentStreak,
+    $status: record.status,
+    $lastSeenAt: record.lastSeenAt,
+    $deprecatedAt: record.deprecatedAt,
+    $updatedAt: record.updatedAt,
+  });
+}
+
 export function loadBetSyncCheckpoint(): DbBetSyncCheckpoint | null {
   const row = db
     .prepare(
@@ -1154,15 +1369,28 @@ export function loadBetSyncCheckpoint(): DbBetSyncCheckpoint | null {
   };
 }
 
-export function saveBetSyncCheckpoint(checkpoint: DbBetSyncCheckpoint): void {
-  upsertBetSyncCheckpoint.run({
-    $sourceEpoch: checkpoint.sourceEpoch,
-    $lastSeenSeq: checkpoint.lastSeenSeq,
-    $lastAppliedSeq: checkpoint.lastAppliedSeq,
-    $replayMode: checkpoint.replayMode,
-    $degradedReason: checkpoint.degradedReason,
-    $updatedAt: checkpoint.updatedAt,
-  });
+export function saveBetSyncCheckpoint(checkpoint: DbBetSyncCheckpoint): boolean {
+  try {
+    upsertBetSyncCheckpoint.run({
+      $sourceEpoch: checkpoint.sourceEpoch,
+      $lastSeenSeq: checkpoint.lastSeenSeq,
+      $lastAppliedSeq: checkpoint.lastAppliedSeq,
+      $replayMode: checkpoint.replayMode,
+      $degradedReason: checkpoint.degradedReason,
+      $updatedAt: checkpoint.updatedAt,
+    });
+    return true;
+  } catch (error) {
+    if (!isSqliteBusyError(error)) {
+      throw error;
+    }
+    console.warn("[db] skipped bet-sync checkpoint write because SQLite is busy", {
+      sourceEpoch: checkpoint.sourceEpoch,
+      lastSeenSeq: checkpoint.lastSeenSeq,
+      lastAppliedSeq: checkpoint.lastAppliedSeq,
+    });
+    return false;
+  }
 }
 
 export function appendBetSyncApplyLogEntry(
@@ -1281,12 +1509,24 @@ export function commitBetSyncProjectionState(input: {
     },
   );
 
-  return commit(
-    input.streamState,
-    input.checkpoint,
-    input.overview,
-    input.applyLogEntry,
-  );
+  try {
+    return commit(
+      input.streamState,
+      input.checkpoint,
+      input.overview,
+      input.applyLogEntry,
+    );
+  } catch (error) {
+    if (!isSqliteBusyError(error)) {
+      throw error;
+    }
+    console.warn("[db] skipped bet-sync projection commit because SQLite is busy", {
+      sourceEpoch: input.checkpoint.sourceEpoch,
+      lastSeenSeq: input.checkpoint.lastSeenSeq,
+      lastAppliedSeq: input.checkpoint.lastAppliedSeq,
+    });
+    return false;
+  }
 }
 
 export function closeDb(): void {

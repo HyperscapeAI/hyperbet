@@ -42,6 +42,12 @@ async function main(): Promise<void> {
     Number(state.perpsMarketId) || modelMarketIdFromCharacterId(characterId);
   const modelName = state.perpsModelName?.trim() || "E2E Model Alpha";
   const now = Date.now();
+  const nextState: E2eState = {
+    ...state,
+    perpsCharacterId: characterId,
+    perpsMarketId: marketId,
+    perpsModelName: modelName,
+  };
 
   const seededWallets = [
     primaryWallet,
@@ -108,6 +114,8 @@ async function main(): Promise<void> {
       recordedAt: snapshot.recordedAt,
     });
   }
+
+  await fs.writeFile(statePath, `${JSON.stringify(nextState, null, 2)}\n`, "utf8");
 
   console.log(
     JSON.stringify(

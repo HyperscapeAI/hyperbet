@@ -375,6 +375,14 @@ async function main(): Promise<void> {
   await publicClient.waitForTransactionReceipt({ hash: seedYesOrderTx });
 
   const env = await readEnv(envPath);
+  env.VITE_BSC_RPC_URL = rpcUrl;
+  env.VITE_BSC_CHAIN_ID = String(chainId);
+  env.VITE_BSC_GOLD_CLOB_ADDRESS = goldClobAddress;
+  env.VITE_BSC_GOLD_TOKEN_ADDRESS = goldTokenAddress;
+  env.VITE_BASE_RPC_URL = rpcUrl;
+  env.VITE_BASE_CHAIN_ID = String(chainId);
+  env.VITE_BASE_GOLD_CLOB_ADDRESS = goldClobAddress;
+  env.VITE_BASE_GOLD_TOKEN_ADDRESS = goldTokenAddress;
   env.VITE_AVAX_RPC_URL = rpcUrl;
   env.VITE_AVAX_CHAIN_ID = String(chainId);
   env.VITE_AVAX_GOLD_CLOB_ADDRESS = goldClobAddress;
@@ -386,12 +394,14 @@ async function main(): Promise<void> {
   env.VITE_E2E_EVM_ADDRESS = adminAccount.address;
   await fs.writeFile(envPath, serializeDotEnv(env), "utf8");
 
-  const state: E2eState = {
-    ...existingState,
-    evmRpcUrl: rpcUrl,
-    evmChainId: chainId,
-    evmHeadlessAddress: adminAccount.address,
-    evmGoldTokenAddress: goldTokenAddress,
+const state: E2eState = {
+  ...existingState,
+  currentMatchId: 1,
+  currentDuelKeyHex: duelKey,
+  evmRpcUrl: rpcUrl,
+  evmChainId: chainId,
+  evmHeadlessAddress: adminAccount.address,
+  evmGoldTokenAddress: goldTokenAddress,
     evmGoldClobAddress: goldClobAddress,
     evmMatchId: 1,
     evmDuelKeyHex: duelKey,
