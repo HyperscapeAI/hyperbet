@@ -52,6 +52,7 @@ import {
   logViewerAlignmentDivergence,
   projectCanonicalSessionToSourceTimeline,
   projectDuelContextToSourceTimeline,
+  resolveAlignedCountdownDisplay,
   resolveAlignedSessionPhase,
   useViewerAlignedBetState,
 } from "@hyperbet/ui/lib/viewerAlignment";
@@ -612,17 +613,6 @@ const EMPTY_SOLANA_CLOB_SNAPSHOT: SolanaClobMarketSnapshot = {
 function normalizeTimestamp(value: number): number {
   if (value > 1_000_000_000_000) return Math.floor(value / 1000);
   return Math.floor(value);
-}
-
-function formatCountdown(seconds: number): string {
-  if (seconds <= 0) return "00:00";
-  const m = Math.floor(seconds / 60)
-    .toString()
-    .padStart(2, "0");
-  const s = Math.floor(seconds % 60)
-    .toString()
-    .padStart(2, "0");
-  return `${m}:${s}`;
 }
 
 function enumIs(value: unknown, variant: string): boolean {
@@ -1335,11 +1325,28 @@ export function App() {
     activeLifecycleMarket?.lifecycleStatus ?? solanaClobSnapshot.marketStatus,
     copy,
   );
-  const countdownText = liveCycle
-    ? formatCountdown(Math.max(0, liveCycle.timeRemaining))
-    : formatCountdown(currentMatch ? Math.max(0, currentMatch.closeTs - nowTs) : 0);
-  const displayPhaseLabel = effPhaseLabel;
-  const displayCountdownText = countdownText;
+  const liveStartDisplay = liveCycle
+    ? resolveAlignedCountdownDisplay({
+        phase: liveCycle.phase ?? null,
+        viewerClock: viewerAligned.viewerClock,
+        betCloseTime: liveCycle.betCloseTime ?? null,
+        fightStartTime: liveCycle.fightStartTime ?? null,
+        fallbackTimeRemaining: liveCycle.timeRemaining,
+      })
+    : currentMatch
+      ? resolveAlignedCountdownDisplay({
+          phase: "ANNOUNCEMENT",
+          viewerClock: null,
+          fallbackTimeRemaining: Math.max(0, currentMatch.closeTs - nowTs),
+        })
+      : null;
+  const displayPhaseLabel =
+    liveStartDisplay?.holdState === "preparing_arena"
+      ? "Preparing arena"
+      : liveStartDisplay?.holdState === "starting"
+        ? "Starting..."
+        : effPhaseLabel;
+  const displayCountdownText = "";
   // Sidebar bet state
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [_hmSide, _setHmSide] = useState<BetSide>("YES");

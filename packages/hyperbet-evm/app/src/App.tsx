@@ -90,6 +90,7 @@ import {
   logViewerAlignmentDivergence,
   projectCanonicalSessionToSourceTimeline,
   projectDuelContextToSourceTimeline,
+  resolveAlignedCountdownDisplay,
   resolveAlignedSessionPhase,
   useViewerAlignedBetState,
 } from "@hyperbet/ui/lib/viewerAlignment";
@@ -213,25 +214,6 @@ function normalizeTimestamp(value: number): number {
   if (value > 1_000_000_000_000) return Math.floor(value / 1000);
   return Math.floor(value);
 }
-
-function normalizeRemainingSeconds(value: number | null | undefined): number {
-  if (!Number.isFinite(value as number)) return 0;
-  const raw = Math.max(0, Number(value));
-  // Streaming API reports ms, while mock mode reports whole seconds.
-  return raw > 10_000 ? Math.floor(raw / 1000) : Math.floor(raw);
-}
-
-function formatCountdown(seconds: number): string {
-  if (seconds <= 0) return "00:00";
-  const m = Math.floor(seconds / 60)
-    .toString()
-    .padStart(2, "0");
-  const s = Math.floor(seconds % 60)
-    .toString()
-    .padStart(2, "0");
-  return `${m}:${s}`;
-}
-
 
 function getAppCopy(locale: UiLocale) {
   if (locale === "zh") {
@@ -1197,9 +1179,22 @@ export function App() {
     marketParityStatusText ??
     canonicalLiveStatus.marketSettlementLabel ??
     copy.statusPending;
-  const countdownText = liveCycle
-    ? formatCountdown(normalizeRemainingSeconds(liveCycle.timeRemaining))
-    : "";
+  const liveStartDisplay = liveCycle
+    ? resolveAlignedCountdownDisplay({
+        phase: liveCycle.phase ?? null,
+        viewerClock: viewerAligned.viewerClock,
+        betCloseTime: liveCycle.betCloseTime ?? null,
+        fightStartTime: liveCycle.fightStartTime ?? null,
+        fallbackTimeRemaining: liveCycle.timeRemaining,
+      })
+    : null;
+  const displayPhaseLabel =
+    liveStartDisplay?.holdState === "preparing_arena"
+      ? "Preparing arena"
+      : liveStartDisplay?.holdState === "starting"
+        ? "Starting..."
+        : effPhaseLabel;
+  const countdownText = "";
   const streamSyncUiState = useMemo(
     () =>
       deriveBettorStreamUiState({
@@ -1392,7 +1387,7 @@ export function App() {
           <span
             className={`hm-phase-badge hm-phase-badge--${effCycle.phase.toLowerCase()} hm-phase-badge--sm`}
           >
-            {effPhaseLabel}
+            {displayPhaseLabel}
           </span>
           {!isBettingPanelOnlyMode ? (
             <button

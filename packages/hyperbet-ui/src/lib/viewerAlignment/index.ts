@@ -11,6 +11,12 @@
  */
 
 export {
+  resolveAlignedCountdownDisplay,
+  type AlignedCountdownDisplay,
+  type AlignedCountdownHoldState,
+  type ResolveAlignedCountdownDisplayInputs,
+} from "./countdown";
+export {
   createClockOffsetEstimator,
   medianOfOffsets,
   type ClockOffsetEstimatorOptions,
