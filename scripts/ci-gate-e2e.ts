@@ -131,6 +131,7 @@ async function runGate(): Promise<void> {
     SOLANA_BOOTSTRAP_KEYPAIR: bootstrapKeypairPath,
     ANCHOR_WALLET: bootstrapKeypairPath,
     E2E_SKIP_PREBUILD: "true",
+    E2E_EVM_BUILD_LOG_PATH: evmBuildLogPath,
     PW_HEADLESS: process.env.PW_HEADLESS ?? "1",
     PW_WEBGPU_ARGS: process.env.PW_WEBGPU_ARGS ?? "--enable-unsafe-webgpu",
     E2E_APP_PORT: localPortConfigByChain[chain].appPort,

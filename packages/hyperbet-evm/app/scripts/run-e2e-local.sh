@@ -9,9 +9,11 @@ SOLANA_APP_DIR="$(cd "$EVM_PKG_DIR/../hyperbet-solana/app" && pwd)"
 SOLANA_ANCHOR_DIR="$(cd "$EVM_PKG_DIR/../hyperbet-solana/anchor" && pwd)"
 BUN_BIN="${BUN_BIN:-}"
 BUNX_BIN="${BUNX_BIN:-}"
+EVM_BUILD_LOG_PATH="${E2E_EVM_BUILD_LOG_PATH:-/tmp/hyperbet-evm-e2e-build.log}"
 APP_PORT="${E2E_APP_PORT:-4181}"
 GAME_API_PORT="${E2E_GAME_API_PORT:-5555}"
 GAME_API_URL="http://127.0.0.1:${GAME_API_PORT}"
+GAME_WS_URL="ws://127.0.0.1:${GAME_API_PORT}/ws"
 ANVIL_PORT="${E2E_EVM_PORT:-18545}"
 ANVIL_RPC_URL="http://127.0.0.1:${ANVIL_PORT}"
 EVM_CHAIN_ID="${E2E_EVM_CHAIN_ID:-31337}"
@@ -272,7 +274,7 @@ kill_listeners "$SOLANA_PROXY_PORT"
 rm -f "$KEEPER_DB_PATH"
 
 echo "[e2e] compiling EVM contracts"
-"$BUN_BIN" run --cwd "$CONTRACTS_DIR" compile >/tmp/hyperbet-evm-e2e-build.log 2>&1
+"$BUN_BIN" run --cwd "$CONTRACTS_DIR" compile >"$EVM_BUILD_LOG_PATH" 2>&1
 
 echo "[e2e] starting Anvil on :$ANVIL_PORT"
 anvil \
@@ -415,7 +417,9 @@ E2E_ARENA_WRITE_KEY="$E2E_ARENA_WRITE_KEY" \
   "$BUN_BIN" run "$APP_DIR/tests/e2e/seed-api-local.ts" >/tmp/hyperbet-evm-e2e-api-seed-live.log
 
 echo "[e2e] starting app on :$APP_PORT"
-"$BUN_BIN" run --cwd "$APP_DIR" dev --mode e2e --port "$APP_PORT" >"$APP_LOG" 2>&1 &
+VITE_GAME_API_URL="$GAME_API_URL" \
+VITE_GAME_WS_URL="$GAME_WS_URL" \
+  "$BUN_BIN" run --cwd "$APP_DIR" dev --mode e2e --port "$APP_PORT" >"$APP_LOG" 2>&1 &
 APP_PID="$!"
 
 if ! wait_for_url "http://127.0.0.1:$APP_PORT/" "$APP_LOG"; then
