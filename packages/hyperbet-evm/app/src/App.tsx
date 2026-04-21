@@ -1306,7 +1306,7 @@ export function App() {
         solanaWalletModal.setVisible(true);
       }}
     >
-      ☀️{" "}
+      {isE2eMode ? "SOL " : "☀️ "}
       {solanaWalletAddress ? truncateAddr(solanaWalletAddress) : copy.connectSolana}
     </button>
   ) : (
@@ -1953,7 +1953,7 @@ export function App() {
                       solanaWalletModal.setVisible(true);
                     }}
                   >
-                    ☀️{" "}
+                    {isE2eMode ? "SOL " : "☀️ "}
                     {solanaWalletAddress ? truncateAddr(solanaWalletAddress) : copy.connectSolana}
                   </button>
                 ) : (

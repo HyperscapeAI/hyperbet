@@ -110,15 +110,21 @@ async function gotoApp(page: Page): Promise<void> {
 
 async function ensureWalletConnected(page: Page): Promise<void> {
   const hasConnectedSolanaWallet = async (): Promise<boolean> => {
-    const desktopWalletChip = page
-      .getByRole("button", { name: /^SOL\s+[A-Za-z0-9].*/i })
-      .first();
-    if (await desktopWalletChip.isVisible().catch(() => false)) return true;
+    const walletButtonCandidates = [
+      page.getByRole("button", { name: /^SOL\s+.+/i }).first(),
+      page.getByRole("button", { name: /^◎\s*.+/i }).first(),
+    ];
 
-    const mobileWalletChip = page
-      .getByRole("button", { name: /^◎\s*[A-Za-z0-9].*/i })
-      .first();
-    if (await mobileWalletChip.isVisible().catch(() => false)) return true;
+    for (const candidate of walletButtonCandidates) {
+      if (!(await candidate.isVisible().catch(() => false))) continue;
+      const label = (await candidate.textContent().catch(() => ""))?.trim() ?? "";
+      if (!label || /connect solana|connect wallet|select wallet/i.test(label)) {
+        continue;
+      }
+      if (/^SOL\s+/i.test(label) || /^◎\s*/i.test(label)) {
+        return true;
+      }
+    }
 
     return false;
   };

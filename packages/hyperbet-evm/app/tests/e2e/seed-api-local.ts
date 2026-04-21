@@ -173,7 +173,7 @@ async function main(): Promise<void> {
       method: "POST",
       body: JSON.stringify({
         cycle: {
-          cycleId: "e2e-cycle-active",
+          cycleId: duelId,
           phase: "FIGHTING",
           duelId,
           duelKeyHex,
