@@ -3,7 +3,7 @@ import {
   resolveBettingEvmRuntimeEnv,
   resolveBettingSolanaDeployment,
   type BettingSolanaCluster,
-} from "../packages/hyperbet-chain-registry/src/index.ts";
+} from "../packages/hyperbet-chain-registry/src/index.js";
 
 export type AcceptanceDeployment = "staging" | "testnet";
 export type AcceptanceDuelSource =

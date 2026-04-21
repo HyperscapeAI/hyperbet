@@ -17,6 +17,7 @@ import {
   createOpenMarketFixture,
   duelStatusBettingOpen,
   duelStatusLocked,
+  duelStatusScheduled,
   ensureClobConfig,
   ensureOracleReady,
   finalizeDuelResult,
@@ -119,6 +120,33 @@ describe("gold_clob_market (native SOL settlement)", () => {
         `expected duplicate PDA initialization failure, got ${message}`,
       );
     }
+  });
+
+  it("allows scheduled prestage and keeps the initialized market locked", async () => {
+    await ensureOracleReady(fightProgram, authority, authority.publicKey);
+    const config = await ensureClobConfig(clobProgram, authority);
+
+    const duelKey = uniqueDuelKey("scheduled-market");
+    const now = Math.floor(Date.now() / 1000);
+    const duelState = await upsertDuel(fightProgram, authority, duelKey, {
+      status: duelStatusScheduled(),
+      betOpenTs: now + 30,
+      betCloseTs: now + 600,
+      duelStartTs: now + 660,
+      metadataUri: "https://hyperscape.gg/tests/clob/scheduled",
+    });
+    const market = await initializeCanonicalMarket(
+      clobProgram,
+      authority,
+      duelState,
+      duelKey,
+      config,
+    );
+
+    const marketState = await clobProgram.account.marketState.fetch(
+      market.marketState,
+    );
+    assert.deepStrictEqual(marketState.status, { locked: {} });
   });
 
   it("charges trade fees only on executed taker size and enforces FIFO at a shared price level", async () => {
