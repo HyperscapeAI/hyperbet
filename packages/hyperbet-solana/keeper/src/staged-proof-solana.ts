@@ -342,21 +342,43 @@ async function ensureRentExemptSystemAccount(args: {
   provider: Awaited<ReturnType<typeof createPrograms>>["provider"];
   target: PublicKey;
 }): Promise<void> {
-  const minimumBalance =
-    await args.connection.getMinimumBalanceForRentExemption(0);
-  const currentBalance = await args.connection.getBalance(args.target, "confirmed");
-  if (currentBalance >= minimumBalance) {
+  const minimumBalance = BigInt(
+    await args.connection.getMinimumBalanceForRentExemption(0),
+  );
+  await ensureSystemAccountBalance({
+    ...args,
+    targetLamports: minimumBalance,
+  });
+}
+
+async function ensureSystemAccountBalance(args: {
+  connection: Awaited<ReturnType<typeof createPrograms>>["connection"];
+  payer: PublicKey;
+  signers: Parameters<Awaited<ReturnType<typeof createPrograms>>["provider"]["sendAndConfirm"]>[1];
+  provider: Awaited<ReturnType<typeof createPrograms>>["provider"];
+  target: PublicKey;
+  targetLamports: bigint;
+  label?: string;
+}): Promise<void> {
+  const currentBalance = BigInt(
+    await args.connection.getBalance(args.target, "confirmed"),
+  );
+  if (currentBalance >= args.targetLamports) {
     return;
   }
+  const topUpLamports = args.targetLamports - currentBalance;
 
   const tx = new Transaction().add(
     SystemProgram.transfer({
       fromPubkey: args.payer,
       toPubkey: args.target,
-      lamports: minimumBalance - currentBalance,
+      lamports: Number(topUpLamports),
     }),
   );
   await args.provider.sendAndConfirm(tx, args.signers);
+  console.error(
+    `[solana-canary] topped up ${args.label ?? args.target.toBase58()} by ${lamportsToSolString(topUpLamports)} SOL`,
+  );
 }
 
 async function topUpPerpsInsurance(args: {
@@ -455,17 +477,53 @@ async function main(): Promise<void> {
     const trader = readKeypair(runtime.canaryKeypair);
     const matcher = readKeypair(runtime.marketMakerKeypair);
 
-    const authorityPrograms = createPrograms(authority);
-    const traderPrograms = createPrograms(trader);
-    const matcherPrograms = createPrograms(matcher);
+    const authorityPrograms = createPrograms(authority, {
+      usePollingSendAndConfirm: true,
+    });
+    const traderPrograms = createPrograms(trader, {
+      usePollingSendAndConfirm: true,
+    });
+    const matcherPrograms = createPrograms(matcher, {
+      usePollingSendAndConfirm: true,
+    });
     const oracleFundingKeypair =
       runtime.oracleAuthorityKeypair &&
       runtime.oracleAuthorityKeypair !== authorityKeypairPath
         ? readKeypair(runtime.oracleAuthorityKeypair)
         : null;
     const oracleFundingPrograms = oracleFundingKeypair
-      ? createPrograms(oracleFundingKeypair)
+      ? createPrograms(oracleFundingKeypair, {
+          usePollingSendAndConfirm: true,
+        })
       : null;
+    const canaryMinLamports = BigInt(
+      (
+        maybeAcceptanceEnv("CANARY_SOLANA_TRADER_MIN_LAMPORTS") ?? "200000000"
+      ).trim(),
+    );
+    const matcherMinLamports = BigInt(
+      (
+        maybeAcceptanceEnv("CANARY_SOLANA_MATCHER_MIN_LAMPORTS") ?? "200000000"
+      ).trim(),
+    );
+    await ensureSystemAccountBalance({
+      connection: authorityPrograms.connection,
+      payer: authority.publicKey,
+      signers: [authority],
+      provider: authorityPrograms.provider,
+      target: trader.publicKey,
+      targetLamports: canaryMinLamports,
+      label: "solana-canary-trader",
+    });
+    await ensureSystemAccountBalance({
+      connection: authorityPrograms.connection,
+      payer: authority.publicKey,
+      signers: [authority],
+      provider: authorityPrograms.provider,
+      target: matcher.publicKey,
+      targetLamports: matcherMinLamports,
+      label: "solana-canary-matcher",
+    });
     const fightOracleProgramId = resolveFightOracleProgramId();
     const fightOracle = authorityPrograms.fightOracle;
     const clobProgram = traderPrograms.goldClobMarket;
@@ -785,10 +843,17 @@ async function main(): Promise<void> {
       .signers([authority])
       .rpc();
 
-    const perpsMinInsuranceLamports = BigInt(
-      (
-        maybeAcceptanceEnv("CANARY_PERPS_MIN_INSURANCE_LAMPORTS") ?? "12000000000"
-      ).trim(),
+    const configuredPerpsMinInsuranceLamports = maybeAcceptanceEnv(
+      "CANARY_PERPS_MIN_INSURANCE_LAMPORTS",
+    );
+    const requiredPerpsMinInsuranceLamports = asBigInt(
+      perpsConfig.minMarketInsuranceLamports,
+    );
+    const perpsMinInsuranceLamports = maxBigInt(
+      configuredPerpsMinInsuranceLamports
+        ? BigInt(configuredPerpsMinInsuranceLamports.trim())
+        : 0n,
+      requiredPerpsMinInsuranceLamports,
     );
     const insuranceFundingSources: InsuranceFundingSource[] = [
       {

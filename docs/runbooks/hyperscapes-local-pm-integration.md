@@ -1,276 +1,115 @@
 # Hyperscapes Local PM Integration
 
-> **TL;DR:** This is the fastest local debug lane for the real `Hyperscapes -> Hyperbet` integration. It uses local Hyperscapes plus local keeper and UI, and it can optionally drive local BSC and AVAX write paths with anvil-backed deployments. It is not the final signoff lane; release signoff still comes from staged proof and soak.
+This is the local and personal-staging integration model after the streaming
+overhaul.
 
-This is the local integration path for prediction markets against the real
-Hyperscapes duel stack. It does **not** seed synthetic markets and it does
-**not** treat the game server as the Hyperbet API.
+## Boundary
 
-For this local runner, skipping Hyperscapes local MUD chain bootstrap is
-intentional. Hyperbet consumes the duel telemetry API from Hyperscapes, not the
-sibling repo's local anvil world. The runner also defaults the duel server to
-development mode so local smoke does not fail on production-only JWT boot
-requirements.
+Hyperscapes provides:
 
-## Architecture
+- duel lifecycle
+- renderer health
+- renderer metrics
+- delivery metadata
 
-1. Hyperscapes is the duel event source.
-   - local game/server stack serves `GET /api/streaming/state`
-   - duel lifecycle comes from the running game
+Hyperbet provides:
 
-2. Hyperbet keeper is the bridge layer.
-   - polls the Hyperscapes streaming endpoint
-   - optionally runs the keeper bot internally
-   - exposes:
-     - `/status`
-     - `/api/streaming/state`
-     - `/api/streaming/state/events`
-     - `/api/arena/prediction-markets/active`
+- keeper APIs
+- betting surfaces
+- chain interaction
 
-3. Hyperbet UI points at the keeper service, not directly at the game server.
-   - `VITE_GAME_API_URL=http://127.0.0.1:8080`
-   - `VITE_GAME_WS_URL=ws://127.0.0.1:5555/ws`
+The Hyperbet UI should point at the keeper for canonical session state and use
+the playback URL carried in that session. It should not invent its own stream
+selection rules beyond explicit debug or operator override behavior.
 
-This split is required because the Hyperscapes server provides duel telemetry,
-while the keeper service provides prediction-market state.
+## Personal Staging
 
-For local write-path smoke, the runner can boot fresh anvil-backed BSC and
-AVAX deployments before starting the keeper. That path seeds fresh local EVM
-contracts from the repo's local E2E setup scripts and is the preferred default
-when you want visible market movement without depending on funded testnet
-writer roles.
+For `enoomian` personal staging:
 
-## Scope
+- Pages hosts `/stream`
+- `/stream` is a dedicated capture preset with the duel camera path and no
+  generic client overhead
+- the GPU box renders and encodes
+- `cdp` is the primary capture mode; `webcodecs` and `mediarecorder` remain
+  supported fallback/debug modes
+- Railway hosts the Hyperscapes API
+- Hyperbet keepers poll Hyperscapes renderer health and session state
+- Cloudflare Stream LL-HLS is the canonical bettor viewer rail
+- self-hosted HLS remains available only for smoke, debug, and explicit
+  operator failover
+- automatic provider failover is disabled by default:
+  `STREAM_ENABLE_AUTOMATIC_FAILOVER=false`
+- canonical channel and destination truth own ingest metadata; keeper
+  `delivery` may enrich playback URLs but must not override canonical ingest
+  transport
+- `publicReadiness` is the final server delivery gate for bettors, derived from
+  source readiness plus persisted Cloudflare authority and playback-probe truth
+- player sync telemetry is a separate client-side betting-safety gate; do not
+  call the page "live synced" from server readiness alone
+- Railway env reconciliation is now a separate action from deploy execution:
+  use `scripts/enoomian-staging/deploy.sh hyperscapes-railway-env`,
+  `scripts/enoomian-staging/deploy.sh hyperbet-solana-keepers-env`, or
+  `scripts/enoomian-staging/deploy.sh hyperbet-keepers-env` when env vars need
+  to be reconciled, then use the normal deploy targets for code-only deploys
 
-The truthful local integrated lifecycle today is:
+## Local Debug Rules
 
-- open
-- lock
-- resolve
+When the stream looks stale:
 
-The current game client and generic EVM keeper path do **not** yet model local
-duel cancellation as a first-class path.
+1. check Hyperscapes capture status
+2. check HLS manifest freshness
+3. check the keeper canonical session
+4. only then inspect the browser player
 
-## Local Duel Preconditions
+If the player alone drifted, rebuild the player.
+If render or encode are stale, do not blame the player.
 
-The local Hyperscapes server can be healthy and still remain in `IDLE` forever
-if it has no duel agents available. That is the default state on a fresh local
-database.
+If self-HLS is healthy but Cloudflare is not, the stream is degraded for
+bettors unless an explicit operator failover path has been enabled.
 
-The minimum viable local duel setup is:
-
-1. Start Hyperscapes in local integration mode:
-
-```bash
-bash scripts/run-hyperscapes-pm-local.sh
-```
-
-2. If `/api/streaming/state` stays `IDLE`, create two local agent characters in
-   the sibling Hyperscapes repo:
-
-```bash
-curl http://127.0.0.1:5555/api/characters/db \
-  -X POST \
-  -H 'content-type: application/json' \
-  --data '{"accountId":"local-agent-account-a","name":"Local Agent A","isAgent":true}'
-
-curl http://127.0.0.1:5555/api/characters/db \
-  -X POST \
-  -H 'content-type: application/json' \
-  --data '{"accountId":"local-agent-account-b","name":"Local Agent B","isAgent":true}'
-```
-
-3. Start those agents through the sibling repo's intended embedded-agent route:
+## Required Checks
 
 ```bash
-curl http://127.0.0.1:5555/api/agents/<agent-id>/start -X POST
-curl http://127.0.0.1:5555/api/agents/<agent-id>/start -X POST
+curl -fsSL "$HYPERSCAPES_URL/api/streaming/capture/status" | jq
+curl -fsSL "$HYPERSCAPES_URL/api/streaming/capture/smoke" | jq
+curl -fsSL "$HYPERSCAPES_URL/api/streaming/state" | jq
+curl -fsSL "$KEEPER_URL/api/streaming/state" | jq
 ```
 
-4. Confirm the duel has left `IDLE`:
+Look for:
 
-```bash
-curl http://127.0.0.1:5555/api/streaming/state
-curl http://127.0.0.1:8080/api/streaming/state
-curl http://127.0.0.1:8080/api/arena/prediction-markets/active
-```
+- `canonicalAuthority`
+- `publicReadiness`
+- `rendererHealth`
+- `rendererMetrics`
+- `sourceRuntime`
+- `delivery`
+- `playback.url`
+- `currentSceneUrl`
+- `activeBundle`
 
-If you already have model-provider keys configured in Hyperscapes, model-agent
-spawning can also satisfy this requirement. The important point is simpler: the
-streaming duel scheduler needs at least two available agents, or no duel cycle
-will ever start.
+If DB access is available, inspect the persisted authority record in storage:
 
-## Authority Model
+- `streaming:cloudflare:lifecycle`
+- `streaming:cloudflare:last-webhook`
+- `streaming:cloudflare:last-lifecycle-poll`
+- `streaming:cloudflare:last-playback-probe`
+- `streaming:cloudflare:reconciliation`
 
-There are two separate wallet classes:
+Decision ordering is:
 
-1. Local smoke trader wallets
-   - used by the UI for order placement and claims
-   - private keys stay local under `keys/local-smoke/`
-   - public addresses are tracked in
-     [local-smoke-wallets.json](../release/evidence/local-smoke-wallets.json)
-   - GitHub can fund them through
-     [fund-local-smoke-wallets.yml](../../.github/workflows/fund-local-smoke-wallets.yml)
+1. `source_unready`
+2. `provider_not_live`
+3. `probe_unready`
+4. `authority_stale`
 
-2. Keeper writer wallets
-   - required for deployed testnet market automation
-   - EVM requires existing `REPORTER`, `MARKET_OPERATOR`, and `FINALIZER`
-     authority
-   - new post-deploy EVM writer wallets cannot be granted those roles because
-     the contracts freeze the governance surface after deployment
-   - therefore local duel -> deployed market automation requires the existing
-     writer keys to be available locally, or a separate remote writer service
+## Operator Goal
 
-## Local Run
+Every local and personal-staging integration run should answer:
 
-From the Hyperbet repo root:
+- is the source rendering?
+- is encode keeping up?
+- is delivery fresh?
+- is the player near the live edge?
 
-```bash
-bash scripts/run-hyperscapes-pm-local.sh
-```
-
-Repo location discovery:
-
-- the runner first honors `HYPERSCAPES_ROOT` if you set it explicitly
-- otherwise it auto-detects common sibling locations such as:
-  - `<workspace>/.worktrees/hyperscapes-stream-bet-sync`
-  - `<workspace>/hyperscapes-stream-bet-sync`
-- if your Hyperscapes checkout was moved elsewhere, set `HYPERSCAPES_ROOT=/abs/path/to/hyperscapes-stream-bet-sync`
-
-Defaults:
-
-- Hyperscapes game/server: `http://127.0.0.1:5555`
-- Hyperbet keeper service: `http://127.0.0.1:8080`
-- Hyperbet EVM app: `http://127.0.0.1:4179`
-- EVM keeper chain scope: `bsc,avax`
-- Hyperscapes chain bootstrap: skipped
-- Hyperscapes node env: `development`
-- interactive UI opening: disabled by default
-- local monitor browser mode: headless by default
-- screenshot viewport: `1280x720`
-
-The script:
-
-1. starts the sibling Hyperscapes duel stack with Hyperbet disabled there
-2. when `PM_LOCAL_EVM_MODE=anvil` (the default), starts local anvil-backed BSC
-   and AVAX deployments by invoking the local E2E seeding scripts under
-   `packages/hyperbet-bsc/app/tests/e2e/` and
-   `packages/hyperbet-avax/app/tests/e2e/`
-3. starts the local Hyperbet EVM keeper service against
-   `http://127.0.0.1:5555/api/streaming/state`
-4. starts the local Hyperbet EVM app pointed at the keeper service
-5. keeps UI opening off by default; manual browser launch is opt-in through
-   `OPEN_LOCAL_UI=true`
-6. can start the PM soak follow monitor in the background, which records JSON
-   state plus paired UI screenshots into:
-   - `output/playwright/pm-soak/<timestamp>/`
-   - screenshots are captured headlessly at `1280x720` unless overridden
-
-The default Hyperbet local page is now the normal betting surface:
-
-- `http://127.0.0.1:4179/`
-
-The `?debug=1` query is optional and only enables hidden E2E/operator controls.
-It is not required for the real local betting flow or for headless stream
-validation.
-
-Monitor and harness controls are explicit:
-- `PM_E2E_MONITOR=true|false` toggles `scripts/pm-soak-monitor.ts`
-- `PM_E2E_FULL_SOAK=true|false` toggles `scripts/soak-harness.ts`
-- `PW_HEADLESS=1` keeps Playwright headless
-- `PW_BROWSER_CHANNEL=chrome` is the preferred macOS local setting
-- `PW_WEBGPU_ARGS="--enable-unsafe-webgpu"` keeps the local stream renderer on
-  the headless WebGPU lane
-- `PM_SOAK_SCREENSHOT_WIDTH=1280`
-- `PM_SOAK_SCREENSHOT_HEIGHT=720`
-
-`PM_E2E_MONITOR` defaults to the value of `CAPTURE_LOCAL_UI_FLOW`.
-
-When you enable `PM_E2E_FULL_SOAK=true`, the runner also starts
-`scripts/soak-harness.ts` so the same local session executes an additional
-PM-AMM + perps path against local BSC and active stream cycles.
-
-The PM soak monitor records key incidences automatically:
-
-- initial stack-up
-- duel key change
-- duel phase change
-- first populated `markets[]`
-- market-status changes
-- final snapshot when the runner is stopped
-
-## Optional Local Env
-
-The runner auto-loads these gitignored local env files when present:
-
-- `<repo-root>/.env.stage-a.testnet.local`
-- `<repo-root>/.env.testnet.local`
-- `<repo-root>/packages/hyperbet-evm/keeper/.env`
-- `<repo-root>/packages/hyperbet-evm/app/.env.local`
-
-Relevant writer env names:
-
-- `EVM_REPORTER_PRIVATE_KEY`
-- `EVM_MARKET_OPERATOR_PRIVATE_KEY`
-- `EVM_FINALIZER_PRIVATE_KEY`
-- `TESTNET_REPORTER_PRIVATE_KEY`
-- `TESTNET_MARKET_OPERATOR_PRIVATE_KEY`
-- `TESTNET_FINALIZER_PRIVATE_KEY`
-- fallback: `EVM_KEEPER_PRIVATE_KEY`
-
-When `PM_LOCAL_EVM_MODE=anvil`, the runner overrides those writer envs with the
-default local-anvil admin key used by the local E2E EVM seeding scripts. The
-local anvil ports default to `18545` for BSC and `18546` for AVAX, and the
-runner derives the seeded oracle/CLOB addresses from each chain's local
-`state.json`.
-
-If these are missing, the integrated stack still boots, but local duel events
-cannot open and resolve deployed BSC/AVAX markets. In that case the runner
-defaults `ENABLE_KEEPER_BOT=false` so the read path stays clean.
-
-Useful overrides:
-
-```bash
-ENABLE_KEEPER_BOT=true bash scripts/run-hyperscapes-pm-local.sh
-HYPERSCAPES_SKIP_CHAIN_SETUP=false bash scripts/run-hyperscapes-pm-local.sh
-HYPERSCAPES_DUEL_NODE_ENV=production JWT_SECRET=... bash scripts/run-hyperscapes-pm-local.sh
-OPEN_LOCAL_UI=false bash scripts/run-hyperscapes-pm-local.sh
-CAPTURE_LOCAL_UI_FLOW=false bash scripts/run-hyperscapes-pm-local.sh
-HYPERBET_UI_DEBUG=true bash scripts/run-hyperscapes-pm-local.sh
-PM_E2E_MONITOR=true \
-PM_E2E_FULL_SOAK=true \
-PM_SOAK_LOCAL_DURATION_MIN=25 \
-PM_E2E_HARNESS_DURATION_MIN=25 \
-bash scripts/run-hyperscapes-pm-local.sh
-
-# Full E2E without local monitor/UI capture:
-OPEN_LOCAL_UI=false \
-PM_E2E_MONITOR=false \
-PM_E2E_FULL_SOAK=true \
-PM_E2E_HARNESS_DURATION_MIN=25 \
-bash scripts/run-hyperscapes-pm-local.sh
-```
-
-## Acceptance
-
-Minimum healthy local integrated state:
-
-1. `GET http://127.0.0.1:5555/api/streaming/state` returns live duel state.
-2. `GET http://127.0.0.1:8080/status` returns keeper health.
-3. `GET http://127.0.0.1:8080/api/arena/prediction-markets/active` returns
-   prediction-market state.
-4. `http://127.0.0.1:4179` loads with duel telemetry from Hyperscapes and
-   prediction markets from the keeper service.
-5. With writer authority present locally, a live duel should drive:
-   - market open
-   - market lock
-   - oracle proposal/finalization
-   - claimable resolved state
-
-6. If local writer authority is intentionally absent, the truthful expected
-   state is:
-   - live duel state visible in keeper and UI
-   - empty `markets[]` on `/api/arena/prediction-markets/active`
-   - `ENABLE_KEEPER_BOT=false`
-7. The local evidence bundle contains paired Hyperscapes and Hyperbet UI
-   screenshots plus the backing keeper/game JSON for each captured incidence.
+If those four answers are not separated, the incident data is incomplete.

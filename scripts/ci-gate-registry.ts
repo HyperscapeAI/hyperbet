@@ -15,8 +15,8 @@ import {
   getMissingBettingSolanaReleaseFields,
   resolveBettingEvmDeploymentForChain,
   resolveBettingSolanaDeployment,
-} from "../packages/hyperbet-chain-registry/src/index";
-import { resolveArtifactRoot, writeJsonArtifact } from "./ci-lib";
+} from "../packages/hyperbet-chain-registry/src/index.js";
+import { resolveArtifactRoot, writeJsonArtifact } from "./ci-lib.js";
 
 type RegistrySurface = "pm-core" | "full-product" | "release";
 type RegistryScope = "all-evm-mainnet" | "launch";

@@ -1,274 +1,159 @@
-# Hyperbet Production Deploy (Cloudflare + Railway)
+# Hyperbet Deploy Topology
 
-> **TL;DR:** This is the production and staged topology for the phase-1 launch product. Launch-blocking chains are `Solana`, `BSC`, and `AVAX`; `Base` remains a non-blocking add-chain lane. The deployment topology is in place, but as of 2026-03-25 real staged proof and soak remain blocked because GitHub does not yet have a provisioned `staging` environment or the required `HYPERBET_*_STAGING_*` vars and secrets.
+This document defines the intended deploy model after the multicast broadcast
+refactor.
 
-This is the recommended production topology for the Hyperbet stack in this repo.
+## Product Topology
 
-Operator runbooks are in [docs/runbooks/README.md](runbooks/README.md).
+- Frontends: Cloudflare Pages per chain surface
+- Keepers: Railway per chain surface
+- Duel and broadcast authority: Hyperscapes
+- Canonical betting destination: Cloudflare Stream
+- Emergency fallback destination: self-hosted HLS from the Hyperscapes GPU host
+- Mirror destinations: Twitch, Kick, YouTube, and custom restream outputs
 
-- Primary frontend (`packages/hyperbet-solana/app`): Cloudflare Pages (`hyperbet.win`)
-- Secondary frontends (`packages/hyperbet-bsc/app`, `packages/hyperbet-avax/app`): dedicated Pages project or subdomain per chain
-- Primary betting API (`packages/hyperbet-solana/keeper`): Railway
-- Secondary betting APIs (`packages/hyperbet-bsc/keeper`, `packages/hyperbet-avax/keeper`): dedicated Railway services if you split by chain
-- Live duel/stream source (`packages/server` or Vast duel stack): separate upstream that the keeper polls
-- DDoS/WAF/edge cache: Cloudflare proxy in front of the betting API
-- Contracts/state: Solana + EVM (configured by env vars below, proxied server-side)
+The product operates as one always-on channel. Duel transitions change the
+content carried by the channel, not the identity of the channel itself.
 
-Production rollout is still blocked until canonical launch-chain deployment
-truth exists in the shared chain registry for `Solana`, `BSC`, and `AVAX`,
-staged proof artifacts are captured for the target environment, and the real
-governance and operator wallets are provisioned.
+## Ownership Model
 
-## Staging Rail
+Hyperscapes is the sole writer of stream truth. It authors:
 
-The repo also supports a manual staging rail for Solana, BSC, and AVAX without
-changing the production topology:
+- `channel`
+- `channel.publicReadiness`
+- `channel.destinations`
+- `canonicalDestination`
+- `fallbackDestination`
 
-- staged Solana Pages + staged Solana keeper
-- staged BSC Pages + staged BSC keeper
-- staged AVAX Pages + staged AVAX keeper
-- external staged duel/stream source
+Keepers and frontends consume that contract unchanged. They do not reconstruct
+canonical playback truth from local `STREAM_PLAYBACK_*` env vars, and they do
+not promote fallback rails on their own.
 
-Manual staging deploys use the same workflows as production through
-`workflow_dispatch`:
+Keepers may still poll renderer-health endpoints for additive diagnostics, but
+those probes are not authoritative for canonical playback routing.
 
-- `Deploy Hyperbet Solana Pages`
-- `Deploy Hyperbet Solana Keeper`
-- `Deploy Hyperbet BSC Pages`
-- `Deploy Hyperbet BSC Keeper`
-- `Deploy Hyperbet AVAX Pages`
-- `Deploy Hyperbet AVAX Keeper`
+## Session Contract Hyperbet Consumes
 
-Select `environment=staging` when dispatching the relevant workflow.
+Hyperbet surfaces should read the server-authored v2 session/feed contract:
 
-Current audited GitHub state:
+- `channel.id`
+- `channel.mode`
+- `channel.presentationDelayMs`
+- `channel.canonicalDestinationId`
+- `channel.fallbackDestinationId`
+- `channel.destinations[]`
+- `channel.publicPlaybackUrl`
+- `channel.publicReadiness`
+- `canonicalDestination`
+- `fallbackDestination`
 
-- repo-level deploy and testnet secrets exist
-- no GitHub `staging` environment exists yet
-- no `HYPERBET_*_STAGING_*` vars or secrets are provisioned yet
-- BSC/AVAX auto-deploy flags can now be split per surface with `HYPERBET_*_PAGES_DEPLOY_ENABLED` and `HYPERBET_*_KEEPER_DEPLOY_ENABLED`; the older shared `HYPERBET_*_DEPLOY_ENABLED` vars remain as a fallback
+Legacy `delivery` and `deliveryHealth` fields remain compatibility shims during
+the migration window only. New work should not depend on them.
 
-That means the code path is ready, but staged proof and staged soak remain
-operationally blocked until staging is provisioned.
+## Destination Roles
 
-Required staging vars are:
+- `canonical`
+  - the only destination that controls betting-page playback readiness
+  - currently Cloudflare Stream
+- `fallback`
+  - emergency recovery rail
+  - currently self-hosted HLS on the GPU host
+- `mirror`
+  - promotional and distribution outputs
+  - Twitch, Kick, YouTube, custom
 
-- `HYPERBET_SOLANA_PAGES_STAGING_PROJECT_NAME`
-- `HYPERBET_SOLANA_PAGES_STAGING_URL`
-- `HYPERBET_SOLANA_KEEPER_STAGING_URL`
-- `HYPERBET_SOLANA_KEEPER_STAGING_WS_URL`
-- `HYPERBET_SOLANA_RAILWAY_STAGING_PROJECT_ID`
-- `HYPERBET_SOLANA_RAILWAY_STAGING_ENVIRONMENT_ID`
-- `HYPERBET_SOLANA_RAILWAY_STAGING_KEEPER_SERVICE_ID`
-- `HYPERBET_BSC_PAGES_STAGING_PROJECT_NAME`
-- `HYPERBET_BSC_PAGES_STAGING_URL`
-- `HYPERBET_BSC_KEEPER_STAGING_URL`
-- `HYPERBET_BSC_KEEPER_STAGING_WS_URL`
-- `HYPERBET_BSC_RAILWAY_STAGING_PROJECT_ID`
-- `HYPERBET_BSC_RAILWAY_STAGING_ENVIRONMENT_ID`
-- `HYPERBET_BSC_RAILWAY_STAGING_KEEPER_SERVICE_ID`
-- `HYPERBET_AVAX_PAGES_STAGING_PROJECT_NAME`
-- `HYPERBET_AVAX_PAGES_STAGING_URL`
-- `HYPERBET_AVAX_KEEPER_STAGING_URL`
-- `HYPERBET_AVAX_KEEPER_STAGING_WS_URL`
-- `HYPERBET_AVAX_RAILWAY_STAGING_PROJECT_ID`
-- `HYPERBET_AVAX_RAILWAY_STAGING_ENVIRONMENT_ID`
-- `HYPERBET_AVAX_RAILWAY_STAGING_KEEPER_SERVICE_ID`
-- `HYPERBET_AVAX_STAGING_CHAIN_ID`
-- `HYPERBET_AVAX_STAGING_GOLD_CLOB_ADDRESS`
+Mirror failures must not change canonical betting readiness. A broken Twitch or
+Kick output is an isolated mirror problem, not a betting-page routing event.
 
-Required staged proof vars/secrets used by the launch-scope proof rail:
+## Env Policy
 
-- `HYPERBET_STAGED_PROOF_DUEL_ID`
-- `HYPERBET_STAGED_PROOF_DUEL_KEY`
-- `HYPERBET_SOLANA_STAGING_CLUSTER`
-- `HYPERBET_SOLANA_STAGING_RPC_URL`
-- `HYPERBET_SOLANA_STAGING_GOLD_CLOB_PROGRAM_ID`
-- `HYPERBET_SOLANA_STAGING_GOLD_AMM_PROGRAM_ID`
-- `HYPERBET_SOLANA_STAGING_GOLD_PERPS_PROGRAM_ID`
-- `HYPERBET_SOLANA_STAGING_STREAM_PUBLISH_KEY`
-- `HYPERBET_SOLANA_STAGING_ORACLE_AUTHORITY_KEYPAIR`
-- `HYPERBET_SOLANA_STAGING_CANARY_KEYPAIR`
-- `HYPERBET_BSC_STAGING_RPC_URL`
-- `HYPERBET_BSC_STAGING_REPORTER_PRIVATE_KEY`
-- `HYPERBET_BSC_STAGING_CANARY_PRIVATE_KEY`
-- `HYPERBET_BSC_STAGING_ADMIN_PRIVATE_KEY`
-- `HYPERBET_BSC_STAGING_MARKET_OPERATOR_PRIVATE_KEY`
-- `HYPERBET_BSC_STAGING_DUEL_ORACLE_ADDRESS`
-- `HYPERBET_BSC_STAGING_GOLD_CLOB_ADDRESS`
-- `HYPERBET_BSC_STAGING_GOLD_AMM_ROUTER_ADDRESS`
-- `HYPERBET_BSC_STAGING_MUSD_TOKEN_ADDRESS`
-- `HYPERBET_BSC_STAGING_GOLD_TOKEN_ADDRESS`
-- `HYPERBET_BSC_STAGING_SKILL_ORACLE_ADDRESS`
-- `HYPERBET_BSC_STAGING_PERP_ENGINE_ADDRESS`
-- `HYPERBET_BSC_STAGING_STREAM_PUBLISH_KEY`
-- `HYPERBET_AVAX_STAGING_RPC_URL`
-- `HYPERBET_AVAX_STAGING_REPORTER_PRIVATE_KEY`
-- `HYPERBET_AVAX_STAGING_CANARY_PRIVATE_KEY`
-- `HYPERBET_AVAX_STAGING_ADMIN_PRIVATE_KEY`
-- `HYPERBET_AVAX_STAGING_MARKET_OPERATOR_PRIVATE_KEY`
-- `HYPERBET_AVAX_STAGING_DUEL_ORACLE_ADDRESS`
-- `HYPERBET_AVAX_STAGING_GOLD_CLOB_ADDRESS`
-- `HYPERBET_AVAX_STAGING_GOLD_AMM_ROUTER_ADDRESS`
-- `HYPERBET_AVAX_STAGING_MUSD_TOKEN_ADDRESS`
-- `HYPERBET_AVAX_STAGING_GOLD_TOKEN_ADDRESS`
-- `HYPERBET_AVAX_STAGING_SKILL_ORACLE_ADDRESS`
-- `HYPERBET_AVAX_STAGING_PERP_ENGINE_ADDRESS`
-- `HYPERBET_AVAX_STAGING_STREAM_PUBLISH_KEY`
-- `HYPERBET_AVAX_RAILWAY_STAGING_PROJECT_ID`
-- `HYPERBET_AVAX_RAILWAY_STAGING_ENVIRONMENT_ID`
-- `HYPERBET_AVAX_RAILWAY_STAGING_KEEPER_SERVICE_ID`
+These env families belong to the Hyperscapes source server and bridge runtime:
 
-AVAX rollout remains blocked until canonical deployment truth exists in the shared chain registry and the effective AVAX wallet/signer set is in place. The staging/prod rail is present so proof and release packaging can use one consistent contract once those addresses are committed.
+- `STREAM_DELIVERY_MODE`
+- `STREAM_DELIVERY_PROVIDER`
+- `STREAM_INGEST_*`
+- `STREAM_PLAYBACK_*`
 
-## 1) Deploy the keeper to Railway
+They exist to bootstrap the encoder and destinations. They are not a source of
+canonical playback truth for keepers or frontends.
 
-From repo root, deploy the keeper service path:
+Keepers may use:
 
-```bash
-railway up packages/hyperbet-solana --path-as-root -s gold-betting-keeper
-```
+- `STREAM_RENDERER_HEALTH_URL`
+- `STREAM_RENDERER_HEALTH_BEARER_TOKEN`
 
-Use `packages/hyperbet-solana/railway.json`.
+Only for renderer diagnostics and stale-source detection.
 
-Set these Railway variables at minimum:
+## Frontend Playback Policy
 
-- `NODE_ENV=production`
-- `PORT=8080` (or let Railway inject its port if you proxy through the service domain)
-- `STREAM_STATE_SOURCE_URL=https://your-stream-source.example/api/streaming/state`
-- `STREAM_STATE_SOURCE_BEARER_TOKEN=...` if the upstream streaming state is protected
-- `ARENA_EXTERNAL_BET_WRITE_KEY=...`
-- `STREAM_PUBLISH_KEY=...` if you use `/api/streaming/state/publish`
-- `SOLANA_CLUSTER=mainnet-beta`
-- `SOLANA_RPC_URL=...`
-- `BSC_RPC_URL=...`
-- `BSC_GOLD_CLOB_ADDRESS=...`
-- `BASE_RPC_URL=...`
-- `BASE_GOLD_CLOB_ADDRESS=...`
-- `AVAX_RPC_URL=...` for AVAX keeper/runtime support after canonical registry values exist
-- `BIRDEYE_API_KEY=...` if token-price proxying is enabled
+All betting surfaces must follow the same routing rules:
 
-Persistence:
+1. Mount canonical playback only when `channel.publicReadiness.ready === true`.
+2. Treat missing canonical readiness as not ready.
+3. Do not auto-fail over in the browser from canonical to fallback unless the
+   server explicitly permits or promotes fallback.
+4. Keep browser/player reconnect state diagnostic-only relative to bet truth.
+5. Never let mirror health change the betting page.
 
-- The keeper defaults to a local SQLite file (`KEEPER_DB_PATH=./keeper.sqlite`).
-- On Railway that file is ephemeral unless you attach a persistent volume or move the keeper state to an external database.
-- Do not treat points history, referrals, or oracle history as durable unless persistence is configured explicitly.
+Low-latency player tuning can remain consistent across surfaces, but those
+player settings do not decide authoritative stream truth.
 
-Notes:
+## Rollout Order
 
-- The keeper serves the Pages app's read/write betting APIs. It is not the same process as the Hyperscape duel server.
-- The keeper also proxies Solana and EVM JSON-RPC for the public app. Keep provider-keyed RPC URLs on Railway, not in Cloudflare Pages build vars.
-- The keeper now keeps a short in-memory cache for read-only RPC and Birdeye proxy traffic. Tune it with `RPC_PROXY_CACHE_MAX_ENTRIES`, `RPC_PROXY_CACHE_MAX_PAYLOAD_BYTES`, and `BIRDEYE_PRICE_CACHE_TTL_MS` if needed.
-- The keeper will return boot fallback duel data until `STREAM_STATE_SOURCE_URL` is set and the upstream duel server responds.
-- The autonomous keeper bot also needs a funded signer wallet on Solana to create/resolve markets in production.
+Production and staging rollouts must respect the control-plane ownership model:
 
-## 2) Deploy the live duel server / stream source
+1. Deploy Hyperscapes server schema v2 with both new and legacy fields.
+2. Deploy keepers so they consume the server-authored `channel` contract and
+   stop reconstructing delivery truth from env.
+3. Deploy Pages frontends so they prefer `channel.publicReadiness` and
+   canonical destination state.
+4. Remove remaining legacy `delivery`/`deliveryHealth` consumers only after all
+   surfaces are on v2.
 
-This can be the Railway `hyperscape` service or the Vast.ai duel stack. It must expose:
+Do not roll frontends or keepers onto a mixed contract that assumes v2 fields
+before the server emits them.
 
-- `/api/streaming/state`
-- `/api/streaming/duel-context`
-- `/api/streaming/rtmp/status`
-- `/live/stream.m3u8`
+## Verification Gates
 
-If you run the Vast.ai stack, verify it before pointing the keeper at it:
+Before promoting a rollout:
 
-```bash
-./scripts/check-streaming-status.sh http://127.0.0.1:5555
-```
+1. The Hyperscapes feed emits `channel`, `publicReadiness`,
+   `canonicalDestination`, and `fallbackDestination`.
+2. The canonical destination is ready only when both transport health and
+   public playback readiness are good.
+3. A mirror failure leaves canonical betting readiness unchanged.
+4. Duel transitions do not restart the channel identity or force player remount
+   churn.
+5. The betting page never shows browser-local buffering as market truth.
+6. Soak tests show no sustained rebuild loop and no canonical/fallback drift.
 
-## 3) Put the betting API behind Cloudflare
+## Operator Runbooks
 
-1. Create `api.yourdomain.com` in Cloudflare DNS and point it to the keeper Railway target.
-2. Enable Cloudflare proxy (orange cloud) for `api.yourdomain.com`.
-3. Add WAF rate-limit rules:
-- `POST /api/arena/bet/record-external`
-- `POST /api/arena/deposit/ingest`
-- `/api/arena/points/*`
-4. Keep the direct Railway URL private if you introduce a public API domain.
+### Canonical Destination Down
 
-## 4) Deploy frontend to Cloudflare Pages
+- Expect `channel.publicReadiness.ready === false`.
+- Expect a canonical-destination-specific reason such as `manifest_missing`,
+  `manifest_stale`, or `destination_disconnected`.
+- Keepers and frontends should surface the unavailable state; they should not
+  synthesize readiness from a leftover playback URL.
+- Restore the canonical destination at the source server or bridge layer.
 
-Project root:
+### Mirror Destination Down
 
-- `packages/hyperbet-solana/app`
+- Expect only that mirror destination entry to degrade.
+- Do not treat this as a betting outage if canonical readiness remains true.
+- Restore the affected mirror without touching canonical playback routing.
 
-Build/output:
+### Fallback Manifest Stale
 
-- Build command: `bun install && bun run build --mode mainnet-beta`
-- Output directory: `dist`
+- Expect the fallback destination entry to degrade independently.
+- This is important operationally, but it does not demote canonical betting
+  playback while canonical readiness is still true.
+- Repair the fallback rail so emergency recovery remains available.
 
-Frontend env vars (Cloudflare Pages):
+### Source Healthy But Canonical Public Playback Not Ready
 
-- `VITE_GAME_API_URL=https://api.yourdomain.com`
-- `VITE_GAME_WS_URL=wss://api.yourdomain.com/ws` if the keeper exposes websocket features you use
-- `VITE_SOLANA_CLUSTER=mainnet-beta` (or testnet/devnet)
-- `VITE_USE_GAME_RPC_PROXY=true`
-- `VITE_USE_GAME_EVM_RPC_PROXY=true`
-- `VITE_BSC_GOLD_CLOB_ADDRESS` / `VITE_BASE_GOLD_CLOB_ADDRESS`
-- `VITE_BSC_GOLD_TOKEN_ADDRESS` / `VITE_BASE_GOLD_TOKEN_ADDRESS`
-- `VITE_STREAM_SOURCES=https://your-hls-or-embed-source,...`
-
-Do not set provider-keyed values in any `VITE_*RPC_URL` variable for production builds. The betting app build fails intentionally if a public RPC URL looks like a Helius / Alchemy / Infura / QuickNode / dRPC secret endpoint.
-
-Do not treat `packages/hyperbet-avax/deployments/contracts.json` as production deployment truth. The shared chain registry is the canonical production source, and AVAX rollout must stay blocked until that registry is populated with real addresses.
-
-Cloudflare Pages headers/SPA rules are already added in:
-
-- `packages/hyperbet-solana/app/public/_headers`
-- `packages/hyperbet-solana/app/public/_redirects`
-
-Deployment metadata:
-
-- `build-info.json` is emitted into `dist/` on every build and should be served with `Cache-Control: no-store`.
-## 5) Verify production
-
-Health:
-
-- `https://api.yourdomain.com/status`
-- `https://bet.yourdomain.com`
-- `https://api.yourdomain.com/api/streaming/state`
-- `https://api.yourdomain.com/api/streaming/duel-context`
-- `https://api.yourdomain.com/api/perps/markets`
-- `https://api.yourdomain.com/api/proxy/evm/rpc?chain=bsc` (POST JSON-RPC smoke test)
-- `https://bet.yourdomain.com/build-info.json`
-
-Repo-backed checks from repo root:
-
-```bash
-./scripts/check-streaming-status.sh https://your-stream-source.example
-bun run --cwd packages/hyperbet-solana build:mainnet
-```
-
-## 6) Run staged live proof
-
-Use the manual `Staged Live Proof` workflow or the repo wrapper:
-
-```bash
-bun run staged:proof -- --mode=read-only --target=all
-bun run staged:proof -- --mode=canary-write --target=solana
-bun run staged:proof -- --mode=canary-write --target=bsc
-bun run staged:proof -- --mode=canary-write --target=avax
-```
-
-The proof wrapper captures:
-
-- Pages `build-info.json`
-- keeper `/status`
-- `/api/arena/prediction-markets/active`
-- `/api/keeper/bot-health`
-- stream-state and duel-context payloads
-- Solana and BSC proxy proof
-- Solana, BSC, and AVAX canary tx hashes/signatures when `mode=canary-write`
-- `verify:chains` output
-- AVAX staging env-audit output
-
-This is a manual operator proof rail. It should not be treated as complete
-until a real staged run passes end to end and the artifacts are reviewed.
-
-## 7) Security notes
-
-- Do not expose `ARENA_EXTERNAL_BET_WRITE_KEY` in public frontend env vars.
-- Do not ship provider-keyed RPC URLs in public frontend env vars. Keep them on Railway and let the keeper proxy them.
-- Rotate all secrets before production if they were ever committed/shared.
-- Keep `DISABLE_RATE_LIMIT` unset in production.
+- Expect renderer/capture health to stay green while `publicReadiness` is false.
+- Treat this as a distribution-plane problem, not a renderer problem.
+- Inspect canonical destination transport health and the public playback probe
+  before touching duel or renderer systems.

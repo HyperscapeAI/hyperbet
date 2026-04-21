@@ -212,7 +212,6 @@ describe("prediction market lifecycle helpers", () => {
       ),
     ).toBe(true);
   });
-
   it("selects the lifecycle record for a target chain", () => {
     const payload = parsePredictionMarketsResponse({
       duel: {

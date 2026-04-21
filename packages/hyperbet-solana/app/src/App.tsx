@@ -42,6 +42,7 @@ import {
 } from "@hyperbet/ui/lib/streamSession";
 import { useAppConnection, useAppWallet, useAppWalletModal } from "./lib/appWallet";
 import {
+  DEFAULT_SYNC_TOLERANCE_MS,
   StreamPlayer,
   type StreamPlayerStatus,
 } from "@hyperbet/ui/components/StreamPlayer";
@@ -1837,7 +1838,7 @@ export function App() {
                         streamUrl={mountedStreamUrl}
                         deliveryMode={streamDeliveryMode}
                         presentationDelayMs={canonicalPresentationDelayMs}
-                        syncToleranceMs={1_500}
+                        syncToleranceMs={DEFAULT_SYNC_TOLERANCE_MS}
                         showDiagnostics={isE2eDebugMode}
                         muted={hmMuted}
                         autoPlay={true}

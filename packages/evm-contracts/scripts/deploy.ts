@@ -18,6 +18,15 @@ function isValidAddress(value: string): boolean {
   return ethers.isAddress(value);
 }
 
+function resolveDisputeWindowSeconds(): number {
+  const raw = process.env.DISPUTE_WINDOW_SECONDS?.trim() || "3600";
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isInteger(parsed) || parsed < 60) {
+    throw new Error(`DISPUTE_WINDOW_SECONDS must be an integer >= 60, got: ${raw}`);
+  }
+  return parsed;
+}
+
 function resolveManifestPaths(): string[] {
   return [
     path.resolve(
@@ -150,6 +159,7 @@ async function main() {
   const challengerAddress =
     process.env.CHALLENGER_ADDRESS?.trim() || multisigAddress;
   const goldTokenAddress = process.env.GOLD_TOKEN_ADDRESS?.trim() || "";
+  const disputeWindowSeconds = resolveDisputeWindowSeconds();
 
   if (!isValidAddress(adminAddress)) {
     throw new Error(`Invalid TIMELOCK_ADDRESS/ADMIN_ADDRESS: ${adminAddress}`);
@@ -210,7 +220,7 @@ async function main() {
     finalizerAddress,
     challengerAddress,
     emergencyCouncilAddress,
-    3600,
+    disputeWindowSeconds,
   );
   await duelOracle.waitForDeployment();
 
@@ -236,6 +246,7 @@ async function main() {
   console.log("- Reporter:", reporterAddress);
   console.log("- Finalizer:", finalizerAddress);
   console.log("- Challenger:", challengerAddress);
+  console.log("- Dispute window seconds:", disputeWindowSeconds);
   console.log("- Treasury:", treasury);
   console.log("- Market Maker:", marketMaker);
   if (goldTokenAddress) {

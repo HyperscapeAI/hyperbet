@@ -1,18 +1,6 @@
-name: Deploy Hyperbet BSC Pages
+name: Rollback Legacy Hyperbet BSC Pages
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - "packages/hyperbet-bsc/app/**"
-      - "packages/hyperbet-ui/**"
-      - "packages/hyperbet-chain-registry/**"
-      - "scripts/**"
-      - ".github/actions/setup-hyperbet/**"
-      - ".github/workflows/deploy-bsc-pages.yml"
-      - "docs/hyperbet-production-deploy.md"
-      - "package.json"
-      - "bun.lock"
   workflow_dispatch:
     inputs:
       environment:
@@ -24,6 +12,11 @@ on:
           - production
           - staging
           - preview
+      rollback_only:
+        description: "Confirm this legacy workflow is being used for rollback only"
+        required: true
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -34,7 +27,7 @@ concurrency:
 
 jobs:
   deploy:
-    if: ${{ github.event_name == 'workflow_dispatch' || vars.HYPERBET_BSC_PAGES_DEPLOY_ENABLED == 'true' || (vars.HYPERBET_BSC_PAGES_DEPLOY_ENABLED == '' && vars.HYPERBET_BSC_DEPLOY_ENABLED == 'true') }}
+    if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.rollback_only == 'true' }}
     name: Deploy hyperbet-bsc pages
     runs-on: ubuntu-latest
     environment: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'staging' && 'staging' || 'production' }}
@@ -120,7 +113,7 @@ jobs:
           bash scripts/ci-install-verified.sh root hyperbet-bsc-app
 
       - name: Audit deploy env
-        run: node --import tsx scripts/ci-env-audit.ts --target=pages:bsc --deployment=${DEPLOY_TARGET}
+        run: node --import tsx scripts/ci-env-audit.ts --target=pages:legacy --deployment=${DEPLOY_TARGET}
         env:
           VITE_GAME_API_URL: ${{ env.HYPERBET_API_URL }}
           VITE_GAME_WS_URL: ${{ env.HYPERBET_WS_URL }}
@@ -164,7 +157,7 @@ jobs:
           if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.environment }}" = "preview" ]; then
             BRANCH="preview-${{ github.run_id }}"
           elif [ "${DEPLOY_TARGET}" = "staging" ]; then
-            BRANCH="staging"
+            BRANCH="enoomian/staging"
           else
             BRANCH="main"
           fi

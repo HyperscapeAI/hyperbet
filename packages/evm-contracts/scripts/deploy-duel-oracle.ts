@@ -42,6 +42,15 @@ function requireConfiguredAddress(name: string): string {
   return candidate;
 }
 
+function resolveDisputeWindowSeconds(): number {
+  const raw = process.env.DISPUTE_WINDOW_SECONDS?.trim() || "3600";
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isInteger(parsed) || parsed < 60) {
+    throw new Error(`DISPUTE_WINDOW_SECONDS must be an integer >= 60, got: ${raw}`);
+  }
+  return parsed;
+}
+
 async function main() {
   const [deployer] = await ethers.getSigners();
   const deployedNetwork = await ethers.provider.getNetwork();
@@ -61,6 +70,7 @@ async function main() {
   const reporter = requireAddress("ORACLE_REPORTER_ADDRESS", deployer.address);
   const finalizer = requireConfiguredAddress("ORACLE_FINALIZER_ADDRESS");
   const challenger = requireConfiguredAddress("ORACLE_CHALLENGER_ADDRESS");
+  const disputeWindowSeconds = resolveDisputeWindowSeconds();
 
   console.log("Deploying DuelOutcomeOracle with account:", deployer.address);
   console.log("Network:", network.name, `(chainId=${chainId})`);
@@ -70,6 +80,7 @@ async function main() {
   console.log("Reporter:", reporter);
   console.log("Finalizer:", finalizer);
   console.log("Challenger:", challenger);
+  console.log("Dispute window seconds:", disputeWindowSeconds);
 
   const DuelOutcomeOracle =
     await ethers.getContractFactory("DuelOutcomeOracle");
@@ -79,7 +90,7 @@ async function main() {
     finalizer,
     challenger,
     emergencyCouncil,
-    3600,
+    disputeWindowSeconds,
   );
   await oracle.waitForDeployment();
 
@@ -100,6 +111,7 @@ async function main() {
     reporterAddress: reporter,
     finalizerAddress: finalizer,
     challengerAddress: challenger,
+    disputeWindowSeconds,
     deploymentTxHash,
     deployedAt: new Date().toISOString(),
   });

@@ -1,5 +1,7 @@
 # Testnet Operations Ledger
 
+> **Historical snapshot:** This ledger preserves the Stage-A wallet, provisioning, and funding record for the branch-era non-mainnet work. Current open-work ownership lives in [tracking-document-map.md](tracking-document-map.md) and [github-project-production-backlog.md](github-project-production-backlog.md). Use this file as evidence and provisioning history, not as the canonical blocker list.
+
 > **TL;DR:** This is the current Stage-A non-mainnet ledger for `Solana devnet`, `BSC testnet`, and `AVAX Fuji`. Repo-level deploy/testnet secrets exist, but GitHub staged proof and staged soak are still blocked because there is no `staging` environment and no `HYPERBET_*_STAGING_*` vars or secrets provisioned yet. Local Stage-A is also still waiting on shared BSC and AVAX token-address inputs for AMM and perps rehearsal.
 
 Single source of truth for testnet wallet generation, funding, secret storage,

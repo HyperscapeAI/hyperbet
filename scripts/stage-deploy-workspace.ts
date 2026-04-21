@@ -3,17 +3,24 @@ import { execFileSync } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
 
-type KeeperTarget = "keeper:bsc" | "keeper:avax" | "keeper:solana";
+type KeeperTarget = "keeper:bsc" | "keeper:avax" | "keeper:solana" | "keeper:shared";
 
 const rootDir = path.resolve(import.meta.dirname, "..");
 
 function parseTarget(argv: string[]): KeeperTarget {
   const targetArg = argv.find((arg) => arg.startsWith("--target="));
   const target = targetArg?.slice("--target=".length) as KeeperTarget | undefined;
-  if (target === "keeper:bsc" || target === "keeper:avax" || target === "keeper:solana") {
+  if (
+    target === "keeper:bsc" ||
+    target === "keeper:avax" ||
+    target === "keeper:solana" ||
+    target === "keeper:shared"
+  ) {
     return target;
   }
-  throw new Error("usage: node --import tsx scripts/stage-deploy-workspace.ts --target=keeper:bsc|keeper:avax|keeper:solana");
+  throw new Error(
+    "usage: node --import tsx scripts/stage-deploy-workspace.ts --target=keeper:bsc|keeper:avax|keeper:solana|keeper:shared",
+  );
 }
 
 function ensureCleanDirectory(dir: string) {
@@ -41,6 +48,14 @@ function copyPackageDir(relativeDir: string, destinationRoot: string) {
   });
 }
 
+function copyPackageDirIfPresent(relativeDir: string, destinationRoot: string) {
+  const sourceDir = path.join(rootDir, relativeDir);
+  if (!existsSync(sourceDir)) {
+    return;
+  }
+  copyPackageDir(relativeDir, destinationRoot);
+}
+
 function buildWorkspaceManifest(workspaces: string[]) {
   const rootPackagePath = path.join(rootDir, "package.json");
   const rootPackage = JSON.parse(readFileSync(rootPackagePath, "utf8"));
@@ -63,6 +78,7 @@ function stageForTarget(target: KeeperTarget) {
     "keeper:bsc": path.join(rootDir, "packages/hyperbet-bsc/keeper"),
     "keeper:avax": path.join(rootDir, "packages/hyperbet-avax/keeper"),
     "keeper:solana": path.join(rootDir, "packages/hyperbet-solana/keeper"),
+    "keeper:shared": path.join(rootDir, "packages/hyperbet-evm/keeper"),
   };
   const sharedPackagesByTarget: Record<KeeperTarget, string[]> = {
     "keeper:bsc": [
@@ -80,17 +96,27 @@ function stageForTarget(target: KeeperTarget) {
       "packages/hyperbet-mm-core",
       "packages/market-maker-bot",
     ],
+    "keeper:shared": [
+      "packages/hyperbet-chain-registry",
+      "packages/hyperbet-mm-core",
+      "packages/hyperbet-evm-keeper-core",
+    ],
   };
   const packageRootByTarget: Record<KeeperTarget, string> = {
     "keeper:bsc": "packages/hyperbet-bsc",
     "keeper:avax": "packages/hyperbet-avax",
     "keeper:solana": "packages/hyperbet-solana",
+    "keeper:shared": "packages/hyperbet-evm",
   };
 
   const keeperDir = keeperDirByTarget[target];
   const workspacePackagesRoot = path.join(keeperDir, "workspace-packages");
   ensureCleanDirectory(workspacePackagesRoot);
   stagePackageRootManifest(packageRootByTarget[target], workspacePackagesRoot);
+  copyPackageDirIfPresent(
+    `${packageRootByTarget[target]}/deployments`,
+    workspacePackagesRoot,
+  );
   for (const packageDir of sharedPackagesByTarget[target]) {
     copyPackageDir(packageDir, workspacePackagesRoot);
   }

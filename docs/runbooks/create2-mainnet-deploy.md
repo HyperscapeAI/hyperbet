@@ -1,10 +1,17 @@
 # CREATE2 Deterministic Deployment Runbook
 
-> **TL;DR:** This runbook covers the EVM portion of the phase-1 launch train. The launch-blocking EVM chains are `BSC` and `AVAX`. `Base` remains an optional add-chain rehearsal lane and is not required for phase-1 signoff. PM CREATE2 deployment must be followed by AMM and perps deployment plus full-product verification before any registry values are promoted.
+> **TL;DR:** This runbook covers the EVM portion of the phase-1 launch train. The active production-readiness EVM chain is `BSC`. `AVAX` remains a preserved but isolated follow-on lane, and `Base` remains an optional add-chain rehearsal lane. PM CREATE2 deployment must be followed by AMM and perps deployment plus full-product verification before any registry values are promoted.
 
 > **Factory:** Arachnid Deterministic Deployment Proxy (`0x4e59b44847b379578588920cA78FbF26c0B4956C`)
 
 ## Preflight
+
+Current scope note:
+
+- blocking EVM path: `BSC`
+- preserved but isolated follow-on lane: `AVAX`
+- when this runbook mentions AVAX below, treat it as preserved operational
+  guidance, not a blocker for the current signoff decision
 
 1. Compute deterministic PM addresses:
 
@@ -111,3 +118,7 @@ After final mainnet verification succeeds:
 2. Archive deployment receipts and verify outputs.
 3. Capture staged proof and soak evidence against the promoted environment.
 4. Record governance transfer and freeze transaction hashes.
+
+For the current production-readiness path, only the BSC outputs above are
+blocking. AVAX outputs remain preserved follow-on artifacts unless the lane is
+explicitly reactivated.

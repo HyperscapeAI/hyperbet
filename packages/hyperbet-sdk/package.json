@@ -30,6 +30,7 @@
     "ethers": "^6.13.4"
   },
   "devDependencies": {
+    "@biomejs/biome": "^2.4.11",
     "@types/bn.js": "^5.2.0",
     "@types/node": "^22.9.0",
     "tsup": "^8.3.5",

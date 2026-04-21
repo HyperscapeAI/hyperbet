@@ -96,9 +96,9 @@ function resolveGovernanceArgs(): Create2Prediction["constructorArgs"] {
   if (!ethers.isAddress(pauser)) {
     throw new Error(`Invalid PAUSER_ADDRESS: ${pauser}`);
   }
-  if (disputeWindowSeconds <= 0) {
+  if (!Number.isInteger(disputeWindowSeconds) || disputeWindowSeconds < 60) {
     throw new Error(
-      `DISPUTE_WINDOW_SECONDS must be > 0, got: ${disputeWindowSeconds}`,
+      `DISPUTE_WINDOW_SECONDS must be an integer >= 60, got: ${disputeWindowSeconds}`,
     );
   }
 
@@ -210,7 +210,9 @@ async function main() {
   console.log("same constructor arguments and deployer factory.");
 }
 
-main().catch((error) => {
-  console.error(error);
-  process.exitCode = 1;
-});
+if (require.main === module) {
+  main().catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
+  });
+}
