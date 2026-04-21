@@ -28,13 +28,32 @@ import {
   captureInviteCodeFromLocation,
   getStoredInviteCode,
 } from "@hyperbet/ui/lib/invite";
+import { ENABLE_STREAM_SOURCE_OVERRIDE } from "@hyperbet/ui/lib/config";
 import {
   normalizePredictionMarketDuelKeyHex,
+  selectPredictionMarketLifecycleRecord,
   usePredictionMarketLifecycle,
+  type PredictionMarketsResponse,
 } from "@hyperbet/ui/lib/predictionMarkets";
+import {
+  describeCanonicalRendererDegradedReason,
+  resolveCanonicalPlaybackDeliveryMode,
+  selectBetSurfaceStreamUrl,
+} from "@hyperbet/ui/lib/streamSession";
 import { useAppConnection, useAppWallet, useAppWalletModal } from "./lib/appWallet";
-import { StreamPlayer } from "@hyperbet/ui/components/StreamPlayer";
+import {
+  StreamPlayer,
+  type StreamPlayerStatus,
+} from "@hyperbet/ui/components/StreamPlayer";
 import { PointsDisplay } from "@hyperbet/ui/components/PointsDisplay";
+import { useCanonicalStreamSession } from "@hyperbet/ui/spectator/useCanonicalStreamSession";
+import {
+  logViewerAlignmentDivergence,
+  projectCanonicalSessionToSourceTimeline,
+  projectDuelContextToSourceTimeline,
+  resolveAlignedSessionPhase,
+  useViewerAlignedBetState,
+} from "@hyperbet/ui/lib/viewerAlignment";
 import type { SolanaClobMarketSnapshot } from "@hyperbet/ui/components/SolanaClobPanel";
 import { getDuelStateDecoder } from "./generated/fight-oracle/accounts";
 import {
@@ -49,6 +68,7 @@ import { FIGHT_ORACLE_PROGRAM_ID } from "./lib/programIds";
 import { useStreamingState } from "./spectator/useStreamingState";
 import { useDuelContext } from "@hyperbet/ui/spectator/useDuelContext";
 import type { LeaderboardEntry } from "./spectator/types";
+import { useMeasuredContentBox } from "@hyperbet/ui/lib/useMeasuredContentBox";
 import { useResizePanel, useIsMobile } from "@hyperbet/ui/lib/useResizePanel";
 import { ResizeHandle } from "@hyperbet/ui/components/ResizeHandle";
 import {
@@ -57,7 +77,6 @@ import {
   XAxis,
   YAxis,
   Tooltip,
-  ResponsiveContainer,
   ReferenceLine,
 } from "recharts";
 
@@ -745,36 +764,161 @@ export function App() {
   >("leaderboard");
   const appRootRef = useRef<HTMLDivElement | null>(null);
   const bettingDockInnerRef = useRef<HTMLDivElement | null>(null);
+  const chartContainerRef = useRef<HTMLDivElement | null>(null);
+  const chartSize = useMeasuredContentBox(chartContainerRef, !isMobile, 2);
 
   const { state: streamingState } = useStreamingState();
+  const {
+    session: canonicalStreamSession,
+    playback: _canonicalPlayback,
+    rawSession: rawCanonicalStreamSession,
+    rendererHealth: canonicalRendererHealth,
+    deliveryHealth: canonicalDeliveryHealth,
+    publicReadiness: canonicalPublicReadiness,
+    authorityHealth: canonicalAuthorityHealth,
+    presentationDelayMs: canonicalPresentationDelayMs,
+  } = useCanonicalStreamSession();
   const { context: duelContext } = useDuelContext();
-  const liveCycle = streamingState?.cycle ?? null;
-  const { market: lifecycleMarket } = usePredictionMarketLifecycle("solana");
+  const freshestCycle = streamingState?.cycle ?? null;
+  const { data: lifecyclePayload, market: lifecycleMarket } =
+    usePredictionMarketLifecycle("solana");
   const runtimeE2eOverride = useMemo(
     () =>
       isE2eMode
         ? readSolanaE2eRuntimeOverride()
-        : {
+      : {
             duelKey: null,
             duelId: null,
             marketRef: null,
           },
     [isE2eMode],
   );
+  const allowStreamSourceOverride =
+    ENABLE_STREAM_SOURCE_OVERRIDE || isE2eDebugMode;
   const streamSources = STREAM_URLS;
-  const activeStreamUrl = streamSources[streamSourceIndex] ?? "";
+  const lifecycleDuelKey = normalizePredictionMarketDuelKeyHex(
+    lifecycleMarket?.duelKey ?? null,
+  );
+  const { activeStreamUrl, preloadStreamUrl } = selectBetSurfaceStreamUrl({
+    allowFallbackOverride: allowStreamSourceOverride,
+    authorityHealth: canonicalAuthorityHealth,
+    fallbackStreamIndex: streamSourceIndex,
+    fallbackStreamSources: streamSources,
+    lifecycleDuelId: lifecycleMarket?.duelId ?? null,
+    lifecycleDuelKey,
+    rendererReady: canonicalRendererHealth?.ready ?? null,
+    session: canonicalStreamSession,
+  });
+  const mountedStreamUrl = activeStreamUrl || preloadStreamUrl;
+  const streamDeliveryMode = resolveCanonicalPlaybackDeliveryMode(
+    canonicalStreamSession,
+  );
+  const [streamPlayerStatus, setStreamPlayerStatus] =
+    useState<StreamPlayerStatus | null>(null);
+
+  // Viewer-alignment shadow composition. When
+  // `VITE_ENABLE_VIEWER_ALIGNED_BET_STATE` is off the inner hook is a
+  // passthrough (no timers, no buffer pushes) and the panel sees the
+  // canonical live overrides unchanged. When the flag is on, the
+  // aligned envelope's `duel` / selected market are used as the
+  // panel's override payloads so display copy tracks the viewer's
+  // video frame. Divergence events are emitted as `[viewer-align]`
+  // shadow-logs.
+  const viewerAligned = useViewerAlignedBetState<
+    typeof canonicalStreamSession,
+    PredictionMarketsResponse | null,
+    typeof duelContext
+  >({
+    latestSession: rawCanonicalStreamSession ?? canonicalStreamSession,
+    latestMarket: lifecyclePayload,
+    latestDuelContext: duelContext,
+    sessionPresentationDelayMs: canonicalPresentationDelayMs,
+    streamPlayerStatus,
+    currentDisplayPhase:
+      canonicalStreamSession?.cycle.broadcastTimeline?.phase ??
+      canonicalStreamSession?.phase ??
+      freshestCycle?.phase ??
+      null,
+    extractAlignedPhase: resolveAlignedSessionPhase,
+    onDivergence: logViewerAlignmentDivergence,
+  });
+  const alignedLifecyclePayload = viewerAligned.enabled
+    ? viewerAligned.marketOverview ?? null
+    : null;
+  const alignedLifecycleDuel = alignedLifecyclePayload?.duel ?? null;
+  const alignedLifecycleMarket = alignedLifecyclePayload
+    ? selectPredictionMarketLifecycleRecord(
+        alignedLifecyclePayload,
+        "solana",
+      )
+    : null;
+  const alignedSession = viewerAligned.enabled
+    ? projectCanonicalSessionToSourceTimeline(
+        viewerAligned.session ?? canonicalStreamSession,
+      )
+    : null;
+  const displaySession = alignedSession ?? canonicalStreamSession;
+  const displayDuelContext = viewerAligned.enabled
+    ? projectDuelContextToSourceTimeline(
+        viewerAligned.duelContext ?? duelContext,
+      ) ?? duelContext
+    : duelContext;
+  const liveCycle =
+    (displaySession?.cycle as typeof freshestCycle) ?? freshestCycle;
+  const displayLifecycleMarket = alignedLifecycleMarket ?? lifecycleMarket ?? null;
+
+  const streamPlaceholderMessage = useMemo(() => {
+    if (!canonicalStreamSession) {
+      return "Connecting to live session...";
+    }
+    if (canonicalAuthorityHealth?.ready === false) {
+      return "Stream authority unavailable. Waiting for session state.";
+    }
+    if (canonicalRendererHealth?.ready === false) {
+      return describeCanonicalRendererDegradedReason(
+        canonicalRendererHealth.degradedReason,
+        "Waiting for stream...",
+      );
+    }
+    if (
+      canonicalPublicReadiness?.ready === false ||
+      canonicalDeliveryHealth?.ready === false
+    ) {
+      return describeCanonicalRendererDegradedReason(
+        canonicalPublicReadiness?.reason ??
+          canonicalDeliveryHealth?.degradedReason,
+        "Waiting for live delivery...",
+      );
+    }
+    return "Waiting for stream...";
+  }, [
+    canonicalPublicReadiness?.reason,
+    canonicalPublicReadiness?.ready,
+    canonicalDeliveryHealth?.degradedReason,
+    canonicalDeliveryHealth?.ready,
+    canonicalAuthorityHealth?.ready,
+    canonicalRendererHealth?.degradedReason,
+    canonicalRendererHealth?.ready,
+    canonicalStreamSession,
+  ]);
 
   const switchToBackupStream = useCallback(() => {
+    if (!allowStreamSourceOverride) {
+      return;
+    }
     setStreamSourceIndex((current) =>
       current + 1 < streamSources.length ? current + 1 : current,
     );
-  }, [streamSources.length]);
+  }, [allowStreamSourceOverride, streamSources.length]);
 
   const cycleStreamSource = useCallback(() => {
+    if (!allowStreamSourceOverride) {
+      return;
+    }
     setStreamSourceIndex((current) =>
       streamSources.length > 1 ? (current + 1) % streamSources.length : current,
     );
-  }, [streamSources.length]);
+  }, [allowStreamSourceOverride, streamSources.length]);
 
   useEffect(() => {
     if (streamSourceIndex < streamSources.length) return;
@@ -1103,8 +1247,8 @@ export function App() {
     return "rgba(255,255,255,0.78)";
   })();
   const effStatus = status;
-  const contextAgent1 = duelContext?.cycle.agent1 ?? null;
-  const contextAgent2 = duelContext?.cycle.agent2 ?? null;
+  const contextAgent1 = displayDuelContext?.cycle.agent1 ?? null;
+  const contextAgent2 = displayDuelContext?.cycle.agent2 ?? null;
 
   // Agent context from live SSE + duel-context polling
   const effA1 = {
@@ -1182,17 +1326,19 @@ export function App() {
 
   const activeLifecycleMarket =
     runtimeE2eOverride.duelKey &&
-    normalizePredictionMarketDuelKeyHex(lifecycleMarket?.duelKey ?? null) !==
+    normalizePredictionMarketDuelKeyHex(displayLifecycleMarket?.duelKey ?? null) !==
       runtimeE2eOverride.duelKey
       ? null
-      : lifecycleMarket;
+      : displayLifecycleMarket;
   const marketStatusText = _getMarketStatusLabel(
     activeLifecycleMarket?.lifecycleStatus ?? solanaClobSnapshot.marketStatus,
     copy,
   );
-  const countdownText = formatCountdown(
-    currentMatch ? Math.max(0, currentMatch.closeTs - nowTs) : 0,
-  );
+  const countdownText = liveCycle
+    ? formatCountdown(Math.max(0, liveCycle.timeRemaining))
+    : formatCountdown(currentMatch ? Math.max(0, currentMatch.closeTs - nowTs) : 0);
+  const displayPhaseLabel = effPhaseLabel;
+  const displayCountdownText = countdownText;
   // Sidebar bet state
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [_hmSide, _setHmSide] = useState<BetSide>("YES");
@@ -1378,7 +1524,7 @@ export function App() {
 
             {/* Non-compact points summary */}
             <div style={{ marginBottom: 16, position: "relative", zIndex: 1 }}>
-              <PointsDisplay walletAddress={pointsWalletAddress} />
+              <PointsDisplay walletAddress={pointsWalletAddress} scope="wallet" />
             </div>
 
             {/* Tab Content */}
@@ -1395,12 +1541,12 @@ export function App() {
                 <Suspense
                   fallback={<PanelFallback label={copy.loadingLeaderboard} />}
                 >
-                  <PointsLeaderboard />
+                  <PointsLeaderboard defaultScope="wallet" />
                 </Suspense>
               )}
               {pointsDrawerTab === "history" && (
                 <Suspense fallback={<PanelFallback label={copy.loadingHistory} />}>
-                  <PointsHistory walletAddress={pointsWalletAddress} />
+                  <PointsHistory walletAddress={pointsWalletAddress} scope="wallet" />
                 </Suspense>
               )}
               {pointsDrawerTab === "referral" && (
@@ -1453,7 +1599,7 @@ export function App() {
             YES pool: {goldDisplay(yesPot)} GOLD | NO pool: {goldDisplay(noPot)}{" "}
             GOLD
           </div>
-          <div data-testid="countdown">{countdownText}</div>
+          <div data-testid="countdown">{displayCountdownText}</div>
           <div data-testid="status">{status}</div>
           <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
             <button
@@ -1609,7 +1755,11 @@ export function App() {
                   ? effStatus
                   : `${effLeaderboard.length} models live`}
               </span>
-              <PointsDisplay walletAddress={pointsWalletAddress} compact />
+              <PointsDisplay
+                walletAddress={pointsWalletAddress}
+                compact
+                scope="wallet"
+              />
               <button
                 type="button"
                 className="dock-collapse-btn"
@@ -1671,7 +1821,7 @@ export function App() {
                     <span
                       className={`hm-phase-badge hm-phase-badge--${effCycle.phase.toLowerCase()}`}
                     >
-                      {effPhaseLabel}
+                      {displayPhaseLabel}
                     </span>
                     <span className="hm-mob-phase-strip-meta">
                       {effA1.name} vs {effA2.name}
@@ -1681,13 +1831,22 @@ export function App() {
 
                 {/* Game Viewport */}
                 <div className="hm-game-viewport">
-                  {activeStreamUrl ? (
+                  {mountedStreamUrl ? (
                     <>
                       <StreamPlayer
-                        streamUrl={activeStreamUrl}
+                        streamUrl={mountedStreamUrl}
+                        deliveryMode={streamDeliveryMode}
+                        presentationDelayMs={canonicalPresentationDelayMs}
+                        syncToleranceMs={1_500}
+                        showDiagnostics={isE2eDebugMode}
                         muted={hmMuted}
                         autoPlay={true}
-                        onStreamUnavailable={switchToBackupStream}
+                        onStatusChange={setStreamPlayerStatus}
+                        onStreamUnavailable={
+                          allowStreamSourceOverride
+                            ? switchToBackupStream
+                            : undefined
+                        }
                         style={{
                           position: "absolute",
                           inset: 0,
@@ -1695,132 +1854,146 @@ export function App() {
                           height: "100%",
                         }}
                       />
-                      <div className="hm-stream-controls">
-                        <button
-                          className="hm-stream-mute-btn"
-                          onClick={() => setHmMuted((m) => !m)}
-                          type="button"
-                          aria-label={hmMuted ? copy.unmuteStream : copy.muteStream}
-                        >
-                          {hmMuted ? (
-                            <svg
-                              width="18"
-                              height="18"
-                              viewBox="0 0 24 24"
-                              fill="none"
-                              stroke="currentColor"
-                              strokeWidth="2"
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                            >
-                              <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
-                              <line x1="23" y1="9" x2="17" y2="15" />
-                              <line x1="17" y1="9" x2="23" y2="15" />
-                            </svg>
-                          ) : (
-                            <svg
-                              width="18"
-                              height="18"
-                              viewBox="0 0 24 24"
-                              fill="none"
-                              stroke="currentColor"
-                              strokeWidth="2"
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                            >
-                              <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
-                              <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
-                              <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
-                            </svg>
-                          )}
-                        </button>
-                        {streamSources.length > 1 && (
+                      {activeStreamUrl ? (
+                        <div className="hm-stream-controls">
                           <button
-                            className="hm-stream-source-btn"
-                            onClick={cycleStreamSource}
+                            className="hm-stream-mute-btn"
+                            onClick={() => setHmMuted((m) => !m)}
                             type="button"
+                            aria-label={hmMuted ? copy.unmuteStream : copy.muteStream}
                           >
-                            Source {streamSourceIndex + 1}/
-                            {streamSources.length}
+                            {hmMuted ? (
+                              <svg
+                                width="18"
+                                height="18"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="2"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                              >
+                                <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+                                <line x1="23" y1="9" x2="17" y2="15" />
+                                <line x1="17" y1="9" x2="23" y2="15" />
+                              </svg>
+                            ) : (
+                              <svg
+                                width="18"
+                                height="18"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="2"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                              >
+                                <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+                                <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
+                                <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
+                              </svg>
+                            )}
                           </button>
-                        )}
-                      </div>
+                          {allowStreamSourceOverride && streamSources.length > 1 && (
+                            <button
+                              className="hm-stream-source-btn"
+                              onClick={cycleStreamSource}
+                              type="button"
+                            >
+                              Source {streamSourceIndex + 1}/
+                              {streamSources.length}
+                            </button>
+                          )}
+                        </div>
+                      ) : null}
+                      {!activeStreamUrl ? (
+                        <div className="hm-game-placeholder hm-game-placeholder--overlay">
+                          <div className="hm-game-bg" />
+                          <span className="hm-game-waiting">
+                            {streamPlaceholderMessage}
+                          </span>
+                        </div>
+                      ) : null}
                     </>
                   ) : (
                     <div className="hm-game-placeholder">
                       <div className="hm-game-bg" />
-                      <span className="hm-game-waiting">
-                        Waiting for stream&hellip;
-                      </span>
+                      <span className="hm-game-waiting">{streamPlaceholderMessage}</span>
                     </div>
                   )}
                 </div>
 
                 {/* Odds Chart */}
-                <div className="hm-chart-panel">
-                  <div className="hm-chart-toolbar">
-                    <button className="hm-chart-tool-btn" type="button">
-                      +
-                    </button>
-                    <button className="hm-chart-tool-btn" type="button">
-                      &#9881;
-                    </button>
-                    <button className="hm-chart-tool-btn" type="button">
-                      &#9634;
-                    </button>
+                {!isMobile && (
+                  <div className="hm-chart-panel">
+                    <div className="hm-chart-toolbar">
+                      <button className="hm-chart-tool-btn" type="button">
+                        +
+                      </button>
+                      <button className="hm-chart-tool-btn" type="button">
+                        &#9881;
+                      </button>
+                      <button className="hm-chart-tool-btn" type="button">
+                        &#9634;
+                      </button>
+                    </div>
+                    <div className="hm-chart-price-label">
+                      <span className="hm-chart-price-current">
+                        {(effYesPercent / 100).toFixed(1)}
+                      </span>
+                    </div>
+                    <div className="hm-chart-container" ref={chartContainerRef}>
+                      {chartSize ? (
+                        <LineChart
+                          data={effChartData}
+                          width={chartSize.width}
+                          height={chartSize.height}
+                        >
+                          <XAxis
+                            dataKey="time"
+                            tick={{ fill: "rgba(255,255,255,0.3)", fontSize: 11 }}
+                            tickLine={false}
+                            axisLine={{ stroke: "rgba(255,255,255,0.08)" }}
+                            tickFormatter={(v: number) => {
+                              const d = new Date(v);
+                              return `${d.getHours()}:${String(d.getMinutes()).padStart(2, "0")}`;
+                            }}
+                          />
+                          <YAxis
+                            domain={[0, 100]}
+                            tick={{ fill: "rgba(255,255,255,0.3)", fontSize: 11 }}
+                            tickLine={false}
+                            axisLine={{ stroke: "rgba(255,255,255,0.08)" }}
+                            width={40}
+                            tickFormatter={(v: number) => `${v}%`}
+                          />
+                          <Tooltip
+                            content={({ active, payload }) =>
+                              active && payload?.length ? (
+                                <div className="hm-chart-tooltip">
+                                  <span>{payload[0].value}%</span>
+                                </div>
+                              ) : null
+                            }
+                          />
+                          <ReferenceLine
+                            y={50}
+                            stroke="rgba(255,255,255,0.06)"
+                            strokeDasharray="4 4"
+                          />
+                          <Line
+                            type="monotone"
+                            dataKey="pct"
+                            stroke="#e5b84a"
+                            strokeWidth={2}
+                            dot={false}
+                            isAnimationActive
+                          />
+                        </LineChart>
+                      ) : null}
+                    </div>
                   </div>
-                  <div className="hm-chart-price-label">
-                    <span className="hm-chart-price-current">
-                      {(effYesPercent / 100).toFixed(1)}
-                    </span>
-                  </div>
-                  <div className="hm-chart-container">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <LineChart data={effChartData}>
-                        <XAxis
-                          dataKey="time"
-                          tick={{ fill: "rgba(255,255,255,0.3)", fontSize: 11 }}
-                          tickLine={false}
-                          axisLine={{ stroke: "rgba(255,255,255,0.08)" }}
-                          tickFormatter={(v: number) => {
-                            const d = new Date(v);
-                            return `${d.getHours()}:${String(d.getMinutes()).padStart(2, "0")}`;
-                          }}
-                        />
-                        <YAxis
-                          domain={[0, 100]}
-                          tick={{ fill: "rgba(255,255,255,0.3)", fontSize: 11 }}
-                          tickLine={false}
-                          axisLine={{ stroke: "rgba(255,255,255,0.08)" }}
-                          width={40}
-                          tickFormatter={(v: number) => `${v}%`}
-                        />
-                        <Tooltip
-                          content={({ active, payload }) =>
-                            active && payload?.length ? (
-                              <div className="hm-chart-tooltip">
-                                <span>{payload[0].value}%</span>
-                              </div>
-                            ) : null
-                          }
-                        />
-                        <ReferenceLine
-                          y={50}
-                          stroke="rgba(255,255,255,0.06)"
-                          strokeDasharray="4 4"
-                        />
-                        <Line
-                          type="monotone"
-                          dataKey="pct"
-                          stroke="#e5b84a"
-                          strokeWidth={2}
-                          dot={false}
-                          isAnimationActive
-                        />
-                      </LineChart>
-                    </ResponsiveContainer>
-                  </div>
-                </div>
+                )}
               </div>
 
               <ResizeHandle
@@ -2211,7 +2384,7 @@ export function App() {
                   <span
                     className={`hm-phase-badge hm-phase-badge--${effCycle.phase.toLowerCase()} hm-phase-badge--sm`}
                   >
-                    {effPhaseLabel}
+                    {displayPhaseLabel}
                   </span>
                   <button
                     className="hm-sidebar-close"
@@ -2241,6 +2414,11 @@ export function App() {
                       agent2Name={effAgent2Name}
                       compact={true}
                       onMarketSnapshot={handleSolanaClobSnapshot}
+                      lifecycleDuelOverride={alignedLifecycleDuel}
+                      lifecycleMarketOverride={alignedLifecycleMarket}
+                      viewerAlignmentTradeGate={
+                        viewerAligned.enabled ? viewerAligned.tradeGate : null
+                      }
                     />
                   </Suspense>
                 </div>

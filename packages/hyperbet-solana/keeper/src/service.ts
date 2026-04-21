@@ -48,6 +48,7 @@ import {
 import type { FightOracle } from "./idl/fight_oracle";
 import type { GoldClobMarket } from "./idl/gold_clob_market";
 import {
+  type DbBetSyncCheckpoint,
   deleteIdentityMembers,
   loadAll,
   loadPerpsMarkets,
@@ -63,7 +64,21 @@ import {
   saveReferral,
   saveInvitedWallet,
   saveReferralFees,
+  saveBetSyncCheckpoint,
 } from "./db";
+import {
+  isBetSyncEventStaleAfterSourceReset,
+  parseBetSyncBootstrapState,
+  parseBetSyncEvent,
+  resolveBetSyncBootstrapCursor,
+  resolveBetSyncReplayMode,
+  selectBetSyncReplayUntilSeq,
+  selectBetSyncResumeSeq,
+  toStreamStateFromBetSyncEvent,
+  type BetSyncEvent,
+  type BetSyncReplayMode,
+} from "./betSync";
+import { mergeCanonicalDeliveryOverride } from "./canonicalDelivery";
 import { buildKeeperBotChildEnv } from "./keeperBot";
 import { modelMarketIdFromCharacterId } from "./modelMarkets";
 import {
@@ -78,6 +93,193 @@ type StreamState = {
   cameraTarget: string | null;
   seq: number;
   emittedAt: number;
+  phase?: string | null;
+  phaseVersion?: number | null;
+  broadcastTimeline?: Record<string, unknown> | null;
+  sourceTimeline?: Record<string, unknown> | null;
+  rendererHealth?: Record<string, unknown> | null;
+  channel?: Record<string, unknown> | null;
+  publicReadiness?: Record<string, unknown> | null;
+  canonicalDestination?: Record<string, unknown> | null;
+  fallbackDestination?: Record<string, unknown> | null;
+  canonicalAuthority?: Record<string, unknown> | null;
+  sourceRuntime?: Record<string, unknown> | null;
+  deliveryHealth?: Record<string, unknown> | null;
+  delivery?: Record<string, unknown> | null;
+};
+
+type CanonicalStreamHealth = {
+  ready: boolean;
+  degradedReason: string | null;
+  updatedAt: number | null;
+};
+
+type CanonicalSourceRuntimeStatusSource =
+  | "external_worker"
+  | "in_process_bridge"
+  | "none";
+
+type CanonicalSourceRuntimeCaptureMode =
+  | "cdp"
+  | "webcodecs"
+  | "mediarecorder"
+  | "none";
+
+type CanonicalSourceRuntimeDegradedReason =
+  | "worker_missing"
+  | "browser_missing"
+  | "page_not_ready"
+  | "unexpected_navigation"
+  | "capture_stalled"
+  | "encoder_stalled"
+  | "manifest_stale"
+  | "destination_disconnected"
+  | "status_stale"
+  | "unknown";
+
+type CanonicalSourceRuntime = {
+  ready: boolean;
+  statusSource: CanonicalSourceRuntimeStatusSource;
+  captureMode: CanonicalSourceRuntimeCaptureMode;
+  degradedReason: CanonicalSourceRuntimeDegradedReason | string | null;
+  currentSceneUrl: string | null;
+  activeBundle: string | null;
+  lastFrameAt: number | null;
+  lastRenderTickAt: number | null;
+  lastVisualChangeAt: number | null;
+  lastRecoveryAt: number | null;
+  recoveryCount: number;
+  workerHeartbeatAt: number | null;
+};
+
+type CanonicalStreamPlayback = {
+  url: string | null;
+  kind: string | null;
+  renderSessionId: string | null;
+  presentationDelayMs: number;
+};
+
+type CanonicalStreamDestinationRole = "canonical" | "fallback" | "mirror";
+type CanonicalStreamDestinationProvider =
+  | "cloudflare_stream"
+  | "self_hls"
+  | "twitch"
+  | "kick"
+  | "youtube"
+  | "custom";
+type CanonicalStreamDeliveryTransport =
+  | "llhls"
+  | "hls"
+  | "rtmps"
+  | "srt"
+  | "unknown";
+type CanonicalStreamManifestStatus = "ok" | "stale" | "missing" | "unknown";
+type CanonicalStreamPublicReadiness = {
+  ready: boolean;
+  reason: string | null;
+  updatedAt: number | null;
+};
+type CanonicalAuthorityInfo = {
+  providerLive: boolean;
+  playbackProbeReady: boolean;
+  decision: string | null;
+  reason: string | null;
+  revision: number | null;
+  updatedAt: number | null;
+  liveInputId: string | null;
+  videoUid: string | null;
+  lifecycleStatus: string | null;
+  playbackUrl: string | null;
+  playbackProbeStatusCode: number | null;
+  playbackManifestStatus: string | null;
+};
+type CanonicalStreamDestination = {
+  id: string;
+  name: string;
+  role: CanonicalStreamDestinationRole;
+  provider: CanonicalStreamDestinationProvider;
+  transport: CanonicalStreamDeliveryTransport;
+  playbackUrl: string | null;
+  ingestUrl: string | null;
+  connected: boolean;
+  transportHealthy: boolean;
+  playbackReady: boolean;
+  manifestStatus: CanonicalStreamManifestStatus;
+  lastError: string | null;
+  updatedAt: number | null;
+};
+type CanonicalStreamChannel = {
+  id: string;
+  mode: "always_on";
+  presentationDelayMs: number;
+  activeDuelId: string | null;
+  activeDuelKey: string | null;
+  canonicalDestinationId: string;
+  fallbackDestinationId: string | null;
+  publicPlaybackUrl: string | null;
+  publicReadiness: CanonicalStreamPublicReadiness;
+  destinations: CanonicalStreamDestination[];
+};
+
+type CanonicalHlsManifest = {
+  updatedAt: number | null;
+  mediaSequence: number | null;
+};
+
+type CanonicalRendererMetrics = {
+  captureFps: number | null;
+  encodeFps: number | null;
+  droppedFrames: number | null;
+  renderTick: number | null;
+  duelStateTick: number | null;
+  latestFrameAt: number | null;
+  latestRenderTickAt: number | null;
+  latestDuelStateTickAt: number | null;
+  latestVisualChangeAt: number | null;
+  visualChangeAgeMs: number | null;
+  hlsManifest: CanonicalHlsManifest | null;
+};
+
+type CanonicalStreamDelivery = {
+  mode: "self_hls" | "external_hls";
+  provider: string | null;
+  playbackUrl: string | null;
+  hlsUrl: string | null;
+  llhlsUrl: string | null;
+  ingestUrl: string | null;
+};
+
+type CanonicalStreamSession = {
+  schemaVersion: number;
+  sourceEpoch: number | null;
+  seq: number;
+  emittedAt: number;
+  duelId: string | null;
+  duelKey: string | null;
+  phase: string | null;
+  phaseVersion: number | null;
+  cycle: Record<string, unknown>;
+  leaderboard: unknown[];
+  cameraTarget: string | null;
+  playback: CanonicalStreamPlayback | null;
+  rendererHealth: CanonicalStreamHealth | null;
+  sourceRuntime: CanonicalSourceRuntime | null;
+  deliveryHealth: CanonicalStreamHealth | null;
+  channel: CanonicalStreamChannel | null;
+  publicReadiness: CanonicalStreamPublicReadiness | null;
+  canonicalDestination: CanonicalStreamDestination | null;
+  fallbackDestination: CanonicalStreamDestination | null;
+  canonicalAuthority: CanonicalAuthorityInfo | null;
+  rendererMetrics: CanonicalRendererMetrics | null;
+  delivery: CanonicalStreamDelivery | null;
+  authorityHealth: CanonicalStreamHealth;
+  status: {
+    authority: CanonicalStreamHealth;
+    renderer: CanonicalStreamHealth | null;
+    sourceRuntime: CanonicalSourceRuntime | null;
+    delivery: CanonicalStreamDelivery | null;
+    deliveryHealth: CanonicalStreamHealth | null;
+  };
 };
 
 type BetRecord = {
@@ -143,6 +345,7 @@ type JsonRpcRequestPayload = Record<string, unknown> & {
 };
 
 const encoder = new TextEncoder();
+const decoder = new TextDecoder();
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const keeperRoot = path.resolve(__dirname, "..");
 const KEEPER_BOT_HEALTH_FILE = (
@@ -213,6 +416,18 @@ function readEnvBoolean(name: string, fallback: boolean): boolean {
   return raw === "1" || raw === "true" || raw === "yes" || raw === "on";
 }
 
+function deriveBetSyncStateUrl(eventsUrl: string): string {
+  if (!eventsUrl) return "";
+  try {
+    const url = new URL(eventsUrl);
+    url.pathname = url.pathname.replace(/\/events$/, "/state");
+    url.search = "";
+    return url.toString();
+  } catch {
+    return "";
+  }
+}
+
 const PORT = Number(process.env.PORT || 8080);
 const ARENA_WRITE_KEY = process.env.ARENA_EXTERNAL_BET_WRITE_KEY?.trim() || "";
 const STREAM_PUBLISH_KEY =
@@ -227,6 +442,18 @@ const STREAM_STATE_SOURCE_URL =
   process.env.STREAM_STATE_SOURCE_URL?.trim() || "";
 const STREAM_STATE_SOURCE_BEARER_TOKEN =
   process.env.STREAM_STATE_SOURCE_BEARER_TOKEN?.trim() || "";
+const BET_SYNC_SOURCE_EVENTS_URL =
+  process.env.BET_SYNC_SOURCE_EVENTS_URL?.trim() || "";
+const BET_SYNC_SOURCE_STATE_URL =
+  process.env.BET_SYNC_SOURCE_STATE_URL?.trim() ||
+  deriveBetSyncStateUrl(BET_SYNC_SOURCE_EVENTS_URL);
+const BET_SYNC_SOURCE_BEARER_TOKEN =
+  process.env.BET_SYNC_SOURCE_BEARER_TOKEN?.trim() ||
+  STREAM_STATE_SOURCE_BEARER_TOKEN;
+const ACTIVE_STREAM_STATE_SOURCE_URL =
+  BET_SYNC_SOURCE_STATE_URL || STREAM_STATE_SOURCE_URL;
+const ACTIVE_STREAM_SOURCE_BEARER_TOKEN =
+  BET_SYNC_SOURCE_BEARER_TOKEN || STREAM_STATE_SOURCE_BEARER_TOKEN;
 const STREAM_STATE_POLL_MS = Math.max(
   1_000,
   Number(process.env.STREAM_STATE_POLL_MS || 2_000),
@@ -238,6 +465,39 @@ const STREAM_STATE_SOURCE_TIMEOUT_MS = Math.max(
 const STREAM_STATE_SOURCE_MAX_BACKOFF_MS = Math.max(
   STREAM_STATE_POLL_MS,
   Number(process.env.STREAM_STATE_SOURCE_MAX_BACKOFF_MS || 30_000),
+);
+const BET_SYNC_CONNECT_TIMEOUT_MS = Math.max(
+  1_000,
+  Number(process.env.BET_SYNC_CONNECT_TIMEOUT_MS || 10_000),
+);
+const BET_SYNC_RECONNECT_MIN_MS = Math.max(
+  500,
+  Number(process.env.BET_SYNC_RECONNECT_MIN_MS || 1_000),
+);
+const BET_SYNC_RECONNECT_MAX_MS = Math.max(
+  BET_SYNC_RECONNECT_MIN_MS,
+  Number(process.env.BET_SYNC_RECONNECT_MAX_MS || 30_000),
+);
+const BET_SYNC_STALE_EVENT_TOLERANCE_MS = Math.max(
+  0,
+  Number(process.env.BET_SYNC_STALE_EVENT_TOLERANCE_MS || 5_000),
+);
+const DEFAULT_EXTERNAL_PRESENTATION_DELAY_MS = 4_000;
+const STREAM_RENDERER_HEALTH_URL =
+  process.env.STREAM_RENDERER_HEALTH_URL?.trim() || "";
+const STREAM_RENDERER_HEALTH_BEARER_TOKEN =
+  process.env.STREAM_RENDERER_HEALTH_BEARER_TOKEN?.trim() || "";
+const STREAM_RENDERER_HEALTH_POLL_MS = Math.max(
+  1_000,
+  Number(process.env.STREAM_RENDERER_HEALTH_POLL_MS || 2_000),
+);
+const STREAM_RENDERER_HEALTH_TIMEOUT_MS = Math.max(
+  500,
+  Number(process.env.STREAM_RENDERER_HEALTH_TIMEOUT_MS || 3_000),
+);
+const STREAM_RENDERER_HLS_FRESHNESS_MS = Math.max(
+  STREAM_RENDERER_HEALTH_POLL_MS,
+  Number(process.env.STREAM_RENDERER_HLS_FRESHNESS_MS || 15_000),
 );
 const CONTRACT_POLL_MS = Math.max(
   5_000,
@@ -341,8 +601,25 @@ let streamLastSourceError: string | null = null;
 let streamSourcePollInFlight = false;
 let streamSourceConsecutiveFailures = 0;
 let streamSourceBackoffUntil = 0;
+let streamRendererHealthOverride: CanonicalStreamHealth | null = null;
+let streamRendererMetricsOverride: CanonicalRendererMetrics | null = null;
+let streamDeliveryOverride: CanonicalStreamDelivery | null = null;
+let streamRendererHealthPollInFlight = false;
+let canonicalStreamSession: CanonicalStreamSession;
+let betSyncSourceLatestSeq = 0;
+let betSyncOldestReplaySeq: number | null = null;
+let betSyncLastEventReceivedAt: number | null = null;
+let betSyncLastAppliedAt: number | null = null;
+let betSyncLastError: string | null = null;
+let betSyncConnectedAt: number | null = null;
+let betSyncConsumerRunning = false;
+let betSyncReplayMode: BetSyncReplayMode = "bootstrap";
+let betSyncReplayUntilSeq: number | null = null;
+let betSyncLastAppliedSeq = 0;
+let betSyncSourceEpoch: number | null = null;
 
 const sseClients = new Set<ReadableStreamDefaultController<Uint8Array>>();
+const sessionSseClients = new Set<ReadableStreamDefaultController<Uint8Array>>();
 const manifestCache = new Map<string, unknown>();
 const rateBuckets = new Map<string, RateBucket>();
 
@@ -368,6 +645,22 @@ const referralFeeShareGoldByWallet: Map<string, number> =
   _db.referralFeeShareGoldByWallet;
 const treasuryFeesFromReferralsByWallet: Map<string, number> =
   _db.treasuryFeesFromReferralsByWallet;
+const persistedBetSyncCheckpoint = _db.betSyncCheckpoint;
+
+if (persistedBetSyncCheckpoint) {
+  betSyncSourceEpoch = persistedBetSyncCheckpoint.sourceEpoch;
+  betSyncSourceLatestSeq = persistedBetSyncCheckpoint.lastSeenSeq;
+  betSyncLastAppliedSeq = persistedBetSyncCheckpoint.lastAppliedSeq;
+  betSyncLastAppliedAt =
+    persistedBetSyncCheckpoint.updatedAt > 0
+      ? persistedBetSyncCheckpoint.updatedAt
+      : null;
+  betSyncReplayMode =
+    (persistedBetSyncCheckpoint.replayMode as BetSyncReplayMode | null) ??
+    (persistedBetSyncCheckpoint.lastAppliedSeq > 0 ? "live" : "bootstrap");
+  betSyncLastError = persistedBetSyncCheckpoint.degradedReason;
+  streamLastSourceError = persistedBetSyncCheckpoint.degradedReason;
+}
 
 const parsers: {
   solana: ParserState;
@@ -379,6 +672,7 @@ const parsers: {
     snapshot: null,
   },
 };
+canonicalStreamSession = buildCanonicalStreamSessionFromStreamState(streamState);
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -769,6 +1063,19 @@ function applyCors(req: Request, headers: Headers): void {
   headers.set("access-control-max-age", "86400");
 }
 
+function buildSseHeaders(req: Request): Headers {
+  const headers = new Headers({
+    "content-type": "text/event-stream; charset=utf-8",
+    "cache-control":
+      "no-store, no-cache, must-revalidate, proxy-revalidate, no-transform",
+    pragma: "no-cache",
+    "x-accel-buffering": "no",
+    ...securityHeaders(),
+  });
+  applyCors(req, headers);
+  return headers;
+}
+
 function normalizeOriginLike(value: string | null): string | null {
   if (!value) return null;
   try {
@@ -1145,14 +1452,24 @@ function handlePerpsMarkets(req: Request): Response {
 }
 
 function handleDuelContext(req: Request): Response {
+  // Commit 2b (viewer-aligned-bet-state): emit both source-time and
+  // server-time anchors so the hyperbet-ui viewer-clock selector can
+  // key duel-context history independently from staleness budgets.
+  // See docs/frontier_duel_bet_stream_sync_prd_sow.md.
+  const state = toStreamStateFromCanonicalSession(canonicalStreamSession);
+  const sourceEmittedAt =
+    typeof state.emittedAt === "number" ? state.emittedAt : null;
+  const serverEmittedAt = Date.now();
   return jsonResponse(
     req,
     {
       type: "STREAMING_DUEL_CONTEXT",
-      cycle: streamState.cycle,
-      leaderboard: streamState.leaderboard,
-      cameraTarget: streamState.cameraTarget,
-      updatedAt: streamState.emittedAt,
+      cycle: state.cycle,
+      leaderboard: state.leaderboard,
+      cameraTarget: state.cameraTarget,
+      updatedAt: sourceEmittedAt,
+      sourceEmittedAt,
+      serverEmittedAt,
     },
     200,
     {
@@ -1173,7 +1490,16 @@ function currentDuelId(): string | null {
   return typeof raw === "string" && raw.trim().length > 0 ? raw.trim() : null;
 }
 
+function currentBroadcastTimeline(): Record<string, unknown> | null {
+  return asRecord(streamState.cycle?.broadcastTimeline);
+}
+
 function currentBetCloseTime(): number | null {
+  const projected = currentBroadcastTimeline()?.betCloseTime;
+  if (typeof projected === "number" && Number.isFinite(projected)) {
+    return projected;
+  }
+
   const raw = streamState.cycle?.betCloseTime;
   return typeof raw === "number" && Number.isFinite(raw) ? raw : null;
 }
@@ -1438,6 +1764,12 @@ function handlePredictionMarkets(req: Request): Response {
   const markets = buildPredictionMarketLifecycleRecords();
   const fallbackMarket =
     markets.find((market) => market.duelKey != null || market.duelId != null) ?? null;
+  // Commit 2b: `sourceEmittedAt` is the stream frame we observed when
+  // deriving this surface (selector key); `serverEmittedAt` is the
+  // wall clock at emission (staleness key).
+  const sourceEmittedAt =
+    typeof streamState.emittedAt === "number" ? streamState.emittedAt : null;
+  const serverEmittedAt = Date.now();
   return jsonResponse(
     req,
     {
@@ -1455,7 +1787,9 @@ function handlePredictionMarkets(req: Request): Response {
         betCloseTime: currentBetCloseTime() ?? fallbackMarket?.betCloseTime ?? null,
       },
       markets,
-      updatedAt: Date.now(),
+      updatedAt: serverEmittedAt,
+      sourceEmittedAt,
+      serverEmittedAt,
     },
     200,
     {
@@ -1756,6 +2090,879 @@ function toStreamState(payload: unknown): StreamState | null {
         Number.isFinite(candidate.emittedAt)
         ? candidate.emittedAt
         : Date.now(),
+    phase:
+      typeof candidate.phase === "string" || candidate.phase === null
+        ? candidate.phase
+        : null,
+    phaseVersion:
+      typeof candidate.phaseVersion === "number" &&
+      Number.isFinite(candidate.phaseVersion)
+        ? candidate.phaseVersion
+        : null,
+    broadcastTimeline: asRecord(candidate.broadcastTimeline),
+    sourceTimeline: asRecord(candidate.sourceTimeline),
+    rendererHealth: asRecord(candidate.rendererHealth),
+    canonicalAuthority: asRecord(candidate.canonicalAuthority),
+    sourceRuntime: asRecord(candidate.sourceRuntime),
+  };
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object"
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function asFiniteNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function asNonEmptyString(value: unknown): string | null {
+  return typeof value === "string" && value.trim().length > 0
+    ? value.trim()
+    : null;
+}
+
+function normalizeCanonicalRendererMetrics(
+  value: unknown,
+): CanonicalRendererMetrics | null {
+  const candidate = asRecord(value);
+  if (!candidate) return null;
+  const hlsManifest = asRecord(candidate.hlsManifest);
+  return {
+    captureFps: asFiniteNumber(candidate.captureFps),
+    encodeFps: asFiniteNumber(candidate.encodeFps),
+    droppedFrames: asFiniteNumber(candidate.droppedFrames),
+    renderTick: asFiniteNumber(candidate.renderTick),
+    duelStateTick: asFiniteNumber(candidate.duelStateTick),
+    latestFrameAt: asFiniteNumber(candidate.latestFrameAt),
+    latestRenderTickAt: asFiniteNumber(candidate.latestRenderTickAt),
+    latestDuelStateTickAt: asFiniteNumber(candidate.latestDuelStateTickAt),
+    latestVisualChangeAt: asFiniteNumber(candidate.latestVisualChangeAt),
+    visualChangeAgeMs: asFiniteNumber(candidate.visualChangeAgeMs),
+    hlsManifest: hlsManifest
+      ? {
+          updatedAt: asFiniteNumber(hlsManifest.updatedAt),
+          mediaSequence: asFiniteNumber(hlsManifest.mediaSequence),
+        }
+    : null,
+  };
+}
+
+function normalizeCanonicalSourceRuntime(
+  value: unknown,
+): CanonicalSourceRuntime | null {
+  const candidate = asRecord(value);
+  if (!candidate) return null;
+
+  const statusSource = asNonEmptyString(candidate.statusSource);
+  const captureMode = asNonEmptyString(candidate.captureMode);
+  if (
+    statusSource !== "external_worker" &&
+    statusSource !== "in_process_bridge" &&
+    statusSource !== "none"
+  ) {
+    return null;
+  }
+  if (
+    captureMode !== "cdp" &&
+    captureMode !== "webcodecs" &&
+    captureMode !== "mediarecorder" &&
+    captureMode !== "none"
+  ) {
+    return null;
+  }
+
+  return {
+    ready: candidate.ready === true,
+    statusSource,
+    captureMode,
+    degradedReason:
+      typeof candidate.degradedReason === "string"
+        ? candidate.degradedReason
+        : null,
+    currentSceneUrl: asNonEmptyString(candidate.currentSceneUrl),
+    activeBundle: asNonEmptyString(candidate.activeBundle),
+    lastFrameAt: asFiniteNumber(candidate.lastFrameAt),
+    lastRenderTickAt: asFiniteNumber(candidate.lastRenderTickAt),
+    lastVisualChangeAt: asFiniteNumber(candidate.lastVisualChangeAt),
+    lastRecoveryAt: asFiniteNumber(candidate.lastRecoveryAt),
+    recoveryCount: Math.max(0, asFiniteNumber(candidate.recoveryCount) ?? 0),
+    workerHeartbeatAt: asFiniteNumber(candidate.workerHeartbeatAt),
+  };
+}
+
+function normalizeCanonicalDelivery(
+  value: unknown,
+): CanonicalStreamDelivery | null {
+  const candidate = asRecord(value);
+  if (!candidate) return null;
+  const mode = asNonEmptyString(candidate.mode);
+  if (mode !== "self_hls" && mode !== "external_hls") {
+    return null;
+  }
+  return {
+    mode,
+    provider: asNonEmptyString(candidate.provider),
+    playbackUrl: asNonEmptyString(candidate.playbackUrl),
+    hlsUrl: asNonEmptyString(candidate.hlsUrl),
+    llhlsUrl: asNonEmptyString(candidate.llhlsUrl),
+    ingestUrl: asNonEmptyString(candidate.ingestUrl),
+  };
+}
+
+function normalizeCanonicalPublicReadiness(
+  value: unknown,
+  fallbackUpdatedAt: number,
+): CanonicalStreamPublicReadiness | null {
+  const candidate = asRecord(value);
+  if (!candidate) return null;
+  return {
+    ready: candidate.ready === true,
+    reason: asNonEmptyString(candidate.reason),
+    updatedAt: asFiniteNumber(candidate.updatedAt) ?? fallbackUpdatedAt,
+  };
+}
+
+function normalizeCanonicalAuthority(
+  value: unknown,
+  fallbackUpdatedAt: number,
+): CanonicalAuthorityInfo | null {
+  const candidate = asRecord(value);
+  if (!candidate) return null;
+  return {
+    providerLive: candidate.providerLive === true,
+    playbackProbeReady: candidate.playbackProbeReady === true,
+    decision: asNonEmptyString(candidate.decision),
+    reason: asNonEmptyString(candidate.reason),
+    revision: asFiniteNumber(candidate.revision),
+    updatedAt: asFiniteNumber(candidate.updatedAt) ?? fallbackUpdatedAt,
+    liveInputId: asNonEmptyString(candidate.liveInputId),
+    videoUid: asNonEmptyString(candidate.videoUid),
+    lifecycleStatus: asNonEmptyString(candidate.lifecycleStatus),
+    playbackUrl: asNonEmptyString(candidate.playbackUrl),
+    playbackProbeStatusCode: asFiniteNumber(candidate.playbackProbeStatusCode),
+    playbackManifestStatus: asNonEmptyString(candidate.playbackManifestStatus),
+  };
+}
+
+function toAuthorityHealthFromCanonicalAuthority(
+  authority: CanonicalAuthorityInfo | null,
+): CanonicalStreamHealth | null {
+  if (!authority) {
+    return null;
+  }
+  return {
+    ready: authority.decision === "ready",
+    degradedReason: authority.reason,
+    updatedAt: authority.updatedAt,
+  };
+}
+
+function normalizeCanonicalDestinationState(
+  value: unknown,
+): CanonicalStreamDestination | null {
+  const candidate = asRecord(value);
+  if (!candidate) return null;
+  const id = asNonEmptyString(candidate.id);
+  const role = asNonEmptyString(candidate.role);
+  const provider = asNonEmptyString(candidate.provider);
+  const transport = asNonEmptyString(candidate.transport);
+  const manifestStatus = asNonEmptyString(candidate.manifestStatus);
+  if (!id) return null;
+  if (role !== "canonical" && role !== "fallback" && role !== "mirror") {
+    return null;
+  }
+  if (
+    provider !== "cloudflare_stream" &&
+    provider !== "self_hls" &&
+    provider !== "twitch" &&
+    provider !== "kick" &&
+    provider !== "youtube" &&
+    provider !== "custom"
+  ) {
+    return null;
+  }
+  if (
+    transport !== "llhls" &&
+    transport !== "hls" &&
+    transport !== "rtmps" &&
+    transport !== "srt" &&
+    transport !== "unknown"
+  ) {
+    return null;
+  }
+  if (
+    manifestStatus !== "ok" &&
+    manifestStatus !== "stale" &&
+    manifestStatus !== "missing" &&
+    manifestStatus !== "unknown"
+  ) {
+    return null;
+  }
+  return {
+    id,
+    name: asNonEmptyString(candidate.name) ?? id,
+    role,
+    provider,
+    transport,
+    playbackUrl: asNonEmptyString(candidate.playbackUrl),
+    ingestUrl: asNonEmptyString(candidate.ingestUrl),
+    connected: candidate.connected === true,
+    transportHealthy: candidate.transportHealthy === true,
+    playbackReady: candidate.playbackReady === true,
+    manifestStatus,
+    lastError: asNonEmptyString(candidate.lastError),
+    updatedAt: asFiniteNumber(candidate.updatedAt),
+  };
+}
+
+function normalizeCanonicalChannel(
+  value: unknown,
+  fallbackUpdatedAt: number,
+): CanonicalStreamChannel | null {
+  const candidate = asRecord(value);
+  if (!candidate) return null;
+  const id = asNonEmptyString(candidate.id);
+  const mode = asNonEmptyString(candidate.mode);
+  const canonicalDestinationId = asNonEmptyString(candidate.canonicalDestinationId);
+  if (!id || mode !== "always_on" || !canonicalDestinationId) {
+    return null;
+  }
+
+  const destinations = Array.isArray(candidate.destinations)
+    ? candidate.destinations
+        .map((destination) => normalizeCanonicalDestinationState(destination))
+        .filter((destination): destination is CanonicalStreamDestination => {
+          return destination != null;
+        })
+    : [];
+  const publicReadiness = normalizeCanonicalPublicReadiness(
+    candidate.publicReadiness,
+    fallbackUpdatedAt,
+  );
+  if (!publicReadiness) {
+    return null;
+  }
+
+  return {
+    id,
+    mode: "always_on",
+    presentationDelayMs: Math.max(
+      0,
+      asFiniteNumber(candidate.presentationDelayMs) ?? 0,
+    ),
+    activeDuelId: asNonEmptyString(candidate.activeDuelId),
+    activeDuelKey: asNonEmptyString(candidate.activeDuelKey),
+    canonicalDestinationId,
+    fallbackDestinationId: asNonEmptyString(candidate.fallbackDestinationId),
+    publicPlaybackUrl: asNonEmptyString(candidate.publicPlaybackUrl),
+    publicReadiness,
+    destinations,
+  };
+}
+
+function findCanonicalDestinationInChannel(
+  channel: CanonicalStreamChannel | null,
+): CanonicalStreamDestination | null {
+  if (!channel) return null;
+  return (
+    channel.destinations.find(
+      (destination) => destination.id === channel.canonicalDestinationId,
+    ) ?? null
+  );
+}
+
+function findFallbackDestinationInChannel(
+  channel: CanonicalStreamChannel | null,
+): CanonicalStreamDestination | null {
+  if (!channel?.fallbackDestinationId) return null;
+  return (
+    channel.destinations.find(
+      (destination) => destination.id === channel.fallbackDestinationId,
+    ) ?? null
+  );
+}
+
+function toDeliveryFromDestination(
+  destination: CanonicalStreamDestination | null,
+  channel: CanonicalStreamChannel | null,
+): CanonicalStreamDelivery | null {
+  if (!destination) {
+    return null;
+  }
+
+  const playbackUrl =
+    channel?.publicPlaybackUrl ?? destination.playbackUrl ?? null;
+  const mode =
+    destination.provider === "self_hls" ? "self_hls" : "external_hls";
+  return {
+    mode,
+    provider: destination.provider,
+    playbackUrl,
+    hlsUrl:
+      destination.transport === "hls" &&
+      destination.provider !== "self_hls"
+        ? destination.playbackUrl
+        : null,
+    llhlsUrl:
+      destination.transport === "llhls" ? destination.playbackUrl : null,
+    ingestUrl: destination.ingestUrl,
+  };
+}
+
+function toDeliveryHealthFromPublicReadiness(
+  publicReadiness: CanonicalStreamPublicReadiness | null,
+): CanonicalStreamHealth | null {
+  if (!publicReadiness) {
+    return null;
+  }
+  return {
+    ready: publicReadiness.ready,
+    degradedReason: publicReadiness.reason,
+    updatedAt: publicReadiness.updatedAt,
+  };
+}
+
+function buildCanonicalStreamDelivery(
+  value: unknown,
+  channel: CanonicalStreamChannel | null = null,
+): CanonicalStreamDelivery | null {
+  return (
+    toDeliveryFromDestination(findCanonicalDestinationInChannel(channel), channel) ??
+    normalizeCanonicalDelivery(value)
+  );
+}
+
+function normalizeCanonicalStreamHealth(
+  value: unknown,
+  fallbackUpdatedAt: number,
+  fallbackReady: boolean,
+): CanonicalStreamHealth {
+  const candidate =
+    value && typeof value === "object"
+      ? (value as Record<string, unknown>)
+      : null;
+  return {
+    ready:
+      candidate?.ready === true ||
+      (candidate?.ready !== false && fallbackReady),
+    degradedReason:
+      typeof candidate?.degradedReason === "string"
+        ? candidate.degradedReason
+        : null,
+    updatedAt:
+      typeof candidate?.updatedAt === "number" &&
+      Number.isFinite(candidate.updatedAt)
+        ? candidate.updatedAt
+        : fallbackUpdatedAt,
+  };
+}
+
+function canonicalStreamHealthEquals(
+  left: CanonicalStreamHealth | null,
+  right: CanonicalStreamHealth | null,
+): boolean {
+  return (
+    left?.ready === right?.ready &&
+    left?.degradedReason === right?.degradedReason &&
+    left?.updatedAt === right?.updatedAt
+  );
+}
+
+function extractFreshHlsManifestUpdatedAt(payload: unknown): number | null {
+  if (!payload || typeof payload !== "object") return null;
+  const candidate = payload as Record<string, unknown>;
+  const hlsManifest =
+    candidate.hlsManifest && typeof candidate.hlsManifest === "object"
+      ? (candidate.hlsManifest as Record<string, unknown>)
+      : null;
+  const updatedAt =
+    typeof hlsManifest?.updatedAt === "number" &&
+    Number.isFinite(hlsManifest.updatedAt)
+      ? hlsManifest.updatedAt
+      : null;
+  const mediaSequence =
+    typeof hlsManifest?.mediaSequence === "number" &&
+    Number.isFinite(hlsManifest.mediaSequence)
+      ? hlsManifest.mediaSequence
+      : null;
+  if (updatedAt == null || mediaSequence == null) return null;
+  return Date.now() - updatedAt <= STREAM_RENDERER_HLS_FRESHNESS_MS
+    ? updatedAt
+    : null;
+}
+
+function toRendererHealthOverride(payload: unknown): CanonicalStreamHealth | null {
+  if (!payload || typeof payload !== "object") return null;
+  const candidate = payload as Record<string, unknown>;
+  const statusCandidate =
+    candidate.status && typeof candidate.status === "object"
+      ? (candidate.status as Record<string, unknown>)
+      : null;
+  const healthCandidate =
+    (candidate.rendererHealth &&
+    typeof candidate.rendererHealth === "object"
+      ? candidate.rendererHealth
+      : null) ??
+    (statusCandidate?.renderer &&
+    typeof statusCandidate.renderer === "object"
+      ? statusCandidate.renderer
+      : null) ??
+    (typeof candidate.ready === "boolean" ||
+    typeof candidate.degradedReason === "string" ||
+    typeof candidate.updatedAt === "number"
+      ? candidate
+      : null);
+
+  if (!healthCandidate) return null;
+  const normalized = normalizeCanonicalStreamHealth(
+    healthCandidate,
+    Date.now(),
+    false,
+  );
+  const freshHlsUpdatedAt = extractFreshHlsManifestUpdatedAt(candidate);
+  if (freshHlsUpdatedAt != null && !normalized.ready) {
+    return {
+      ready: true,
+      degradedReason: null,
+      updatedAt: freshHlsUpdatedAt,
+    };
+  }
+  return normalized;
+}
+
+function toRendererMetricsOverride(
+  payload: unknown,
+): CanonicalRendererMetrics | null {
+  if (!payload || typeof payload !== "object") return null;
+  const candidate = payload as Record<string, unknown>;
+  const metricsCandidate =
+    (candidate.metrics && typeof candidate.metrics === "object"
+      ? candidate.metrics
+      : null) ??
+    (candidate.rendererMetrics && typeof candidate.rendererMetrics === "object"
+      ? candidate.rendererMetrics
+      : null);
+
+  if (!metricsCandidate) return null;
+  const normalized = normalizeCanonicalRendererMetrics(metricsCandidate);
+  if (!normalized) return null;
+  const candidateRecord = candidate as Record<string, unknown>;
+  const topLevelHlsManifest = asRecord(candidateRecord.hlsManifest);
+  if (topLevelHlsManifest) {
+    normalized.hlsManifest = {
+      updatedAt: asFiniteNumber(topLevelHlsManifest.updatedAt),
+      mediaSequence: asFiniteNumber(topLevelHlsManifest.mediaSequence),
+    };
+  } else if (!normalized.hlsManifest) {
+    normalized.hlsManifest = {
+      updatedAt: extractFreshHlsManifestUpdatedAt(candidate),
+      mediaSequence: null,
+    };
+  }
+  return normalized;
+}
+
+function toDeliveryOverride(payload: unknown): CanonicalStreamDelivery | null {
+  if (!payload || typeof payload !== "object") return null;
+  const candidate = payload as Record<string, unknown>;
+  return buildCanonicalStreamDelivery(candidate.delivery);
+}
+
+function resolveCanonicalRendererHealth(
+  value: unknown,
+  fallbackUpdatedAt: number,
+): CanonicalStreamHealth | null {
+  return (
+    streamRendererHealthOverride ??
+    normalizeCanonicalStreamHealth(value, fallbackUpdatedAt, false)
+  );
+}
+
+function resolveCanonicalRendererMetrics(
+  value: unknown,
+): CanonicalRendererMetrics | null {
+  return (
+    streamRendererMetricsOverride ??
+    normalizeCanonicalRendererMetrics(value)
+  );
+}
+
+function resolveCanonicalDelivery(
+  value: unknown,
+  channel: CanonicalStreamChannel | null = null,
+): CanonicalStreamDelivery | null {
+  return mergeCanonicalDeliveryOverride({
+    baseDelivery: buildCanonicalStreamDelivery(value, channel),
+    overrideDelivery: streamDeliveryOverride,
+    hasAuthoritativeCanonicalDestination:
+      findCanonicalDestinationInChannel(channel) != null,
+  });
+}
+
+function resolveCanonicalDeliveryHealth(
+  value: unknown,
+  fallbackUpdatedAt: number,
+  channel: CanonicalStreamChannel | null,
+  publicReadiness: CanonicalStreamPublicReadiness | null,
+  delivery: CanonicalStreamDelivery | null,
+): CanonicalStreamHealth | null {
+  if (publicReadiness) {
+    return toDeliveryHealthFromPublicReadiness(publicReadiness);
+  }
+  if (!delivery && (value == null || typeof value !== "object")) {
+    return null;
+  }
+
+  const fallbackReady =
+    channel == null &&
+    delivery?.mode === "self_hls" &&
+    Boolean(delivery.playbackUrl);
+
+  return normalizeCanonicalStreamHealth(
+    value,
+    fallbackUpdatedAt,
+    fallbackReady,
+  );
+}
+
+function buildCanonicalStreamPlayback(
+  cycle: Record<string, unknown>,
+  playbackCandidate: Record<string, unknown> | null,
+  delivery: CanonicalStreamDelivery | null,
+  channel: CanonicalStreamChannel | null,
+  fallbackRenderSessionId: string,
+): CanonicalStreamPlayback | null {
+  const canonicalDestination = findCanonicalDestinationInChannel(channel);
+  const candidateUrl =
+    typeof playbackCandidate?.url === "string"
+      ? playbackCandidate.url.trim()
+      : "";
+  const playbackUrl =
+    channel?.publicPlaybackUrl ||
+    canonicalDestination?.playbackUrl ||
+    delivery?.playbackUrl ||
+    candidateUrl;
+  if (!playbackUrl) return null;
+
+  const presentationDelayMs =
+    typeof playbackCandidate?.presentationDelayMs === "number" &&
+    Number.isFinite(playbackCandidate.presentationDelayMs)
+      ? Math.max(0, playbackCandidate.presentationDelayMs)
+      : channel?.presentationDelayMs ??
+        (delivery?.mode === "external_hls"
+          ? DEFAULT_EXTERNAL_PRESENTATION_DELAY_MS
+          : 0);
+
+  return {
+    url: playbackUrl,
+    kind:
+      canonicalDestination?.transport === "llhls"
+        ? "llhls"
+        : canonicalDestination?.transport === "hls"
+          ? "hls"
+          : delivery?.mode === "external_hls" && delivery.llhlsUrl
+            ? "llhls"
+            : delivery?.mode === "external_hls" && delivery.hlsUrl
+              ? "hls"
+              : typeof playbackCandidate?.kind === "string"
+                ? playbackCandidate.kind
+                : null,
+    renderSessionId:
+      typeof playbackCandidate?.renderSessionId === "string"
+        ? playbackCandidate.renderSessionId
+        : ((typeof cycle.duelId === "string" && cycle.duelId) ||
+          (typeof cycle.cycleId === "string" && cycle.cycleId) ||
+          fallbackRenderSessionId),
+    presentationDelayMs,
+  };
+}
+
+function buildCanonicalStreamSessionFromStreamState(
+  next: StreamState,
+): CanonicalStreamSession {
+  const emittedAt =
+    typeof next.emittedAt === "number" && Number.isFinite(next.emittedAt)
+      ? next.emittedAt
+      : Date.now();
+  const nextRecord = next as Record<string, unknown>;
+  const cycle = next.cycle as Record<string, unknown>;
+  const duelKeyHex =
+    typeof cycle.duelKeyHex === "string" ? cycle.duelKeyHex.trim() : null;
+  const channel = normalizeCanonicalChannel(
+    nextRecord.channel ?? cycle.channel,
+    emittedAt,
+  );
+  const publicReadiness =
+    channel?.publicReadiness ??
+    normalizeCanonicalPublicReadiness(
+      nextRecord.publicReadiness ?? cycle.publicReadiness,
+      emittedAt,
+    );
+  const sourceRuntime =
+    normalizeCanonicalSourceRuntime(
+      nextRecord.sourceRuntime ??
+        cycle.sourceRuntime ??
+        asRecord(nextRecord.status)?.sourceRuntime,
+    ) ?? null;
+  const canonicalDestination =
+    findCanonicalDestinationInChannel(channel) ??
+    normalizeCanonicalDestinationState(
+      nextRecord.canonicalDestination ?? cycle.canonicalDestination,
+    );
+  const fallbackDestination =
+    findFallbackDestinationInChannel(channel) ??
+    normalizeCanonicalDestinationState(
+      nextRecord.fallbackDestination ?? cycle.fallbackDestination,
+    );
+  const canonicalAuthority = normalizeCanonicalAuthority(
+    nextRecord.canonicalAuthority ?? cycle.canonicalAuthority,
+    emittedAt,
+  );
+  const delivery = resolveCanonicalDelivery(
+    nextRecord.delivery ?? cycle.delivery,
+    channel,
+  );
+  const deliveryHealth = resolveCanonicalDeliveryHealth(
+    nextRecord.deliveryHealth ?? cycle.deliveryHealth,
+    emittedAt,
+    channel,
+    publicReadiness,
+    delivery,
+  );
+  const playback = buildCanonicalStreamPlayback(
+    cycle,
+    null,
+    delivery,
+    channel,
+    `stream-${next.seq}`,
+  );
+  const rendererHealth = resolveCanonicalRendererHealth(
+    cycle.rendererHealth,
+    emittedAt,
+  );
+  const rendererMetrics = resolveCanonicalRendererMetrics(cycle.rendererMetrics);
+  const authorityHealth =
+    toAuthorityHealthFromCanonicalAuthority(canonicalAuthority) ??
+    toDeliveryHealthFromPublicReadiness(publicReadiness) ??
+    normalizeCanonicalStreamHealth(
+      {
+        ready: Boolean(playback?.url),
+        degradedReason: playback?.url ? null : "playback_unconfigured",
+        updatedAt: emittedAt,
+      },
+      emittedAt,
+      Boolean(playback?.url),
+    );
+
+  return {
+    schemaVersion: 1,
+    sourceEpoch: null,
+    seq: next.seq,
+    emittedAt,
+    duelId: typeof cycle.duelId === "string" ? cycle.duelId : null,
+    duelKey: duelKeyHex ? duelKeyHex.replace(/^0x/i, "").toLowerCase() : null,
+    phase: typeof cycle.phase === "string" ? cycle.phase : null,
+    phaseVersion:
+      typeof cycle.phaseVersion === "number" && Number.isFinite(cycle.phaseVersion)
+        ? cycle.phaseVersion
+        : null,
+    cycle,
+    leaderboard: Array.isArray(next.leaderboard) ? next.leaderboard : [],
+    cameraTarget:
+      typeof next.cameraTarget === "string" || next.cameraTarget === null
+        ? next.cameraTarget
+        : null,
+    playback,
+    rendererHealth,
+    sourceRuntime,
+    deliveryHealth,
+    channel,
+    publicReadiness,
+    canonicalDestination,
+    fallbackDestination,
+    canonicalAuthority,
+    rendererMetrics,
+    delivery,
+    authorityHealth,
+    status: {
+      authority: authorityHealth,
+      renderer: rendererHealth,
+      sourceRuntime,
+      delivery,
+      deliveryHealth,
+    },
+  };
+}
+
+function toCanonicalStreamSession(payload: unknown): CanonicalStreamSession | null {
+  if (!payload || typeof payload !== "object") return null;
+  const candidate = payload as Record<string, unknown>;
+  const cycle =
+    candidate.cycle && typeof candidate.cycle === "object"
+      ? (candidate.cycle as Record<string, unknown>)
+      : null;
+  if (!cycle) return null;
+
+  const emittedAt =
+    typeof candidate.emittedAt === "number" && Number.isFinite(candidate.emittedAt)
+      ? candidate.emittedAt
+      : Date.now();
+  const statusCandidate =
+    candidate.status && typeof candidate.status === "object"
+      ? (candidate.status as Record<string, unknown>)
+      : null;
+  const channel = normalizeCanonicalChannel(candidate.channel, emittedAt);
+  const publicReadiness =
+    channel?.publicReadiness ??
+    normalizeCanonicalPublicReadiness(candidate.publicReadiness, emittedAt);
+  const sourceRuntime =
+    normalizeCanonicalSourceRuntime(
+      candidate.sourceRuntime ?? asRecord(statusCandidate?.sourceRuntime),
+    ) ?? null;
+  const canonicalDestination =
+    findCanonicalDestinationInChannel(channel) ??
+    normalizeCanonicalDestinationState(candidate.canonicalDestination);
+  const fallbackDestination =
+    findFallbackDestinationInChannel(channel) ??
+    normalizeCanonicalDestinationState(candidate.fallbackDestination);
+  const canonicalAuthority = normalizeCanonicalAuthority(
+    candidate.canonicalAuthority,
+    emittedAt,
+  );
+  const rendererHealth = resolveCanonicalRendererHealth(
+    candidate.rendererHealth ?? statusCandidate?.renderer,
+    emittedAt,
+  );
+  const rendererMetrics = resolveCanonicalRendererMetrics(
+    candidate.rendererMetrics,
+  );
+  const delivery = resolveCanonicalDelivery(
+    candidate.delivery ?? statusCandidate?.delivery,
+    channel,
+  );
+  const deliveryHealth = resolveCanonicalDeliveryHealth(
+    candidate.deliveryHealth ?? statusCandidate?.deliveryHealth,
+    emittedAt,
+    channel,
+    publicReadiness,
+    delivery,
+  );
+  const playbackCandidate =
+    candidate.playback && typeof candidate.playback === "object"
+      ? (candidate.playback as Record<string, unknown>)
+      : null;
+  const playback = buildCanonicalStreamPlayback(
+    cycle,
+    playbackCandidate,
+    delivery,
+    channel,
+    "",
+  );
+  const authorityHealth =
+    toAuthorityHealthFromCanonicalAuthority(canonicalAuthority) ??
+    toDeliveryHealthFromPublicReadiness(publicReadiness) ??
+    normalizeCanonicalStreamHealth(
+      candidate.authorityHealth ?? statusCandidate?.authority,
+      emittedAt,
+      Boolean(playback?.url),
+    );
+
+  return {
+    schemaVersion:
+      typeof candidate.schemaVersion === "number" &&
+      Number.isFinite(candidate.schemaVersion)
+        ? candidate.schemaVersion
+        : 1,
+    sourceEpoch:
+      typeof candidate.sourceEpoch === "number" &&
+      Number.isFinite(candidate.sourceEpoch)
+        ? candidate.sourceEpoch
+        : null,
+    seq:
+      typeof candidate.seq === "number" && Number.isFinite(candidate.seq)
+        ? candidate.seq
+        : streamSeq + 1,
+    emittedAt,
+    duelId:
+      typeof candidate.duelId === "string"
+        ? candidate.duelId
+        : typeof cycle.duelId === "string"
+          ? cycle.duelId
+          : null,
+    duelKey:
+      typeof candidate.duelKey === "string"
+        ? candidate.duelKey.replace(/^0x/i, "").toLowerCase()
+        : typeof cycle.duelKeyHex === "string"
+          ? cycle.duelKeyHex.replace(/^0x/i, "").toLowerCase()
+          : null,
+    phase:
+      typeof candidate.phase === "string"
+        ? candidate.phase
+        : typeof cycle.phase === "string"
+          ? cycle.phase
+          : null,
+    phaseVersion:
+      typeof candidate.phaseVersion === "number" &&
+      Number.isFinite(candidate.phaseVersion)
+        ? candidate.phaseVersion
+        : typeof cycle.phaseVersion === "number" &&
+            Number.isFinite(cycle.phaseVersion)
+          ? cycle.phaseVersion
+          : null,
+    cycle,
+    leaderboard: Array.isArray(candidate.leaderboard) ? candidate.leaderboard : [],
+    cameraTarget:
+      typeof candidate.cameraTarget === "string" || candidate.cameraTarget === null
+        ? (candidate.cameraTarget as string | null)
+        : null,
+    playback,
+    rendererHealth,
+    sourceRuntime,
+    deliveryHealth,
+    channel,
+    publicReadiness,
+    canonicalDestination,
+    fallbackDestination,
+    canonicalAuthority,
+    rendererMetrics,
+    delivery,
+    authorityHealth,
+    status: {
+      authority: authorityHealth,
+      renderer: rendererHealth,
+      sourceRuntime,
+      delivery,
+      deliveryHealth,
+    },
+  };
+}
+
+function toStreamStateFromCanonicalSession(
+  session: CanonicalStreamSession,
+): StreamState {
+  return {
+    type: "STREAMING_STATE_UPDATE",
+    cycle: {
+      ...session.cycle,
+      rendererHealth: session.rendererHealth,
+      sourceRuntime: session.sourceRuntime,
+      delivery: session.delivery,
+      deliveryHealth: session.deliveryHealth,
+    },
+    leaderboard: session.leaderboard,
+    cameraTarget: session.cameraTarget,
+    seq: session.seq,
+    emittedAt: session.emittedAt,
+    channel: session.channel,
+    publicReadiness: session.publicReadiness,
+    canonicalDestination: session.canonicalDestination,
+    fallbackDestination: session.fallbackDestination,
+    canonicalAuthority: session.canonicalAuthority,
+    sourceRuntime: session.sourceRuntime,
+    deliveryHealth: session.deliveryHealth,
+    delivery: session.delivery,
   };
 }
 
@@ -1780,21 +2987,468 @@ function broadcastStreamState(nextState: StreamState, event = "state"): void {
   }
 }
 
-function publishStreamState(next: StreamState, sourceLabel: string): void {
+function broadcastCanonicalStreamSession(
+  nextSession: CanonicalStreamSession,
+  event = "session",
+): void {
+  for (const controller of sessionSseClients) {
+    try {
+      sendSse(controller, event, nextSession.seq, nextSession);
+    } catch {
+      sessionSseClients.delete(controller);
+    }
+  }
+}
+
+function publishCanonicalStreamSession(
+  next: CanonicalStreamSession,
+  sourceLabel: string,
+): void {
+  const emittedAt =
+    typeof next.emittedAt === "number" && Number.isFinite(next.emittedAt)
+      ? next.emittedAt
+      : Date.now();
+  const resolvedRendererHealth = resolveCanonicalRendererHealth(
+    next.rendererHealth ?? next.status?.renderer,
+    emittedAt,
+  );
+  const resolvedRendererMetrics = resolveCanonicalRendererMetrics(
+    next.rendererMetrics,
+  );
+  const resolvedChannel = normalizeCanonicalChannel(next.channel, emittedAt);
+  const resolvedPublicReadiness =
+    resolvedChannel?.publicReadiness ??
+    normalizeCanonicalPublicReadiness(next.publicReadiness, emittedAt);
+  const resolvedSourceRuntime =
+    normalizeCanonicalSourceRuntime(
+      next.sourceRuntime ?? next.status?.sourceRuntime,
+    ) ?? null;
+  const resolvedCanonicalDestination =
+    findCanonicalDestinationInChannel(resolvedChannel) ??
+    normalizeCanonicalDestinationState(next.canonicalDestination);
+  const resolvedFallbackDestination =
+    findFallbackDestinationInChannel(resolvedChannel) ??
+    normalizeCanonicalDestinationState(next.fallbackDestination);
+  const resolvedCanonicalAuthority = normalizeCanonicalAuthority(
+    next.canonicalAuthority,
+    emittedAt,
+  );
+  const resolvedDelivery = resolveCanonicalDelivery(
+    next.delivery ?? next.status?.delivery,
+    resolvedChannel,
+  );
+  const resolvedDeliveryHealth = resolveCanonicalDeliveryHealth(
+    next.deliveryHealth ?? next.status?.deliveryHealth,
+    emittedAt,
+    resolvedChannel,
+    resolvedPublicReadiness,
+    resolvedDelivery,
+  );
+  const resolvedPlayback = buildCanonicalStreamPlayback(
+    next.cycle,
+    next.playback as Record<string, unknown> | null,
+    resolvedDelivery,
+    resolvedChannel,
+    next.duelId || `stream-${streamSeq + 1}`,
+  );
+  const resolvedAuthorityHealth =
+    toAuthorityHealthFromCanonicalAuthority(resolvedCanonicalAuthority) ??
+    toDeliveryHealthFromPublicReadiness(resolvedPublicReadiness) ??
+    next.authorityHealth;
   streamSeq = Math.max(streamSeq + 1, next.seq || streamSeq + 1);
-  streamState = {
+  canonicalStreamSession = {
     ...next,
-    type: "STREAMING_STATE_UPDATE",
+    cycle: {
+      ...next.cycle,
+      rendererHealth: resolvedRendererHealth,
+    },
     seq: streamSeq,
     emittedAt: Date.now(),
+    playback: resolvedPlayback,
+    rendererHealth: resolvedRendererHealth,
+    sourceRuntime: resolvedSourceRuntime,
+    deliveryHealth: resolvedDeliveryHealth,
+    channel: resolvedChannel,
+    publicReadiness: resolvedPublicReadiness,
+    canonicalDestination: resolvedCanonicalDestination,
+    fallbackDestination: resolvedFallbackDestination,
+    canonicalAuthority: resolvedCanonicalAuthority,
+    rendererMetrics: resolvedRendererMetrics,
+    delivery: resolvedDelivery,
+    authorityHealth: resolvedAuthorityHealth,
+    status: {
+      authority: resolvedAuthorityHealth,
+      renderer: resolvedRendererHealth,
+      sourceRuntime: resolvedSourceRuntime,
+      delivery: resolvedDelivery,
+      deliveryHealth: resolvedDeliveryHealth,
+    },
   };
+  streamState = toStreamStateFromCanonicalSession(canonicalStreamSession);
   streamLastUpdatedAt = Date.now();
   streamLastSourceError = null;
   persistStreamStateSnapshot(streamState);
   broadcastStreamState(streamState, "state");
+  broadcastCanonicalStreamSession(canonicalStreamSession, "session");
   console.log(
     `[${nowIso()}] [stream] updated from ${sourceLabel} cycle=${streamState.cycle?.cycleId ?? "unknown"} phase=${streamState.cycle?.phase ?? "unknown"}`,
   );
+}
+
+function publishStreamState(next: StreamState, sourceLabel: string): void {
+  publishCanonicalStreamSession(
+    buildCanonicalStreamSessionFromStreamState({
+      ...next,
+      type: "STREAMING_STATE_UPDATE",
+      seq:
+        typeof next.seq === "number" && Number.isFinite(next.seq)
+          ? next.seq
+          : streamSeq + 1,
+      emittedAt:
+        typeof next.emittedAt === "number" && Number.isFinite(next.emittedAt)
+          ? next.emittedAt
+          : Date.now(),
+    }),
+    sourceLabel,
+  );
+}
+
+function nextBetSyncCheckpointState(
+  next: Partial<DbBetSyncCheckpoint> = {},
+): DbBetSyncCheckpoint {
+  return {
+    sourceEpoch: betSyncSourceEpoch ?? 0,
+    lastSeenSeq: Math.max(betSyncSourceLatestSeq, betSyncLastAppliedSeq),
+    lastAppliedSeq: betSyncLastAppliedSeq,
+    replayMode: betSyncReplayMode,
+    degradedReason: betSyncLastError,
+    updatedAt: Date.now(),
+    ...next,
+  };
+}
+
+function persistBetSyncCheckpointState(
+  next: Partial<DbBetSyncCheckpoint> = {},
+): void {
+  saveBetSyncCheckpoint(nextBetSyncCheckpointState(next));
+}
+
+function buildBetSyncHeaders(resumeSeq?: number): Record<string, string> {
+  const headers: Record<string, string> = {
+    connection: "close",
+  };
+  if (BET_SYNC_SOURCE_BEARER_TOKEN) {
+    headers.authorization = `Bearer ${BET_SYNC_SOURCE_BEARER_TOKEN}`;
+  }
+  if (typeof resumeSeq === "number" && Number.isFinite(resumeSeq) && resumeSeq > 0) {
+    headers["last-event-id"] = String(resumeSeq);
+  }
+  return headers;
+}
+
+function buildCanonicalStreamSessionFromBetSyncEvent(
+  event: BetSyncEvent,
+): CanonicalStreamSession {
+  const nextState = toStreamStateFromBetSyncEvent(event) as unknown as StreamState;
+  const base = buildCanonicalStreamSessionFromStreamState(nextState);
+  const eventRecord = event as unknown as Record<string, unknown>;
+  const channel = normalizeCanonicalChannel(eventRecord.channel, event.emittedAt);
+  const publicReadiness =
+    channel?.publicReadiness ??
+    normalizeCanonicalPublicReadiness(eventRecord.publicReadiness, event.emittedAt);
+  const sourceRuntime =
+    normalizeCanonicalSourceRuntime(
+      eventRecord.sourceRuntime ?? base.sourceRuntime,
+    ) ?? base.sourceRuntime;
+  const canonicalDestination =
+    findCanonicalDestinationInChannel(channel) ??
+    normalizeCanonicalDestinationState(eventRecord.canonicalDestination);
+  const fallbackDestination =
+    findFallbackDestinationInChannel(channel) ??
+    normalizeCanonicalDestinationState(eventRecord.fallbackDestination);
+  const canonicalAuthority = normalizeCanonicalAuthority(
+    eventRecord.canonicalAuthority,
+    event.emittedAt,
+  );
+  const delivery = resolveCanonicalDelivery(event.delivery, channel);
+  const deliveryHealth = resolveCanonicalDeliveryHealth(
+    eventRecord.deliveryHealth,
+    event.emittedAt,
+    channel,
+    publicReadiness,
+    delivery,
+  );
+  return {
+    ...base,
+    schemaVersion: event.schemaVersion,
+    sourceEpoch: event.sourceEpoch,
+    seq: event.seq,
+    emittedAt: event.emittedAt,
+    duelId: event.duelId,
+    duelKey: event.duelKey,
+    phase: event.phase,
+    phaseVersion: event.phaseVersion,
+    channel,
+    publicReadiness,
+    canonicalDestination,
+    fallbackDestination,
+    canonicalAuthority,
+    sourceRuntime,
+    rendererMetrics: resolveCanonicalRendererMetrics(event.rendererMetrics),
+    delivery,
+    deliveryHealth,
+    authorityHealth:
+      toAuthorityHealthFromCanonicalAuthority(canonicalAuthority) ??
+      toDeliveryHealthFromPublicReadiness(publicReadiness) ??
+      base.authorityHealth,
+    status: {
+      authority:
+        toAuthorityHealthFromCanonicalAuthority(canonicalAuthority) ??
+        toDeliveryHealthFromPublicReadiness(publicReadiness) ??
+        base.authorityHealth,
+      renderer: base.rendererHealth,
+      sourceRuntime,
+      delivery,
+      deliveryHealth,
+    },
+  };
+}
+
+function applyBetSyncEvent(
+  event: BetSyncEvent,
+  sourceLabel: string,
+): void {
+  betSyncSourceLatestSeq = Math.max(betSyncSourceLatestSeq, event.seq);
+  betSyncLastEventReceivedAt = Date.now();
+  const sourceEpochChanged =
+    betSyncSourceEpoch != null && event.sourceEpoch !== betSyncSourceEpoch;
+  const currentAppliedEmittedAt =
+    typeof canonicalStreamSession.emittedAt === "number" &&
+    Number.isFinite(canonicalStreamSession.emittedAt)
+      ? canonicalStreamSession.emittedAt
+      : null;
+
+  if (
+    isBetSyncEventStaleAfterSourceReset({
+      sourceEpochChanged,
+      currentStreamEmittedAt: currentAppliedEmittedAt,
+      eventEmittedAt: event.emittedAt,
+      toleranceMs: BET_SYNC_STALE_EVENT_TOLERANCE_MS,
+    })
+  ) {
+    betSyncLastError = "stale_source_reset_event";
+    streamLastSourceError = betSyncLastError;
+    persistBetSyncCheckpointState({
+      sourceEpoch: event.sourceEpoch,
+      lastSeenSeq: betSyncSourceLatestSeq,
+      degradedReason: betSyncLastError,
+    });
+    return;
+  }
+
+  if (!sourceEpochChanged && event.seq <= betSyncLastAppliedSeq) {
+    persistBetSyncCheckpointState({
+      sourceEpoch: event.sourceEpoch,
+      lastSeenSeq: betSyncSourceLatestSeq,
+      degradedReason: null,
+    });
+    return;
+  }
+
+  publishCanonicalStreamSession(
+    buildCanonicalStreamSessionFromBetSyncEvent(event),
+    sourceLabel,
+  );
+  betSyncSourceEpoch = event.sourceEpoch;
+  betSyncLastAppliedSeq = event.seq;
+  betSyncLastAppliedAt = Date.now();
+  if (sourceEpochChanged) {
+    betSyncReplayUntilSeq = null;
+  }
+  betSyncLastError = null;
+  streamLastSourceError = null;
+  persistBetSyncCheckpointState({
+    sourceEpoch: event.sourceEpoch,
+    lastSeenSeq: betSyncSourceLatestSeq,
+    lastAppliedSeq: betSyncLastAppliedSeq,
+    replayMode: betSyncReplayMode,
+    degradedReason: null,
+  });
+  resetStreamSourceFailures();
+}
+
+async function bootstrapBetSyncState(): Promise<void> {
+  if (!BET_SYNC_SOURCE_STATE_URL) return;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), BET_SYNC_CONNECT_TIMEOUT_MS);
+  try {
+    const response = await fetch(BET_SYNC_SOURCE_STATE_URL, {
+      cache: "no-store",
+      headers: buildBetSyncHeaders(),
+      signal: controller.signal,
+    });
+    streamLastSourcePollAt = Date.now();
+    if (!response.ok) {
+      throw new Error(`bootstrap failed (${response.status})`);
+    }
+
+    const state = parseBetSyncBootstrapState(await response.json());
+    if (!state) {
+      throw new Error("bootstrap payload was invalid");
+    }
+
+    const bootstrapCursor = resolveBetSyncBootstrapCursor({
+      previousSourceEpoch: betSyncSourceEpoch,
+      nextSourceEpoch: state.sourceEpoch,
+      previousLastAppliedSeq: betSyncLastAppliedSeq,
+      latestSeq: state.latestSeq,
+    });
+
+    if (bootstrapCursor.sourceEpochChanged) {
+      betSyncLastAppliedAt = null;
+    }
+
+    betSyncSourceEpoch = state.sourceEpoch;
+    betSyncSourceLatestSeq = state.latestSeq;
+    betSyncOldestReplaySeq = state.oldestReplaySeq;
+    betSyncLastAppliedSeq = bootstrapCursor.rebasedLastAppliedSeq;
+    betSyncReplayUntilSeq = bootstrapCursor.replayUntilSeq;
+    betSyncReplayMode = bootstrapCursor.replayMode;
+    persistBetSyncCheckpointState({
+      sourceEpoch: state.sourceEpoch,
+      lastSeenSeq: state.latestSeq,
+      lastAppliedSeq: betSyncLastAppliedSeq,
+      replayMode: betSyncReplayMode,
+      degradedReason: null,
+    });
+
+    if (state.latestEvent && betSyncReplayUntilSeq == null) {
+      applyBetSyncEvent(state.latestEvent, "bet-sync-bootstrap");
+    }
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+async function consumeBetSyncEventsOnce(): Promise<void> {
+  if (!BET_SYNC_SOURCE_EVENTS_URL) return;
+
+  const url = new URL(BET_SYNC_SOURCE_EVENTS_URL);
+  const resumeSeq = selectBetSyncResumeSeq({
+    lastAppliedSeq: betSyncLastAppliedSeq,
+  });
+  if (resumeSeq > 0) {
+    url.searchParams.set("since", String(resumeSeq));
+  }
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), BET_SYNC_CONNECT_TIMEOUT_MS);
+  const response = await fetch(url, {
+    cache: "no-store",
+    headers: {
+      ...buildBetSyncHeaders(resumeSeq),
+      accept: "text/event-stream",
+    },
+    signal: controller.signal,
+  });
+  clearTimeout(timeoutId);
+
+  if (!response.ok || !response.body) {
+    throw new Error(`bet-sync stream failed (${response.status})`);
+  }
+
+  betSyncConnectedAt = Date.now();
+  let buffer = "";
+  for await (const chunk of response.body as unknown as AsyncIterable<Uint8Array>) {
+    buffer += decoder.decode(chunk, { stream: true });
+    let boundary = buffer.indexOf("\n\n");
+    while (boundary >= 0) {
+      const frame = buffer.slice(0, boundary);
+      buffer = buffer.slice(boundary + 2);
+      boundary = buffer.indexOf("\n\n");
+
+      if (!frame.trim() || frame.startsWith(":")) {
+        continue;
+      }
+
+      const lines = frame.split(/\r?\n/);
+      let eventName = "message";
+      let data = "";
+      for (const line of lines) {
+        if (line.startsWith("event:")) {
+          eventName = line.slice(6).trim();
+          continue;
+        }
+        if (line.startsWith("data:")) {
+          data += `${line.slice(5).trim()}\n`;
+        }
+      }
+
+      if (eventName === "heartbeat" || !data.trim()) {
+        continue;
+      }
+
+      let decodedPayload: unknown;
+      try {
+        decodedPayload = JSON.parse(data);
+      } catch {
+        continue;
+      }
+
+      const parsed = parseBetSyncEvent(decodedPayload);
+      if (!parsed) {
+        continue;
+      }
+
+      const replayDecision = resolveBetSyncReplayMode({
+        eventName,
+        eventSeq: parsed.seq,
+        replayUntilSeq: betSyncReplayUntilSeq,
+        sourceEpochChanged:
+          betSyncSourceEpoch != null && parsed.sourceEpoch !== betSyncSourceEpoch,
+      });
+      betSyncReplayMode = replayDecision.replayMode;
+      betSyncReplayUntilSeq = replayDecision.replayUntilSeq;
+      if (eventName === "reset") {
+        betSyncOldestReplaySeq = parsed.seq;
+      }
+
+      applyBetSyncEvent(parsed, `bet-sync-${eventName}`);
+    }
+  }
+}
+
+function startBetSyncConsumer(): void {
+  if (!BET_SYNC_SOURCE_EVENTS_URL || betSyncConsumerRunning) return;
+  betSyncConsumerRunning = true;
+  void (async () => {
+    let reconnectDelayMs = BET_SYNC_RECONNECT_MIN_MS;
+    while (true) {
+      try {
+        await bootstrapBetSyncState();
+        await consumeBetSyncEventsOnce();
+        reconnectDelayMs = BET_SYNC_RECONNECT_MIN_MS;
+        betSyncLastError = null;
+      } catch (error) {
+        betSyncLastError =
+          error instanceof Error ? error.message : "bet-sync consumer failed";
+        streamLastSourceError = betSyncLastError;
+        persistBetSyncCheckpointState({
+          replayMode: betSyncReplayMode,
+          degradedReason: betSyncLastError,
+        });
+        registerStreamSourceFailure(streamLastSourceError);
+        console.warn(
+          `[${nowIso()}] [bet-sync] consumer error: ${betSyncLastError}; reconnecting in ${reconnectDelayMs}ms`,
+        );
+        await new Promise((resolve) => setTimeout(resolve, reconnectDelayMs));
+        reconnectDelayMs = Math.min(
+          BET_SYNC_RECONNECT_MAX_MS,
+          reconnectDelayMs * 2,
+        );
+      }
+    }
+  })();
 }
 
 function nextStreamSourceBackoffMs(): number {
@@ -1826,7 +3480,7 @@ function resetStreamSourceFailures(): void {
 }
 
 async function pollStreamStateSource(): Promise<void> {
-  if (!STREAM_STATE_SOURCE_URL) return;
+  if (!ACTIVE_STREAM_STATE_SOURCE_URL) return;
   if (streamSourcePollInFlight) return;
   if (Date.now() < streamSourceBackoffUntil) return;
 
@@ -1839,12 +3493,12 @@ async function pollStreamStateSource(): Promise<void> {
 
   try {
     const headers: Record<string, string> = {};
-    if (STREAM_STATE_SOURCE_BEARER_TOKEN) {
-      headers.authorization = `Bearer ${STREAM_STATE_SOURCE_BEARER_TOKEN}`;
+    if (ACTIVE_STREAM_SOURCE_BEARER_TOKEN) {
+      headers.authorization = `Bearer ${ACTIVE_STREAM_SOURCE_BEARER_TOKEN}`;
     }
     headers.connection = "close";
 
-    const response = await fetch(STREAM_STATE_SOURCE_URL, {
+    const response = await fetch(ACTIVE_STREAM_STATE_SOURCE_URL, {
       cache: "no-store",
       headers,
       signal: controller.signal,
@@ -1862,6 +3516,48 @@ async function pollStreamStateSource(): Promise<void> {
     }
 
     const payload = await response.json();
+    const nextSession =
+      toCanonicalStreamSession(payload) ||
+      toCanonicalStreamSession((payload as Record<string, unknown>)?.data);
+
+    if (nextSession) {
+      const changed =
+        canonicalStreamSession.seq !== nextSession.seq ||
+        canonicalStreamSession.duelId !== nextSession.duelId ||
+        canonicalStreamSession.phase !== nextSession.phase ||
+        canonicalStreamSession.playback?.url !== nextSession.playback?.url ||
+        canonicalStreamSession.canonicalAuthority?.revision !==
+          nextSession.canonicalAuthority?.revision ||
+        canonicalStreamSession.canonicalAuthority?.decision !==
+          nextSession.canonicalAuthority?.decision ||
+        canonicalStreamSession.canonicalAuthority?.reason !==
+          nextSession.canonicalAuthority?.reason ||
+        canonicalStreamSession.canonicalAuthority?.providerLive !==
+          nextSession.canonicalAuthority?.providerLive ||
+        canonicalStreamSession.canonicalAuthority?.playbackProbeReady !==
+          nextSession.canonicalAuthority?.playbackProbeReady ||
+        canonicalStreamSession.canonicalAuthority?.playbackManifestStatus !==
+          nextSession.canonicalAuthority?.playbackManifestStatus ||
+        canonicalStreamSession.publicReadiness?.ready !==
+          nextSession.publicReadiness?.ready ||
+        canonicalStreamSession.publicReadiness?.reason !==
+          nextSession.publicReadiness?.reason ||
+        canonicalStreamSession.sourceRuntime?.ready !==
+          nextSession.sourceRuntime?.ready ||
+        canonicalStreamSession.sourceRuntime?.degradedReason !==
+          nextSession.sourceRuntime?.degradedReason ||
+        canonicalStreamSession.rendererHealth?.ready !==
+          nextSession.rendererHealth?.ready ||
+        canonicalStreamSession.rendererHealth?.degradedReason !==
+          nextSession.rendererHealth?.degradedReason;
+      if (changed) {
+        publishCanonicalStreamSession(nextSession, "poll");
+      }
+      streamLastSourceError = null;
+      resetStreamSourceFailures();
+      return;
+    }
+
     const nextState =
       toStreamState(payload) ||
       toStreamState((payload as Record<string, unknown>)?.data);
@@ -1888,6 +3584,69 @@ async function pollStreamStateSource(): Promise<void> {
   } finally {
     clearTimeout(timeoutId);
     streamSourcePollInFlight = false;
+  }
+}
+
+async function pollRendererHealthSource(): Promise<void> {
+  if (!STREAM_RENDERER_HEALTH_URL || streamRendererHealthPollInFlight) return;
+
+  streamRendererHealthPollInFlight = true;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(
+    () => controller.abort(),
+    STREAM_RENDERER_HEALTH_TIMEOUT_MS,
+  );
+
+  try {
+    const headers: Record<string, string> = { connection: "close" };
+    if (STREAM_RENDERER_HEALTH_BEARER_TOKEN) {
+      headers.authorization = `Bearer ${STREAM_RENDERER_HEALTH_BEARER_TOKEN}`;
+    }
+    const response = await fetch(STREAM_RENDERER_HEALTH_URL, {
+      cache: "no-store",
+      headers,
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      try {
+        await response.body?.cancel();
+      } catch {
+        // Ignore cancellation issues for already-closed streams.
+      }
+      return;
+    }
+
+    const payload = await response.json();
+    const nextHealth =
+      toRendererHealthOverride(payload) ||
+      toRendererHealthOverride((payload as Record<string, unknown>)?.data);
+    const nextMetrics =
+      toRendererMetricsOverride(payload) ||
+      toRendererMetricsOverride((payload as Record<string, unknown>)?.data);
+    const nextDelivery =
+      toDeliveryOverride(payload) ||
+      toDeliveryOverride((payload as Record<string, unknown>)?.data);
+    if (!nextHealth && !nextMetrics && !nextDelivery) return;
+
+    if (
+      canonicalStreamHealthEquals(streamRendererHealthOverride, nextHealth) &&
+      JSON.stringify(streamRendererMetricsOverride) ===
+        JSON.stringify(nextMetrics) &&
+      JSON.stringify(streamDeliveryOverride) === JSON.stringify(nextDelivery)
+    ) {
+      return;
+    }
+
+    streamRendererHealthOverride = nextHealth;
+    streamRendererMetricsOverride = nextMetrics;
+    streamDeliveryOverride = nextDelivery;
+    publishCanonicalStreamSession(canonicalStreamSession, "renderer-health");
+  } catch {
+    // Defer to the canonical authority when the override source is unavailable.
+  } finally {
+    clearTimeout(timeoutId);
+    streamRendererHealthPollInFlight = false;
   }
 }
 
@@ -2163,13 +3922,16 @@ function leaderboardResponse(
   };
 }
 
-function rankResponse(wallet: string): Record<string, unknown> {
+function rankResponse(
+  wallet: string,
+  scope: string | null,
+): Record<string, unknown> {
   const normalized = rememberWalletCase(wallet);
   const canonical = ensureIdentity(normalized);
-  const rows = leaderboardRows("linked", "alltime");
+  const rows = leaderboardRows(scope, "alltime");
   const rank =
     rows.findIndex((entry) => normalizeWallet(entry.wallet) === canonical) + 1;
-  const wallets = identityWallets(normalized, "linked");
+  const wallets = identityWallets(normalized, scope);
 
   return {
     wallet: displayWallet(canonical),
@@ -2183,9 +3945,10 @@ function historyResponse(
   limit: number,
   offset: number,
   eventType: string | null,
+  scope: string | null,
 ): Record<string, unknown> {
   const normalized = rememberWalletCase(wallet);
-  const wallets = new Set(identityWallets(normalized, "linked"));
+  const wallets = new Set(identityWallets(normalized, scope));
   const filtered = pointsEvents.filter((entry) => {
     if (!wallets.has(entry.wallet)) return false;
     if (eventType && entry.eventType !== eventType) return false;
@@ -2217,8 +3980,11 @@ function historyResponse(
   };
 }
 
-function multiplierResponse(wallet: string): Record<string, unknown> {
-  const wallets = identityWallets(wallet, "linked");
+function multiplierResponse(
+  wallet: string,
+  scope: string | null,
+): Record<string, unknown> {
+  const wallets = identityWallets(wallet, scope);
   const detail = multiplierDetailForWallets(wallets);
   return {
     wallet: wallet.trim(),
@@ -2974,11 +4740,25 @@ const server = Bun.serve({
           cycleId: streamState.cycle?.cycleId ?? null,
           phase: streamState.cycle?.phase ?? null,
           lastUpdatedAt: streamLastUpdatedAt,
-          sourceUrl: STREAM_STATE_SOURCE_URL
-            ? sanitizeUrlForStatus(STREAM_STATE_SOURCE_URL)
+          sourceUrl: BET_SYNC_SOURCE_EVENTS_URL
+            ? sanitizeUrlForStatus(BET_SYNC_SOURCE_EVENTS_URL)
+            : ACTIVE_STREAM_STATE_SOURCE_URL
+              ? sanitizeUrlForStatus(ACTIVE_STREAM_STATE_SOURCE_URL)
             : null,
           lastSourcePollAt: streamLastSourcePollAt,
-          lastSourceError: streamLastSourceError,
+          lastSourceError: betSyncLastError ?? streamLastSourceError,
+          betSync: {
+            enabled: Boolean(BET_SYNC_SOURCE_EVENTS_URL),
+            replayMode: betSyncReplayMode,
+            sourceEpoch: betSyncSourceEpoch,
+            sourceLatestSeq: betSyncSourceLatestSeq,
+            oldestReplaySeq: betSyncOldestReplaySeq,
+            lastAppliedSeq: betSyncLastAppliedSeq,
+            connectedAt: betSyncConnectedAt,
+            lastEventReceivedAt: betSyncLastEventReceivedAt,
+            lastAppliedAt: betSyncLastAppliedAt,
+            lastError: betSyncLastError,
+          },
           sseClients: connectedSseCount(),
         },
         parsers,
@@ -3025,7 +4805,18 @@ const server = Bun.serve({
     }
 
     if (req.method === "GET" && url.pathname === "/api/streaming/state") {
-      return jsonResponse(req, streamState, 200, {
+      return jsonResponse(
+        req,
+        toStreamStateFromCanonicalSession(canonicalStreamSession),
+        200,
+        {
+          "cache-control": "no-store",
+        },
+      );
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/streaming/session") {
+      return jsonResponse(req, canonicalStreamSession, 200, {
         "cache-control": "no-store",
       });
     }
@@ -3084,15 +4875,36 @@ const server = Bun.serve({
         },
       });
 
-      const headers = new Headers({
-        "content-type": "text/event-stream; charset=utf-8",
-        "cache-control":
-          "no-store, no-cache, must-revalidate, proxy-revalidate",
-        connection: "keep-alive",
-        ...securityHeaders(),
+      return new Response(stream, {
+        status: 200,
+        headers: buildSseHeaders(req),
       });
-      applyCors(req, headers);
-      return new Response(stream, { status: 200, headers });
+    }
+
+    if (
+      req.method === "GET" &&
+      url.pathname === "/api/streaming/session/events"
+    ) {
+      const stream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          sessionSseClients.add(controller);
+          sendSse(
+            controller,
+            "reset",
+            canonicalStreamSession.seq,
+            canonicalStreamSession,
+          );
+          controller.enqueue(encoder.encode(": connected\n\n"));
+        },
+        cancel(reason) {
+          void reason;
+        },
+      });
+
+      return new Response(stream, {
+        status: 200,
+        headers: buildSseHeaders(req),
+      });
     }
 
     if (
@@ -3149,7 +4961,7 @@ const server = Bun.serve({
       if (!wallet) {
         return jsonResponse(req, { error: "Wallet is required" }, 400);
       }
-      return jsonResponse(req, rankResponse(wallet), 200, {
+      return jsonResponse(req, rankResponse(wallet, url.searchParams.get("scope")), 200, {
         "cache-control": "no-store",
       });
     }
@@ -3180,6 +4992,7 @@ const server = Bun.serve({
           limit,
           offset,
           url.searchParams.get("eventType"),
+          url.searchParams.get("scope"),
         ),
         200,
         {
@@ -3200,7 +5013,7 @@ const server = Bun.serve({
       if (!wallet) {
         return jsonResponse(req, { error: "Wallet is required" }, 400);
       }
-      return jsonResponse(req, multiplierResponse(wallet), 200, {
+      return jsonResponse(req, multiplierResponse(wallet, url.searchParams.get("scope")), 200, {
         "cache-control": "no-store",
       });
     }
@@ -3277,14 +5090,29 @@ setInterval(() => {
   }
 }, 20_000);
 
-if (STREAM_STATE_SOURCE_URL) {
+if (BET_SYNC_SOURCE_EVENTS_URL) {
   console.log(
-    `[${nowIso()}] [stream] polling source ${STREAM_STATE_SOURCE_URL}`,
+    `[${nowIso()}] [bet-sync] consuming ${BET_SYNC_SOURCE_EVENTS_URL}`,
+  );
+  startBetSyncConsumer();
+} else if (ACTIVE_STREAM_STATE_SOURCE_URL) {
+  console.log(
+    `[${nowIso()}] [stream] polling source ${ACTIVE_STREAM_STATE_SOURCE_URL}`,
   );
   setInterval(() => {
     void pollStreamStateSource();
   }, STREAM_STATE_POLL_MS);
   void pollStreamStateSource();
+}
+
+if (STREAM_RENDERER_HEALTH_URL) {
+  console.log(
+    `[${nowIso()}] [renderer-health] polling ${STREAM_RENDERER_HEALTH_URL}`,
+  );
+  setInterval(() => {
+    void pollRendererHealthSource();
+  }, STREAM_RENDERER_HEALTH_POLL_MS);
+  void pollRendererHealthSource();
 }
 
 setInterval(() => {

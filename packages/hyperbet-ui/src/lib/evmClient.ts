@@ -2,6 +2,7 @@ import {
   createPublicClient,
   createWalletClient,
   custom,
+  decodeFunctionResult,
   encodeAbiParameters,
   encodeFunctionData,
   fallback,
@@ -55,6 +56,21 @@ export type Position = {
   bStake: bigint;
 };
 
+export type OrderBookLevel = {
+  price: number;
+  amount: bigint;
+  total: bigint;
+};
+
+export type MarketReadSnapshot = {
+  feeBps: number;
+  position: Position | null;
+  orderBook: {
+    bids: OrderBookLevel[];
+    asks: OrderBookLevel[];
+  };
+};
+
 export type TimeInForce = "gtc" | "ioc";
 
 export type OrderInfo = {
@@ -77,9 +93,31 @@ export type ContractWriteClient = {
 export type ContractWriteAccount = Address | Account;
 
 type JsonRpcPayload<T> = {
+  id?: number | string | null;
   result?: T;
   error?: { message?: string };
 };
+
+type GoldClobBatchRead = {
+  functionName:
+    | "tradeTreasuryFeeBps"
+    | "tradeMarketMakerFeeBps"
+    | "positions"
+    | "getPriceLevel";
+  args?: readonly unknown[];
+};
+
+export class RateLimitError extends Error {
+  readonly retryAfterMs: number;
+
+  constructor(message = "Rate limit exceeded", retryAfterMs = 15_000) {
+    super(message);
+    this.name = "RateLimitError";
+    this.retryAfterMs = retryAfterMs;
+  }
+}
+
+const PROVIDER_ACCESS_DENIED_BACKOFF_MS = 120_000;
 
 export const SIDE_ENUM = {
   NONE: 0,
@@ -142,9 +180,13 @@ function deriveAlchemyWsUrl(rpcUrl: string): string | null {
   }
 }
 
+function isProxyReadRpcUrl(rpcUrl: string): boolean {
+  return rpcUrl.includes("/api/proxy/evm/rpc");
+}
+
 function createEvmTransport(rpcUrl: string) {
   const httpTransport = http(rpcUrl, {
-    retryCount: 5,
+    retryCount: isProxyReadRpcUrl(rpcUrl) ? 0 : 5,
     retryDelay: 250,
     timeout: 20_000,
   });
@@ -250,6 +292,12 @@ async function callEvmRpc<T>(
       }),
       signal: controller.signal,
     });
+    if (response.status === 429) {
+      throw rateLimitErrorFromResponse(response);
+    }
+    if (response.status === 403) {
+      throw await accessDeniedErrorFromResponse(response);
+    }
     const payload = (await response.json()) as JsonRpcPayload<T>;
     if (!response.ok || payload.result === undefined) {
       throw new Error(payload.error?.message || `${method} failed`);
@@ -258,6 +306,130 @@ async function callEvmRpc<T>(
   } catch (error) {
     if (error instanceof Error && error.name === "AbortError") {
       throw new Error(`${method} timed out after 15000ms`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+function parseRetryAfterMs(rawValue: string | null): number | null {
+  if (!rawValue) return null;
+  const seconds = Number(rawValue);
+  if (Number.isFinite(seconds) && seconds >= 0) {
+    return Math.max(1_000, Math.ceil(seconds * 1_000));
+  }
+
+  const retryAtMs = Date.parse(rawValue);
+  if (!Number.isNaN(retryAtMs)) {
+    return Math.max(1_000, retryAtMs - Date.now());
+  }
+  return null;
+}
+
+function rateLimitErrorFromResponse(response: Response): RateLimitError {
+  return new RateLimitError(
+    "EVM read rate limited",
+    parseRetryAfterMs(response.headers.get("retry-after")) ?? 15_000,
+  );
+}
+
+async function readResponseErrorMessage(
+  response: Response,
+  fallbackMessage: string,
+): Promise<string> {
+  const rawBody = (await response.text()).trim();
+  if (!rawBody) return fallbackMessage;
+
+  try {
+    const parsed = JSON.parse(rawBody) as {
+      error?: { message?: string };
+      message?: string;
+    };
+    return parsed.error?.message || parsed.message || rawBody;
+  } catch {
+    return rawBody;
+  }
+}
+
+async function accessDeniedErrorFromResponse(
+  response: Response,
+): Promise<RateLimitError> {
+  return new RateLimitError(
+    await readResponseErrorMessage(response, "EVM RPC access denied"),
+    PROVIDER_ACCESS_DENIED_BACKOFF_MS,
+  );
+}
+
+async function callGoldClobBatchRead(
+  rpcUrl: string,
+  contractAddress: Address,
+  calls: readonly GoldClobBatchRead[],
+): Promise<unknown[]> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 15_000);
+
+  try {
+    const payload = calls.map((call, index) => ({
+      jsonrpc: "2.0" as const,
+      id: index,
+      method: "eth_call",
+      params: [
+        {
+          to: contractAddress,
+          data: encodeFunctionData({
+            abi: GOLD_CLOB_ABI,
+            functionName: call.functionName,
+            args: (call.args ?? []) as readonly unknown[],
+          } as unknown as Parameters<typeof encodeFunctionData>[0]),
+        },
+        "latest",
+      ],
+    }));
+    const response = await fetch(rpcUrl, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    });
+
+    if (response.status === 429) {
+      throw rateLimitErrorFromResponse(response);
+    }
+    if (response.status === 403) {
+      throw await accessDeniedErrorFromResponse(response);
+    }
+
+    const body = (await response.json()) as JsonRpcPayload<Hex>[];
+    if (!response.ok || !Array.isArray(body)) {
+      throw new Error("eth_call batch failed");
+    }
+
+    const byId = new Map<number, JsonRpcPayload<Hex>>();
+    for (const entry of body) {
+      const id = Number(entry.id);
+      if (Number.isInteger(id)) {
+        byId.set(id, entry);
+      }
+    }
+
+    return calls.map((call, index) => {
+      const entry = byId.get(index);
+      if (!entry) {
+        throw new Error(`${call.functionName} missing from eth_call batch`);
+      }
+      if (entry.result === undefined) {
+        throw new Error(entry.error?.message || `${call.functionName} failed`);
+      }
+      return decodeFunctionResult({
+        abi: GOLD_CLOB_ABI,
+        functionName: call.functionName,
+        data: entry.result,
+      } as unknown as Parameters<typeof decodeFunctionResult>[0]);
+    });
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      throw new Error("eth_call batch timed out after 15000ms");
     }
     throw error;
   } finally {
@@ -389,6 +561,92 @@ export async function getMarketMeta(
     totalAShares: result.totalAShares,
     totalBShares: result.totalBShares,
     marketKey: resolvedMarketKey,
+  };
+}
+
+export async function getMarketReadSnapshot(
+  chainConfig: EvmChainConfig,
+  contractAddress: Address,
+  duelKey: Hex,
+  marketKind: number,
+  market: MarketMeta,
+  userAddress?: Address,
+): Promise<MarketReadSnapshot> {
+  const calls: GoldClobBatchRead[] = [
+    { functionName: "tradeTreasuryFeeBps" },
+    { functionName: "tradeMarketMakerFeeBps" },
+  ];
+  const hasUserAddress = Boolean(userAddress);
+  if (userAddress) {
+    calls.push({
+      functionName: "positions",
+      args: [market.marketKey, userAddress],
+    });
+  }
+
+  const bidPrices: number[] = [];
+  for (let price = market.bestBid; price > 0 && bidPrices.length < 10; price -= 1) {
+    bidPrices.push(price);
+    calls.push({
+      functionName: "getPriceLevel",
+      args: [duelKey, marketKind, SIDE_ENUM.BUY, price],
+    });
+  }
+
+  const askPrices: number[] = [];
+  for (let price = market.bestAsk; price < 1000 && askPrices.length < 10; price += 1) {
+    askPrices.push(price);
+    calls.push({
+      functionName: "getPriceLevel",
+      args: [duelKey, marketKind, SIDE_ENUM.SELL, price],
+    });
+  }
+
+  const results = await callGoldClobBatchRead(
+    chainConfig.readRpcUrl,
+    contractAddress,
+    calls,
+  );
+
+  let nextIndex = 0;
+  const treasuryFee = results[nextIndex++] as bigint;
+  const marketMakerFee = results[nextIndex++] as bigint;
+  const position = hasUserAddress
+    ? ((results[nextIndex++] as [bigint, bigint, bigint, bigint]) ?? null)
+    : null;
+
+  const bids: OrderBookLevel[] = [];
+  let runningBid = 0n;
+  for (const price of bidPrices) {
+    const level = results[nextIndex++] as [bigint, bigint, bigint];
+    if (level[2] <= 0n) continue;
+    runningBid += level[2];
+    bids.push({ price: price / 1000, amount: level[2], total: runningBid });
+  }
+
+  const asks: OrderBookLevel[] = [];
+  let runningAsk = 0n;
+  for (const price of askPrices) {
+    const level = results[nextIndex++] as [bigint, bigint, bigint];
+    if (level[2] <= 0n) continue;
+    runningAsk += level[2];
+    asks.push({ price: price / 1000, amount: level[2], total: runningAsk });
+  }
+
+  return {
+    feeBps: Number(treasuryFee + marketMakerFee),
+    position: position
+      ? {
+          aShares: position[0],
+          bShares: position[1],
+          aStake: position[2],
+          bStake: position[3],
+        }
+      : null,
+    orderBook: {
+      bids,
+      asks,
+    },
   };
 }
 

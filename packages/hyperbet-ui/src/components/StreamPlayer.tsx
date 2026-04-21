@@ -1,5 +1,13 @@
-import React, { useCallback, useEffect, useMemo, useRef } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import Hls from "hls.js";
+import { describeCanonicalRendererDegradedReason } from "../lib/streamSession";
+import type { ViewerBootPhase } from "../player/viewerBootPhases";
 
 interface StreamPlayerProps {
   streamUrl: string;
@@ -8,9 +16,296 @@ interface StreamPlayerProps {
   muted?: boolean;
   className?: string;
   style?: React.CSSProperties;
+  deliveryMode?: string | null;
+  presentationDelayMs?: number | null;
+  syncToleranceMs?: number;
+  showDiagnostics?: boolean;
   onStreamUnavailable?: () => void;
   onStreamReady?: () => void;
+  onStatusChange?: (status: StreamPlayerStatus) => void;
 }
+
+export type ViewerSyncState =
+  | "starting"
+  | "aligned"
+  | "buffering"
+  | "out_of_sync"
+  | "error";
+
+export type StreamPlayerStatus = {
+  ready: boolean;
+  status: string | null;
+  liveEdgeLatencyMs: number | null;
+  stallCount: number;
+  rebuildCount: number;
+  lastBufferedFragmentAt: number | null;
+  lastPlaybackProgressAt: number | null;
+  playbackUrl: string | null;
+  deliveryMode: string | null;
+  firstFrameAt: number | null;
+  startupDurationMs: number | null;
+  playbackStarted: boolean;
+  presentationDelayMs: number | null;
+  syncDeltaMs: number | null;
+  syncState: ViewerSyncState;
+  bootPhase: ViewerBootPhase;
+  loaderVisible: boolean;
+};
+
+type EmbedStatusPayload = {
+  type?: string;
+  ready?: boolean;
+  status?: string | null;
+  liveEdgeLatencyMs?: number | null;
+  stallCount?: number | null;
+  rebuildCount?: number | null;
+  lastBufferedFragmentAt?: number | null;
+  lastPlaybackProgressAt?: number | null;
+  playbackUrl?: string | null;
+  deliveryMode?: string | null;
+  firstFrameAt?: number | null;
+  startupDurationMs?: number | null;
+  playbackStarted?: boolean | null;
+  presentationDelayMs?: number | null;
+  syncDeltaMs?: number | null;
+  syncState?: ViewerSyncState | null;
+  bootPhase?: ViewerBootPhase | null;
+  loaderVisible?: boolean | null;
+  rendererHealth?: {
+    ready?: boolean;
+    degradedReason?: string | null;
+  } | null;
+};
+
+type HlsPlaybackProfile = {
+  config: Record<string, unknown>;
+  driftThresholdMs: number;
+  syncDriftThresholdMs: number;
+  waitingGraceMs: number;
+  reloadOnBufferStall: boolean;
+  rebuildOnVideoError: boolean;
+  minVideoErrorTailMs: number;
+  startupGraceMs: number;
+};
+
+const LOW_LATENCY_HLS_CONFIG = {
+  enableWorker: true,
+  lowLatencyMode: true,
+  capLevelToPlayerSize: true,
+  testBandwidth: false,
+  liveSyncDurationCount: 3,
+  liveMaxLatencyDurationCount: 6,
+  liveBackBufferLength: 10,
+  maxBufferLength: 12,
+  maxMaxBufferLength: 12,
+  maxLiveSyncPlaybackRate: 1.5,
+  startFragPrefetch: true,
+  manifestLoadingMaxRetry: 6,
+  manifestLoadingRetryDelay: 800,
+  levelLoadingMaxRetry: 6,
+  levelLoadingRetryDelay: 800,
+  fragLoadingMaxRetry: 6,
+  fragLoadingRetryDelay: 800,
+} as const;
+
+export const LIVE_EDGE_HLS_CONFIG = LOW_LATENCY_HLS_CONFIG;
+export const RECENT_PLAYER_SIGNAL_WINDOW_MS = 30_000;
+export const RECENT_PLAYER_SIGNAL_THRESHOLD = 3;
+export const DEFAULT_SYNC_TOLERANCE_MS = 2_500;
+
+type HlsVariantDescriptor = {
+  index: number;
+  width: number;
+  height: number;
+  bitrate: number;
+};
+
+export function resolvePlaybackTargetSize(video: HTMLVideoElement | null) {
+  const devicePixelRatio =
+    typeof window !== "undefined" && Number.isFinite(window.devicePixelRatio)
+      ? Math.max(1, window.devicePixelRatio)
+      : 1;
+  const viewportWidth =
+    typeof window !== "undefined" && Number.isFinite(window.innerWidth)
+      ? Math.max(0, window.innerWidth)
+      : 0;
+  const viewportHeight =
+    typeof window !== "undefined" && Number.isFinite(window.innerHeight)
+      ? Math.max(0, window.innerHeight)
+      : 0;
+  return {
+    targetWidth:
+      Math.max(viewportWidth, video?.clientWidth ?? 0, video?.videoWidth ?? 0, 1) *
+      devicePixelRatio,
+    targetHeight:
+      Math.max(
+        viewportHeight,
+        video?.clientHeight ?? 0,
+        video?.videoHeight ?? 0,
+        1,
+      ) *
+      devicePixelRatio,
+  };
+}
+
+function selectPreferredHlsVariantIndex(
+  variants: HlsVariantDescriptor[],
+  targetWidth: number,
+  targetHeight: number,
+): number {
+  const sizeBudgetWidth = targetWidth * 1.25;
+  const sizeBudgetHeight = targetHeight * 1.25;
+  const rankedLevels = variants
+    .map((variant) => {
+      const hasWidth = variant.width > 0;
+      const hasHeight = variant.height > 0;
+      const fitsWidth = !hasWidth || variant.width <= sizeBudgetWidth;
+      const fitsHeight = !hasHeight || variant.height <= sizeBudgetHeight;
+      const fitsPlayerSize = (hasWidth || hasHeight) && fitsWidth && fitsHeight;
+      return {
+        ...variant,
+        fitsPlayerSize,
+        pixelCount: variant.width * variant.height,
+      };
+    })
+    .sort((left, right) => {
+      if (left.fitsPlayerSize !== right.fitsPlayerSize) {
+        return left.fitsPlayerSize ? -1 : 1;
+      }
+      if (left.pixelCount !== right.pixelCount) {
+        return right.pixelCount - left.pixelCount;
+      }
+      if (left.bitrate !== right.bitrate) {
+        return right.bitrate - left.bitrate;
+      }
+      return left.index - right.index;
+    });
+  return rankedLevels[0]?.index ?? 0;
+}
+
+export function selectPreferredHlsStartLevelFromManifest(
+  manifestText: string,
+  targetWidth: number,
+  targetHeight: number,
+): number | null {
+  const variants: HlsVariantDescriptor[] = [];
+  let pendingStreamInf: string | null = null;
+
+  for (const rawLine of manifestText.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line) {
+      continue;
+    }
+    if (line.startsWith("#EXT-X-STREAM-INF:")) {
+      pendingStreamInf = line.slice("#EXT-X-STREAM-INF:".length);
+      continue;
+    }
+    if (pendingStreamInf == null || line.startsWith("#")) {
+      continue;
+    }
+
+    const resolutionMatch = pendingStreamInf.match(/RESOLUTION=(\d+)x(\d+)/i);
+    const bandwidthMatch = pendingStreamInf.match(/BANDWIDTH=(\d+)/i);
+    variants.push({
+      index: variants.length,
+      width: resolutionMatch ? Number.parseInt(resolutionMatch[1] ?? "0", 10) : 0,
+      height: resolutionMatch
+        ? Number.parseInt(resolutionMatch[2] ?? "0", 10)
+        : 0,
+      bitrate: bandwidthMatch ? Number.parseInt(bandwidthMatch[1] ?? "0", 10) : 0,
+    });
+    pendingStreamInf = null;
+  }
+
+  if (variants.length === 0) {
+    return null;
+  }
+
+  const preferredManifestIndex = selectPreferredHlsVariantIndex(
+    variants,
+    targetWidth,
+    targetHeight,
+  );
+  const sortedVariants = [...variants].sort((left, right) => {
+    if (left.width !== right.width) {
+      return left.width - right.width;
+    }
+    if (left.height !== right.height) {
+      return left.height - right.height;
+    }
+    if (left.bitrate !== right.bitrate) {
+      return left.bitrate - right.bitrate;
+    }
+    return left.index - right.index;
+  });
+  const preferredSortedIndex = sortedVariants.findIndex(
+    (variant) => variant.index === preferredManifestIndex,
+  );
+  return preferredSortedIndex >= 0 ? preferredSortedIndex : null;
+}
+
+export function preferHighestViableHlsLevel(
+  hls: Hls,
+  video: HTMLVideoElement | null,
+): void {
+  const levels = hls.levels;
+  if (!Array.isArray(levels) || levels.length === 0) {
+    return;
+  }
+
+  hls.capLevelToPlayerSize = true;
+
+  const { targetWidth, targetHeight } = resolvePlaybackTargetSize(video);
+  const preferredLevel = selectPreferredHlsVariantIndex(
+    levels.map((level, index) => ({
+      index,
+      width: level?.width ?? 0,
+      height: level?.height ?? 0,
+      bitrate: level?.bitrate ?? 0,
+    })),
+    targetWidth,
+    targetHeight,
+  );
+
+  hls.autoLevelCapping = preferredLevel;
+  hls.nextLoadLevel = preferredLevel;
+  hls.nextAutoLevel = preferredLevel;
+  hls.startLevel = preferredLevel;
+  hls.nextLevel = preferredLevel;
+  hls.loadLevel = preferredLevel;
+  if ("manualLevel" in hls) {
+    try {
+      (hls as Hls & { manualLevel: number }).manualLevel = preferredLevel;
+    } catch {
+      // Ignore manualLevel assignment failures on older hls.js shims.
+    }
+  }
+  try {
+    hls.currentLevel = preferredLevel;
+  } catch {
+    // Ignore early currentLevel assignment failures before the media controller is ready.
+  }
+}
+
+const STABLE_LIVE_HLS_CONFIG = {
+  enableWorker: true,
+  lowLatencyMode: false,
+  capLevelToPlayerSize: true,
+  testBandwidth: false,
+  liveSyncDurationCount: 10,
+  liveMaxLatencyDurationCount: 16,
+  liveBackBufferLength: 45,
+  maxBufferLength: 45,
+  maxMaxBufferLength: 90,
+  maxLiveSyncPlaybackRate: 1.1,
+  startFragPrefetch: false,
+  manifestLoadingMaxRetry: 6,
+  manifestLoadingRetryDelay: 800,
+  levelLoadingMaxRetry: 6,
+  levelLoadingRetryDelay: 800,
+  fragLoadingMaxRetry: 6,
+  fragLoadingRetryDelay: 800,
+} as const;
 
 export const StreamPlayer: React.FC<StreamPlayerProps> = ({
   streamUrl,
@@ -19,30 +314,328 @@ export const StreamPlayer: React.FC<StreamPlayerProps> = ({
   muted = true,
   className,
   style,
+  deliveryMode = null,
+  presentationDelayMs = null,
+  syncToleranceMs = DEFAULT_SYNC_TOLERANCE_MS,
+  showDiagnostics = false,
   onStreamUnavailable,
   onStreamReady,
+  onStatusChange,
 }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const syncTrackerRef = useRef<{
+    consecutiveOutOfSyncPolls: number;
+    consecutiveAlignedPolls: number;
+    syncState: ViewerSyncState;
+  }>({
+    consecutiveOutOfSyncPolls: 0,
+    consecutiveAlignedPolls: 0,
+    syncState: "starting",
+  });
   const embedUrl = useMemo(
-    () => resolveEmbedUrl(streamUrl, autoPlay, muted),
-    [autoPlay, muted, streamUrl],
+    () =>
+      resolveEmbedUrl(streamUrl, autoPlay, muted, {
+        deliveryMode,
+        presentationDelayMs,
+        showDiagnostics,
+        syncToleranceMs,
+      }),
+    [
+      autoPlay,
+      deliveryMode,
+      muted,
+      presentationDelayMs,
+      showDiagnostics,
+      streamUrl,
+      syncToleranceMs,
+    ],
   );
+  const embedKind = useMemo(() => classifyEmbedKind(embedUrl), [embedUrl]);
   const unavailableNotifiedRef = useRef(false);
+  const readyNotifiedRef = useRef(false);
+  const [embedFailure, setEmbedFailure] = useState<string | null>(null);
+  const [diagnosticMessage, setDiagnosticMessage] = useState<string | null>(null);
+  const [playerStatus, setPlayerStatus] = useState<StreamPlayerStatus>(() =>
+    createInitialPlayerStatus({
+      streamUrl,
+      deliveryMode,
+      presentationDelayMs,
+    }),
+  );
 
-  const markUnavailable = useCallback(() => {
-    if (unavailableNotifiedRef.current) return;
-    unavailableNotifiedRef.current = true;
-    onStreamUnavailable?.();
-  }, [onStreamUnavailable]);
+  const markUnavailable = useCallback(
+    (
+      reason = "Live stream unavailable.",
+      status: string = "error:unavailable",
+    ) => {
+      setDiagnosticMessage(reason);
+      setEmbedFailure((current) => current ?? reason);
+      setPlayerStatus((current) => ({
+        ...current,
+        ready: false,
+        status,
+        loaderVisible: true,
+        bootPhase: "error",
+      }));
+      if (unavailableNotifiedRef.current) return;
+      unavailableNotifiedRef.current = true;
+      onStreamUnavailable?.();
+    },
+    [onStreamUnavailable],
+  );
+
+  const markReady = useCallback(() => {
+    setEmbedFailure(null);
+    setDiagnosticMessage(null);
+    setPlayerStatus((current) => ({
+      ...current,
+      ready: true,
+      status: "playing",
+      bootPhase: "finalizing",
+      loaderVisible: false,
+    }));
+    if (readyNotifiedRef.current) return;
+    readyNotifiedRef.current = true;
+    onStreamReady?.();
+  }, [onStreamReady]);
+
+  const markDegraded = useCallback((reason: string | null, status?: string | null) => {
+    setDiagnosticMessage(reason);
+    if (status) {
+      setPlayerStatus((current) => ({
+        ...current,
+        ready: false,
+        status,
+        loaderVisible: true,
+      }));
+    }
+  }, []);
 
   useEffect(() => {
     unavailableNotifiedRef.current = false;
-  }, [streamUrl]);
+    readyNotifiedRef.current = false;
+    syncTrackerRef.current = {
+      consecutiveOutOfSyncPolls: 0,
+      consecutiveAlignedPolls: 0,
+      syncState: "starting",
+    };
+    setEmbedFailure(null);
+    setDiagnosticMessage(null);
+    setPlayerStatus(
+      createInitialPlayerStatus({
+        streamUrl,
+        deliveryMode,
+        presentationDelayMs,
+      }),
+    );
+  }, [deliveryMode, presentationDelayMs, streamUrl]);
+
+  useEffect(() => {
+    const nextSync = advanceViewerSyncState({
+      previousState: syncTrackerRef.current.syncState,
+      consecutiveAlignedPolls: syncTrackerRef.current.consecutiveAlignedPolls,
+      consecutiveOutOfSyncPolls: syncTrackerRef.current.consecutiveOutOfSyncPolls,
+      liveEdgeLatencyMs: playerStatus.liveEdgeLatencyMs,
+      playbackStarted: playerStatus.playbackStarted,
+      presentationDelayMs: playerStatus.presentationDelayMs,
+      ready: playerStatus.ready,
+      status: playerStatus.status,
+      syncToleranceMs,
+    });
+    syncTrackerRef.current = {
+      consecutiveOutOfSyncPolls: nextSync.consecutiveOutOfSyncPolls,
+      consecutiveAlignedPolls: nextSync.consecutiveAlignedPolls,
+      syncState: nextSync.syncState,
+    };
+    if (
+      playerStatus.syncDeltaMs !== nextSync.syncDeltaMs ||
+      playerStatus.syncState !== nextSync.syncState
+    ) {
+      setPlayerStatus((current) => ({
+        ...current,
+        syncDeltaMs: nextSync.syncDeltaMs,
+        syncState: nextSync.syncState,
+      }));
+    }
+  }, [
+    playerStatus.liveEdgeLatencyMs,
+    playerStatus.playbackStarted,
+    playerStatus.presentationDelayMs,
+    playerStatus.ready,
+    playerStatus.status,
+    playerStatus.syncDeltaMs,
+    playerStatus.syncState,
+    syncToleranceMs,
+  ]);
+
+  useEffect(() => {
+    onStatusChange?.(playerStatus);
+  }, [onStatusChange, playerStatus]);
 
   useEffect(() => {
     if (embedUrl) return;
     markUnavailable();
   }, [embedUrl, markUnavailable]);
+
+  useEffect(() => {
+    if (embedKind !== "hyperscape-public") return;
+    markUnavailable(
+      "Invalid stream configuration. Embedded Hyperscapes streams must use a tokenized /stream URL.",
+    );
+  }, [embedKind, markUnavailable]);
+
+  useEffect(() => {
+    if (
+      !embedUrl ||
+      (embedKind !== "hyperscape" && embedKind !== "hls-player") ||
+      typeof window === "undefined"
+    ) {
+      return;
+    }
+
+    const embedOrigin = getEmbedOrigin(embedUrl);
+    if (!embedOrigin) {
+      return;
+    }
+
+    const expectedMessageType =
+      embedKind === "hyperscape"
+        ? "HYPERSCAPE_STREAM_STATUS"
+        : "HLS_PLAYER_STATUS";
+    let seenStatusMessage = false;
+    const bootstrapTimeout = window.setTimeout(() => {
+      if (!seenStatusMessage) {
+        markUnavailable(
+          embedKind === "hyperscape"
+            ? "Failed to initialize the embedded Hyperscapes stream."
+            : "Failed to initialize the embedded HLS stream.",
+        );
+      }
+    }, 10_000);
+
+    const handleMessage = (event: MessageEvent) => {
+      if (event.origin !== embedOrigin) return;
+      if (!event.data || typeof event.data !== "object") return;
+
+      const payload = event.data as EmbedStatusPayload;
+      if (payload.type !== expectedMessageType) {
+        return;
+      }
+
+      seenStatusMessage = true;
+      window.clearTimeout(bootstrapTimeout);
+      setPlayerStatus((current) => ({
+        ...current,
+        ready: payload.ready === true ? true : current.ready,
+        status:
+          typeof payload.status === "string" && payload.status.trim().length > 0
+            ? payload.status.trim()
+            : current.status,
+        liveEdgeLatencyMs:
+          typeof payload.liveEdgeLatencyMs === "number" &&
+          Number.isFinite(payload.liveEdgeLatencyMs)
+            ? payload.liveEdgeLatencyMs
+            : current.liveEdgeLatencyMs,
+        stallCount:
+          typeof payload.stallCount === "number" &&
+          Number.isFinite(payload.stallCount)
+            ? payload.stallCount
+            : current.stallCount,
+        rebuildCount:
+          typeof payload.rebuildCount === "number" &&
+          Number.isFinite(payload.rebuildCount)
+            ? payload.rebuildCount
+            : current.rebuildCount,
+        lastBufferedFragmentAt:
+          typeof payload.lastBufferedFragmentAt === "number" &&
+          Number.isFinite(payload.lastBufferedFragmentAt)
+            ? payload.lastBufferedFragmentAt
+            : current.lastBufferedFragmentAt,
+        lastPlaybackProgressAt:
+          typeof payload.lastPlaybackProgressAt === "number" &&
+          Number.isFinite(payload.lastPlaybackProgressAt)
+            ? payload.lastPlaybackProgressAt
+            : current.lastPlaybackProgressAt,
+        playbackUrl:
+          typeof payload.playbackUrl === "string" && payload.playbackUrl.trim().length > 0
+            ? payload.playbackUrl.trim()
+            : current.playbackUrl,
+        deliveryMode:
+          typeof payload.deliveryMode === "string" && payload.deliveryMode.trim().length > 0
+            ? payload.deliveryMode.trim()
+            : current.deliveryMode,
+        firstFrameAt:
+          typeof payload.firstFrameAt === "number" &&
+          Number.isFinite(payload.firstFrameAt)
+            ? payload.firstFrameAt
+            : current.firstFrameAt,
+        startupDurationMs:
+          typeof payload.startupDurationMs === "number" &&
+          Number.isFinite(payload.startupDurationMs)
+            ? payload.startupDurationMs
+            : current.startupDurationMs,
+        playbackStarted:
+          payload.playbackStarted === true ? true : current.playbackStarted,
+        presentationDelayMs:
+          typeof payload.presentationDelayMs === "number" &&
+          Number.isFinite(payload.presentationDelayMs)
+            ? Math.max(0, payload.presentationDelayMs)
+            : current.presentationDelayMs,
+        syncDeltaMs:
+          typeof payload.syncDeltaMs === "number" &&
+          Number.isFinite(payload.syncDeltaMs)
+            ? payload.syncDeltaMs
+            : current.syncDeltaMs,
+        syncState:
+          payload.syncState && payload.syncState.trim().length > 0
+            ? payload.syncState
+            : current.syncState,
+        bootPhase:
+          payload.bootPhase && payload.bootPhase.trim().length > 0
+            ? payload.bootPhase
+            : current.bootPhase,
+        loaderVisible:
+          typeof payload.loaderVisible === "boolean"
+            ? payload.loaderVisible
+            : current.loaderVisible,
+      }));
+
+      if (payload.ready === true) {
+        markReady();
+        return;
+      }
+
+      const degradedStatus =
+        typeof payload.status === "string" && payload.status.trim().length > 0
+          ? payload.status.trim()
+          : typeof payload.rendererHealth?.degradedReason === "string" &&
+              payload.rendererHealth.degradedReason.trim().length > 0
+            ? payload.rendererHealth.degradedReason.trim()
+            : null;
+
+      if (degradedStatus && degradedStatus.startsWith("error:")) {
+        markUnavailable(
+          embedKind === "hyperscape"
+            ? describeHyperscapeEmbedError(degradedStatus)
+            : describeHlsEmbedError(degradedStatus),
+        );
+        return;
+      }
+
+      if (!isTransientPlayerStatus(degradedStatus)) {
+        markDegraded(
+          describePlayerStatus(degradedStatus, embedKind),
+          degradedStatus ?? undefined,
+        );
+      }
+    };
+
+    window.addEventListener("message", handleMessage);
+    return () => {
+      window.clearTimeout(bootstrapTimeout);
+      window.removeEventListener("message", handleMessage);
+    };
+  }, [embedKind, embedUrl, markDegraded, markReady, markUnavailable]);
 
   useEffect(() => {
     // External embeddable URLs render through iframe mode below.
@@ -53,250 +646,540 @@ export const StreamPlayer: React.FC<StreamPlayerProps> = ({
 
     let hls: Hls | null = null;
     let retryTimeout: ReturnType<typeof setTimeout> | null = null;
-    let healthWatchdog: ReturnType<typeof setInterval> | null = null;
-    let lastPlaybackTime = 0;
-    let lastPlaylistUpdateAt = Date.now();
-    let stallCount = 0;
+    let latencyInterval: ReturnType<typeof setInterval> | null = null;
+    let waitingTimeout: ReturnType<typeof setTimeout> | null = null;
+    let recoveryCooldownUntil = 0;
+    let fatalErrorCount = 0;
     let disposed = false;
+    let lastProgressAt = Date.now();
+    let lastCurrentTime = 0;
+    let recentVideoErrorRecoveries = 0;
+    let playbackStarted = false;
+    let startupStartedAt = Date.now();
+    let playerReady = false;
+    let waitingSignalTimestamps: number[] = [];
+    const sourceUrl = streamUrl.trim();
+    const playbackProfile = resolveHlsPlaybackProfile(sourceUrl, deliveryMode);
 
-    const clearTimers = () => {
-      if (retryTimeout) {
-        clearTimeout(retryTimeout);
-        retryTimeout = null;
+    const updateTelemetry = (
+      next:
+        | Partial<StreamPlayerStatus>
+        | ((current: StreamPlayerStatus) => StreamPlayerStatus),
+    ) => {
+      setPlayerStatus((current) =>
+        typeof next === "function"
+          ? next(current)
+          : {
+              ...current,
+              ...next,
+            },
+      );
+    };
+
+    const clearRetry = () => {
+      if (!retryTimeout) return;
+      clearTimeout(retryTimeout);
+      retryTimeout = null;
+    };
+
+    const clearLatencyInterval = () => {
+      if (!latencyInterval) return;
+      clearInterval(latencyInterval);
+      latencyInterval = null;
+    };
+
+    const clearWaitingTimeout = () => {
+      if (!waitingTimeout) return;
+      clearTimeout(waitingTimeout);
+      waitingTimeout = null;
+    };
+
+    const syncLatencyTelemetry = () => {
+      const latencyMs = readLiveEdgeLatencyMs(hls, video);
+      const normalizedPresentationDelayMs =
+        typeof presentationDelayMs === "number" &&
+        Number.isFinite(presentationDelayMs)
+          ? Math.max(0, presentationDelayMs)
+          : null;
+      updateTelemetry({
+        liveEdgeLatencyMs: latencyMs,
+        playbackUrl: sourceUrl,
+        deliveryMode: resolvePlayerDeliveryModeHint(sourceUrl, deliveryMode),
+        presentationDelayMs: normalizedPresentationDelayMs,
+      });
+      if (
+        playbackStarted &&
+        !video.paused &&
+        isPlaybackLatencyWithinBudget({
+          driftThresholdMs: playbackProfile.driftThresholdMs,
+          syncDriftThresholdMs: playbackProfile.syncDriftThresholdMs,
+          latencyMs,
+          presentationDelayMs: normalizedPresentationDelayMs,
+        })
+      ) {
+        playerReady = true;
+        markDegraded(null);
+        markReady();
+        return;
       }
-      if (healthWatchdog) {
-        clearInterval(healthWatchdog);
-        healthWatchdog = null;
+      if (
+        shouldTreatPlaybackLatencyAsDrifted({
+          driftThresholdMs: playbackProfile.driftThresholdMs,
+          syncDriftThresholdMs: playbackProfile.syncDriftThresholdMs,
+          latencyMs,
+          presentationDelayMs: normalizedPresentationDelayMs,
+          playbackStarted,
+          ready: playerReady,
+        })
+      ) {
+        playerReady = false;
+        markDegraded(
+          describeCanonicalRendererDegradedReason("player_drifted"),
+        );
       }
     };
 
-    const sourceUrl = () =>
-      `${streamUrl}${streamUrl.includes("?") ? "&" : "?"}t=${Date.now()}`;
-
-    const probeManifest = async () => {
-      try {
-        const response = await fetch(sourceUrl(), { cache: "no-store" });
-        if (!response.ok) return false;
-        const text = await response.text();
-        // A valid live playlist should include media segments.
-        return /#EXTINF/i.test(text) && /\.(ts|m4s|mp4)\b/i.test(text);
-      } catch {
-        return false;
+    const notePlaybackProgress = () => {
+      if (video.currentTime > lastCurrentTime + 0.05) {
+        playbackStarted = true;
+        lastCurrentTime = video.currentTime;
+        lastProgressAt = Date.now();
+        recentVideoErrorRecoveries = 0;
+        waitingSignalTimestamps = [];
+        playerReady = true;
+        const firstFrameAt = Date.now();
+        updateTelemetry((current) => ({
+          ...current,
+          playbackStarted: true,
+          firstFrameAt: current.firstFrameAt ?? firstFrameAt,
+          startupDurationMs:
+            current.startupDurationMs ?? firstFrameAt - startupStartedAt,
+          lastPlaybackProgressAt: lastProgressAt,
+        }));
+        markDegraded(null);
+        markReady();
       }
     };
 
-    const nudgeToLiveEdge = () => {
-      if (!video) return;
+    const readBufferedTailMs = () => {
+      if (video.buffered.length === 0) {
+        return null;
+      }
+      const bufferedEnd = video.buffered.end(video.buffered.length - 1);
+      const remaining = bufferedEnd - video.currentTime;
+      if (!Number.isFinite(remaining) || remaining < 0) {
+        return null;
+      }
+      return Math.round(remaining * 1000);
+    };
 
-      const syncPosition = hls?.liveSyncPosition;
-      if (typeof syncPosition === "number" && Number.isFinite(syncPosition)) {
-        if (syncPosition - video.currentTime > 1) {
-          video.currentTime = Math.max(0, syncPosition - 0.5);
+    const startLatencyPolling = () => {
+      clearLatencyInterval();
+      latencyInterval = setInterval(syncLatencyTelemetry, 1000);
+    };
+
+    const isStartupPending = (now = Date.now()) =>
+      shouldTreatPlaybackStartupAsPending({
+        currentTime: video.currentTime,
+        now,
+        playbackStarted,
+        startupGraceMs: playbackProfile.startupGraceMs,
+        startupStartedAt,
+      });
+
+    const recoverPlayback = (
+      reason: string,
+      {
+        reloadSource = false,
+        recoverMedia = false,
+        delayMs = 0,
+      }: {
+        reloadSource?: boolean;
+        recoverMedia?: boolean;
+        delayMs?: number;
+      } = {},
+    ) => {
+      const run = () => {
+        if (disposed) return;
+
+        const now = Date.now();
+        if (now < recoveryCooldownUntil) {
+          return;
         }
-      } else if (video.buffered.length > 0) {
-        const liveEdge = video.buffered.end(video.buffered.length - 1);
-        if (liveEdge - video.currentTime > 1) {
-          video.currentTime = Math.max(0, liveEdge - 0.5);
+        recoveryCooldownUntil = now + 2500;
+
+        console.warn(`[StreamPlayer] Recovering playback: ${reason}`);
+        if (recoverMedia) {
+          hls?.recoverMediaError();
         }
+        if (reloadSource) {
+          hls?.startLoad(-1);
+        }
+        syncLatencyTelemetry();
+        void video.play().catch(() => {});
+      };
+
+      clearRetry();
+      if (delayMs > 0) {
+        retryTimeout = setTimeout(run, delayMs);
+        return;
       }
 
-      void video.play().catch(() => {});
+      run();
     };
 
-    const scheduleRebuild = (reason: string, delayMs = 1500) => {
+    const rebuildPlayer = (reason: string, delayMs = 1500) => {
       console.warn(`[StreamPlayer] Rebuilding stream: ${reason}`);
-      if (retryTimeout) clearTimeout(retryTimeout);
+      updateTelemetry((current) => ({
+        ...current,
+        rebuildCount: current.rebuildCount + 1,
+      }));
+      markDegraded("Rebuilding live stream...");
+      clearRetry();
       retryTimeout = setTimeout(() => {
+        if (disposed) return;
         void initPlayer();
       }, delayMs);
     };
 
-    const startHealthWatchdog = () => {
-      if (healthWatchdog) clearInterval(healthWatchdog);
-
-      lastPlaybackTime = 0;
-      stallCount = 0;
-
-      // Recovery loop for tiny stalls and stale playlist updates.
-      healthWatchdog = setInterval(() => {
-        if (!video) return;
-
-        const now = Date.now();
-        const playbackDelta = Math.abs(video.currentTime - lastPlaybackTime);
-        const stalled =
-          video.currentTime > 0 &&
-          playbackDelta < 0.01 &&
-          !video.paused &&
-          !video.ended;
-
-        if (stalled) {
-          stallCount += 1;
-          console.warn(
-            `[StreamPlayer] Playback stalled (count: ${stallCount})`,
-          );
-
-          if (stallCount >= 3) {
-            scheduleRebuild("playback stalled repeatedly");
-            return;
-          }
-
-          if (stallCount === 1) {
-            nudgeToLiveEdge();
-          } else {
-            hls?.recoverMediaError();
-            nudgeToLiveEdge();
-          }
-        } else {
-          stallCount = 0;
-        }
-
-        if (hls && now - lastPlaylistUpdateAt > 8000) {
-          console.warn(
-            "[StreamPlayer] Playlist stalled; forcing manifest/fragment reload",
-          );
-          hls.startLoad();
-          nudgeToLiveEdge();
-          lastPlaylistUpdateAt = now;
-        }
-
-        lastPlaybackTime = video.currentTime;
-      }, 2000);
-    };
-
     const initPlayer = async () => {
       if (disposed) return;
-      clearTimers();
+
+      clearRetry();
+      fatalErrorCount = 0;
+      recoveryCooldownUntil = 0;
+
       if (hls) {
         hls.destroy();
         hls = null;
       }
-      lastPlaylistUpdateAt = Date.now();
+      clearLatencyInterval();
+      clearWaitingTimeout();
+      playbackStarted = false;
+      playerReady = false;
+      startupStartedAt = Date.now();
+      lastProgressAt = startupStartedAt;
+      lastCurrentTime = 0;
+      recentVideoErrorRecoveries = 0;
+      updateTelemetry((current) => ({
+        ...current,
+        liveEdgeLatencyMs: null,
+        lastBufferedFragmentAt: null,
+        lastPlaybackProgressAt: null,
+        playbackUrl: sourceUrl,
+        deliveryMode: resolvePlayerDeliveryModeHint(sourceUrl, deliveryMode),
+        firstFrameAt: null,
+        startupDurationMs: null,
+        playbackStarted: false,
+        presentationDelayMs:
+          typeof presentationDelayMs === "number" && Number.isFinite(presentationDelayMs)
+            ? Math.max(0, presentationDelayMs)
+            : null,
+      }));
 
-      const manifestReady = await probeManifest();
-      if (!manifestReady) {
-        scheduleRebuild("manifest not ready", 1000);
+      video.preload = "auto";
+      if (autoPlay) {
+        video.autoplay = true;
+      }
+      video.muted = muted;
+
+      if (video.canPlayType("application/vnd.apple.mpegurl")) {
+        video.src = sourceUrl;
+        startLatencyPolling();
+        syncLatencyTelemetry();
+        void video.play().catch(() => {});
         return;
       }
 
-      // Check if browser supports HLS natively (Safari)
-      if (video.canPlayType("application/vnd.apple.mpegurl")) {
-        video.src = sourceUrl();
+      if (!Hls.isSupported()) {
+        console.error("[StreamPlayer] HLS is not supported in this browser");
+        markUnavailable("HLS is not supported in this browser.");
+        return;
+      }
+
+      hls = new Hls({ ...playbackProfile.config });
+
+      hls.loadSource(sourceUrl);
+      hls.attachMedia(video);
+      startLatencyPolling();
+
+      hls.on(Hls.Events.MANIFEST_PARSED, () => {
+        preferHighestViableHlsLevel(hls!, video);
+        console.log("[StreamPlayer] Manifest parsed, starting playback");
+        markDegraded(null);
+        syncLatencyTelemetry();
         void video.play().catch(() => {});
-        startHealthWatchdog();
-      } else if (Hls.isSupported()) {
-        hls = new Hls({
-          enableWorker: true,
-          // FFmpeg emits standard live HLS, not LL-HLS parts.
-          lowLatencyMode: false,
-          // Keep a wider live window to absorb network jitter.
-          liveSyncDurationCount: 4,
-          liveMaxLatencyDurationCount: 12,
-          liveBackBufferLength: 30,
-          maxBufferLength: 30,
-          maxMaxBufferLength: 60,
-          // Aggressive retries when manifests/fragments fail.
-          manifestLoadingMaxRetry: 10,
-          manifestLoadingRetryDelay: 800,
-          levelLoadingMaxRetry: 10,
-          levelLoadingRetryDelay: 800,
-          fragLoadingMaxRetry: 10,
-          fragLoadingRetryDelay: 800,
+      });
+
+      hls.on(Hls.Events.FRAG_BUFFERED, () => {
+        clearWaitingTimeout();
+        lastProgressAt = Date.now();
+        recentVideoErrorRecoveries = 0;
+        updateTelemetry({
+          lastBufferedFragmentAt: Date.now(),
         });
+        syncLatencyTelemetry();
+        markDegraded(null);
+        markReady();
+      });
 
-        hls.loadSource(sourceUrl());
-        hls.attachMedia(video);
+      hls.on(Hls.Events.LEVEL_UPDATED, () => {
+        syncLatencyTelemetry();
+      });
 
-        hls.on(Hls.Events.MANIFEST_LOADED, () => {
-          lastPlaylistUpdateAt = Date.now();
-        });
+      hls.on(Hls.Events.ERROR, (_event, data) => {
+        console.warn(
+          "[StreamPlayer] HLS error:",
+          data.type,
+          data.details,
+          data.fatal,
+        );
 
-        hls.on(Hls.Events.LEVEL_LOADED, () => {
-          lastPlaylistUpdateAt = Date.now();
-        });
-
-        hls.on(Hls.Events.FRAG_LOADED, () => {
-          lastPlaylistUpdateAt = Date.now();
-        });
-
-        hls.on(Hls.Events.MANIFEST_PARSED, () => {
-          console.log("[StreamPlayer] Manifest parsed, starting playback");
-          onStreamReady?.();
-          void video.play().catch(() => {});
-        });
-
-        hls.on(Hls.Events.ERROR, (_event, data) => {
-          console.warn(
-            "[StreamPlayer] HLS error:",
-            data.type,
-            data.details,
-            data.fatal,
-          );
-
-          if (data.fatal) {
-            switch (data.type) {
-              case Hls.ErrorTypes.NETWORK_ERROR:
-                console.log("[StreamPlayer] Network error, retrying load...");
-                hls?.startLoad(-1);
-                break;
-              case Hls.ErrorTypes.MEDIA_ERROR:
-                console.log("[StreamPlayer] Media error, recovering...");
-                hls?.recoverMediaError();
-                nudgeToLiveEdge();
-                break;
-              default:
-                scheduleRebuild("fatal HLS error", 2000);
-                break;
+        if (!data.fatal) {
+          if (data.details === Hls.ErrorDetails.BUFFER_STALLED_ERROR) {
+            if (isStartupPending()) {
+              recoverPlayback("startup buffer stall", {
+                reloadSource: true,
+                recoverMedia: true,
+                delayMs: 750,
+              });
+              return;
+            }
+            updateTelemetry((current) => ({
+              ...current,
+              stallCount: current.stallCount + 1,
+            }));
+            markDegraded(
+              describeCanonicalRendererDegradedReason("player_drifted"),
+            );
+            if (playbackProfile.reloadOnBufferStall) {
+              recoverPlayback("buffer stalled near live edge", {
+                reloadSource: true,
+              });
+            } else {
+              syncLatencyTelemetry();
+              void video.play().catch(() => {});
             }
           } else if (
-            data.details === Hls.ErrorDetails.BUFFER_STALLED_ERROR ||
             data.details === Hls.ErrorDetails.FRAG_LOAD_TIMEOUT ||
-            data.details === Hls.ErrorDetails.LEVEL_LOAD_TIMEOUT ||
-            data.details === Hls.ErrorDetails.BUFFER_APPEND_ERROR
+            data.details === Hls.ErrorDetails.LEVEL_LOAD_TIMEOUT
           ) {
-            console.warn(
-              "[StreamPlayer] Non-fatal buffering/loading issue; forcing recovery",
-            );
-            hls?.startLoad();
-            nudgeToLiveEdge();
+            updateTelemetry((current) => ({
+              ...current,
+              stallCount: current.stallCount + 1,
+            }));
+            markDegraded("Reconnecting to the live stream.");
+            recoverPlayback("fragment/level load timeout", {
+              reloadSource: true,
+            });
+          } else if (data.details === Hls.ErrorDetails.BUFFER_APPEND_ERROR) {
+            updateTelemetry((current) => ({
+              ...current,
+              stallCount: current.stallCount + 1,
+            }));
+            markDegraded("Recovering live stream...");
+            recoverPlayback("buffer append issue", {
+              recoverMedia: true,
+              reloadSource: true,
+            });
           }
-        });
+          return;
+        }
 
-        startHealthWatchdog();
-      } else {
-        console.error("[StreamPlayer] HLS is not supported in this browser");
-      }
+        fatalErrorCount += 1;
+
+        switch (data.type) {
+          case Hls.ErrorTypes.NETWORK_ERROR:
+            if (fatalErrorCount < 3) {
+              markDegraded("Reconnecting to the live edge...");
+              recoverPlayback("fatal network error", {
+                reloadSource: true,
+                delayMs: 1000,
+              });
+            } else {
+              rebuildPlayer("repeated fatal network error", 2000);
+            }
+            break;
+          case Hls.ErrorTypes.MEDIA_ERROR:
+            if (fatalErrorCount < 3) {
+              markDegraded("Recovering live playback...");
+              recoverPlayback("fatal media error", {
+                recoverMedia: true,
+                reloadSource: true,
+                delayMs: 500,
+              });
+            } else {
+              rebuildPlayer("repeated fatal media error", 2000);
+            }
+            break;
+          default:
+            if (fatalErrorCount < 2) {
+              rebuildPlayer("fatal HLS error", 2000);
+            } else {
+              markUnavailable("Live stream unavailable.");
+            }
+            break;
+        }
+      });
     };
 
-    const onWaiting = () => nudgeToLiveEdge();
-    const onStalled = () => nudgeToLiveEdge();
-    const onLoadedMetadata = () => onStreamReady?.();
-    const onVideoError = () => scheduleRebuild("video element error", 1000);
+    const onLoadedMetadata = () => markReady();
+    const onLoadedData = () => markReady();
+    const onCanPlay = () => markReady();
+    const onPlaying = () => {
+      clearWaitingTimeout();
+      notePlaybackProgress();
+      markDegraded(null);
+      syncLatencyTelemetry();
+      markReady();
+    };
+    const onWaiting = () => {
+      clearWaitingTimeout();
+      waitingTimeout = setTimeout(() => {
+        const now = Date.now();
+        if (isStartupPending(now)) {
+          syncLatencyTelemetry();
+          return;
+        }
+        if (!playbackStarted && video.currentTime <= 0.05) {
+          markDegraded("Reconnecting to the live stream.");
+          recoverPlayback("startup waiting timeout", {
+            reloadSource: true,
+            recoverMedia: true,
+            delayMs: 750,
+          });
+          return;
+        }
+        const bufferedTailMs = readBufferedTailMs();
+        const idleForMs = now - lastProgressAt;
+        if (
+          bufferedTailMs != null &&
+          bufferedTailMs > playbackProfile.minVideoErrorTailMs &&
+          idleForMs < playbackProfile.waitingGraceMs * 2
+        ) {
+          syncLatencyTelemetry();
+          return;
+        }
+        updateTelemetry((current) => ({
+          ...current,
+          stallCount: current.stallCount + 1,
+        }));
+        waitingSignalTimestamps = recordRecentPlaybackSignal(
+          waitingSignalTimestamps,
+          now,
+        );
+        const repeatedWaitingSignals =
+          waitingSignalTimestamps.length >= RECENT_PLAYER_SIGNAL_THRESHOLD;
+        const sustainedIdleWithoutTail =
+          bufferedTailMs == null &&
+          idleForMs > playbackProfile.waitingGraceMs * 2;
+        if (!repeatedWaitingSignals && !sustainedIdleWithoutTail) {
+          syncLatencyTelemetry();
+          return;
+        }
+        markDegraded("Your playback is catching up to the live edge.");
+      }, playbackProfile.waitingGraceMs);
+    };
+    const onStalled = () => {
+      clearWaitingTimeout();
+      if (isStartupPending()) {
+        syncLatencyTelemetry();
+        return;
+      }
+      if (!playbackStarted && video.currentTime <= 0.05) {
+        markDegraded("Reconnecting to the live stream.");
+        recoverPlayback("startup video stalled", {
+          reloadSource: true,
+          recoverMedia: true,
+          delayMs: 750,
+        });
+        return;
+      }
+      updateTelemetry((current) => ({
+        ...current,
+        stallCount: current.stallCount + 1,
+      }));
+      markDegraded(describeCanonicalRendererDegradedReason("player_drifted"));
+      recoverPlayback("video stalled", {
+        reloadSource: true,
+        recoverMedia: true,
+        delayMs: 750,
+      });
+    };
+    const onTimeUpdate = () => {
+      notePlaybackProgress();
+      syncLatencyTelemetry();
+    };
+    const onVideoError = () => {
+      const bufferedTailMs = readBufferedTailMs();
+      const idleForMs = Date.now() - lastProgressAt;
+      if (
+        !playbackProfile.rebuildOnVideoError &&
+        recentVideoErrorRecoveries < 2
+      ) {
+        recentVideoErrorRecoveries += 1;
+        updateTelemetry((current) => ({
+          ...current,
+          stallCount: current.stallCount + 1,
+        }));
+        markDegraded("Recovering live playback...");
+        recoverPlayback("video element error", {
+          reloadSource: true,
+          recoverMedia: true,
+          delayMs:
+            bufferedTailMs != null &&
+            bufferedTailMs > playbackProfile.minVideoErrorTailMs
+              ? 1250
+              : 750,
+        });
+        return;
+      }
+      rebuildPlayer("video element error", 1000);
+    };
 
+    video.addEventListener("loadedmetadata", onLoadedMetadata);
+    video.addEventListener("loadeddata", onLoadedData);
+    video.addEventListener("canplay", onCanPlay);
+    video.addEventListener("playing", onPlaying);
     video.addEventListener("waiting", onWaiting);
     video.addEventListener("stalled", onStalled);
-    video.addEventListener("loadedmetadata", onLoadedMetadata);
+    video.addEventListener("timeupdate", onTimeUpdate);
     video.addEventListener("error", onVideoError);
-
-    if (autoPlay) {
-      video.autoplay = true;
-    }
-    video.muted = muted;
 
     void initPlayer();
 
     return () => {
+      video.removeEventListener("loadedmetadata", onLoadedMetadata);
+      video.removeEventListener("loadeddata", onLoadedData);
+      video.removeEventListener("canplay", onCanPlay);
+      video.removeEventListener("playing", onPlaying);
       video.removeEventListener("waiting", onWaiting);
       video.removeEventListener("stalled", onStalled);
-      video.removeEventListener("loadedmetadata", onLoadedMetadata);
+      video.removeEventListener("timeupdate", onTimeUpdate);
       video.removeEventListener("error", onVideoError);
-      clearTimers();
+      clearRetry();
+      clearLatencyInterval();
+      clearWaitingTimeout();
       disposed = true;
       if (hls) {
         hls.destroy();
         hls = null;
       }
+      video.removeAttribute("src");
+      video.load();
     };
-  }, [embedUrl, streamUrl, autoPlay, muted]);
+  }, [
+    embedUrl,
+    streamUrl,
+    autoPlay,
+    deliveryMode,
+    muted,
+    markDegraded,
+    markReady,
+    markUnavailable,
+    presentationDelayMs,
+  ]);
+  const overlayMessage = embedFailure ?? diagnosticMessage;
 
   if (!embedUrl) {
     return (
@@ -323,6 +1206,42 @@ export const StreamPlayer: React.FC<StreamPlayerProps> = ({
             backgroundColor: "#000",
           }}
         />
+        {overlayMessage ? (
+          <div
+            style={{
+              position: "absolute",
+              inset: 0,
+              zIndex: 1,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              padding: "24px",
+              textAlign: "center",
+              color: "#f3e4ba",
+              fontFamily: "system-ui, sans-serif",
+              fontSize: "0.95rem",
+              lineHeight: 1.5,
+              background:
+                embedFailure != null
+                  ? "linear-gradient(180deg, rgba(2,4,10,0.76), rgba(2,4,10,0.88))"
+                  : "linear-gradient(180deg, rgba(2,4,10,0.38), rgba(2,4,10,0.72))",
+            }}
+          >
+            <div
+              style={{
+                maxWidth: "28rem",
+                padding: "1rem 1.25rem",
+                border: "1px solid rgba(243, 228, 186, 0.28)",
+                borderRadius: "0.9rem",
+                backgroundColor: "rgba(8, 11, 20, 0.72)",
+                boxShadow: "0 16px 48px rgba(0, 0, 0, 0.28)",
+              }}
+            >
+              {overlayMessage}
+            </div>
+          </div>
+        ) : null}
+        {showDiagnostics ? <PlayerDiagnostics telemetry={playerStatus} /> : null}
         <div
           style={{
             position: "absolute",
@@ -343,24 +1262,74 @@ export const StreamPlayer: React.FC<StreamPlayerProps> = ({
       className={className}
       style={{ position: "relative", width: "100%", height: "100%", ...style }}
     >
-      <iframe
-        key={`${embedUrl}|${poster ?? ""}`}
-        src={embedUrl}
-        title="Live Stream"
-        allow="autoplay; encrypted-media; picture-in-picture; clipboard-write"
-        allowFullScreen
-        loading="eager"
-        onLoad={onStreamReady}
-        referrerPolicy="strict-origin-when-cross-origin"
-        onError={markUnavailable}
-        style={{
-          width: "100%",
-          height: "100%",
-          border: 0,
-          display: "block",
-          backgroundColor: "#000",
-        }}
-      />
+      {embedKind === "hyperscape-public" ? (
+        <div
+          style={{
+            width: "100%",
+            height: "100%",
+            backgroundColor: "#000",
+          }}
+        />
+      ) : (
+        <iframe
+          key={`${embedUrl}|${poster ?? ""}`}
+          src={embedUrl}
+          title="Live Stream"
+          allow="autoplay; encrypted-media; picture-in-picture; clipboard-write"
+          allowFullScreen
+          loading="eager"
+          onLoad={
+            embedKind === "hyperscape" || embedKind === "hls-player"
+              ? undefined
+              : markReady
+          }
+          referrerPolicy="strict-origin-when-cross-origin"
+          onError={() => markUnavailable()}
+          style={{
+            width: "100%",
+            height: "100%",
+            border: 0,
+            display: "block",
+            backgroundColor: "#000",
+          }}
+        />
+      )}
+      {overlayMessage ? (
+        <div
+          style={{
+            position: "absolute",
+            inset: 0,
+            zIndex: 1,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: "24px",
+            textAlign: "center",
+            color: "#f3e4ba",
+            fontFamily: "system-ui, sans-serif",
+            fontSize: "0.95rem",
+            lineHeight: 1.5,
+            background:
+              embedFailure != null
+                ? "linear-gradient(180deg, rgba(2,4,10,0.76), rgba(2,4,10,0.88))"
+                : "linear-gradient(180deg, rgba(2,4,10,0.38), rgba(2,4,10,0.72))",
+          }}
+        >
+          <div
+            style={{
+              maxWidth: "28rem",
+              padding: "1rem 1.25rem",
+              border: "1px solid rgba(243, 228, 186, 0.28)",
+              borderRadius: "0.9rem",
+              backgroundColor: "rgba(8, 11, 20, 0.72)",
+              boxShadow: "0 16px 48px rgba(0, 0, 0, 0.28)",
+            }}
+          >
+            {overlayMessage}
+          </div>
+        </div>
+      ) : null}
+      {showDiagnostics ? <PlayerDiagnostics telemetry={playerStatus} /> : null}
       <div
         style={{
           position: "absolute",
@@ -376,16 +1345,118 @@ export const StreamPlayer: React.FC<StreamPlayerProps> = ({
   );
 };
 
+function createInitialPlayerStatus(params: {
+  streamUrl: string;
+  deliveryMode: string | null;
+  presentationDelayMs: number | null;
+}): StreamPlayerStatus {
+  return {
+    ready: false,
+    status: "loading",
+    liveEdgeLatencyMs: null,
+    stallCount: 0,
+    rebuildCount: 0,
+    lastBufferedFragmentAt: null,
+    lastPlaybackProgressAt: null,
+    playbackUrl: params.streamUrl.trim() || null,
+    deliveryMode: resolvePlayerDeliveryModeHint(
+      params.streamUrl,
+      params.deliveryMode,
+    ),
+    firstFrameAt: null,
+    startupDurationMs: null,
+    playbackStarted: false,
+    presentationDelayMs:
+      typeof params.presentationDelayMs === "number" &&
+      Number.isFinite(params.presentationDelayMs)
+        ? Math.max(0, params.presentationDelayMs)
+        : null,
+    syncDeltaMs: null,
+    syncState: "starting",
+    bootPhase: "connecting",
+    loaderVisible: true,
+  };
+}
+
+export function buildHlsPlayerEmbedUrl(
+  streamUrl: string,
+  autoPlay: boolean,
+  muted: boolean,
+  options: {
+    deliveryMode: string | null;
+    presentationDelayMs: number | null;
+    showDiagnostics: boolean;
+    syncToleranceMs: number;
+  },
+): string | null {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  const baseOrigin =
+    typeof window.location.origin === "string" &&
+    /^https?:\/\//i.test(window.location.origin)
+      ? window.location.origin
+      : "http://localhost";
+  const playerUrl = new URL("/hls-player", baseOrigin);
+  playerUrl.searchParams.set("src", streamUrl);
+  playerUrl.searchParams.set("autoplay", autoPlay ? "1" : "0");
+  playerUrl.searchParams.set("muted", muted ? "1" : "0");
+  const deliveryModeHint = resolvePlayerDeliveryModeHint(
+    streamUrl,
+    options.deliveryMode,
+  );
+  if (deliveryModeHint) {
+    playerUrl.searchParams.set("deliveryMode", deliveryModeHint);
+  }
+  if (
+    typeof options.presentationDelayMs === "number" &&
+    Number.isFinite(options.presentationDelayMs)
+  ) {
+    playerUrl.searchParams.set(
+      "presentationDelayMs",
+      String(Math.max(0, options.presentationDelayMs)),
+    );
+  }
+  if (options.syncToleranceMs > 0) {
+    playerUrl.searchParams.set(
+      "syncToleranceMs",
+      String(Math.max(0, options.syncToleranceMs)),
+    );
+  }
+  if (options.showDiagnostics) {
+    playerUrl.searchParams.set("debug", "1");
+  }
+  return playerUrl.toString();
+}
+
 function resolveEmbedUrl(
   inputUrl: string,
   autoPlay: boolean,
   muted: boolean,
+  options: {
+    deliveryMode: string | null;
+    presentationDelayMs: number | null;
+    showDiagnostics: boolean;
+    syncToleranceMs: number;
+  },
 ): string | null {
   const trimmed = inputUrl.trim();
-  if (!trimmed || trimmed.includes(".m3u8")) return null;
+  if (!trimmed) return null;
 
   const parsed = parseUrl(trimmed);
   if (!parsed) return null;
+  const pathname = parsed.pathname.toLowerCase();
+
+  if (pathname.endsWith(".m3u8")) {
+    return buildHlsPlayerEmbedUrl(
+      parsed.toString(),
+      autoPlay,
+      muted,
+      options,
+    );
+  }
+
   const host = parsed.hostname.toLowerCase();
 
   if (
@@ -465,6 +1536,455 @@ function toTwitchEmbedUrl(
   embed.searchParams.set("autoplay", autoPlay ? "true" : "false");
   embed.searchParams.set("muted", muted ? "true" : "false");
   return embed.toString();
+}
+
+function classifyEmbedKind(
+  embedUrl: string | null,
+): "generic" | "hls-player" | "hyperscape" | "hyperscape-public" {
+  if (!embedUrl) return "generic";
+
+  const parsed = parseUrl(embedUrl);
+  if (!parsed) return "generic";
+
+  const pathname = parsed.pathname.toLowerCase();
+  if (
+    pathname.endsWith("/hls-player.html") ||
+    pathname === "/hls-player.html" ||
+    pathname.endsWith("/hls-player") ||
+    pathname === "/hls-player"
+  ) {
+    return "hls-player";
+  }
+  const page = (parsed.searchParams.get("page") || "").trim().toLowerCase();
+  const isStreamRoute =
+    pathname.endsWith("/stream") ||
+    pathname === "/stream" ||
+    pathname.endsWith("/stream.html") ||
+    pathname === "/stream.html" ||
+    page === "stream";
+
+  if (!isStreamRoute) return "generic";
+  if (parsed.searchParams.has("streamToken")) return "hyperscape";
+  if (parsed.hostname.toLowerCase().includes("hyperscape")) {
+    return "hyperscape-public";
+  }
+  return "generic";
+}
+
+function getEmbedOrigin(embedUrl: string): string | null {
+  const parsed = parseUrl(embedUrl);
+  return parsed?.origin ?? null;
+}
+
+function inferDeliveryMode(streamUrl: string): string | null {
+  const parsed = parseUrl(streamUrl);
+  if (!parsed) return null;
+  const protocol = (parsed.searchParams.get("protocol") || "").trim().toLowerCase();
+  if (protocol === "llhls") {
+    return "external_hls/llhls";
+  }
+  if (parsed.pathname.toLowerCase().endsWith(".m3u8")) {
+    return "self_hls/hls";
+  }
+  if (
+    parsed.pathname.toLowerCase().endsWith("/stream") ||
+    parsed.pathname.toLowerCase().endsWith("/stream.html")
+  ) {
+    return "embedded_hyperscape";
+  }
+  return null;
+}
+
+export function resolvePlayerDeliveryModeHint(
+  streamUrl: string,
+  explicitDeliveryMode: string | null | undefined,
+): string | null {
+  const inferredDeliveryMode = inferDeliveryMode(streamUrl);
+  const normalizedExplicitDeliveryMode =
+    explicitDeliveryMode && explicitDeliveryMode.trim().length > 0
+      ? explicitDeliveryMode.trim()
+      : null;
+
+  if (
+    inferredDeliveryMode === "external_hls/llhls" &&
+    normalizedExplicitDeliveryMode !== "external_hls/llhls"
+  ) {
+    return inferredDeliveryMode;
+  }
+
+  return normalizedExplicitDeliveryMode ?? inferredDeliveryMode;
+}
+
+export function resolveHlsPlaybackProfile(
+  streamUrl: string,
+  explicitDeliveryMode: string | null | undefined = null,
+): HlsPlaybackProfile {
+  const deliveryMode = resolvePlayerDeliveryModeHint(
+    streamUrl,
+    explicitDeliveryMode,
+  );
+  if (deliveryMode === "external_hls/llhls") {
+    return {
+      config: LOW_LATENCY_HLS_CONFIG,
+      driftThresholdMs: 12_000,
+      syncDriftThresholdMs: 2_500,
+      waitingGraceMs: 1_200,
+      reloadOnBufferStall: true,
+      rebuildOnVideoError: true,
+      minVideoErrorTailMs: 750,
+      startupGraceMs: 4_000,
+    };
+  }
+
+  return {
+    config: STABLE_LIVE_HLS_CONFIG,
+    driftThresholdMs: 35_000,
+    syncDriftThresholdMs: 8_000,
+    waitingGraceMs: 2_500,
+    reloadOnBufferStall: false,
+    rebuildOnVideoError: false,
+    minVideoErrorTailMs: 1_500,
+    startupGraceMs: 7_000,
+  };
+}
+
+export function shouldTreatPlaybackStartupAsPending(params: {
+  currentTime: number;
+  now: number;
+  playbackStarted: boolean;
+  startupGraceMs: number;
+  startupStartedAt: number;
+}): boolean {
+  return (
+    !params.playbackStarted &&
+    params.currentTime <= 0.05 &&
+    params.now - params.startupStartedAt < params.startupGraceMs
+  );
+}
+
+export function resolvePlaybackSyncDeltaMs(
+  latencyMs: number | null,
+  presentationDelayMs: number | null,
+): number | null {
+  return latencyMs != null &&
+    Number.isFinite(latencyMs) &&
+    presentationDelayMs != null &&
+    Number.isFinite(presentationDelayMs) &&
+    presentationDelayMs > 0
+    ? Math.round(latencyMs - presentationDelayMs)
+    : null;
+}
+
+export function isPlaybackLatencyWithinBudget(params: {
+  driftThresholdMs: number;
+  syncDriftThresholdMs: number;
+  latencyMs: number | null;
+  presentationDelayMs: number | null;
+}): boolean {
+  if (params.latencyMs == null || !Number.isFinite(params.latencyMs)) {
+    return true;
+  }
+
+  const syncDeltaMs = resolvePlaybackSyncDeltaMs(
+    params.latencyMs,
+    params.presentationDelayMs,
+  );
+  if (syncDeltaMs != null) {
+    return Math.abs(syncDeltaMs) <= params.syncDriftThresholdMs;
+  }
+
+  return params.latencyMs <= params.driftThresholdMs;
+}
+
+export function recordRecentPlaybackSignal(
+  signalTimestamps: number[],
+  now: number,
+  windowMs = RECENT_PLAYER_SIGNAL_WINDOW_MS,
+): number[] {
+  return [
+    ...signalTimestamps.filter((timestamp) => now - timestamp <= windowMs),
+    now,
+  ];
+}
+
+export function shouldTreatPlaybackLatencyAsDrifted(params: {
+  driftThresholdMs: number;
+  syncDriftThresholdMs: number;
+  latencyMs: number | null;
+  presentationDelayMs: number | null;
+  playbackStarted: boolean;
+  ready: boolean;
+}): boolean {
+  const syncDeltaMs = resolvePlaybackSyncDeltaMs(
+    params.latencyMs,
+    params.presentationDelayMs,
+  );
+  return (
+    params.ready &&
+    params.playbackStarted &&
+    (syncDeltaMs != null
+      ? syncDeltaMs > params.syncDriftThresholdMs
+      : !isPlaybackLatencyWithinBudget({
+          driftThresholdMs: params.driftThresholdMs,
+          syncDriftThresholdMs: params.syncDriftThresholdMs,
+          latencyMs: params.latencyMs,
+          presentationDelayMs: params.presentationDelayMs,
+        }))
+  );
+}
+
+export function advanceViewerSyncState(params: {
+  previousState: ViewerSyncState;
+  consecutiveOutOfSyncPolls: number;
+  consecutiveAlignedPolls: number;
+  liveEdgeLatencyMs: number | null;
+  playbackStarted: boolean;
+  presentationDelayMs: number | null;
+  ready: boolean;
+  status: string | null;
+  syncToleranceMs: number;
+}): {
+  consecutiveOutOfSyncPolls: number;
+  consecutiveAlignedPolls: number;
+  syncDeltaMs: number | null;
+  syncState: ViewerSyncState;
+} {
+  const normalizedStatus = (params.status ?? "").trim().toLowerCase();
+  const syncDeltaMs = resolvePlaybackSyncDeltaMs(
+    params.liveEdgeLatencyMs,
+    params.presentationDelayMs,
+  );
+
+  if (normalizedStatus.startsWith("error:")) {
+    return {
+      consecutiveOutOfSyncPolls: 0,
+      consecutiveAlignedPolls: 0,
+      syncDeltaMs,
+      syncState: "error",
+    };
+  }
+
+  if (
+    !params.playbackStarted ||
+    !params.ready ||
+    normalizedStatus === "loading" ||
+    normalizedStatus === "manifest_ready" ||
+    normalizedStatus === "reconnecting"
+  ) {
+    return {
+      consecutiveOutOfSyncPolls: 0,
+      consecutiveAlignedPolls: 0,
+      syncDeltaMs,
+      syncState: "starting",
+    };
+  }
+
+  if (normalizedStatus === "buffering") {
+    return {
+      consecutiveOutOfSyncPolls: 3,
+      consecutiveAlignedPolls: 0,
+      syncDeltaMs,
+      syncState: "buffering",
+    };
+  }
+
+  if (normalizedStatus === "player_drifted") {
+    return {
+      consecutiveOutOfSyncPolls: 3,
+      consecutiveAlignedPolls: 0,
+      syncDeltaMs,
+      syncState: "out_of_sync",
+    };
+  }
+
+  const overTolerance =
+    syncDeltaMs != null && syncDeltaMs > Math.max(0, params.syncToleranceMs);
+
+  if (overTolerance) {
+    const consecutiveOutOfSyncPolls = params.consecutiveOutOfSyncPolls + 1;
+    return {
+      consecutiveOutOfSyncPolls,
+      consecutiveAlignedPolls: 0,
+      syncDeltaMs,
+      syncState:
+        consecutiveOutOfSyncPolls >= 3
+          ? "out_of_sync"
+          : params.previousState === "buffering" ||
+              params.previousState === "out_of_sync"
+            ? params.previousState
+            : "aligned",
+    };
+  }
+
+  const consecutiveAlignedPolls =
+    params.previousState === "buffering" ||
+    params.previousState === "out_of_sync"
+      ? params.consecutiveAlignedPolls + 1
+      : 0;
+
+  return {
+    consecutiveOutOfSyncPolls: 0,
+    consecutiveAlignedPolls,
+    syncDeltaMs,
+    syncState:
+      params.previousState === "buffering" ||
+      params.previousState === "out_of_sync"
+        ? consecutiveAlignedPolls >= 2
+          ? "aligned"
+          : params.previousState
+        : "aligned",
+  };
+}
+
+function readLiveEdgeLatencyMs(
+  hls: Hls | null,
+  video: HTMLVideoElement,
+): number | null {
+  if (hls && typeof hls.latency === "number" && Number.isFinite(hls.latency)) {
+    return Math.max(0, Math.round(hls.latency * 1000));
+  }
+
+  if (video.seekable.length > 0) {
+    const liveEdge = video.seekable.end(video.seekable.length - 1);
+    const remaining = liveEdge - video.currentTime;
+    if (Number.isFinite(remaining) && remaining >= 0) {
+      return Math.round(remaining * 1000);
+    }
+  }
+
+  if (video.buffered.length > 0) {
+    const bufferedEnd = video.buffered.end(video.buffered.length - 1);
+    const remaining = bufferedEnd - video.currentTime;
+    if (Number.isFinite(remaining) && remaining >= 0) {
+      return Math.round(remaining * 1000);
+    }
+  }
+
+  if (!Number.isFinite(video.duration) || video.duration <= 0) {
+    return null;
+  }
+
+  const remaining = video.duration - video.currentTime;
+  if (!Number.isFinite(remaining) || remaining < 0) {
+    return null;
+  }
+
+  return Math.round(remaining * 1000);
+}
+
+function describeHyperscapeEmbedError(status: string): string {
+  switch (status) {
+    case "error:viewer_access_denied":
+      return "Live stream access is currently restricted for this page.";
+    case "error:webgpu_required":
+      return "This browser cannot render the live 3D stream.";
+    case "error:http":
+      return "The live stream is temporarily unavailable.";
+    case "error:init_failed":
+      return "Failed to initialize the live 3D stream.";
+    default:
+      return "Live stream unavailable.";
+  }
+}
+
+function describeHlsEmbedError(status: string): string {
+  switch (status) {
+    case "error:missing_stream_url":
+      return "Missing live stream URL.";
+    case "error:hls_not_supported":
+      return "HLS playback is not supported in this browser.";
+    case "error:unavailable":
+    case "error:fatal":
+      return "Live stream unavailable.";
+    default:
+      return "Failed to initialize the embedded HLS stream.";
+  }
+}
+
+function describePlayerStatus(
+  status: string | null,
+  embedKind: "generic" | "hls-player" | "hyperscape" | "hyperscape-public",
+): string | null {
+  const normalized = (status || "").trim().toLowerCase();
+  if (!normalized) return null;
+  if (normalized.startsWith("error:")) {
+    return embedKind === "hyperscape"
+      ? describeHyperscapeEmbedError(normalized)
+      : describeHlsEmbedError(normalized);
+  }
+  switch (normalized) {
+    case "player_drifted":
+      return describeCanonicalRendererDegradedReason("player_drifted");
+    case "buffering":
+      return "Your playback is catching up to the live edge.";
+    case "reconnecting":
+      return "Reconnecting to the live stream.";
+    default:
+      return describeCanonicalRendererDegradedReason(normalized);
+  }
+}
+
+function isTransientPlayerStatus(status: string | null): boolean {
+  const normalized = (status || "").trim().toLowerCase();
+  return (
+    !normalized ||
+    normalized === "loading" ||
+    normalized === "playing" ||
+    normalized === "manifest_ready"
+  );
+}
+
+function formatLatencyLabel(latencyMs: number | null): string {
+  if (latencyMs == null || !Number.isFinite(latencyMs)) {
+    return "n/a";
+  }
+  return `${(latencyMs / 1000).toFixed(1)}s`;
+}
+
+function formatBufferedLabel(timestamp: number | null): string {
+  if (timestamp == null || !Number.isFinite(timestamp)) {
+    return "n/a";
+  }
+  const ageMs = Math.max(0, Date.now() - timestamp);
+  return `${(ageMs / 1000).toFixed(1)}s ago`;
+}
+
+function PlayerDiagnostics({
+  telemetry,
+}: {
+  telemetry: StreamPlayerStatus;
+}) {
+  return (
+    <div
+      style={{
+        position: "absolute",
+        right: 12,
+        bottom: 12,
+        zIndex: 2,
+        padding: "8px 10px",
+        borderRadius: 10,
+        border: "1px solid rgba(255,255,255,0.12)",
+        background: "rgba(5, 8, 16, 0.7)",
+        color: "#d3dae8",
+        fontFamily:
+          'ui-monospace, SFMono-Regular, SFMono-Regular, Menlo, monospace',
+        fontSize: 11,
+        lineHeight: 1.4,
+        pointerEvents: "none",
+        minWidth: 156,
+      }}
+    >
+      <div>latency {formatLatencyLabel(telemetry.liveEdgeLatencyMs)}</div>
+      <div>stalls {telemetry.stallCount}</div>
+      <div>rebuilds {telemetry.rebuildCount}</div>
+      <div>buffered {formatBufferedLabel(telemetry.lastBufferedFragmentAt)}</div>
+      {telemetry.deliveryMode ? <div>mode {telemetry.deliveryMode}</div> : null}
+      {telemetry.presentationDelayMs != null ? (
+        <div>delay {formatLatencyLabel(telemetry.presentationDelayMs)}</div>
+      ) : null}
+      <div>sync {telemetry.syncState}</div>
+    </div>
+  );
 }
 
 function parseUrl(rawValue: string): URL | null {

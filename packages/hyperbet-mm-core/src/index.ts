@@ -211,6 +211,47 @@ export interface KeeperMarketHealthRecord {
   recovery: string[];
 }
 
+export type KeeperParityBundleState =
+  | "preparing"
+  | "awaiting_confirmations"
+  | "open"
+  | "locked"
+  | "resolved"
+  | "cancelled"
+  | "frozen"
+  | "aborted";
+
+export interface KeeperParityChainReceipt {
+  chainKey: BettingChainKey;
+  preparedAtMs: number | null;
+  openedAtMs: number | null;
+  lockedAtMs: number | null;
+  resolvedAtMs: number | null;
+  cancelledAtMs: number | null;
+  confirmedAtMs: number | null;
+  lifecycleStatus: PredictionMarketLifecycleStatus | null;
+  txRef: string | null;
+  note: string | null;
+}
+
+export interface KeeperMarketParitySnapshot {
+  bundleId: string;
+  duelKey: string | null;
+  duelId: string | null;
+  revision: number;
+  requiredChains: BettingChainKey[];
+  confirmedChains: BettingChainKey[];
+  state: KeeperParityBundleState;
+  phase: string | null;
+  safeToBet: boolean;
+  openedAtMs: number | null;
+  lockedAtMs: number | null;
+  resolvedAtMs: number | null;
+  freezeReason: string | null;
+  updatedAtMs: number;
+  receipts: KeeperParityChainReceipt[];
+}
+
 export interface KeeperBotHealthSnapshot {
   chainKey: BettingChainKey;
   updatedAtMs: number;
@@ -220,6 +261,7 @@ export interface KeeperBotHealthSnapshot {
   lastSuccessfulRpcAtMs: number | null;
   recovery: KeeperRecoveryState[];
   markets: KeeperMarketHealthRecord[];
+  marketParity?: KeeperMarketParitySnapshot | null;
 }
 
 export interface PredictionMarketStatusRecord

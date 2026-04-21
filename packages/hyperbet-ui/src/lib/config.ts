@@ -11,6 +11,7 @@ import {
   resolveBettingEvmDefaults,
   resolveBettingSolanaDeployment,
 } from "@hyperbet/chain-registry";
+import { sanitizeResolvedStreamSources } from "./streamSession";
 
 export type SolanaCluster = "localnet" | "devnet" | "testnet" | "mainnet-beta";
 
@@ -46,6 +47,12 @@ function readEnvString(name: string): string | undefined {
   if (typeof rawValue !== "string") return undefined;
   const trimmed = rawValue.trim();
   return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function readEnvStringOverride(name: string): string | undefined {
+  const rawValue = import.meta.env[name];
+  if (typeof rawValue !== "string") return undefined;
+  return rawValue.trim();
 }
 
 function readEnvNumber(name: string, fallback: number): number {
@@ -259,6 +266,7 @@ export interface EnvConfig {
   enableAutoSeed: boolean;
   gameApiUrl: string;
   gameWsUrl: string;
+  publicCdnUrl: string;
   streamUrl: string;
   uiSyncDelayMs: number;
   refreshIntervalMs: number;
@@ -289,7 +297,7 @@ export interface EnvConfig {
 const DEFAULT_STREAM_URL = "https://www.twitch.tv/hyperscapeai";
 const DEFAULT_STREAM_FALLBACK_URL = "";
 const DEFAULT_GAME_API_URL = "http://127.0.0.1:5555";
-const DEFAULT_PRODUCTION_GAME_API_URL = "https://gold-betting-keeper-production.up.railway.app";
+const DEFAULT_PRODUCTION_GAME_API_URL = "https://api.hyperbet.win";
 const DEFAULT_LOCAL_STREAM_URL =
   "http://127.0.0.1:3333/stream.html?disableBridgeCapture=1";
 
@@ -306,6 +314,7 @@ const baseConfig: Partial<EnvConfig> = {
   enableAutoSeed: true,
   gameApiUrl: DEFAULT_GAME_API_URL,
   gameWsUrl: `${DEFAULT_GAME_API_URL.replace(/^http/, "ws")}/ws`,
+  publicCdnUrl: `${DEFAULT_GAME_API_URL}/game-assets`,
   streamUrl: DEFAULT_STREAM_URL,
   refreshIntervalMs: 5000,
   jupiterBaseUrl: "https://lite-api.jup.ag",
@@ -392,6 +401,7 @@ export const ENV_CONFIGS: Record<Environment, EnvConfig> = {
     wsUrl: "wss://api.mainnet-beta.solana.com/",
     gameApiUrl: DEFAULT_PRODUCTION_GAME_API_URL,
     gameWsUrl: `${DEFAULT_PRODUCTION_GAME_API_URL.replace(/^http/, "ws")}/ws`,
+    publicCdnUrl: `${DEFAULT_PRODUCTION_GAME_API_URL}/game-assets`,
     uiSyncDelayMs: 0,
     headlessWalletName: "Headless Test Wallet",
     headlessWalletAutoConnect: false,
@@ -414,6 +424,9 @@ const resolvedGameApiUrl = envGameApiUrl ?? baseEnvConfig.gameApiUrl;
 const envGameWsUrl = readEnvString("VITE_GAME_WS_URL");
 const resolvedGameWsUrl =
   envGameWsUrl ?? `${resolvedGameApiUrl.replace(/^http/, "ws")}/ws`;
+const envPublicCdnUrl = readEnvString("VITE_PUBLIC_CDN_URL");
+const resolvedPublicCdnUrl =
+  envPublicCdnUrl ?? `${resolvedGameApiUrl.replace(/\/$/, "")}/game-assets`;
 const envStreamUrl = readEnvString("VITE_STREAM_URL");
 const envStreamSources = parseEnvList(readEnvString("VITE_STREAM_SOURCES"));
 const suppressDefaultStreamFallback =
@@ -425,7 +438,7 @@ const defaultPrimaryStreamUrl =
   envStreamUrl ?? (suppressDefaultStreamFallback ? "" : baseEnvConfig.streamUrl);
 const resolvedStreamSources = (() => {
   if (envStreamSources.length > 0) {
-    return uniqueList(envStreamSources);
+    return sanitizeResolvedStreamSources(envStreamSources);
   }
   const envFallbackUrl = readEnvString("VITE_STREAM_FALLBACK_URL");
   const fallbackUrl =
@@ -433,8 +446,10 @@ const resolvedStreamSources = (() => {
     (defaultPrimaryStreamUrl && !suppressDefaultStreamFallback
       ? DEFAULT_STREAM_FALLBACK_URL
       : "");
-  return uniqueList([defaultPrimaryStreamUrl, fallbackUrl ?? ""]).filter(
-    (value) => value.length > 0,
+  return sanitizeResolvedStreamSources(
+    uniqueList([defaultPrimaryStreamUrl, fallbackUrl ?? ""]).filter(
+      (value) => value.length > 0,
+    ),
   );
 })();
 const resolvedStreamUrl = resolvedStreamSources[0] ?? "";
@@ -447,19 +462,28 @@ const resolvedEvmChains = BETTING_EVM_CHAIN_ORDER.reduce<
   }
 
   const envPrefix = chainKey.toUpperCase();
+  const rpcUrlOverride = readEnvStringOverride(`VITE_${envPrefix}_RPC_URL`);
+  const goldClobAddressOverride = readEnvStringOverride(
+    `VITE_${envPrefix}_GOLD_CLOB_ADDRESS`,
+  );
+  const goldTokenAddressOverride = readEnvStringOverride(
+    `VITE_${envPrefix}_GOLD_TOKEN_ADDRESS`,
+  );
   acc[chainKey] = {
     chainId: readEnvNumber(
       `VITE_${envPrefix}_CHAIN_ID`,
       baseChainConfig.chainId,
     ),
     rpcUrl:
-      readEnvString(`VITE_${envPrefix}_RPC_URL`) ?? baseChainConfig.rpcUrl,
+      rpcUrlOverride !== undefined ? rpcUrlOverride : baseChainConfig.rpcUrl,
     goldClobAddress:
-      readEnvString(`VITE_${envPrefix}_GOLD_CLOB_ADDRESS`) ??
-      baseChainConfig.goldClobAddress,
+      goldClobAddressOverride !== undefined
+        ? goldClobAddressOverride
+        : baseChainConfig.goldClobAddress,
     goldTokenAddress:
-      readEnvString(`VITE_${envPrefix}_GOLD_TOKEN_ADDRESS`) ??
-      baseChainConfig.goldTokenAddress,
+      goldTokenAddressOverride !== undefined
+        ? goldTokenAddressOverride
+        : baseChainConfig.goldTokenAddress,
     networkKey: resolvedEvmNetworkKey(
       chainKey,
       readEnvNumber(`VITE_${envPrefix}_CHAIN_ID`, baseChainConfig.chainId),
@@ -517,6 +541,7 @@ export const CONFIG: EnvConfig = {
   ),
   gameApiUrl: resolvedGameApiUrl,
   gameWsUrl: resolvedGameWsUrl,
+  publicCdnUrl: resolvedPublicCdnUrl,
   streamUrl: resolvedStreamUrl,
   uiSyncDelayMs: readEnvNumber(
     "VITE_UI_SYNC_DELAY_MS",
@@ -586,9 +611,29 @@ export function toBaseUnits(amount: number, decimals = GOLD_DECIMALS): bigint {
 
 export const STREAM_URL: string = CONFIG.streamUrl;
 export const STREAM_URLS: string[] = resolvedStreamSources;
+export const ENABLE_STREAM_SOURCE_OVERRIDE = readEnvBoolean(
+  "VITE_ENABLE_STREAM_SOURCE_OVERRIDE",
+  RUNTIME_ENV === "e2e" || !isPublicBrowserRuntime(),
+);
+export const ENABLE_LIFECYCLE_MISMATCH_CONSOLE = readEnvBoolean(
+  "VITE_ENABLE_LIFECYCLE_MISMATCH_CONSOLE",
+  !isPublicBrowserRuntime() && Boolean(import.meta.env.DEV),
+);
 export const GAME_API_URL: string = CONFIG.gameApiUrl;
 export const GAME_WS_URL: string = CONFIG.gameWsUrl;
+export const PUBLIC_CDN_URL: string = CONFIG.publicCdnUrl;
 export const UI_SYNC_DELAY_MS: number = CONFIG.uiSyncDelayMs;
+
+if (
+  typeof window !== "undefined" &&
+  PUBLIC_CDN_URL.length > 0
+) {
+  (
+    window as Window & {
+      __CDN_URL?: string;
+    }
+  ).__CDN_URL = PUBLIC_CDN_URL;
+}
 // Mainnet must route through backend RPC proxy so we can use server-side
 // Helius credentials and avoid browser-origin RPC blocking.
 const USE_GAME_RPC_PROXY =
