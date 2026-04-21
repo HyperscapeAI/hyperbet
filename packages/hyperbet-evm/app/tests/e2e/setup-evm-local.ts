@@ -19,6 +19,7 @@ import goldClobArtifact from "../../../../evm-contracts/out/GoldClob.sol/GoldClo
 
 type E2eState = Record<string, unknown> & {
   currentDuelKeyHex?: string;
+  currentBetWindowSeconds?: number;
   evmRpcUrl?: string;
   evmChainId?: number;
   evmHeadlessAddress?: string;
@@ -46,6 +47,7 @@ const SELL_SIDE = 2;
 const DUEL_STATUS_BETTING_OPEN = 2;
 const ORDER_FLAG_GTC = 0x01;
 const DUEL_ORACLE_DISPUTE_WINDOW_SECONDS = 3_600;
+const E2E_BET_WINDOW_SECONDS = 300;
 
 type EvmArtifact = {
   abi: unknown[];
@@ -379,14 +381,14 @@ async function main(): Promise<void> {
   env.VITE_BSC_CHAIN_ID = String(chainId);
   env.VITE_BSC_GOLD_CLOB_ADDRESS = goldClobAddress;
   env.VITE_BSC_GOLD_TOKEN_ADDRESS = goldTokenAddress;
-  env.VITE_BASE_RPC_URL = rpcUrl;
-  env.VITE_BASE_CHAIN_ID = String(chainId);
-  env.VITE_BASE_GOLD_CLOB_ADDRESS = goldClobAddress;
-  env.VITE_BASE_GOLD_TOKEN_ADDRESS = goldTokenAddress;
-  env.VITE_AVAX_RPC_URL = rpcUrl;
-  env.VITE_AVAX_CHAIN_ID = String(chainId);
-  env.VITE_AVAX_GOLD_CLOB_ADDRESS = goldClobAddress;
-  env.VITE_AVAX_GOLD_TOKEN_ADDRESS = goldTokenAddress;
+  delete env.VITE_BASE_RPC_URL;
+  delete env.VITE_BASE_CHAIN_ID;
+  delete env.VITE_BASE_GOLD_CLOB_ADDRESS;
+  delete env.VITE_BASE_GOLD_TOKEN_ADDRESS;
+  delete env.VITE_AVAX_RPC_URL;
+  delete env.VITE_AVAX_CHAIN_ID;
+  delete env.VITE_AVAX_GOLD_CLOB_ADDRESS;
+  delete env.VITE_AVAX_GOLD_TOKEN_ADDRESS;
   env.VITE_EVM_PRIVATE_KEY = adminPrivateKey;
   env.VITE_HEADLESS_EVM_PRIVATE_KEY = adminPrivateKey;
   env.VITE_HEADLESS_EVM_ADDRESS = adminAccount.address;
@@ -398,6 +400,7 @@ const state: E2eState = {
   ...existingState,
   currentMatchId: 1,
   currentDuelKeyHex: duelKey,
+  currentBetWindowSeconds: E2E_BET_WINDOW_SECONDS,
   evmRpcUrl: rpcUrl,
   evmChainId: chainId,
   evmHeadlessAddress: adminAccount.address,
