@@ -1815,24 +1815,28 @@ async function handlePerpsMarkets(req: Request, url: URL): Promise<Response> {
   const requestedChainKey = url.searchParams.get("chainKey");
   const normalizedChainKey = normalizePublicPerpsChainKeyParam(requestedChainKey);
   if (!requestedChainKey) {
-    const markets = loadPerpsMarkets().map((market) => ({
-      chainKey: "bsc" as const,
-      characterId: market.agentId,
-      marketId: market.marketId,
-      rank: market.rank,
-      name: market.name,
-      provider: market.provider,
-      model: market.model,
-      wins: market.wins,
-      losses: market.losses,
-      winRate: market.winRate,
-      combatLevel: market.combatLevel,
-      currentStreak: market.currentStreak,
-      status: market.status,
-      lastSeenAt: market.lastSeenAt,
-      deprecatedAt: market.deprecatedAt,
-      updatedAt: market.updatedAt,
-    }));
+    const markets = BETTING_EVM_CHAIN_ORDER.filter((chainKey) =>
+      enabledEvmKeeperChains.has(chainKey),
+    ).flatMap((chainKey) =>
+      loadChainScopedPerpsMarkets(chainKey).map((market) => ({
+        chainKey: market.chainKey,
+        characterId: market.agentId,
+        marketId: market.marketId,
+        rank: market.rank,
+        name: market.name,
+        provider: market.provider,
+        model: market.model,
+        wins: market.wins,
+        losses: market.losses,
+        winRate: market.winRate,
+        combatLevel: market.combatLevel,
+        currentStreak: market.currentStreak,
+        status: market.status,
+        lastSeenAt: market.lastSeenAt,
+        deprecatedAt: market.deprecatedAt,
+        updatedAt: market.updatedAt,
+      })),
+    );
     if (typeof console !== "undefined") {
       console.info("[hyperbet] perps_chain_defaulted", {
         endpoint: "/api/perps/markets",
