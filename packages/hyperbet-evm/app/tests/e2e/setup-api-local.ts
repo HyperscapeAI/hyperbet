@@ -3,6 +3,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
+  saveChainScopedPerpsMarket,
+  saveChainScopedPerpsOracleSnapshot,
   savePerpsMarket,
   savePerpsOracleSnapshot,
   saveWalletDisplay,
@@ -41,6 +43,7 @@ async function main(): Promise<void> {
   const marketId =
     Number(state.perpsMarketId) || modelMarketIdFromCharacterId(characterId);
   const modelName = state.perpsModelName?.trim() || "E2E Model Alpha";
+  const localChainKey = "bsc" as const;
   const now = Date.now();
   const nextState: E2eState = {
     ...state,
@@ -94,6 +97,24 @@ async function main(): Promise<void> {
     deprecatedAt: null,
     updatedAt: now,
   });
+  saveChainScopedPerpsMarket({
+    chainKey: localChainKey,
+    agentId: characterId,
+    marketId,
+    rank: 1,
+    name: modelName,
+    provider: "Hyperscape",
+    model: "alpha-local",
+    wins: 12,
+    losses: 4,
+    winRate: 75,
+    combatLevel: 88,
+    currentStreak: 4,
+    status: "ACTIVE",
+    lastSeenAt: now,
+    deprecatedAt: null,
+    updatedAt: now,
+  });
 
   const oracleSnapshots = [
     { spotIndex: 118, mu: 27.2, sigma: 4.6, recordedAt: now - 60 * 60 * 1000 },
@@ -105,6 +126,16 @@ async function main(): Promise<void> {
 
   for (const snapshot of oracleSnapshots) {
     savePerpsOracleSnapshot({
+      agentId: characterId,
+      marketId,
+      spotIndex: snapshot.spotIndex,
+      conservativeSkill: snapshot.mu - snapshot.sigma * 3,
+      mu: snapshot.mu,
+      sigma: snapshot.sigma,
+      recordedAt: snapshot.recordedAt,
+    });
+    saveChainScopedPerpsOracleSnapshot({
+      chainKey: localChainKey,
       agentId: characterId,
       marketId,
       spotIndex: snapshot.spotIndex,
