@@ -1,4 +1,4 @@
-import { URL } from "node:url";
+import { URL, pathToFileURL } from "node:url";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -8,6 +8,7 @@ type EndpointResult = {
   ok: boolean;
   headers: Record<string, string>;
   body: unknown;
+  error: string | null;
 };
 
 type StreamSummary = {
@@ -149,6 +150,7 @@ async function fetchJson(url: string, timeoutMs: number): Promise<EndpointResult
     ok: response.ok,
     headers,
     body,
+    error: null,
   };
 }
 
@@ -163,7 +165,44 @@ async function probePlayback(url: string, timeoutMs: number): Promise<EndpointRe
     ok: response.ok,
     headers: Object.fromEntries(response.headers.entries()),
     body: null,
+    error: null,
   };
+}
+
+function formatError(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  return String(error);
+}
+
+function buildFailedEndpoint(url: string, error: unknown): EndpointResult {
+  const message = formatError(error);
+  return {
+    url,
+    status: 0,
+    ok: false,
+    headers: {},
+    body: { error: message },
+    error: message,
+  };
+}
+
+async function fetchJsonSettled(url: string, timeoutMs: number): Promise<EndpointResult> {
+  try {
+    return await fetchJson(url, timeoutMs);
+  } catch (error) {
+    return buildFailedEndpoint(url, error);
+  }
+}
+
+async function probePlaybackSettled(
+  url: string,
+  timeoutMs: number,
+): Promise<EndpointResult> {
+  try {
+    return await probePlayback(url, timeoutMs);
+  } catch (error) {
+    return buildFailedEndpoint(url, error);
+  }
 }
 
 function formatSummary(label: string, summary: StreamSummary): string[] {
@@ -187,12 +226,24 @@ function compareTruths(
 ): string[] {
   const issues: string[] = [];
 
+  if (captureResult.error) {
+    issues.push(`capture/status probe failed: ${captureResult.error}`);
+  }
+
   if (!captureResult.ok) {
     issues.push(`capture/status returned HTTP ${captureResult.status}`);
   }
 
+  if (keeperResult.error) {
+    issues.push(`keeper/state probe failed: ${keeperResult.error}`);
+  }
+
   if (!keeperResult.ok) {
     issues.push(`keeper/state returned HTTP ${keeperResult.status}`);
+  }
+
+  if (betSyncResult.error) {
+    issues.push(`bet-sync/state probe failed: ${betSyncResult.error}`);
   }
 
   if (!betSyncResult.ok && betSyncResult.status !== 401 && betSyncResult.status !== 403) {
@@ -288,6 +339,9 @@ function printEndpoint(label: string, result: EndpointResult): void {
   const server = result.headers.server ?? "null";
   const via = result.headers.via ?? "null";
   console.log(`  server=${server} via=${via}`);
+  if (result.error) {
+    console.log(`  error=${result.error}`);
+  }
 }
 
 async function main(): Promise<void> {
@@ -298,9 +352,9 @@ async function main(): Promise<void> {
   const keeperStateUrl = new URL("/api/streaming/state", config.keeperUrl).toString();
 
   const [betSync, capture, keeper] = await Promise.all([
-    fetchJson(betSyncUrl, config.timeoutMs),
-    fetchJson(captureUrl, config.timeoutMs),
-    fetchJson(keeperStateUrl, config.timeoutMs),
+    fetchJsonSettled(betSyncUrl, config.timeoutMs),
+    fetchJsonSettled(captureUrl, config.timeoutMs),
+    fetchJsonSettled(keeperStateUrl, config.timeoutMs),
   ]);
 
   const betSyncSummary = summarizePayload(betSync.body);
@@ -337,11 +391,17 @@ async function main(): Promise<void> {
     if (!playbackUrl) {
       issues.push("no playback URL available to probe");
     } else {
-      const playback = await probePlayback(playbackUrl, config.timeoutMs);
+      const playback = await probePlaybackSettled(playbackUrl, config.timeoutMs);
       console.log("");
       console.log(`playback probe: ${playback.url}`);
       console.log(`  http=${playback.status} ok=${playback.ok}`);
       console.log(`  server=${playback.headers.server ?? "null"} via=${playback.headers.via ?? "null"}`);
+      if (playback.error) {
+        console.log(`  error=${playback.error}`);
+      }
+      if (playback.error) {
+        issues.push(`playback probe failed: ${playback.error}`);
+      }
       if (!playback.ok) {
         issues.push(`playback manifest probe returned HTTP ${playback.status}`);
       }
@@ -361,9 +421,21 @@ async function main(): Promise<void> {
   process.exitCode = 1;
 }
 
-main().catch((error) => {
-  console.error(
-    `authority audit failed: ${error instanceof Error ? error.message : String(error)}`,
-  );
-  process.exit(1);
-});
+export {
+  buildFailedEndpoint,
+  compareTruths,
+  fetchJsonSettled,
+  probePlaybackSettled,
+  summarizePayload,
+};
+
+const isMain =
+  typeof process.argv[1] === "string" &&
+  pathToFileURL(process.argv[1]).href === import.meta.url;
+
+if (isMain) {
+  main().catch((error) => {
+    console.error(`authority audit failed: ${formatError(error)}`);
+    process.exit(1);
+  });
+}
