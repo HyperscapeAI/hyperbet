@@ -17,3 +17,4 @@ Primary runbooks:
 - [Claim Backlog Drainage](claim-backlog-drainage.md)
 - [Oracle Finality Fail-Closed](oracle-finality-fail-closed.md)
 - [AVAX Fuji Bootstrap Market Smoke](avax-fuji-bootstrap.md)
+- [Enoomian Staging Stream Authority](enoomian-staging-stream-authority.md)
