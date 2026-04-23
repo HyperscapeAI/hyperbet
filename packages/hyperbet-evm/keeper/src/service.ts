@@ -83,6 +83,8 @@ import {
   parseBetSyncBootstrapState,
   parseBetSyncEvent,
   parsePredictionMarketsOverview,
+  parseStreamStatePayload,
+  publicStreamStateChanged,
   resolveBetSyncReplayMode,
   rollPredictionMarketsOverview,
   selectBetSyncReplayUntilSeq,
@@ -3000,67 +3002,12 @@ async function authorizeExternalBetRecord(
 }
 
 function toStreamState(payload: unknown): StreamState | null {
-  if (!payload || typeof payload !== "object") return null;
-
-  const candidate = payload as JsonRecord;
-  const cycle = candidate.cycle;
-  if (!cycle || typeof cycle !== "object") return null;
-
-  return {
-    type: "STREAMING_STATE_UPDATE",
-    cycle: cycle as JsonRecord,
-    leaderboard: Array.isArray(candidate.leaderboard)
-      ? (candidate.leaderboard as JsonRecord[])
-      : [],
-    cameraTarget:
-      typeof candidate.cameraTarget === "string" ||
-      candidate.cameraTarget === null
-        ? candidate.cameraTarget
-        : null,
-    seq:
-      typeof candidate.seq === "number" && Number.isFinite(candidate.seq)
-        ? candidate.seq
-        : streamSeq + 1,
-    emittedAt:
-      typeof candidate.emittedAt === "number" &&
-      Number.isFinite(candidate.emittedAt)
-        ? candidate.emittedAt
-        : Date.now(),
-    phase:
-      typeof candidate.phase === "string" || candidate.phase === null
-        ? candidate.phase
-        : null,
-    phaseVersion:
-      typeof candidate.phaseVersion === "number" &&
-      Number.isFinite(candidate.phaseVersion)
-        ? candidate.phaseVersion
-        : null,
-    broadcastTimeline: asJsonRecord(candidate.broadcastTimeline) as
-      | StreamState["broadcastTimeline"]
-      | null,
-    sourceTimeline: asJsonRecord(candidate.sourceTimeline) as
-      | StreamState["sourceTimeline"]
-      | null,
-    rendererHealth: asJsonRecord(candidate.rendererHealth) as
-      | StreamState["rendererHealth"]
-      | null,
-    rendererMetrics: asJsonRecord(candidate.rendererMetrics) as
-      | StreamState["rendererMetrics"]
-      | null,
-    delivery: asJsonRecord(candidate.delivery) as StreamState["delivery"] | null,
-    sourceRuntime: asJsonRecord(candidate.sourceRuntime),
-    channel: asJsonRecord(candidate.channel),
-    publicReadiness: asJsonRecord(candidate.publicReadiness),
-    canonicalDestination: asJsonRecord(candidate.canonicalDestination),
-    fallbackDestination: asJsonRecord(candidate.fallbackDestination),
-    canonicalAuthority: asJsonRecord(candidate.canonicalAuthority) as
-      | StreamState["canonicalAuthority"]
-      | null,
-    deliveryHealth: asJsonRecord(candidate.deliveryHealth),
-    marketParity: asJsonRecord(candidate.marketParity) as
-      | StreamState["marketParity"]
-      | null,
-  };
+  return (
+    parseStreamStatePayload(payload, {
+      seq: streamSeq + 1,
+      emittedAt: Date.now(),
+    }) as StreamState | null
+  );
 }
 
 function sendSse(
@@ -3272,10 +3219,10 @@ async function pollStreamStateSource(): Promise<void> {
       return;
     }
 
-    const changed =
-      streamState.cycle?.cycleId !== nextState.cycle?.cycleId ||
-      streamState.cycle?.phase !== nextState.cycle?.phase ||
-      streamState.cycle?.winnerId !== nextState.cycle?.winnerId;
+    const changed = publicStreamStateChanged(
+      streamState as BetSyncStreamState,
+      nextState as BetSyncStreamState,
+    );
     if (changed) {
       publishStreamState(nextState, "poll");
     }

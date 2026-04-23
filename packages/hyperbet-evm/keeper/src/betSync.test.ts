@@ -6,6 +6,7 @@ import {
   parseBetSyncBootstrapState,
   parseBetSyncEvent,
   parsePredictionMarketsOverview,
+  publicStreamStateChanged,
   resolveBetSyncReplayMode,
   rollPredictionMarketsOverview,
   selectBetSyncReplayUntilSeq,
@@ -646,5 +647,148 @@ describe("bet-sync helpers", () => {
         toleranceMs: 1_000,
       }),
     ).toBe(false);
+  });
+
+  test("detects same-duel readiness flips in polled stream state", () => {
+    const base = {
+      type: "STREAMING_STATE_UPDATE" as const,
+      cycle: {
+        cycleId: "cycle-1",
+        phase: "FIGHTING",
+        duelId: "duel-1",
+        duelKeyHex: "0x11",
+        winnerId: null,
+      },
+      leaderboard: [],
+      cameraTarget: "arena",
+      seq: 10,
+      emittedAt: 1_700_000_000_000,
+      publicReadiness: {
+        ready: false,
+        reason: "source_unready",
+      },
+      canonicalAuthority: {
+        providerLive: true,
+        playbackProbeReady: false,
+        decision: "blocked",
+        reason: "source_unready",
+        revision: 9,
+        playbackManifestStatus: "stale",
+      },
+      sourceRuntime: {
+        ready: false,
+        statusSource: "external_worker",
+        captureMode: "cdp",
+        degradedReason: "worker_missing",
+      },
+      rendererHealth: {
+        ready: false,
+        degradedReason: "render_tick_stale",
+      },
+      deliveryHealth: {
+        ready: false,
+        degradedReason: "manifest_stale",
+      },
+      delivery: {
+        mode: "external_hls",
+        provider: "cloudflare_stream",
+        playbackUrl: "https://video.example/live.m3u8?protocol=llhls",
+      },
+      channel: {
+        id: "main",
+        mode: "always_on",
+        canonicalDestinationId: "canonical-cloudflare",
+        publicPlaybackUrl: "https://video.example/live.m3u8?protocol=llhls",
+      },
+      canonicalDestination: {
+        id: "canonical-cloudflare",
+        playbackReady: false,
+        manifestStatus: "stale",
+      },
+    };
+
+    const next = {
+      ...base,
+      seq: 11,
+      emittedAt: 1_700_000_000_500,
+      publicReadiness: {
+        ready: true,
+        reason: null,
+      },
+      canonicalAuthority: {
+        ...base.canonicalAuthority,
+        playbackProbeReady: true,
+        decision: "ready",
+        reason: null,
+        revision: 10,
+        playbackManifestStatus: "ok",
+      },
+      sourceRuntime: {
+        ...base.sourceRuntime,
+        ready: true,
+        degradedReason: null,
+      },
+      rendererHealth: {
+        ready: true,
+        degradedReason: null,
+      },
+      deliveryHealth: {
+        ready: true,
+        degradedReason: null,
+      },
+      canonicalDestination: {
+        ...base.canonicalDestination,
+        playbackReady: true,
+        manifestStatus: "ok",
+      },
+    };
+
+    expect(publicStreamStateChanged(base, next)).toBe(true);
+  });
+
+  test("ignores seq and emittedAt churn when the public stream surface is unchanged", () => {
+    const base = {
+      type: "STREAMING_STATE_UPDATE" as const,
+      cycle: {
+        cycleId: "cycle-1",
+        phase: "FIGHTING",
+        duelId: "duel-1",
+        duelKeyHex: "0x11",
+      },
+      leaderboard: [],
+      cameraTarget: "arena",
+      seq: 10,
+      emittedAt: 1_700_000_000_000,
+      publicReadiness: {
+        ready: true,
+        reason: null,
+      },
+      canonicalAuthority: {
+        providerLive: true,
+        playbackProbeReady: true,
+        decision: "ready",
+        reason: null,
+        revision: 9,
+        playbackManifestStatus: "ok",
+      },
+      sourceRuntime: {
+        ready: true,
+        statusSource: "external_worker",
+        captureMode: "cdp",
+        degradedReason: null,
+      },
+      rendererHealth: {
+        ready: true,
+        degradedReason: null,
+      },
+    };
+
+    const next = {
+      ...base,
+      seq: 11,
+      emittedAt: 1_700_000_000_500,
+    };
+
+    expect(publicStreamStateChanged(base, next)).toBe(false);
   });
 });

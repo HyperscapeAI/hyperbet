@@ -73,11 +73,14 @@ import {
   isBetSyncEventStaleAfterSourceReset,
   parseBetSyncBootstrapState,
   parseBetSyncEvent,
+  parseStreamStatePayload,
+  publicStreamStateChanged,
   resolveBetSyncBootstrapCursor,
   resolveBetSyncReplayMode,
   selectBetSyncReplayUntilSeq,
   selectBetSyncResumeSeq,
   toStreamStateFromBetSyncEvent,
+  type StreamState as BetSyncStreamState,
   type BetSyncEvent,
   type BetSyncReplayMode,
 } from "./betSync";
@@ -2178,47 +2181,12 @@ async function authorizeExternalBetRecord(
 }
 
 function toStreamState(payload: any): StreamState | null {
-  if (!payload || typeof payload !== "object") return null;
-
-  const candidate = payload as Record<string, any>;
-  const cycle = candidate.cycle;
-  if (!cycle || typeof cycle !== "object") return null;
-
-  return {
-    type: "STREAMING_STATE_UPDATE",
-    cycle: cycle as Record<string, any>,
-    leaderboard: Array.isArray(candidate.leaderboard)
-      ? candidate.leaderboard
-      : [],
-    cameraTarget:
-      typeof candidate.cameraTarget === "string" ||
-      candidate.cameraTarget === null
-        ? candidate.cameraTarget
-        : null,
-    seq:
-      typeof candidate.seq === "number" && Number.isFinite(candidate.seq)
-        ? candidate.seq
-        : streamSeq + 1,
-    emittedAt:
-      typeof candidate.emittedAt === "number" &&
-      Number.isFinite(candidate.emittedAt)
-        ? candidate.emittedAt
-        : Date.now(),
-    phase:
-      typeof candidate.phase === "string" || candidate.phase === null
-        ? candidate.phase
-        : null,
-    phaseVersion:
-      typeof candidate.phaseVersion === "number" &&
-      Number.isFinite(candidate.phaseVersion)
-        ? candidate.phaseVersion
-        : null,
-    broadcastTimeline: asRecord(candidate.broadcastTimeline),
-    sourceTimeline: asRecord(candidate.sourceTimeline),
-    rendererHealth: asRecord(candidate.rendererHealth),
-    canonicalAuthority: asRecord(candidate.canonicalAuthority),
-    sourceRuntime: asRecord(candidate.sourceRuntime),
-  };
+  return (
+    parseStreamStatePayload(payload, {
+      seq: streamSeq + 1,
+      emittedAt: Date.now(),
+    }) as StreamState | null
+  );
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -3684,10 +3652,10 @@ async function pollStreamStateSource(): Promise<void> {
       return;
     }
 
-    const changed =
-      streamState.cycle?.cycleId !== nextState.cycle?.cycleId ||
-      streamState.cycle?.phase !== nextState.cycle?.phase ||
-      streamState.cycle?.winnerId !== nextState.cycle?.winnerId;
+    const changed = publicStreamStateChanged(
+      streamState as BetSyncStreamState,
+      nextState as BetSyncStreamState,
+    );
     if (changed) {
       publishStreamState(nextState, "poll");
     }

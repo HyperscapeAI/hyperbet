@@ -9,6 +9,8 @@ import {
 } from "../../../hyperbet-chain-registry/src/index";
 
 type JsonRecord = Record<string, unknown>;
+type JsonPrimitive = string | number | boolean | null;
+type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue };
 
 export type BetSyncRendererHealth = {
   ready: boolean;
@@ -135,8 +137,14 @@ export type StreamState = {
   broadcastTimeline?: BetSyncBroadcastTimeline | null;
   sourceTimeline?: BetSyncSourceTimeline | null;
   rendererHealth?: BetSyncRendererHealth | null;
+  delivery?: BetSyncDelivery | null;
+  channel?: JsonRecord | null;
+  publicReadiness?: JsonRecord | null;
+  canonicalDestination?: JsonRecord | null;
+  fallbackDestination?: JsonRecord | null;
   canonicalAuthority?: BetSyncCanonicalAuthority | null;
   sourceRuntime?: JsonRecord | null;
+  deliveryHealth?: JsonRecord | null;
 };
 
 export type PredictionMarketsDuelSnapshot = {
@@ -173,6 +181,173 @@ function asFiniteNumber(value: unknown): number | null {
 
 function asString(value: unknown): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value : null;
+}
+
+function asBoolean(value: unknown): boolean | null {
+  return typeof value === "boolean" ? value : null;
+}
+
+function normalizeForChangeDetection(value: unknown): JsonValue | undefined {
+  if (value == null) return null;
+  if (typeof value === "string" || typeof value === "boolean") {
+    return value;
+  }
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : null;
+  }
+  if (Array.isArray(value)) {
+    return value
+      .map((entry) => normalizeForChangeDetection(entry))
+      .filter((entry): entry is JsonValue => entry !== undefined);
+  }
+  if (typeof value === "object") {
+    const entries = Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .flatMap(([key, entryValue]) => {
+        const normalized = normalizeForChangeDetection(entryValue);
+        return normalized === undefined ? [] : [[key, normalized] as const];
+      });
+    return Object.fromEntries(entries);
+  }
+  return undefined;
+}
+
+function summarizeStreamHealthForChangeDetection(value: unknown): JsonValue {
+  const candidate = asRecord(value);
+  if (!candidate) return null;
+  return normalizeForChangeDetection({
+    ready: asBoolean(candidate.ready),
+    degradedReason: asString(candidate.degradedReason),
+  }) ?? null;
+}
+
+function summarizeSourceRuntimeForChangeDetection(value: unknown): JsonValue {
+  const candidate = asRecord(value);
+  if (!candidate) return null;
+  return normalizeForChangeDetection({
+    ready: asBoolean(candidate.ready),
+    statusSource: asString(candidate.statusSource),
+    captureMode: asString(candidate.captureMode),
+    degradedReason: asString(candidate.degradedReason),
+    currentSceneUrl: asString(candidate.currentSceneUrl),
+    activeBundle: asString(candidate.activeBundle),
+  }) ?? null;
+}
+
+function summarizeDeliveryForChangeDetection(value: unknown): JsonValue {
+  const candidate = asRecord(value);
+  if (!candidate) return null;
+  return normalizeForChangeDetection({
+    mode: asString(candidate.mode),
+    provider: asString(candidate.provider),
+    playbackUrl: asString(candidate.playbackUrl),
+    hlsUrl: asString(candidate.hlsUrl),
+    llhlsUrl: asString(candidate.llhlsUrl),
+    ingestUrl: asString(candidate.ingestUrl),
+  }) ?? null;
+}
+
+function summarizePublicReadinessForChangeDetection(value: unknown): JsonValue {
+  const candidate = asRecord(value);
+  if (!candidate) return null;
+  return normalizeForChangeDetection({
+    ready: asBoolean(candidate.ready),
+    reason: asString(candidate.reason),
+  }) ?? null;
+}
+
+function summarizeDestinationForChangeDetection(value: unknown): JsonValue {
+  const candidate = asRecord(value);
+  if (!candidate) return null;
+  return normalizeForChangeDetection({
+    id: asString(candidate.id),
+    name: asString(candidate.name),
+    role: asString(candidate.role),
+    provider: asString(candidate.provider),
+    transport: asString(candidate.transport),
+    playbackUrl: asString(candidate.playbackUrl),
+    ingestUrl: asString(candidate.ingestUrl),
+    connected: asBoolean(candidate.connected),
+    transportHealthy: asBoolean(candidate.transportHealthy),
+    playbackReady: asBoolean(candidate.playbackReady),
+    manifestStatus: asString(candidate.manifestStatus),
+    lastError: asString(candidate.lastError),
+  }) ?? null;
+}
+
+function summarizeChannelForChangeDetection(value: unknown): JsonValue {
+  const candidate = asRecord(value);
+  if (!candidate) return null;
+  return normalizeForChangeDetection({
+    id: asString(candidate.id),
+    mode: asString(candidate.mode),
+    presentationDelayMs: asFiniteNumber(candidate.presentationDelayMs),
+    activeDuelId: asString(candidate.activeDuelId),
+    activeDuelKey: normalizeDuelKey(candidate.activeDuelKey),
+    canonicalDestinationId: asString(candidate.canonicalDestinationId),
+    fallbackDestinationId: asString(candidate.fallbackDestinationId),
+    publicPlaybackUrl: asString(candidate.publicPlaybackUrl),
+    publicReadiness: summarizePublicReadinessForChangeDetection(
+      candidate.publicReadiness,
+    ),
+  }) ?? null;
+}
+
+function summarizeCanonicalAuthorityForChangeDetection(
+  value: unknown,
+): JsonValue {
+  const candidate = asRecord(value);
+  if (!candidate) return null;
+  return normalizeForChangeDetection({
+    providerLive: asBoolean(candidate.providerLive),
+    playbackProbeReady: asBoolean(candidate.playbackProbeReady),
+    decision: asString(candidate.decision),
+    reason: asString(candidate.reason),
+    revision: asFiniteNumber(candidate.revision),
+    liveInputId: asString(candidate.liveInputId),
+    videoUid: asString(candidate.videoUid),
+    lifecycleStatus: asString(candidate.lifecycleStatus),
+    playbackUrl: asString(candidate.playbackUrl),
+    playbackProbeStatusCode: asFiniteNumber(candidate.playbackProbeStatusCode),
+    playbackManifestStatus: asString(candidate.playbackManifestStatus),
+  }) ?? null;
+}
+
+function buildPublicStreamStateChangeSnapshot(state: StreamState): JsonValue {
+  return (
+    normalizeForChangeDetection({
+      cycle: state.cycle ?? null,
+      leaderboard: state.leaderboard ?? [],
+      cameraTarget: state.cameraTarget ?? null,
+      phase: state.phase ?? null,
+      phaseVersion: state.phaseVersion ?? null,
+      broadcastTimeline: state.broadcastTimeline ?? null,
+      sourceTimeline: state.sourceTimeline ?? null,
+      rendererHealth: summarizeStreamHealthForChangeDetection(
+        state.rendererHealth,
+      ),
+      delivery: summarizeDeliveryForChangeDetection(state.delivery),
+      sourceRuntime: summarizeSourceRuntimeForChangeDetection(
+        state.sourceRuntime,
+      ),
+      channel: summarizeChannelForChangeDetection(state.channel),
+      publicReadiness: summarizePublicReadinessForChangeDetection(
+        state.publicReadiness,
+      ),
+      canonicalDestination: summarizeDestinationForChangeDetection(
+        state.canonicalDestination,
+      ),
+      fallbackDestination: summarizeDestinationForChangeDetection(
+        state.fallbackDestination,
+      ),
+      canonicalAuthority: summarizeCanonicalAuthorityForChangeDetection(
+        state.canonicalAuthority,
+      ),
+      deliveryHealth: summarizeStreamHealthForChangeDetection(
+        state.deliveryHealth,
+      ),
+    }) ?? null
+  );
 }
 
 function normalizeDuelKey(value: unknown): string | null {
@@ -472,6 +647,70 @@ export function parseBetSyncBootstrapState(
   };
 }
 
+export function parseStreamStatePayload(
+  payload: unknown,
+  fallback: { seq: number; emittedAt: number },
+): StreamState | null {
+  const candidate = asRecord(payload);
+  const cycle = asRecord(candidate?.cycle);
+  if (!candidate || !cycle) {
+    return null;
+  }
+
+  return {
+    type: "STREAMING_STATE_UPDATE",
+    cycle,
+    leaderboard: Array.isArray(candidate.leaderboard)
+      ? candidate.leaderboard
+          .map((entry) => asRecord(entry))
+          .filter((entry): entry is JsonRecord => entry !== null)
+      : [],
+    cameraTarget:
+      typeof candidate.cameraTarget === "string" || candidate.cameraTarget === null
+        ? (candidate.cameraTarget as string | null)
+        : null,
+    seq:
+      typeof candidate.seq === "number" && Number.isFinite(candidate.seq)
+        ? candidate.seq
+        : fallback.seq,
+    emittedAt:
+      typeof candidate.emittedAt === "number" &&
+      Number.isFinite(candidate.emittedAt)
+        ? candidate.emittedAt
+        : fallback.emittedAt,
+    phase:
+      typeof candidate.phase === "string" || candidate.phase === null
+        ? (candidate.phase as string | null)
+        : null,
+    phaseVersion:
+      typeof candidate.phaseVersion === "number" &&
+      Number.isFinite(candidate.phaseVersion)
+        ? candidate.phaseVersion
+        : null,
+    broadcastTimeline: normalizeBroadcastTimeline(candidate.broadcastTimeline),
+    sourceTimeline: normalizeSourceTimeline(candidate.sourceTimeline),
+    rendererHealth: normalizeRendererHealth(candidate.rendererHealth),
+    delivery: normalizeDelivery(candidate.delivery),
+    channel: asRecord(candidate.channel),
+    publicReadiness: asRecord(candidate.publicReadiness),
+    canonicalDestination: asRecord(candidate.canonicalDestination),
+    fallbackDestination: asRecord(candidate.fallbackDestination),
+    canonicalAuthority: normalizeCanonicalAuthority(candidate.canonicalAuthority),
+    sourceRuntime: asRecord(candidate.sourceRuntime),
+    deliveryHealth: asRecord(candidate.deliveryHealth),
+  };
+}
+
+export function publicStreamStateChanged(
+  previous: StreamState,
+  next: StreamState,
+): boolean {
+  return (
+    JSON.stringify(buildPublicStreamStateChangeSnapshot(previous)) !==
+    JSON.stringify(buildPublicStreamStateChangeSnapshot(next))
+  );
+}
+
 export function toStreamStateFromBetSyncEvent(event: BetSyncEvent): StreamState {
   const rawCycle = event.cycle;
   return {
@@ -512,8 +751,14 @@ export function toStreamStateFromBetSyncEvent(event: BetSyncEvent): StreamState 
     broadcastTimeline: event.broadcastTimeline,
     sourceTimeline: event.sourceTimeline,
     rendererHealth: event.rendererHealth,
+    delivery: event.delivery,
+    channel: event.channel,
+    publicReadiness: event.publicReadiness,
+    canonicalDestination: event.canonicalDestination,
+    fallbackDestination: event.fallbackDestination,
     canonicalAuthority: event.canonicalAuthority,
     sourceRuntime: event.sourceRuntime,
+    deliveryHealth: event.deliveryHealth,
   };
 }
 
