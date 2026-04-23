@@ -657,4 +657,92 @@ describe("stream state poll helpers", () => {
 
     expect(publicStreamStateChanged(base, next)).toBe(false);
   });
+
+  test("ignores volatile raw cycle and timeline telemetry churn", () => {
+    const base = parseStreamStatePayload(
+      {
+        cycle: {
+          cycleId: "cycle-1",
+          phase: "FIGHTING",
+          phaseVersion: 4,
+          duelId: "duel-1",
+          duelKeyHex: "0x11",
+          rawCycle: {
+            telemetryNonce: 1,
+          },
+          rendererHealth: {
+            ready: true,
+            degradedReason: null,
+            updatedAt: 100,
+          },
+        },
+        leaderboard: [],
+        cameraTarget: "arena",
+        broadcastTimeline: {
+          phase: "FIGHTING",
+          updatedAt: 100,
+        },
+        sourceTimeline: {
+          phase: "FIGHTING",
+          updatedAt: 100,
+        },
+        publicReadiness: {
+          ready: true,
+          reason: null,
+        },
+        canonicalAuthority: {
+          providerLive: true,
+          playbackProbeReady: true,
+          decision: "ready",
+          reason: null,
+          revision: 9,
+        },
+        sourceRuntime: {
+          ready: true,
+          statusSource: "external_worker",
+          captureMode: "cdp",
+          degradedReason: null,
+        },
+        rendererHealth: {
+          ready: true,
+          degradedReason: null,
+        },
+      },
+      {
+        seq: 10,
+        emittedAt: 1_700_000_000_000,
+      },
+    )!;
+
+    const next = parseStreamStatePayload(
+      {
+        ...base,
+        cycle: {
+          ...base.cycle,
+          rawCycle: {
+            telemetryNonce: 2,
+          },
+          rendererHealth: {
+            ready: true,
+            degradedReason: null,
+            updatedAt: 200,
+          },
+        },
+        broadcastTimeline: {
+          ...base.broadcastTimeline,
+          updatedAt: 200,
+        },
+        sourceTimeline: {
+          ...base.sourceTimeline,
+          updatedAt: 200,
+        },
+      },
+      {
+        seq: 11,
+        emittedAt: 1_700_000_000_500,
+      },
+    )!;
+
+    expect(publicStreamStateChanged(base, next)).toBe(false);
+  });
 });

@@ -791,4 +791,85 @@ describe("bet-sync helpers", () => {
 
     expect(publicStreamStateChanged(base, next)).toBe(false);
   });
+
+  test("ignores volatile cycle and timeline telemetry churn", () => {
+    const base = {
+      type: "STREAMING_STATE_UPDATE" as const,
+      cycle: {
+        cycleId: "cycle-1",
+        phase: "FIGHTING",
+        phaseVersion: 4,
+        duelId: "duel-1",
+        duelKeyHex: "0x11",
+        winnerId: null,
+        rawCycle: {
+          telemetryNonce: 1,
+        },
+        rendererHealth: {
+          ready: true,
+          degradedReason: null,
+          updatedAt: 100,
+        },
+      },
+      leaderboard: [],
+      cameraTarget: "arena",
+      seq: 10,
+      emittedAt: 1_700_000_000_000,
+      broadcastTimeline: {
+        phase: "FIGHTING",
+        updatedAt: 100,
+      },
+      sourceTimeline: {
+        phase: "FIGHTING",
+        updatedAt: 100,
+      },
+      publicReadiness: {
+        ready: true,
+        reason: null,
+      },
+      canonicalAuthority: {
+        providerLive: true,
+        playbackProbeReady: true,
+        decision: "ready",
+        reason: null,
+        revision: 9,
+        playbackManifestStatus: "ok",
+      },
+      sourceRuntime: {
+        ready: true,
+        statusSource: "external_worker",
+        captureMode: "cdp",
+        degradedReason: null,
+      },
+      rendererHealth: {
+        ready: true,
+        degradedReason: null,
+      },
+    };
+
+    const next = {
+      ...base,
+      cycle: {
+        ...base.cycle,
+        rawCycle: {
+          telemetryNonce: 2,
+        },
+        rendererHealth: {
+          ready: true,
+          degradedReason: null,
+          updatedAt: 200,
+        },
+      },
+      broadcastTimeline: {
+        ...base.broadcastTimeline,
+        updatedAt: 200,
+      },
+      sourceTimeline: {
+        ...base.sourceTimeline,
+        updatedAt: 200,
+      },
+    };
+
+    expect(publicStreamStateChanged(base, next)).toBe(false);
+  });
 });

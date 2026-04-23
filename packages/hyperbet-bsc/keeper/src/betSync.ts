@@ -313,16 +313,56 @@ function summarizeCanonicalAuthorityForChangeDetection(
   }) ?? null;
 }
 
+function summarizeTimelineForChangeDetection(value: unknown): JsonValue {
+  const candidate = asRecord(value);
+  if (!candidate) return null;
+  return normalizeForChangeDetection({
+    phase: asString(candidate.phase),
+    betOpenTime: asFiniteNumber(candidate.betOpenTime),
+    betCloseTime: asFiniteNumber(candidate.betCloseTime),
+    fightStartTime: asFiniteNumber(candidate.fightStartTime),
+    duelEndTime: asFiniteNumber(candidate.duelEndTime),
+    presentationDelayMs: asFiniteNumber(candidate.presentationDelayMs),
+  }) ?? null;
+}
+
+function summarizeCycleForChangeDetection(value: unknown): JsonValue {
+  const candidate = asRecord(value);
+  if (!candidate) return null;
+  return normalizeForChangeDetection({
+    cycleId: asString(candidate.cycleId),
+    duelId: asString(candidate.duelId),
+    duelKey:
+      normalizeDuelKey(candidate.duelKey) ?? normalizeDuelKey(candidate.duelKeyHex),
+    phase: asString(candidate.phase),
+    phaseVersion: asFiniteNumber(candidate.phaseVersion),
+    betOpenTime: asFiniteNumber(candidate.betOpenTime),
+    betCloseTime: asFiniteNumber(candidate.betCloseTime),
+    fightStartTime: asFiniteNumber(candidate.fightStartTime),
+    duelEndTime: asFiniteNumber(candidate.duelEndTime),
+    winnerId: asString(candidate.winnerId),
+    winnerName: asString(candidate.winnerName),
+    winReason: asString(candidate.winReason),
+    seed: asString(candidate.seed),
+    replayHash: asString(candidate.replayHash),
+    agent1: normalizeForChangeDetection(asRecord(candidate.agent1)),
+    agent2: normalizeForChangeDetection(asRecord(candidate.agent2)),
+    arenaPositions: normalizeForChangeDetection(asRecord(candidate.arenaPositions)),
+  }) ?? null;
+}
+
 function buildPublicStreamStateChangeSnapshot(state: StreamState): JsonValue {
   return (
     normalizeForChangeDetection({
-      cycle: state.cycle ?? null,
+      cycle: summarizeCycleForChangeDetection(state.cycle),
       leaderboard: state.leaderboard ?? [],
       cameraTarget: state.cameraTarget ?? null,
       phase: state.phase ?? null,
       phaseVersion: state.phaseVersion ?? null,
-      broadcastTimeline: state.broadcastTimeline ?? null,
-      sourceTimeline: state.sourceTimeline ?? null,
+      broadcastTimeline: summarizeTimelineForChangeDetection(
+        state.broadcastTimeline,
+      ),
+      sourceTimeline: summarizeTimelineForChangeDetection(state.sourceTimeline),
       rendererHealth: summarizeStreamHealthForChangeDetection(
         state.rendererHealth,
       ),
