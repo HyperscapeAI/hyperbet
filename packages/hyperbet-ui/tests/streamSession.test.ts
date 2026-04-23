@@ -792,6 +792,10 @@ describe("useCanonicalStreamSession", () => {
 });
 
 describe("selectBetSurfaceStreamUrl", () => {
+  const lifecycleDuelKeyA = "ab".repeat(32);
+  const lifecycleDuelKeyB = "cd".repeat(32);
+  const lifecycleDuelKeyC = "ef".repeat(32);
+
   it("prefers canonical external delivery when the renderer is healthy", () => {
     const session = normalizeCanonicalStreamSession({
       seq: 1,
@@ -837,6 +841,312 @@ describe("selectBetSurfaceStreamUrl", () => {
 
     expect(selection.activeStreamUrl).toContain("protocol=llhls");
     expect(selection.canUseCanonicalPlayback).toBe(true);
+  });
+
+  it("blocks both active and preload canonical playback when lifecycle identity mismatches", () => {
+    const session = normalizeCanonicalStreamSession({
+      seq: 1,
+      emittedAt: 1,
+      duelId: "duel-b",
+      duelKey: lifecycleDuelKeyB,
+      cycle: {
+        cycleId: "cycle-1",
+        phase: "FIGHTING",
+        duelId: "duel-b",
+        duelKeyHex: lifecycleDuelKeyB,
+        rendererHealth: {
+          ready: true,
+          degradedReason: null,
+          updatedAt: 1,
+        },
+      },
+      rendererHealth: {
+        ready: true,
+        degradedReason: null,
+        updatedAt: 1,
+      },
+      authorityHealth: {
+        ready: true,
+        degradedReason: null,
+        updatedAt: 1,
+      },
+      sourceRuntime: makeSourceRuntime(),
+      channel: makeCanonicalChannel(),
+      playback: {
+        url: "https://video.example/manifest.m3u8?protocol=llhls",
+        kind: "llhls",
+        renderSessionId: "render-1",
+        presentationDelayMs: 0,
+      },
+    });
+
+    const selection = selectBetSurfaceStreamUrl({
+      fallbackStreamIndex: 0,
+      fallbackStreamSources: ["https://fallback.example/live/stream.m3u8"],
+      lifecycleDuelId: "duel-a",
+      lifecycleDuelKey: lifecycleDuelKeyA,
+      authorityHealth: session?.authorityHealth,
+      rendererReady: session?.rendererHealth?.ready,
+      session,
+    });
+
+    expect(selection.canonicalSessionMatchesLifecycle).toBe(false);
+    expect(selection.canUseCanonicalPlayback).toBe(false);
+    expect(selection.activeStreamUrl).toBe("");
+    expect(selection.preloadStreamUrl).toBe("");
+  });
+
+  it("fails closed when lifecycle is known but the canonical session has no duel identity", () => {
+    const session = normalizeCanonicalStreamSession({
+      seq: 1,
+      emittedAt: 1,
+      cycle: {
+        cycleId: "cycle-1",
+        phase: "FIGHTING",
+        rendererHealth: {
+          ready: true,
+          degradedReason: null,
+          updatedAt: 1,
+        },
+      },
+      rendererHealth: {
+        ready: true,
+        degradedReason: null,
+        updatedAt: 1,
+      },
+      authorityHealth: {
+        ready: true,
+        degradedReason: null,
+        updatedAt: 1,
+      },
+      sourceRuntime: makeSourceRuntime(),
+      channel: makeCanonicalChannel(),
+      playback: {
+        url: "https://video.example/manifest.m3u8?protocol=llhls",
+        kind: "llhls",
+        renderSessionId: "render-1",
+        presentationDelayMs: 0,
+      },
+    });
+
+    const selection = selectBetSurfaceStreamUrl({
+      fallbackStreamIndex: 0,
+      fallbackStreamSources: ["https://fallback.example/live/stream.m3u8"],
+      lifecycleDuelId: "duel-a",
+      lifecycleDuelKey: lifecycleDuelKeyA,
+      authorityHealth: session?.authorityHealth,
+      rendererReady: session?.rendererHealth?.ready,
+      session,
+    });
+
+    expect(selection.canonicalSessionMatchesLifecycle).toBe(false);
+    expect(selection.canUseCanonicalPlayback).toBe(false);
+    expect(selection.activeStreamUrl).toBe("");
+    expect(selection.preloadStreamUrl).toBe("");
+  });
+
+  it("allows canonical playback when duel id matches without a conflicting duel key", () => {
+    const session = normalizeCanonicalStreamSession({
+      seq: 1,
+      emittedAt: 1,
+      duelId: "duel-a",
+      cycle: {
+        cycleId: "cycle-1",
+        phase: "FIGHTING",
+        duelId: "duel-a",
+        rendererHealth: {
+          ready: true,
+          degradedReason: null,
+          updatedAt: 1,
+        },
+      },
+      rendererHealth: {
+        ready: true,
+        degradedReason: null,
+        updatedAt: 1,
+      },
+      authorityHealth: {
+        ready: true,
+        degradedReason: null,
+        updatedAt: 1,
+      },
+      sourceRuntime: makeSourceRuntime(),
+      channel: makeCanonicalChannel(),
+      playback: {
+        url: "https://video.example/manifest.m3u8?protocol=llhls",
+        kind: "llhls",
+        renderSessionId: "render-1",
+        presentationDelayMs: 0,
+      },
+    });
+
+    const selection = selectBetSurfaceStreamUrl({
+      fallbackStreamIndex: 0,
+      fallbackStreamSources: ["https://fallback.example/live/stream.m3u8"],
+      lifecycleDuelId: "duel-a",
+      authorityHealth: session?.authorityHealth,
+      rendererReady: session?.rendererHealth?.ready,
+      session,
+    });
+
+    expect(selection.canonicalSessionMatchesLifecycle).toBe(true);
+    expect(selection.canUseCanonicalPlayback).toBe(true);
+    expect(selection.activeStreamUrl).toContain("protocol=llhls");
+    expect(selection.preloadStreamUrl).toContain("protocol=llhls");
+  });
+
+  it("allows canonical playback when normalized duel keys match", () => {
+    const session = normalizeCanonicalStreamSession({
+      seq: 1,
+      emittedAt: 1,
+      duelKey: `0x${lifecycleDuelKeyA.toUpperCase()}`,
+      cycle: {
+        cycleId: "cycle-1",
+        phase: "FIGHTING",
+        duelKeyHex: `0x${lifecycleDuelKeyA.toUpperCase()}`,
+        rendererHealth: {
+          ready: true,
+          degradedReason: null,
+          updatedAt: 1,
+        },
+      },
+      rendererHealth: {
+        ready: true,
+        degradedReason: null,
+        updatedAt: 1,
+      },
+      authorityHealth: {
+        ready: true,
+        degradedReason: null,
+        updatedAt: 1,
+      },
+      sourceRuntime: makeSourceRuntime(),
+      channel: makeCanonicalChannel(),
+      playback: {
+        url: "https://video.example/manifest.m3u8?protocol=llhls",
+        kind: "llhls",
+        renderSessionId: "render-1",
+        presentationDelayMs: 0,
+      },
+    });
+
+    const selection = selectBetSurfaceStreamUrl({
+      fallbackStreamIndex: 0,
+      fallbackStreamSources: ["https://fallback.example/live/stream.m3u8"],
+      lifecycleDuelKey: lifecycleDuelKeyA,
+      authorityHealth: session?.authorityHealth,
+      rendererReady: session?.rendererHealth?.ready,
+      session,
+    });
+
+    expect(selection.canonicalSessionMatchesLifecycle).toBe(true);
+    expect(selection.canUseCanonicalPlayback).toBe(true);
+    expect(selection.activeStreamUrl).toContain("protocol=llhls");
+    expect(selection.preloadStreamUrl).toContain("protocol=llhls");
+  });
+
+  it("fails closed when overlapping lifecycle identifiers disagree", () => {
+    const session = normalizeCanonicalStreamSession({
+      seq: 1,
+      emittedAt: 1,
+      duelId: "duel-a",
+      duelKey: lifecycleDuelKeyB,
+      cycle: {
+        cycleId: "cycle-1",
+        phase: "FIGHTING",
+        duelId: "duel-a",
+        duelKeyHex: lifecycleDuelKeyB,
+        rendererHealth: {
+          ready: true,
+          degradedReason: null,
+          updatedAt: 1,
+        },
+      },
+      rendererHealth: {
+        ready: true,
+        degradedReason: null,
+        updatedAt: 1,
+      },
+      authorityHealth: {
+        ready: true,
+        degradedReason: null,
+        updatedAt: 1,
+      },
+      sourceRuntime: makeSourceRuntime(),
+      channel: makeCanonicalChannel(),
+      playback: {
+        url: "https://video.example/manifest.m3u8?protocol=llhls",
+        kind: "llhls",
+        renderSessionId: "render-1",
+        presentationDelayMs: 0,
+      },
+    });
+
+    const selection = selectBetSurfaceStreamUrl({
+      fallbackStreamIndex: 0,
+      fallbackStreamSources: ["https://fallback.example/live/stream.m3u8"],
+      lifecycleDuelId: "duel-a",
+      lifecycleDuelKey: lifecycleDuelKeyC,
+      authorityHealth: session?.authorityHealth,
+      rendererReady: session?.rendererHealth?.ready,
+      session,
+    });
+
+    expect(selection.canonicalSessionMatchesLifecycle).toBe(false);
+    expect(selection.canUseCanonicalPlayback).toBe(false);
+    expect(selection.activeStreamUrl).toBe("");
+    expect(selection.preloadStreamUrl).toBe("");
+  });
+
+  it("keeps canonical playback available when lifecycle identity is unconstrained", () => {
+    const session = normalizeCanonicalStreamSession({
+      seq: 1,
+      emittedAt: 1,
+      duelId: "duel-a",
+      duelKey: lifecycleDuelKeyA,
+      cycle: {
+        cycleId: "cycle-1",
+        phase: "FIGHTING",
+        duelId: "duel-a",
+        duelKeyHex: lifecycleDuelKeyA,
+        rendererHealth: {
+          ready: true,
+          degradedReason: null,
+          updatedAt: 1,
+        },
+      },
+      rendererHealth: {
+        ready: true,
+        degradedReason: null,
+        updatedAt: 1,
+      },
+      authorityHealth: {
+        ready: true,
+        degradedReason: null,
+        updatedAt: 1,
+      },
+      sourceRuntime: makeSourceRuntime(),
+      channel: makeCanonicalChannel(),
+      playback: {
+        url: "https://video.example/manifest.m3u8?protocol=llhls",
+        kind: "llhls",
+        renderSessionId: "render-1",
+        presentationDelayMs: 0,
+      },
+    });
+
+    const selection = selectBetSurfaceStreamUrl({
+      fallbackStreamIndex: 0,
+      fallbackStreamSources: ["https://fallback.example/live/stream.m3u8"],
+      authorityHealth: session?.authorityHealth,
+      rendererReady: session?.rendererHealth?.ready,
+      session,
+    });
+
+    expect(selection.canonicalSessionMatchesLifecycle).toBe(true);
+    expect(selection.canUseCanonicalPlayback).toBe(true);
+    expect(selection.activeStreamUrl).toContain("protocol=llhls");
+    expect(selection.preloadStreamUrl).toContain("protocol=llhls");
   });
 
   it("does not use canonical external delivery when broadcast delivery is disconnected", () => {

@@ -5,6 +5,7 @@ import type {
   StreamDestinationState,
   StreamPublicReadiness,
 } from "../spectator/types";
+import { normalizePredictionMarketDuelKeyHex } from "./predictionMarkets";
 
 function parseStreamSourceUrl(value: string): URL | null {
   try {
@@ -171,6 +172,54 @@ function findCanonicalDestination(
   );
 }
 
+function normalizeLifecycleDuelId(value: string | null | undefined): string | null {
+  const duelId = value?.trim() ?? "";
+  return duelId.length > 0 ? duelId : null;
+}
+
+function matchesCanonicalSessionLifecycle(params: {
+  canonicalSessionDuelId: string | null | undefined;
+  canonicalSessionDuelKey: string | null | undefined;
+  lifecycleDuelId: string | null | undefined;
+  lifecycleDuelKey: string | null | undefined;
+}): boolean {
+  const lifecycleDuelId = normalizeLifecycleDuelId(params.lifecycleDuelId);
+  const lifecycleDuelKey = normalizePredictionMarketDuelKeyHex(
+    params.lifecycleDuelKey ?? null,
+  );
+  if (lifecycleDuelId == null && lifecycleDuelKey == null) {
+    return true;
+  }
+
+  const canonicalSessionDuelId = normalizeLifecycleDuelId(
+    params.canonicalSessionDuelId,
+  );
+  const canonicalSessionDuelKey = normalizePredictionMarketDuelKeyHex(
+    params.canonicalSessionDuelKey ?? null,
+  );
+  if (canonicalSessionDuelId == null && canonicalSessionDuelKey == null) {
+    return false;
+  }
+
+  let hasMatchingIdentifier = false;
+
+  if (lifecycleDuelId != null && canonicalSessionDuelId != null) {
+    if (canonicalSessionDuelId !== lifecycleDuelId) {
+      return false;
+    }
+    hasMatchingIdentifier = true;
+  }
+
+  if (lifecycleDuelKey != null && canonicalSessionDuelKey != null) {
+    if (canonicalSessionDuelKey !== lifecycleDuelKey) {
+      return false;
+    }
+    hasMatchingIdentifier = true;
+  }
+
+  return hasMatchingIdentifier;
+}
+
 type SelectBetSurfaceStreamUrlInput = {
   allowFallbackOverride?: boolean;
   allowFallbackWhenSessionUnavailable?: boolean;
@@ -222,13 +271,12 @@ export function selectBetSurfaceStreamUrl({
     session?.cycle.duelKeyHex?.replace(/^0x/i, "") ??
     null;
 
-  const canonicalSessionMatchesLifecycle =
-    (!lifecycleDuelId && !lifecycleDuelKey) ||
-    ((!canonicalSessionDuelId && !canonicalSessionDuelKey) ||
-      canonicalSessionDuelId === lifecycleDuelId ||
-      (canonicalSessionDuelKey != null &&
-        lifecycleDuelKey != null &&
-        canonicalSessionDuelKey === lifecycleDuelKey));
+  const canonicalSessionMatchesLifecycle = matchesCanonicalSessionLifecycle({
+    canonicalSessionDuelId,
+    canonicalSessionDuelKey,
+    lifecycleDuelId,
+    lifecycleDuelKey,
+  });
 
   const authorityReady = session?.authorityHealth.ready ?? authorityHealth?.ready ?? true;
   const canonicalRendererReady =
@@ -278,7 +326,8 @@ export function selectBetSurfaceStreamUrl({
     authorityReady &&
     canonicalRendererPlaybackReady &&
     canonicalSourceReady &&
-    canonicalDeliveryReady
+    canonicalDeliveryReady &&
+    canonicalSessionMatchesLifecycle
       ? canonicalPlaybackUrl
       : "";
 
