@@ -12,6 +12,7 @@ import {
   selectBetSyncReplayUntilSeq,
   selectBetSyncResumeSeq,
   toStreamStateFromBetSyncEvent,
+  type StreamState,
 } from "./betSync";
 
 describe("bet-sync helpers", () => {
@@ -743,7 +744,9 @@ describe("bet-sync helpers", () => {
       },
     };
 
-    expect(publicStreamStateChanged(base, next)).toBe(true);
+    expect(
+      publicStreamStateChanged(base as StreamState, next as StreamState),
+    ).toBe(true);
   });
 
   test("ignores seq and emittedAt churn when the public stream surface is unchanged", () => {
@@ -789,7 +792,9 @@ describe("bet-sync helpers", () => {
       emittedAt: 1_700_000_000_500,
     };
 
-    expect(publicStreamStateChanged(base, next)).toBe(false);
+    expect(
+      publicStreamStateChanged(base as StreamState, next as StreamState),
+    ).toBe(false);
   });
 
   test("ignores volatile cycle and timeline telemetry churn", () => {
@@ -870,6 +875,8 @@ describe("bet-sync helpers", () => {
       },
     };
 
-    expect(publicStreamStateChanged(base, next)).toBe(false);
+    expect(
+      publicStreamStateChanged(base as StreamState, next as StreamState),
+    ).toBe(false);
   });
 });

@@ -5,7 +5,15 @@ import type {
   StreamDestinationState,
   StreamPublicReadiness,
 } from "../spectator/types";
-import { normalizePredictionMarketDuelKeyHex } from "./predictionMarkets";
+// Import directly from `@hyperbet/chain-registry` rather than via
+// `./predictionMarkets` to avoid the cycle
+// `predictionMarkets → config → streamSession → predictionMarkets`.
+// The cycle previously caused a Vite/ESM evaluation-order trap where
+// `GAME_API_URL` was in TDZ when the module-level URL consts in
+// predictionMarkets.ts were evaluated, producing
+// `ReferenceError: Cannot access 'GAME_API_URL' before initialization`
+// on page load in E2E runs.
+import { normalizePredictionMarketDuelKeyHex } from "@hyperbet/chain-registry";
 
 function parseStreamSourceUrl(value: string): URL | null {
   try {

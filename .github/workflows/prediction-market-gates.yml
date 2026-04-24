@@ -258,8 +258,13 @@ jobs:
         run: bun run dev:bootstrap
 
       - name: Install Playwright browser
+        # Use the workspace-pinned Playwright rather than `bunx`, which
+        # resolves the latest CLI from npm and downloads a browser bundle
+        # (e.g. v1217) that doesn't match the pinned `@playwright/test`
+        # runner (v1208). That skew caused the Apr 23 Cross-Chain / Unified
+        # Bets E2E regression.
         working-directory: packages/hyperbet-${{ matrix.chain }}/app
-        run: bunx playwright install --with-deps chromium
+        run: ./node_modules/.bin/playwright install --with-deps chromium
 
       - name: Audit unified page env
         env:
