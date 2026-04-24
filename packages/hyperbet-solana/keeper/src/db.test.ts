@@ -245,6 +245,32 @@ describe("keeper db persistence", () => {
     ]);
   });
 
+  test("round-trips bet-sync checkpoint state through SQLite", async () => {
+    const db = (await import(
+      `./db.ts?case=${Date.now()}-bet-sync-checkpoint`
+    )) as typeof import("./db.ts");
+    loadedModules.push(db);
+
+    db.saveBetSyncCheckpoint({
+      sourceEpoch: 7,
+      lastSeenSeq: 101,
+      lastAppliedSeq: 99,
+      replayMode: "replay",
+      degradedReason: "upstream reset",
+      updatedAt: 1_700_000_000_123,
+    });
+
+    const state = db.loadAll();
+    expect(state.betSyncCheckpoint).toEqual({
+      sourceEpoch: 7,
+      lastSeenSeq: 101,
+      lastAppliedSeq: 99,
+      replayMode: "replay",
+      degradedReason: "upstream reset",
+      updatedAt: 1_700_000_000_123,
+    });
+  });
+
   test("quarantines duplicate recorded bets before enforcing uniqueness", async () => {
     seedDuplicateBets(process.env.KEEPER_DB_PATH!);
 

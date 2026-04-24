@@ -3,12 +3,15 @@ import type {
   PredictionMarketLifecycleStatus,
   PredictionMarketWinner,
 } from "../../../hyperbet-chain-registry/src/index";
+import type { KeeperMarketParitySnapshot } from "../../../hyperbet-mm-core/src/index";
 import {
   normalizePredictionMarketTimestamp,
   normalizePredictionMarketWinner,
 } from "../../../hyperbet-chain-registry/src/index";
 
 type JsonRecord = Record<string, unknown>;
+type JsonPrimitive = string | number | boolean | null;
+type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue };
 
 export type BetSyncRendererHealth = {
   ready: boolean;
@@ -16,15 +19,80 @@ export type BetSyncRendererHealth = {
   updatedAt: number | null;
 };
 
+export type BetSyncHlsManifest = {
+  updatedAt: number | null;
+  mediaSequence: number | null;
+};
+
+export type BetSyncRendererMetrics = {
+  captureFps: number | null;
+  encodeFps: number | null;
+  droppedFrames: number | null;
+  renderTick: number | null;
+  duelStateTick: number | null;
+  latestFrameAt: number | null;
+  latestRenderTickAt: number | null;
+  latestDuelStateTickAt: number | null;
+  latestVisualChangeAt: number | null;
+  visualChangeAgeMs: number | null;
+  hlsManifest: BetSyncHlsManifest | null;
+};
+
+export type BetSyncDelivery = {
+  mode: "self_hls" | "external_hls";
+  provider: string | null;
+  playbackUrl: string | null;
+  hlsUrl: string | null;
+  llhlsUrl: string | null;
+  ingestUrl: string | null;
+};
+
+export type BetSyncBroadcastTimeline = {
+  phase: string | null;
+  betOpenTime: number | null;
+  betCloseTime: number | null;
+  fightStartTime: number | null;
+  duelEndTime: number | null;
+  presentationDelayMs: number;
+  updatedAt: number | null;
+};
+
+export type BetSyncSourceTimeline = {
+  phase: string | null;
+  betOpenTime: number | null;
+  betCloseTime: number | null;
+  fightStartTime: number | null;
+  duelEndTime: number | null;
+  updatedAt: number | null;
+};
+
+export type BetSyncCanonicalAuthority = {
+  providerLive: boolean;
+  playbackProbeReady: boolean;
+  decision: string | null;
+  reason: string | null;
+  revision: number | null;
+  updatedAt: number | null;
+  liveInputId: string | null;
+  videoUid: string | null;
+  lifecycleStatus: string | null;
+  playbackUrl: string | null;
+  playbackProbeStatusCode: number | null;
+  playbackManifestStatus: string | null;
+};
+
 export type BetSyncEvent = {
   schemaVersion: number;
   sourceEpoch: number;
   seq: number;
   emittedAt: number;
+  cycle: JsonRecord | null;
   duelId: string | null;
   duelKey: string | null;
   phase: string | null;
   phaseVersion: number | null;
+  broadcastTimeline: BetSyncBroadcastTimeline | null;
+  sourceTimeline: BetSyncSourceTimeline | null;
   betOpenTime: number | null;
   betCloseTime: number | null;
   fightStartTime: number | null;
@@ -40,6 +108,16 @@ export type BetSyncEvent = {
   leaderboard: JsonRecord[];
   cameraTarget: string | null;
   rendererHealth: BetSyncRendererHealth | null;
+  rendererMetrics: BetSyncRendererMetrics | null;
+  delivery: BetSyncDelivery | null;
+  sourceRuntime: JsonRecord | null;
+  channel: JsonRecord | null;
+  publicReadiness: JsonRecord | null;
+  canonicalDestination: JsonRecord | null;
+  fallbackDestination: JsonRecord | null;
+  canonicalAuthority: BetSyncCanonicalAuthority | null;
+  deliveryHealth: JsonRecord | null;
+  marketParity?: KeeperMarketParitySnapshot | null;
 };
 
 export type BetSyncBootstrapState = {
@@ -56,6 +134,21 @@ export type StreamState = {
   cameraTarget: string | null;
   seq: number;
   emittedAt: number;
+  phase?: string | null;
+  phaseVersion?: number | null;
+  broadcastTimeline?: BetSyncBroadcastTimeline | null;
+  sourceTimeline?: BetSyncSourceTimeline | null;
+  rendererHealth?: BetSyncRendererHealth | null;
+  rendererMetrics?: BetSyncRendererMetrics | null;
+  delivery?: BetSyncDelivery | null;
+  sourceRuntime?: JsonRecord | null;
+  channel?: JsonRecord | null;
+  publicReadiness?: JsonRecord | null;
+  canonicalDestination?: JsonRecord | null;
+  fallbackDestination?: JsonRecord | null;
+  canonicalAuthority?: BetSyncCanonicalAuthority | null;
+  deliveryHealth?: JsonRecord | null;
+  marketParity?: KeeperMarketParitySnapshot | null;
 };
 
 export type PredictionMarketsDuelSnapshot = {
@@ -71,11 +164,45 @@ export type PredictionMarketsDuelSnapshot = {
 export type PredictionMarketsSurface = {
   duel: PredictionMarketsDuelSnapshot;
   markets: PredictionMarketLifecycleRecord[];
+  /**
+   * Legacy wall-clock timestamp: when the keeper built / last updated this
+   * surface. Retained for backwards compatibility with consumers that pre-
+   * date the source/server split. Prefer `serverEmittedAt` going forward.
+   */
   updatedAt: number | null;
+  /**
+   * Source-time emission anchor — the upstream `streamState.emittedAt`
+   * of the stream frame used to derive this surface. Preserved across
+   * `rollPredictionMarketsOverview` forward-rolls so a `recentSettlement`
+   * surface retains its original source anchor even as wall-clock
+   * `serverEmittedAt` advances. Selector keys (commit 3) use this field
+   * to align surface history against the viewer's playback clock.
+   */
+  sourceEmittedAt: number | null;
+  /**
+   * Server-clock timestamp at which this surface was (re)built by the
+   * keeper. Staleness / max-age budgets key off this field; selectors
+   * key off `sourceEmittedAt`.
+   */
+  serverEmittedAt: number;
+  marketParity?: KeeperMarketParitySnapshot | null;
 };
 
 export type PredictionMarketsOverviewResponse = {
   updatedAt: number | null;
+  /**
+   * Envelope-level convenience: the newest source emission across
+   * `live` and `recentSettlement`. Consumers doing per-surface
+   * alignment should read the per-surface fields directly; this is
+   * just a top-level summary.
+   */
+  sourceEmittedAt: number | null;
+  /**
+   * Server-clock timestamp at which the keeper emitted this envelope.
+   * Distinct from `updatedAt` (kept for legacy compatibility); always
+   * set to `Date.now()` at the moment the response is constructed.
+   */
+  serverEmittedAt: number;
   live: PredictionMarketsSurface | null;
   recentSettlement: PredictionMarketsSurface | null;
 };
@@ -94,6 +221,289 @@ function asFiniteNumber(value: unknown): number | null {
 
 function asString(value: unknown): string | null {
   return typeof value === "string" && value.trim().length > 0 ? value : null;
+}
+
+function asBoolean(value: unknown): boolean | null {
+  return typeof value === "boolean" ? value : null;
+}
+
+function normalizeForChangeDetection(value: unknown): JsonValue | undefined {
+  if (value == null) return null;
+  if (typeof value === "string" || typeof value === "boolean") {
+    return value;
+  }
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : null;
+  }
+  if (Array.isArray(value)) {
+    return value
+      .map((entry) => normalizeForChangeDetection(entry))
+      .filter((entry): entry is JsonValue => entry !== undefined);
+  }
+  if (typeof value === "object") {
+    const entries = Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .flatMap(([key, entryValue]) => {
+        const normalized = normalizeForChangeDetection(entryValue);
+        return normalized === undefined ? [] : [[key, normalized] as const];
+      });
+    return Object.fromEntries(entries);
+  }
+  return undefined;
+}
+
+function summarizeStreamHealthForChangeDetection(value: unknown): JsonValue {
+  const candidate = asRecord(value);
+  if (!candidate) return null;
+  return normalizeForChangeDetection({
+    ready: asBoolean(candidate.ready),
+    degradedReason: asString(candidate.degradedReason),
+  }) ?? null;
+}
+
+function summarizeSourceRuntimeForChangeDetection(value: unknown): JsonValue {
+  const candidate = asRecord(value);
+  if (!candidate) return null;
+  return normalizeForChangeDetection({
+    ready: asBoolean(candidate.ready),
+    statusSource: asString(candidate.statusSource),
+    captureMode: asString(candidate.captureMode),
+    degradedReason: asString(candidate.degradedReason),
+    currentSceneUrl: asString(candidate.currentSceneUrl),
+    activeBundle: asString(candidate.activeBundle),
+  }) ?? null;
+}
+
+function summarizeDeliveryForChangeDetection(value: unknown): JsonValue {
+  const candidate = asRecord(value);
+  if (!candidate) return null;
+  return normalizeForChangeDetection({
+    mode: asString(candidate.mode),
+    provider: asString(candidate.provider),
+    playbackUrl: asString(candidate.playbackUrl),
+    hlsUrl: asString(candidate.hlsUrl),
+    llhlsUrl: asString(candidate.llhlsUrl),
+    ingestUrl: asString(candidate.ingestUrl),
+  }) ?? null;
+}
+
+function summarizePublicReadinessForChangeDetection(value: unknown): JsonValue {
+  const candidate = asRecord(value);
+  if (!candidate) return null;
+  return normalizeForChangeDetection({
+    ready: asBoolean(candidate.ready),
+    reason: asString(candidate.reason),
+  }) ?? null;
+}
+
+function summarizeDestinationForChangeDetection(value: unknown): JsonValue {
+  const candidate = asRecord(value);
+  if (!candidate) return null;
+  return normalizeForChangeDetection({
+    id: asString(candidate.id),
+    name: asString(candidate.name),
+    role: asString(candidate.role),
+    provider: asString(candidate.provider),
+    transport: asString(candidate.transport),
+    playbackUrl: asString(candidate.playbackUrl),
+    ingestUrl: asString(candidate.ingestUrl),
+    connected: asBoolean(candidate.connected),
+    transportHealthy: asBoolean(candidate.transportHealthy),
+    playbackReady: asBoolean(candidate.playbackReady),
+    manifestStatus: asString(candidate.manifestStatus),
+    lastError: asString(candidate.lastError),
+  }) ?? null;
+}
+
+function summarizeChannelForChangeDetection(value: unknown): JsonValue {
+  const candidate = asRecord(value);
+  if (!candidate) return null;
+  return normalizeForChangeDetection({
+    id: asString(candidate.id),
+    mode: asString(candidate.mode),
+    presentationDelayMs: asFiniteNumber(candidate.presentationDelayMs),
+    activeDuelId: asString(candidate.activeDuelId),
+    activeDuelKey: normalizeDuelKey(candidate.activeDuelKey),
+    canonicalDestinationId: asString(candidate.canonicalDestinationId),
+    fallbackDestinationId: asString(candidate.fallbackDestinationId),
+    publicPlaybackUrl: asString(candidate.publicPlaybackUrl),
+    publicReadiness: summarizePublicReadinessForChangeDetection(
+      candidate.publicReadiness,
+    ),
+  }) ?? null;
+}
+
+function summarizeCanonicalAuthorityForChangeDetection(
+  value: unknown,
+): JsonValue {
+  const candidate = asRecord(value);
+  if (!candidate) return null;
+  return normalizeForChangeDetection({
+    providerLive: asBoolean(candidate.providerLive),
+    playbackProbeReady: asBoolean(candidate.playbackProbeReady),
+    decision: asString(candidate.decision),
+    reason: asString(candidate.reason),
+    revision: asFiniteNumber(candidate.revision),
+    liveInputId: asString(candidate.liveInputId),
+    videoUid: asString(candidate.videoUid),
+    lifecycleStatus: asString(candidate.lifecycleStatus),
+    playbackUrl: asString(candidate.playbackUrl),
+    playbackProbeStatusCode: asFiniteNumber(candidate.playbackProbeStatusCode),
+    playbackManifestStatus: asString(candidate.playbackManifestStatus),
+  }) ?? null;
+}
+
+function summarizeTimelineForChangeDetection(value: unknown): JsonValue {
+  const candidate = asRecord(value);
+  if (!candidate) return null;
+  return normalizeForChangeDetection({
+    phase: asString(candidate.phase),
+    betOpenTime: asFiniteNumber(candidate.betOpenTime),
+    betCloseTime: asFiniteNumber(candidate.betCloseTime),
+    fightStartTime: asFiniteNumber(candidate.fightStartTime),
+    duelEndTime: asFiniteNumber(candidate.duelEndTime),
+    presentationDelayMs: asFiniteNumber(candidate.presentationDelayMs),
+  }) ?? null;
+}
+
+function summarizeCycleForChangeDetection(value: unknown): JsonValue {
+  const candidate = asRecord(value);
+  if (!candidate) return null;
+  return normalizeForChangeDetection({
+    cycleId: asString(candidate.cycleId),
+    duelId: asString(candidate.duelId),
+    duelKey:
+      normalizeDuelKey(candidate.duelKey) ?? normalizeDuelKey(candidate.duelKeyHex),
+    phase: asString(candidate.phase),
+    phaseVersion: asFiniteNumber(candidate.phaseVersion),
+    betOpenTime: asFiniteNumber(candidate.betOpenTime),
+    betCloseTime: asFiniteNumber(candidate.betCloseTime),
+    fightStartTime: asFiniteNumber(candidate.fightStartTime),
+    duelEndTime: asFiniteNumber(candidate.duelEndTime),
+    winnerId: asString(candidate.winnerId),
+    winnerName: asString(candidate.winnerName),
+    winReason: asString(candidate.winReason),
+    seed: asString(candidate.seed),
+    replayHash: asString(candidate.replayHash),
+    agent1: normalizeForChangeDetection(asRecord(candidate.agent1)),
+    agent2: normalizeForChangeDetection(asRecord(candidate.agent2)),
+    arenaPositions: normalizeForChangeDetection(asRecord(candidate.arenaPositions)),
+  }) ?? null;
+}
+
+function buildPublicStreamStateChangeSnapshot(state: StreamState): JsonValue {
+  return (
+    normalizeForChangeDetection({
+      cycle: summarizeCycleForChangeDetection(state.cycle),
+      leaderboard: state.leaderboard ?? [],
+      cameraTarget: state.cameraTarget ?? null,
+      phase: state.phase ?? null,
+      phaseVersion: state.phaseVersion ?? null,
+      broadcastTimeline: summarizeTimelineForChangeDetection(
+        state.broadcastTimeline,
+      ),
+      sourceTimeline: summarizeTimelineForChangeDetection(state.sourceTimeline),
+      rendererHealth: summarizeStreamHealthForChangeDetection(
+        state.rendererHealth,
+      ),
+      delivery: summarizeDeliveryForChangeDetection(state.delivery),
+      sourceRuntime: summarizeSourceRuntimeForChangeDetection(
+        state.sourceRuntime,
+      ),
+      channel: summarizeChannelForChangeDetection(state.channel),
+      publicReadiness: summarizePublicReadinessForChangeDetection(
+        state.publicReadiness,
+      ),
+      canonicalDestination: summarizeDestinationForChangeDetection(
+        state.canonicalDestination,
+      ),
+      fallbackDestination: summarizeDestinationForChangeDetection(
+        state.fallbackDestination,
+      ),
+      canonicalAuthority: summarizeCanonicalAuthorityForChangeDetection(
+        state.canonicalAuthority,
+      ),
+      deliveryHealth: summarizeStreamHealthForChangeDetection(
+        state.deliveryHealth,
+      ),
+    }) ?? null
+  );
+}
+
+function normalizeMarketParity(
+  value: unknown,
+): KeeperMarketParitySnapshot | null {
+  const candidate = asRecord(value);
+  if (!candidate) return null;
+  const bundleId = asString(candidate.bundleId);
+  if (!bundleId) return null;
+  return {
+    bundleId,
+    duelKey: normalizeDuelKey(candidate.duelKey),
+    duelId: asString(candidate.duelId),
+    revision: Math.max(1, asFiniteNumber(candidate.revision) ?? 1),
+    requiredChains: Array.isArray(candidate.requiredChains)
+      ? candidate.requiredChains.filter(
+          (chain): chain is KeeperMarketParitySnapshot["requiredChains"][number] =>
+            typeof chain === "string",
+        )
+      : [],
+    confirmedChains: Array.isArray(candidate.confirmedChains)
+      ? candidate.confirmedChains.filter(
+          (chain): chain is KeeperMarketParitySnapshot["confirmedChains"][number] =>
+            typeof chain === "string",
+        )
+      : [],
+    state: (asString(candidate.state) as KeeperMarketParitySnapshot["state"]) ?? "preparing",
+    phase: asString(candidate.phase),
+    safeToBet: candidate.safeToBet === true,
+    openedAtMs: normalizePredictionMarketTimestamp(candidate.openedAtMs),
+    lockedAtMs: normalizePredictionMarketTimestamp(candidate.lockedAtMs),
+    resolvedAtMs: normalizePredictionMarketTimestamp(candidate.resolvedAtMs),
+    freezeReason: asString(candidate.freezeReason),
+    updatedAtMs: normalizePredictionMarketTimestamp(candidate.updatedAtMs) ?? 0,
+    receipts: Array.isArray(candidate.receipts)
+      ? candidate.receipts
+          .map((receipt) => {
+            const normalized = asRecord(receipt);
+            const chainKey = normalized && typeof normalized.chainKey === "string"
+              ? normalized.chainKey
+              : null;
+            if (!normalized || !chainKey) {
+              return null;
+            }
+            return {
+              chainKey,
+              preparedAtMs: normalizePredictionMarketTimestamp(
+                normalized.preparedAtMs,
+              ),
+              openedAtMs: normalizePredictionMarketTimestamp(normalized.openedAtMs),
+              lockedAtMs: normalizePredictionMarketTimestamp(normalized.lockedAtMs),
+              resolvedAtMs: normalizePredictionMarketTimestamp(
+                normalized.resolvedAtMs,
+              ),
+              cancelledAtMs: normalizePredictionMarketTimestamp(
+                normalized.cancelledAtMs,
+              ),
+              confirmedAtMs: normalizePredictionMarketTimestamp(
+                normalized.confirmedAtMs,
+              ),
+              lifecycleStatus:
+                (asString(normalized.lifecycleStatus) as PredictionMarketLifecycleStatus | null) ??
+                null,
+              txRef: asString(normalized.txRef),
+              note: asString(normalized.note),
+            };
+          })
+          .filter(
+            (
+              receipt,
+            ): receipt is KeeperMarketParitySnapshot["receipts"][number] => {
+              return receipt != null;
+            },
+          )
+      : [],
+  };
 }
 
 function normalizeDuelKey(value: unknown): string | null {
@@ -202,6 +612,113 @@ function normalizeRendererHealth(value: unknown): BetSyncRendererHealth | null {
   };
 }
 
+function normalizeHlsManifest(value: unknown): BetSyncHlsManifest | null {
+  const candidate = asRecord(value);
+  if (!candidate) return null;
+  return {
+    updatedAt: normalizePredictionMarketTimestamp(candidate.updatedAt),
+    mediaSequence: asFiniteNumber(candidate.mediaSequence),
+  };
+}
+
+function normalizeRendererMetrics(
+  value: unknown,
+): BetSyncRendererMetrics | null {
+  const candidate = asRecord(value);
+  if (!candidate) return null;
+  return {
+    captureFps: asFiniteNumber(candidate.captureFps),
+    encodeFps: asFiniteNumber(candidate.encodeFps),
+    droppedFrames: asFiniteNumber(candidate.droppedFrames),
+    renderTick: asFiniteNumber(candidate.renderTick),
+    duelStateTick: asFiniteNumber(candidate.duelStateTick),
+    latestFrameAt: normalizePredictionMarketTimestamp(candidate.latestFrameAt),
+    latestRenderTickAt: normalizePredictionMarketTimestamp(
+      candidate.latestRenderTickAt,
+    ),
+    latestDuelStateTickAt: normalizePredictionMarketTimestamp(
+      candidate.latestDuelStateTickAt,
+    ),
+    latestVisualChangeAt: normalizePredictionMarketTimestamp(
+      candidate.latestVisualChangeAt,
+    ),
+    visualChangeAgeMs: asFiniteNumber(candidate.visualChangeAgeMs),
+    hlsManifest: normalizeHlsManifest(candidate.hlsManifest),
+  };
+}
+
+function normalizeDelivery(value: unknown): BetSyncDelivery | null {
+  const candidate = asRecord(value);
+  if (!candidate) return null;
+  const mode = asString(candidate.mode);
+  if (mode !== "self_hls" && mode !== "external_hls") {
+    return null;
+  }
+  return {
+    mode,
+    provider: asString(candidate.provider),
+    playbackUrl: asString(candidate.playbackUrl),
+    hlsUrl: asString(candidate.hlsUrl),
+    llhlsUrl: asString(candidate.llhlsUrl),
+    ingestUrl: asString(candidate.ingestUrl),
+  };
+}
+
+function normalizeBroadcastTimeline(
+  value: unknown,
+): BetSyncBroadcastTimeline | null {
+  const candidate = asRecord(value);
+  if (!candidate) return null;
+  return {
+    phase: asString(candidate.phase),
+    betOpenTime: normalizePredictionMarketTimestamp(candidate.betOpenTime),
+    betCloseTime: normalizePredictionMarketTimestamp(candidate.betCloseTime),
+    fightStartTime: normalizePredictionMarketTimestamp(candidate.fightStartTime),
+    duelEndTime: normalizePredictionMarketTimestamp(candidate.duelEndTime),
+    presentationDelayMs: Math.max(
+      0,
+      asFiniteNumber(candidate.presentationDelayMs) ?? 0,
+    ),
+    updatedAt: normalizePredictionMarketTimestamp(candidate.updatedAt),
+  };
+}
+
+function normalizeSourceTimeline(
+  value: unknown,
+): BetSyncSourceTimeline | null {
+  const candidate = asRecord(value);
+  if (!candidate) return null;
+  return {
+    phase: asString(candidate.phase),
+    betOpenTime: normalizePredictionMarketTimestamp(candidate.betOpenTime),
+    betCloseTime: normalizePredictionMarketTimestamp(candidate.betCloseTime),
+    fightStartTime: normalizePredictionMarketTimestamp(candidate.fightStartTime),
+    duelEndTime: normalizePredictionMarketTimestamp(candidate.duelEndTime),
+    updatedAt: normalizePredictionMarketTimestamp(candidate.updatedAt),
+  };
+}
+
+function normalizeCanonicalAuthority(
+  value: unknown,
+): BetSyncCanonicalAuthority | null {
+  const candidate = asRecord(value);
+  if (!candidate) return null;
+  return {
+    providerLive: candidate.providerLive === true,
+    playbackProbeReady: candidate.playbackProbeReady === true,
+    decision: asString(candidate.decision),
+    reason: asString(candidate.reason),
+    revision: asFiniteNumber(candidate.revision),
+    updatedAt: normalizePredictionMarketTimestamp(candidate.updatedAt),
+    liveInputId: asString(candidate.liveInputId),
+    videoUid: asString(candidate.videoUid),
+    lifecycleStatus: asString(candidate.lifecycleStatus),
+    playbackUrl: asString(candidate.playbackUrl),
+    playbackProbeStatusCode: asFiniteNumber(candidate.playbackProbeStatusCode),
+    playbackManifestStatus: asString(candidate.playbackManifestStatus),
+  };
+}
+
 export function parseBetSyncEvent(payload: unknown): BetSyncEvent | null {
   const candidate = asRecord(payload);
   if (!candidate) return null;
@@ -214,15 +731,25 @@ export function parseBetSyncEvent(payload: unknown): BetSyncEvent | null {
     return null;
   }
 
+  const broadcastTimeline = normalizeBroadcastTimeline(
+    candidate.broadcastTimeline,
+  );
+  const sourceTimeline = normalizeSourceTimeline(
+    candidate.sourceTimeline,
+  );
+
   return {
     schemaVersion: asFiniteNumber(candidate.schemaVersion) ?? 1,
     sourceEpoch,
     seq,
     emittedAt,
+    cycle: asRecord(candidate.cycle),
     duelId: asString(candidate.duelId),
     duelKey: normalizeDuelKey(candidate.duelKey),
     phase: asString(candidate.phase),
     phaseVersion: asFiniteNumber(candidate.phaseVersion),
+    broadcastTimeline,
+    sourceTimeline,
     betOpenTime: normalizePredictionMarketTimestamp(candidate.betOpenTime),
     betCloseTime: normalizePredictionMarketTimestamp(candidate.betCloseTime),
     fightStartTime: normalizePredictionMarketTimestamp(candidate.fightStartTime),
@@ -242,6 +769,16 @@ export function parseBetSyncEvent(payload: unknown): BetSyncEvent | null {
       : [],
     cameraTarget: asString(candidate.cameraTarget),
     rendererHealth: normalizeRendererHealth(candidate.rendererHealth),
+    rendererMetrics: normalizeRendererMetrics(candidate.rendererMetrics),
+    delivery: normalizeDelivery(candidate.delivery),
+    sourceRuntime: asRecord(candidate.sourceRuntime),
+    channel: asRecord(candidate.channel),
+    publicReadiness: asRecord(candidate.publicReadiness),
+    canonicalDestination: asRecord(candidate.canonicalDestination),
+    fallbackDestination: asRecord(candidate.fallbackDestination),
+    canonicalAuthority: normalizeCanonicalAuthority(candidate.canonicalAuthority),
+    deliveryHealth: asRecord(candidate.deliveryHealth),
+    marketParity: normalizeMarketParity(candidate.marketParity),
   };
 }
 
@@ -274,16 +811,89 @@ export function parseBetSyncBootstrapState(
   };
 }
 
+export function parseStreamStatePayload(
+  payload: unknown,
+  fallback: { seq: number; emittedAt: number },
+): StreamState | null {
+  const candidate = asRecord(payload);
+  const cycle = asRecord(candidate?.cycle);
+  if (!candidate || !cycle) {
+    return null;
+  }
+
+  return {
+    type: "STREAMING_STATE_UPDATE",
+    cycle,
+    leaderboard: Array.isArray(candidate.leaderboard)
+      ? candidate.leaderboard
+          .map((entry) => asRecord(entry))
+          .filter((entry): entry is JsonRecord => entry !== null)
+      : [],
+    cameraTarget:
+      typeof candidate.cameraTarget === "string" || candidate.cameraTarget === null
+        ? candidate.cameraTarget
+        : null,
+    seq:
+      typeof candidate.seq === "number" && Number.isFinite(candidate.seq)
+        ? candidate.seq
+        : fallback.seq,
+    emittedAt:
+      typeof candidate.emittedAt === "number" &&
+      Number.isFinite(candidate.emittedAt)
+        ? candidate.emittedAt
+        : fallback.emittedAt,
+    phase:
+      typeof candidate.phase === "string" || candidate.phase === null
+        ? candidate.phase
+        : null,
+    phaseVersion:
+      typeof candidate.phaseVersion === "number" &&
+      Number.isFinite(candidate.phaseVersion)
+        ? candidate.phaseVersion
+        : null,
+    broadcastTimeline: normalizeBroadcastTimeline(candidate.broadcastTimeline),
+    sourceTimeline: normalizeSourceTimeline(candidate.sourceTimeline),
+    rendererHealth: normalizeRendererHealth(candidate.rendererHealth),
+    rendererMetrics: normalizeRendererMetrics(candidate.rendererMetrics),
+    delivery: normalizeDelivery(candidate.delivery),
+    sourceRuntime: asRecord(candidate.sourceRuntime),
+    channel: asRecord(candidate.channel),
+    publicReadiness: asRecord(candidate.publicReadiness),
+    canonicalDestination: asRecord(candidate.canonicalDestination),
+    fallbackDestination: asRecord(candidate.fallbackDestination),
+    canonicalAuthority: normalizeCanonicalAuthority(candidate.canonicalAuthority),
+    deliveryHealth: asRecord(candidate.deliveryHealth),
+    marketParity: normalizeMarketParity(candidate.marketParity),
+  };
+}
+
+export function publicStreamStateChanged(
+  previous: StreamState,
+  next: StreamState,
+): boolean {
+  return (
+    JSON.stringify(buildPublicStreamStateChangeSnapshot(previous)) !==
+    JSON.stringify(buildPublicStreamStateChangeSnapshot(next))
+  );
+}
+
 export function toStreamStateFromBetSyncEvent(event: BetSyncEvent): StreamState {
+  const rawCycle = event.cycle;
   return {
     type: "STREAMING_STATE_UPDATE",
     cycle: {
-      cycleId: event.duelId ?? `bet-sync-${event.sourceEpoch}-${event.seq}`,
+      cycleId:
+        asString(rawCycle?.cycleId) ??
+        event.duelId ??
+        `bet-sync-${event.sourceEpoch}-${event.seq}`,
       duelId: event.duelId,
       duelKey: event.duelKey,
       duelKeyHex: event.duelKey ? `0x${event.duelKey}` : null,
       phase: event.phase ?? "IDLE",
       phaseVersion: event.phaseVersion,
+      rawCycle,
+      broadcastTimeline: event.broadcastTimeline,
+      sourceTimeline: event.sourceTimeline,
       betOpenTime: event.betOpenTime,
       betCloseTime: event.betCloseTime,
       fightStartTime: event.fightStartTime,
@@ -302,6 +912,21 @@ export function toStreamStateFromBetSyncEvent(event: BetSyncEvent): StreamState 
     cameraTarget: event.cameraTarget,
     seq: event.seq,
     emittedAt: event.emittedAt,
+    phase: event.phase,
+    phaseVersion: event.phaseVersion,
+    broadcastTimeline: event.broadcastTimeline,
+    sourceTimeline: event.sourceTimeline,
+    rendererHealth: event.rendererHealth,
+    rendererMetrics: event.rendererMetrics,
+    delivery: event.delivery,
+    sourceRuntime: event.sourceRuntime,
+    channel: event.channel,
+    publicReadiness: event.publicReadiness,
+    canonicalDestination: event.canonicalDestination,
+    fallbackDestination: event.fallbackDestination,
+    canonicalAuthority: event.canonicalAuthority,
+    deliveryHealth: event.deliveryHealth,
+    marketParity: event.marketParity ?? null,
   };
 }
 
@@ -314,6 +939,13 @@ export function parsePredictionMarketsSurface(
     return null;
   }
 
+  const parsedUpdatedAt = normalizePredictionMarketTimestamp(candidate.updatedAt);
+  const parsedSourceEmittedAt = normalizePredictionMarketTimestamp(
+    candidate.sourceEmittedAt,
+  );
+  const parsedServerEmittedAt = normalizePredictionMarketTimestamp(
+    candidate.serverEmittedAt,
+  );
   return {
     duel: {
       duelKey: normalizeDuelKey(duel.duelKey),
@@ -328,7 +960,15 @@ export function parsePredictionMarketsSurface(
       (market): market is PredictionMarketLifecycleRecord =>
         Boolean(market) && typeof market === "object",
     ) as PredictionMarketLifecycleRecord[],
-    updatedAt: normalizePredictionMarketTimestamp(candidate.updatedAt),
+    updatedAt: parsedUpdatedAt,
+    // Backfill rules for snapshots parsed from legacy payloads (pre-
+    // commit-2 keeper builds): when the new fields are absent, derive
+    // them from `updatedAt` so the surface still has the fields the
+    // selector expects. This keeps downstream buffers safe against
+    // mixed-version environments during rollout.
+    sourceEmittedAt: parsedSourceEmittedAt ?? parsedUpdatedAt ?? null,
+    serverEmittedAt: parsedServerEmittedAt ?? parsedUpdatedAt ?? 0,
+    marketParity: normalizeMarketParity(candidate.marketParity),
   };
 }
 
@@ -337,10 +977,34 @@ export function parsePredictionMarketsOverview(
 ): PredictionMarketsOverviewResponse | null {
   const candidate = asRecord(payload);
   if (!candidate) return null;
+  const parsedUpdatedAt = normalizePredictionMarketTimestamp(candidate.updatedAt);
+  const parsedSourceEmittedAt = normalizePredictionMarketTimestamp(
+    candidate.sourceEmittedAt,
+  );
+  const parsedServerEmittedAt = normalizePredictionMarketTimestamp(
+    candidate.serverEmittedAt,
+  );
+  const live = parsePredictionMarketsSurface(candidate.live);
+  const recentSettlement = parsePredictionMarketsSurface(
+    candidate.recentSettlement,
+  );
+  // Envelope backfill: if the top-level source/server fields are
+  // absent on legacy payloads, derive from per-surface values so
+  // consumers see a coherent envelope.
+  const envelopeSourceCandidates = [
+    parsedSourceEmittedAt,
+    live?.sourceEmittedAt,
+    recentSettlement?.sourceEmittedAt,
+  ].filter((value): value is number => typeof value === "number");
   return {
-    updatedAt: normalizePredictionMarketTimestamp(candidate.updatedAt),
-    live: parsePredictionMarketsSurface(candidate.live),
-    recentSettlement: parsePredictionMarketsSurface(candidate.recentSettlement),
+    updatedAt: parsedUpdatedAt,
+    sourceEmittedAt:
+      envelopeSourceCandidates.length > 0
+        ? Math.max(...envelopeSourceCandidates)
+        : null,
+    serverEmittedAt: parsedServerEmittedAt ?? parsedUpdatedAt ?? 0,
+    live,
+    recentSettlement,
   };
 }
 
@@ -388,6 +1052,15 @@ export function mergePredictionMarketsSurface(
     duel: mergeDuelSnapshot(previous.duel, next.duel),
     markets: Array.from(byChain.values()),
     updatedAt: next.updatedAt,
+    // Merge semantics for source/server emission: both come from the
+    // NEXT surface (the newer build). `sourceEmittedAt` follows the
+    // newer source anchor; `serverEmittedAt` follows the newer build
+    // clock. Falling back to `previous` only when `next` is missing the
+    // field (transitional safety during rollout before every caller is
+    // updated to pass these fields).
+    sourceEmittedAt: next.sourceEmittedAt ?? previous.sourceEmittedAt ?? null,
+    serverEmittedAt: next.serverEmittedAt ?? previous.serverEmittedAt,
+    marketParity: next.marketParity ?? previous.marketParity ?? null,
   };
 }
 
@@ -404,11 +1077,32 @@ export function rollPredictionMarketsOverview(
     hasMeaningfulSurface(nextLive) &&
     !sameDuelIdentity(previous?.live, nextLive)
   ) {
+    // Roll the previous live surface forward into recentSettlement. We
+    // deliberately keep the surface object intact — including its
+    // original `sourceEmittedAt` — because that anchor ties the surface
+    // back to the stream frame that produced it. Downstream selectors
+    // (commit 3) rely on this to place recentSettlement at the right
+    // point on the viewer's playback timeline.
     recentSettlement = previous?.live ?? null;
   }
 
+  // Envelope-level `sourceEmittedAt` is max over present surfaces.
+  // Null only when BOTH surfaces are missing or both lack a source
+  // anchor — which only happens transitionally during rollout before
+  // upstream `streamState.emittedAt` is populated.
+  const envelopeSourceCandidates = [
+    nextLive?.sourceEmittedAt,
+    recentSettlement?.sourceEmittedAt,
+  ].filter((value): value is number => typeof value === "number");
+  const sourceEmittedAt =
+    envelopeSourceCandidates.length > 0
+      ? Math.max(...envelopeSourceCandidates)
+      : null;
+
   return {
     updatedAt,
+    sourceEmittedAt,
+    serverEmittedAt: updatedAt,
     live: nextLive,
     recentSettlement,
   };

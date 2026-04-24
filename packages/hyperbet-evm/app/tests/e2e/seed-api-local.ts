@@ -9,6 +9,8 @@ type E2eState = {
   currentMatchId?: number;
   currentDuelKeyHex?: string;
   currentBetWindowSeconds?: number;
+  evmMatchId?: number;
+  evmDuelKeyHex?: string;
 };
 
 async function readState(): Promise<E2eState> {
@@ -23,11 +25,24 @@ function requireString(value: string | undefined, label: string): string {
   return trimmed;
 }
 
+function requireNumber(value: number | undefined, label: string): number {
+  if (!Number.isFinite(value)) {
+    throw new Error(`Missing ${label} in e2e state`);
+  }
+  return Number(value);
+}
+
 async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
+  const writeKey =
+    process.env.E2E_ARENA_WRITE_KEY?.trim() ||
+    process.env.ARENA_EXTERNAL_BET_WRITE_KEY?.trim() ||
+    process.env.VITE_ARENA_WRITE_KEY?.trim() ||
+    "";
   const response = await fetch(url, {
     ...init,
     headers: {
       "content-type": "application/json",
+      ...(writeKey ? { "x-arena-write-key": writeKey } : {}),
       ...(init?.headers || {}),
     },
   });
@@ -53,11 +68,8 @@ async function main(): Promise<void> {
     "perpsCharacterId",
   );
   const perpsModelName = state.perpsModelName?.trim() || "E2E Model Alpha";
-  const duelKeyHex = requireString(
-    state.currentDuelKeyHex,
-    "currentDuelKeyHex",
-  );
-  const duelId = String(state.currentMatchId || Date.now());
+  const duelKeyHex = requireString(state.currentDuelKeyHex, "currentDuelKeyHex");
+  const duelId = String(requireNumber(state.currentMatchId, "currentMatchId"));
   const currentBetWindowSeconds = Math.max(
     30,
     Number(state.currentBetWindowSeconds || 45),
@@ -161,7 +173,7 @@ async function main(): Promise<void> {
       method: "POST",
       body: JSON.stringify({
         cycle: {
-          cycleId: "e2e-cycle-active",
+          cycleId: duelId,
           phase: "FIGHTING",
           duelId,
           duelKeyHex,

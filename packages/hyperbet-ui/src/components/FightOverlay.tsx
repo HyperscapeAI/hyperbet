@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import type { MockAgentContext } from "../lib/useMockStreamingEngine";
 import type { StreamingPhase } from "../spectator/types";
-import { GAME_API_URL } from "../lib/config";
+import { GAME_API_URL, PUBLIC_CDN_URL } from "../lib/config";
 import { resolveUiLocale, getUiCopy } from "../i18n";
 
 interface FightOverlayProps {
@@ -48,13 +48,21 @@ let cachedItemIconMap: Record<string, string> | null = null;
 let itemIconMapPromise: Promise<Record<string, string>> | null = null;
 
 function resolveManifestIconPath(iconPath: string): string {
-  const base = GAME_API_URL.replace(/\/$/, "");
+  if (/^https?:\/\//i.test(iconPath)) {
+    return iconPath;
+  }
+
+  const assetBase = PUBLIC_CDN_URL.replace(/\/$/, "");
+  const apiBase = GAME_API_URL.replace(/\/$/, "");
   if (iconPath.startsWith("asset://")) {
     const relativePath = iconPath.replace("asset://", "");
-    return `${base}/game-assets/${relativePath}`;
+    return `${assetBase}/${relativePath}`;
   }
-  if (iconPath.startsWith("/")) return `${base}${iconPath}`;
-  return `${base}/${iconPath}`;
+  if (iconPath.startsWith("/game-assets/")) {
+    return `${assetBase}/${iconPath.replace(/^\/game-assets\//, "")}`;
+  }
+  if (iconPath.startsWith("/")) return `${apiBase}${iconPath}`;
+  return `${assetBase}/${iconPath}`;
 }
 
 async function loadItemIconMap(): Promise<Record<string, string>> {
@@ -65,7 +73,7 @@ async function loadItemIconMap(): Promise<Record<string, string>> {
     const responses = await Promise.all(
       ITEM_MANIFEST_FILES.map(async (fileName) => {
         const response = await fetch(
-          `${GAME_API_URL}/game-assets/manifests/items/${fileName}`,
+          `${PUBLIC_CDN_URL.replace(/\/$/, "")}/manifests/items/${fileName}`,
           { cache: "force-cache" },
         );
         if (!response.ok) return [] as ManifestItemRecord[];

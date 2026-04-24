@@ -1,5 +1,5 @@
 {
-  "address": "GFdnu7kUnZGiXh4ejWiJSBCUxvq4UfdEeUv9jjFzr5EM",
+  "address": "7EXSmAP4fcabojJBQbxN7GcBE4hinqfZao1tJcGLTrfB",
   "metadata": {
     "name": "fight_oracle",
     "version": "0.1.0",
@@ -343,7 +343,7 @@
         },
         {
           "name": "program",
-          "address": "GFdnu7kUnZGiXh4ejWiJSBCUxvq4UfdEeUv9jjFzr5EM"
+          "address": "7EXSmAP4fcabojJBQbxN7GcBE4hinqfZao1tJcGLTrfB"
         },
         {
           "name": "program_data"
@@ -1051,12 +1051,12 @@
     {
       "code": 6021,
       "name": "ParticipantHashImmutable",
-      "msg": "Participant hashes are immutable after betting opens"
+      "msg": "Participant hashes are immutable after duel prepare"
     },
     {
       "code": 6022,
       "name": "TimingImmutable",
-      "msg": "Bet timing is immutable after betting opens"
+      "msg": "Bet timing is immutable after duel prepare"
     },
     {
       "code": 6023,

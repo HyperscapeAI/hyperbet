@@ -3,7 +3,7 @@ import {
   resolveBettingEvmRuntimeEnv,
   resolveBettingSolanaDeployment,
   type BettingSolanaCluster,
-} from "../packages/hyperbet-chain-registry/src/index.ts";
+} from "../packages/hyperbet-chain-registry/src/index.js";
 
 export type AcceptanceDeployment = "staging" | "testnet";
 export type AcceptanceDuelSource =
@@ -13,6 +13,10 @@ export type AcceptanceEvmChain = "bsc" | "avax";
 export type AcceptanceChain = "solana" | AcceptanceEvmChain;
 
 type EnvMap = Record<string, string | undefined>;
+
+type UnifiedAcceptanceOptions = {
+  requireUnified?: boolean;
+};
 
 export function firstNonEmptyValue(
   ...values: Array<string | null | undefined>
@@ -88,8 +92,8 @@ function evmChainCandidates(
 ): string[] {
   const upper = chain.toUpperCase();
   return [
-    `HYPERBET_${upper}_TESTNET_${suffix}`,
     `HYPERBET_${upper}_STAGING_${suffix}`,
+    `HYPERBET_${upper}_TESTNET_${suffix}`,
     `${upper}_TESTNET_${suffix}`,
     `${upper}_STAGING_${suffix}`,
   ];
@@ -97,9 +101,15 @@ function evmChainCandidates(
 
 function solanaCandidates(suffix: string): string[] {
   return [
-    `HYPERBET_SOLANA_TESTNET_${suffix}`,
     `HYPERBET_SOLANA_STAGING_${suffix}`,
+    `HYPERBET_SOLANA_TESTNET_${suffix}`,
   ];
+}
+
+function unifiedAcceptanceCandidates(
+  suffix: "PAGES_URL" | "KEEPER_URL" | "KEEPER_WS_URL",
+): string[] {
+  return [`ENOOMIAN_HYPERBET_${suffix}`];
 }
 
 function solanaDefaultRpc(cluster: BettingSolanaCluster): string {
@@ -187,32 +197,63 @@ function resolveSolanaRpcWsUrl(
 export function resolveAcceptanceUrls(
   chain: AcceptanceChain,
   env: EnvMap = process.env,
+  options: UnifiedAcceptanceOptions = {},
 ): { pagesUrl: string; keeperUrl: string; wsUrl: string } {
+  if (options.requireUnified) {
+    const unifiedPagesUrl = firstNonEmptyEnv(
+      env,
+      unifiedAcceptanceCandidates("PAGES_URL"),
+    );
+    const unifiedKeeperUrl = firstNonEmptyEnv(
+      env,
+      unifiedAcceptanceCandidates("KEEPER_URL"),
+    );
+    const unifiedWsUrl = firstNonEmptyEnv(
+      env,
+      unifiedAcceptanceCandidates("KEEPER_WS_URL"),
+    );
+    if (!unifiedPagesUrl || !unifiedKeeperUrl || !unifiedWsUrl) {
+      throw new Error(
+        `Missing unified acceptance URLs: pages=${unifiedPagesUrl ? "ok" : "missing"} keeper=${unifiedKeeperUrl ? "ok" : "missing"} ws=${unifiedWsUrl ? "ok" : "missing"}`,
+      );
+    }
+    return {
+      pagesUrl: unifiedPagesUrl.replace(/\/$/, ""),
+      keeperUrl: unifiedKeeperUrl.replace(/\/$/, ""),
+      wsUrl: unifiedWsUrl.replace(/\/$/, ""),
+    };
+  }
+
   const candidates =
     chain === "solana"
       ? {
-          pages: ["HYPERBET_SOLANA_PAGES_TESTNET_URL", "HYPERBET_SOLANA_PAGES_STAGING_URL"],
+          pages: [
+            "HYPERBET_SOLANA_PAGES_TESTNET_URL",
+            "HYPERBET_SOLANA_PAGES_STAGING_URL",
+            ...unifiedAcceptanceCandidates("PAGES_URL"),
+          ],
           keeper: [
-            "HYPERBET_SOLANA_KEEPER_TESTNET_URL",
             "HYPERBET_SOLANA_KEEPER_STAGING_URL",
+            "HYPERBET_SOLANA_KEEPER_TESTNET_URL",
           ],
           ws: [
-            "HYPERBET_SOLANA_KEEPER_TESTNET_WS_URL",
             "HYPERBET_SOLANA_KEEPER_STAGING_WS_URL",
+            "HYPERBET_SOLANA_KEEPER_TESTNET_WS_URL",
           ],
         }
       : {
           pages: [
-            `HYPERBET_${chain.toUpperCase()}_PAGES_TESTNET_URL`,
             `HYPERBET_${chain.toUpperCase()}_PAGES_STAGING_URL`,
+            `HYPERBET_${chain.toUpperCase()}_PAGES_TESTNET_URL`,
+            ...unifiedAcceptanceCandidates("PAGES_URL"),
           ],
           keeper: [
-            `HYPERBET_${chain.toUpperCase()}_KEEPER_TESTNET_URL`,
             `HYPERBET_${chain.toUpperCase()}_KEEPER_STAGING_URL`,
+            `HYPERBET_${chain.toUpperCase()}_KEEPER_TESTNET_URL`,
           ],
           ws: [
-            `HYPERBET_${chain.toUpperCase()}_KEEPER_TESTNET_WS_URL`,
             `HYPERBET_${chain.toUpperCase()}_KEEPER_STAGING_WS_URL`,
+            `HYPERBET_${chain.toUpperCase()}_KEEPER_TESTNET_WS_URL`,
           ],
         };
 
@@ -234,6 +275,7 @@ export function resolveAcceptanceUrls(
 export function resolveEvmAcceptanceRuntime(
   chain: AcceptanceEvmChain,
   env: EnvMap = process.env,
+  options: UnifiedAcceptanceOptions = {},
 ): {
   chainId: number;
   rpcUrl: string;
@@ -256,25 +298,34 @@ export function resolveEvmAcceptanceRuntime(
   const runtime = resolveBettingEvmRuntimeEnv(chain, "testnet", env);
   const upper = chain.toUpperCase();
   const alchemyRpcUrl = evmAlchemyRpc(chain, env);
+  const keeperUrlCandidates = options.requireUnified
+    ? unifiedAcceptanceCandidates("KEEPER_URL")
+    : [
+        `HYPERBET_${upper}_KEEPER_TESTNET_URL`,
+        `HYPERBET_${upper}_KEEPER_STAGING_URL`,
+      ];
+  const keeperUrl = firstNonEmptyEnv(env, keeperUrlCandidates);
+  if (options.requireUnified && !keeperUrl) {
+    throw new Error(
+      `Missing unified acceptance keeper URL for ${chain}: keeper=missing`,
+    );
+  }
   return {
     chainId: runtime.deployment.chainId,
     rpcUrl:
       firstNonEmptyValue(
-        alchemyRpcUrl,
         firstNonEmptyEnv(env, [
-          `HYPERBET_${upper}_TESTNET_RPC_URL`,
           `HYPERBET_${upper}_STAGING_RPC_URL`,
+          `HYPERBET_${upper}_TESTNET_RPC_URL`,
           `EVM_${upper}_RPC_URL`,
-          `${upper}_TESTNET_RPC`,
           `${upper}_STAGING_RPC`,
+          `${upper}_TESTNET_RPC`,
           `${upper}_RPC_URL`,
         ]),
+        alchemyRpcUrl,
         runtime.rpcUrl,
       ) ?? runtime.rpcUrl,
-    keeperUrl: firstNonEmptyEnv(env, [
-      `HYPERBET_${upper}_KEEPER_TESTNET_URL`,
-      `HYPERBET_${upper}_KEEPER_STAGING_URL`,
-    ]),
+    keeperUrl: keeperUrl ?? null,
     duelOracleAddress:
       firstNonEmptyEnv(env, [
         ...evmChainCandidates(chain, "DUEL_ORACLE_ADDRESS"),
@@ -360,6 +411,7 @@ export function resolveEvmAcceptanceRuntime(
 
 export function resolveSolanaAcceptanceRuntime(
   env: EnvMap = process.env,
+  options: UnifiedAcceptanceOptions = {},
 ): {
   cluster: BettingSolanaCluster;
   rpcUrl: string;
@@ -385,30 +437,43 @@ export function resolveSolanaAcceptanceRuntime(
   );
   const deployment = resolveBettingSolanaDeployment(cluster);
   const alchemyRpcUrl = solanaAlchemyRpc(cluster, env);
+  const unifiedUrls = options.requireUnified
+    ? resolveAcceptanceUrls("solana", env, { requireUnified: true })
+    : null;
   const rpcUrl =
     firstNonEmptyValue(
-      alchemyRpcUrl,
       firstNonEmptyEnv(env, [
         ...solanaCandidates("RPC_URL"),
         "SOLANA_RPC_URL",
       ]),
+      alchemyRpcUrl,
     ) ?? solanaDefaultRpc(cluster);
   return {
     cluster,
     rpcUrl,
     rpcWsUrl: resolveSolanaRpcWsUrl(env, rpcUrl),
-    keeperUrl: firstNonEmptyEnv(env, [
-      "HYPERBET_SOLANA_KEEPER_TESTNET_URL",
-      "HYPERBET_SOLANA_KEEPER_STAGING_URL",
-    ]),
-    pagesUrl: firstNonEmptyEnv(env, [
-      "HYPERBET_SOLANA_PAGES_TESTNET_URL",
-      "HYPERBET_SOLANA_PAGES_STAGING_URL",
-    ]),
-    wsUrl: firstNonEmptyEnv(env, [
-      "HYPERBET_SOLANA_KEEPER_TESTNET_WS_URL",
-      "HYPERBET_SOLANA_KEEPER_STAGING_WS_URL",
-    ]),
+    keeperUrl:
+      unifiedUrls?.keeperUrl ??
+      firstNonEmptyEnv(env, [
+        "HYPERBET_SOLANA_KEEPER_STAGING_URL",
+        "HYPERBET_SOLANA_KEEPER_TESTNET_URL",
+      ]) ??
+      null,
+    pagesUrl:
+      unifiedUrls?.pagesUrl ??
+      firstNonEmptyEnv(env, [
+        "HYPERBET_SOLANA_PAGES_STAGING_URL",
+        "HYPERBET_SOLANA_PAGES_TESTNET_URL",
+        ...unifiedAcceptanceCandidates("PAGES_URL"),
+      ]) ??
+      null,
+    wsUrl:
+      unifiedUrls?.wsUrl ??
+      firstNonEmptyEnv(env, [
+        "HYPERBET_SOLANA_KEEPER_STAGING_WS_URL",
+        "HYPERBET_SOLANA_KEEPER_TESTNET_WS_URL",
+      ]) ??
+      null,
     streamPublishKey: firstNonEmptyEnv(env, [
       "HYPERBET_SOLANA_TESTNET_STREAM_PUBLISH_KEY",
       "HYPERBET_SOLANA_STAGING_STREAM_PUBLISH_KEY",

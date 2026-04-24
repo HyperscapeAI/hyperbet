@@ -1,3 +1,6 @@
+export type EvmPerpsChainKey = "bsc" | "base" | "avax";
+export type PerpsChainKey = "solana" | EvmPerpsChainKey;
+
 export interface PerpsOracleHistorySnapshot {
   agentId: string;
   marketId: number;
@@ -9,6 +12,7 @@ export interface PerpsOracleHistorySnapshot {
 }
 
 export interface PerpsOracleHistoryResponse {
+  chainKey: PerpsChainKey | null;
   characterId: string;
   marketId: number;
   snapshots: PerpsOracleHistorySnapshot[];
@@ -18,6 +22,7 @@ export interface PerpsOracleHistoryResponse {
 export type PerpsMarketLifecycleStatus = "ACTIVE" | "CLOSE_ONLY" | "ARCHIVED";
 
 export interface PerpsMarketDirectoryEntry {
+  chainKey: PerpsChainKey;
   rank: number | null;
   characterId: string;
   marketId: number;
@@ -36,8 +41,38 @@ export interface PerpsMarketDirectoryEntry {
 }
 
 export interface PerpsMarketsResponse {
+  chainKey: PerpsChainKey | null;
   markets: PerpsMarketDirectoryEntry[];
   updatedAt: number;
+}
+
+export function buildPerpsMarketsEndpoint(
+  gameApiUrl: string,
+  chainKey: PerpsChainKey,
+): string {
+  const endpoint = new URL("/api/perps/markets", ensureBaseUrl(gameApiUrl));
+  endpoint.searchParams.set("chainKey", chainKey);
+  return endpoint.toString();
+}
+
+export function buildPerpsOracleHistoryEndpoint(params: {
+  gameApiUrl: string;
+  chainKey: PerpsChainKey;
+  characterId: string;
+  limit: number;
+}): string {
+  const endpoint = new URL(
+    "/api/perps/oracle-history",
+    ensureBaseUrl(params.gameApiUrl),
+  );
+  endpoint.searchParams.set("chainKey", params.chainKey);
+  endpoint.searchParams.set("characterId", params.characterId);
+  endpoint.searchParams.set("limit", String(params.limit));
+  return endpoint.toString();
+}
+
+function ensureBaseUrl(gameApiUrl: string): string {
+  return gameApiUrl.endsWith("/") ? gameApiUrl : `${gameApiUrl}/`;
 }
 
 function isFiniteNumber(value: unknown): value is number {
@@ -48,6 +83,15 @@ function isPerpsMarketLifecycleStatus(
   value: unknown,
 ): value is PerpsMarketLifecycleStatus {
   return value === "ACTIVE" || value === "CLOSE_ONLY" || value === "ARCHIVED";
+}
+
+function isPerpsChainKey(value: unknown): value is PerpsChainKey {
+  return (
+    value === "solana" ||
+    value === "bsc" ||
+    value === "base" ||
+    value === "avax"
+  );
 }
 
 function isPerpsOracleHistorySnapshot(
@@ -70,6 +114,7 @@ function isPerpsMarketDirectoryEntry(
 ): value is PerpsMarketDirectoryEntry {
   const maybe = value as Partial<PerpsMarketDirectoryEntry>;
   return (
+    isPerpsChainKey(maybe?.chainKey) &&
     typeof maybe?.characterId === "string" &&
     isFiniteNumber(maybe?.marketId) &&
     typeof maybe?.name === "string" &&
@@ -86,13 +131,50 @@ function isPerpsMarketDirectoryEntry(
   );
 }
 
+function coercePerpsMarketDirectoryEntry(
+  value: unknown,
+  expectedChainKey?: PerpsChainKey | null,
+): PerpsMarketDirectoryEntry | null {
+  if (typeof value !== "object" || value == null) {
+    return null;
+  }
+  const candidate = { ...(value as Record<string, unknown>) };
+  if (expectedChainKey && !isPerpsChainKey(candidate.chainKey)) {
+    candidate.chainKey = expectedChainKey;
+  }
+  if (!isPerpsMarketDirectoryEntry(candidate)) {
+    return null;
+  }
+  if (expectedChainKey && candidate.chainKey !== expectedChainKey) {
+    return null;
+  }
+  return candidate;
+}
+
 export function sanitizePerpsOracleHistoryResponse(
   value: unknown,
   characterId: string,
+  expectedChainKey?: PerpsChainKey | null,
 ): PerpsOracleHistoryResponse {
   const candidate = value as Partial<PerpsOracleHistoryResponse>;
+  const responseChainKey = isPerpsChainKey(candidate?.chainKey)
+    ? candidate.chainKey
+    : null;
+  const chainKey =
+    expectedChainKey && responseChainKey && responseChainKey !== expectedChainKey
+      ? expectedChainKey
+      : (responseChainKey ?? expectedChainKey ?? null);
+  const snapshots =
+    expectedChainKey &&
+    responseChainKey &&
+    responseChainKey !== expectedChainKey
+      ? []
+      : Array.isArray(candidate?.snapshots)
+        ? candidate.snapshots.filter(isPerpsOracleHistorySnapshot)
+        : [];
 
   return {
+    chainKey,
     characterId:
       typeof candidate?.characterId === "string" &&
       candidate.characterId.trim().length > 0
@@ -101,9 +183,7 @@ export function sanitizePerpsOracleHistoryResponse(
     marketId: isFiniteNumber(candidate?.marketId)
       ? candidate.marketId
       : modelMarketIdFromCharacterId(characterId),
-    snapshots: Array.isArray(candidate?.snapshots)
-      ? candidate.snapshots.filter(isPerpsOracleHistorySnapshot)
-      : [],
+    snapshots,
     updatedAt: isFiniteNumber(candidate?.updatedAt)
       ? candidate.updatedAt
       : Date.now(),
@@ -112,12 +192,26 @@ export function sanitizePerpsOracleHistoryResponse(
 
 export function sanitizePerpsMarketsResponse(
   value: unknown,
+  expectedChainKey?: PerpsChainKey | null,
 ): PerpsMarketsResponse {
   const candidate = value as Partial<PerpsMarketsResponse>;
+  const responseChainKey = isPerpsChainKey(candidate?.chainKey)
+    ? candidate.chainKey
+    : null;
+  const chainKey =
+    responseChainKey ?? expectedChainKey ?? null;
+  const markets = Array.isArray(candidate?.markets)
+    ? candidate.markets.flatMap((market) => {
+        const normalized = coercePerpsMarketDirectoryEntry(
+          market,
+          expectedChainKey,
+        );
+        return normalized ? [normalized] : [];
+      })
+    : [];
   return {
-    markets: Array.isArray(candidate?.markets)
-      ? candidate.markets.filter(isPerpsMarketDirectoryEntry)
-      : [],
+    chainKey,
+    markets,
     updatedAt: isFiniteNumber(candidate?.updatedAt)
       ? candidate.updatedAt
       : Date.now(),

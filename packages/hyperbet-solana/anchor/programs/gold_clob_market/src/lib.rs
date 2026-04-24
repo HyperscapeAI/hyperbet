@@ -7,7 +7,7 @@ use fight_oracle::{
     self, DuelState as OracleDuelState, DuelStatus as OracleDuelStatus, MarketSide,
 };
 
-declare_id!("3QUVoaKJqo1rg9eXe7vyFewJrY75NWdtH8JZfvTb79Uy");
+declare_id!("EHBdndoQUXZXDtoTcb5D5AimJ1x715vKWzbqLH8entTt");
 
 const CONFIG_SEED: &[u8] = b"config";
 const MARKET_SEED: &[u8] = b"market";
@@ -180,7 +180,8 @@ pub mod gold_clob_market {
             ErrorCode::DuelMismatch
         );
         require!(
-            ctx.accounts.duel_state.status == OracleDuelStatus::BettingOpen
+            ctx.accounts.duel_state.status == OracleDuelStatus::Scheduled
+                || ctx.accounts.duel_state.status == OracleDuelStatus::BettingOpen
                 || ctx.accounts.duel_state.status == OracleDuelStatus::Locked,
             ErrorCode::MarketCreationClosed
         );

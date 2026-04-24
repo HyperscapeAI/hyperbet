@@ -1,5 +1,7 @@
 # Localnet Headless Validation Tracker
 
+> **Historical snapshot:** This tracker preserves branch-era local runner and headless validation findings. Current open-work ownership lives in [tracking-document-map.md](tracking-document-map.md) and [github-project-production-backlog.md](github-project-production-backlog.md). Use this file as context and evidence, not as the canonical blocker list.
+
 > **TL;DR:** The local signoff lane is not blocked by product functionality anymore; it is blocked by local orchestration quality. The main issues are runner assumptions, headless stream proof, and final BSC/AVAX local E2E stabilization. The Hyperbet page does **not** need `?debug=1` for real local betting flow, and the integrated runner starts the stream by shelling into the sibling Hyperscapes repo and executing `bun run duel`.
 
 ## Current Findings

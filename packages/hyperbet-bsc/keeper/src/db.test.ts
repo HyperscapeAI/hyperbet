@@ -178,6 +178,7 @@ describe("keeper db persistence", () => {
     loadedModules.push(db);
 
     db.savePerpsOracleSnapshot({
+      chainKey: "bsc",
       agentId: "claude-sonnet",
       marketId: 42,
       spotIndex: 118.25,
@@ -189,6 +190,7 @@ describe("keeper db persistence", () => {
 
     expect(db.loadPerpsOracleSnapshots("claude-sonnet", 10)).toEqual([
       {
+        chainKey: "bsc",
         agentId: "claude-sonnet",
         marketId: 42,
         spotIndex: 118.25,
@@ -207,6 +209,7 @@ describe("keeper db persistence", () => {
     loadedModules.push(db);
 
     db.savePerpsMarket({
+      chainKey: "bsc",
       agentId: "gpt-4.1",
       marketId: 42,
       rank: 1,
@@ -226,6 +229,7 @@ describe("keeper db persistence", () => {
 
     expect(db.loadPerpsMarkets()).toEqual([
       {
+        chainKey: "bsc",
         agentId: "gpt-4.1",
         marketId: 42,
         rank: 1,
@@ -243,6 +247,32 @@ describe("keeper db persistence", () => {
         updatedAt: 1_700_000_000_500,
       },
     ]);
+  });
+
+  test("round-trips bet-sync checkpoint state through SQLite", async () => {
+    const db = (await import(
+      `./db.ts?case=${Date.now()}-bet-sync-checkpoint`
+    )) as typeof import("./db.ts");
+    loadedModules.push(db);
+
+    db.saveBetSyncCheckpoint({
+      sourceEpoch: 7,
+      lastSeenSeq: 101,
+      lastAppliedSeq: 99,
+      replayMode: "replay",
+      degradedReason: "upstream reset",
+      updatedAt: 1_700_000_000_123,
+    });
+
+    const state = db.loadAll();
+    expect(state.betSyncCheckpoint).toEqual({
+      sourceEpoch: 7,
+      lastSeenSeq: 101,
+      lastAppliedSeq: 99,
+      replayMode: "replay",
+      degradedReason: "upstream reset",
+      updatedAt: 1_700_000_000_123,
+    });
   });
 
   test("quarantines duplicate recorded bets before enforcing uniqueness", async () => {

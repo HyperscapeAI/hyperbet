@@ -71,6 +71,58 @@ function lamportsBn(sol: number): BN {
   return new BN(Math.round(sol * LAMPORTS_PER_SOL).toString());
 }
 
+function parseDotEnv(body: string): Record<string, string> {
+  const result: Record<string, string> = {};
+  for (const rawLine of body.split("\n")) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith("#")) continue;
+    const equals = line.indexOf("=");
+    if (equals <= 0) continue;
+    const key = line.slice(0, equals).trim();
+    const value = line.slice(equals + 1).trim();
+    result[key] = value;
+  }
+  return result;
+}
+
+function serializeDotEnv(values: Record<string, string>): string {
+  return `${Object.entries(values)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([key, value]) => `${key}=${value}`)
+    .join("\n")}\n`;
+}
+
+async function readJsonFile<T>(filepath: string): Promise<T | null> {
+  try {
+    const body = await fs.readFile(filepath, "utf8");
+    return JSON.parse(body) as T;
+  } catch {
+    return null;
+  }
+}
+
+async function readEnvFile(filepath: string): Promise<Record<string, string>> {
+  try {
+    return parseDotEnv(await fs.readFile(filepath, "utf8"));
+  } catch {
+    return {};
+  }
+}
+
+function parseOptionalPositiveInteger(value: string | undefined): number | null {
+  const parsed = Number.parseInt(value?.trim() || "", 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+function decodeHex32(value: string | undefined, label: string): number[] | null {
+  const normalized = value?.trim().replace(/^0x/i, "").toLowerCase() || "";
+  if (!normalized) return null;
+  if (!/^[0-9a-f]{64}$/.test(normalized)) {
+    throw new Error(`Invalid ${label}; expected 32-byte hex string`);
+  }
+  return Array.from(Buffer.from(normalized, "hex"));
+}
+
 async function loadBootstrapAuthority(): Promise<{
   keypair: Keypair;
   keypairPath: string;
@@ -326,9 +378,15 @@ function attachReliableSendAndConfirm(
 
 async function main(): Promise<void> {
   const __dirname = path.dirname(fileURLToPath(import.meta.url));
-  const appDir = path.resolve(__dirname, "../..");
-  const statePath = path.resolve(__dirname, "./state.json");
-  const envPath = path.resolve(appDir, ".env.e2e");
+  const appDir = process.env.E2E_TARGET_APP_DIR?.trim()
+    ? path.resolve(process.env.E2E_TARGET_APP_DIR)
+    : path.resolve(__dirname, "../..");
+  const statePath = process.env.E2E_TARGET_STATE_PATH?.trim()
+    ? path.resolve(process.env.E2E_TARGET_STATE_PATH)
+    : path.resolve(__dirname, "./state.json");
+  const envPath = process.env.E2E_TARGET_ENV_PATH?.trim()
+    ? path.resolve(process.env.E2E_TARGET_ENV_PATH)
+    : path.resolve(appDir, ".env.e2e");
   const solanaRpcUrl =
     process.env.E2E_SOLANA_RPC_URL || "http://127.0.0.1:8899";
   const solanaWsUrl = process.env.E2E_SOLANA_WS_URL || "ws://127.0.0.1:8900";
@@ -336,6 +394,8 @@ async function main(): Promise<void> {
     process.env.E2E_BROWSER_SOLANA_RPC_URL || solanaRpcUrl;
   const browserSolanaWsUrl =
     process.env.E2E_BROWSER_SOLANA_WS_URL || solanaWsUrl;
+  const headlessWalletAutoConnect =
+    process.env.E2E_HEADLESS_WALLET_AUTO_CONNECT?.trim() || "true";
   const clobProgramId = resolveIdlAddress(
     goldClobIdl as unknown as IdlWithAddress,
     "gold_clob_market",
@@ -348,6 +408,13 @@ async function main(): Promise<void> {
   const bootstrapAuthority = await loadBootstrapAuthority();
   const authority = bootstrapAuthority.keypair;
   const trader = Keypair.fromSeed(E2E_TRADER_SEED);
+  const existingState =
+    (await readJsonFile<Record<string, unknown>>(statePath)) ?? {};
+  const fixedMatchId = parseOptionalPositiveInteger(process.env.E2E_FIXED_MATCH_ID);
+  const fixedDuelKey = decodeHex32(
+    process.env.E2E_FIXED_DUEL_KEY_HEX,
+    "E2E_FIXED_DUEL_KEY_HEX",
+  );
   const provider = new AnchorProvider(connection, toWallet(authority), {
     commitment: "confirmed",
     preflightCommitment: "confirmed",
@@ -383,7 +450,7 @@ async function main(): Promise<void> {
   const e2ePerpsMarketId = modelMarketIdFromCharacterId(e2eModelCharacterId);
   const hostNow = Math.floor(Date.now() / 1000);
   const now = await getChainUnixTimestamp(connection, hostNow);
-  const currentMatchId = Math.max(Date.now(), now * 1000);
+  const currentMatchId = fixedMatchId ?? Math.max(Date.now(), now * 1000);
   const currentDuelMetadata = JSON.stringify({
     duelId: currentMatchId,
     matchId: currentMatchId,
@@ -395,9 +462,11 @@ async function main(): Promise<void> {
     clobProgram as never,
     authority,
     {
-      duelKey: uniqueDuelKey(
-        `e2e-current-duel:${Date.now()}:${Math.random().toString(16).slice(2)}`,
-      ),
+      duelKey:
+        fixedDuelKey ??
+        uniqueDuelKey(
+          `e2e-current-duel:${Date.now()}:${Math.random().toString(16).slice(2)}`,
+        ),
       betOpenTs: now - 30,
       // Use validator time, not host wall clock, or the local chain can reject
       // orders as already closed while the UI still thinks the market is open.
@@ -482,52 +551,74 @@ async function main(): Promise<void> {
   );
 
   const oracleRecordedAt = Date.now();
-
-  const envBody = [
-    "VITE_SOLANA_CLUSTER=localnet",
-    `VITE_SOLANA_RPC_URL=${browserSolanaRpcUrl}`,
-    `VITE_SOLANA_WS_URL=${browserSolanaWsUrl}`,
-    "VITE_USE_LOCAL_SOLANA_RPC_PROXY=true",
-    `VITE_FIGHT_ORACLE_PROGRAM_ID=${fightProgram.programId.toBase58()}`,
-    `VITE_GOLD_CLOB_MARKET_PROGRAM_ID=${clobProgramId}`,
-    `VITE_GOLD_BINARY_MARKET_PROGRAM_ID=${clobProgramId}`,
-    `VITE_GOLD_MINT=${goldMint.toBase58()}`,
-    `VITE_ACTIVE_MATCH_ID=${currentMatchId}`,
-    "VITE_BET_WINDOW_SECONDS=300",
-    "VITE_NEW_ROUND_BET_WINDOW_SECONDS=300",
-    "VITE_AUTO_SEED_DELAY_SECONDS=10",
-    "VITE_MARKET_MAKER_SEED_GOLD=1",
-    "VITE_BET_FEE_BPS=200",
-    "VITE_GOLD_DECIMALS=9",
-    "VITE_REFRESH_INTERVAL_MS=1500",
-    "VITE_ENABLE_AUTO_SEED=false",
-    "VITE_E2E_FORCE_WINNER=YES",
-    `VITE_E2E_MODEL_CHARACTER_ID=${e2eModelCharacterId}`,
-    `VITE_E2E_MODEL_NAME=${e2eModelName}`,
-    `VITE_E2E_MODEL_PROVIDER=${e2eModelProvider}`,
-    `VITE_E2E_MODEL_SLUG=${e2eModelSlug}`,
-    `VITE_E2E_MODEL_WINS=${e2eModelWins}`,
-    `VITE_E2E_MODEL_LOSSES=${e2eModelLosses}`,
-    `VITE_E2E_MODEL_COMBAT_LEVEL=${e2eModelCombatLevel}`,
-    `VITE_E2E_MODEL_STREAK=${e2eModelCurrentStreak}`,
-    `VITE_E2E_MODEL_SPOT_INDEX=${e2eModelSpotIndex}`,
-    `VITE_E2E_MODEL_MU=${e2eModelMu}`,
-    `VITE_E2E_MODEL_SIGMA=${e2eModelSigma}`,
-    "VITE_E2E_MODEL_INSURANCE=12",
-    `VITE_E2E_MODEL_ORACLE_RECORDED_AT=${oracleRecordedAt}`,
-    `VITE_BINARY_MARKET_MAKER_WALLET=${authority.publicKey.toBase58()}`,
-    `VITE_BINARY_TRADE_TREASURY_WALLET=${authority.publicKey.toBase58()}`,
-    `VITE_BINARY_TRADE_MARKET_MAKER_WALLET=${authority.publicKey.toBase58()}`,
-    `VITE_HEADLESS_WALLET_SECRET_KEY=${Array.from(trader.secretKey).join(",")}`,
-    "VITE_HEADLESS_WALLET_NAME=E2E Trader",
-    "VITE_HEADLESS_WALLET_AUTO_CONNECT=true",
-  ].join("\n");
-
-  await fs.writeFile(envPath, `${envBody}\n`, "utf8");
+  const envValues = {
+    VITE_SOLANA_CLUSTER: "localnet",
+    VITE_SOLANA_RPC_URL: browserSolanaRpcUrl,
+    VITE_SOLANA_WS_URL: browserSolanaWsUrl,
+    VITE_USE_LOCAL_SOLANA_RPC_PROXY: "true",
+    VITE_FIGHT_ORACLE_PROGRAM_ID: fightProgram.programId.toBase58(),
+    VITE_GOLD_CLOB_MARKET_PROGRAM_ID: clobProgramId,
+    VITE_GOLD_BINARY_MARKET_PROGRAM_ID: clobProgramId,
+    VITE_GOLD_MINT: goldMint.toBase58(),
+    VITE_ACTIVE_MATCH_ID: String(currentMatchId),
+    VITE_BET_WINDOW_SECONDS: "300",
+    VITE_NEW_ROUND_BET_WINDOW_SECONDS: "300",
+    VITE_AUTO_SEED_DELAY_SECONDS: "10",
+    VITE_MARKET_MAKER_SEED_GOLD: "1",
+    VITE_BET_FEE_BPS: "200",
+    VITE_GOLD_DECIMALS: "9",
+    VITE_REFRESH_INTERVAL_MS: "1500",
+    VITE_ENABLE_AUTO_SEED: "false",
+    VITE_E2E_FORCE_WINNER: "YES",
+    VITE_E2E_MODEL_CHARACTER_ID: e2eModelCharacterId,
+    VITE_E2E_MODEL_NAME: e2eModelName,
+    VITE_E2E_MODEL_PROVIDER: e2eModelProvider,
+    VITE_E2E_MODEL_SLUG: e2eModelSlug,
+    VITE_E2E_MODEL_WINS: String(e2eModelWins),
+    VITE_E2E_MODEL_LOSSES: String(e2eModelLosses),
+    VITE_E2E_MODEL_COMBAT_LEVEL: String(e2eModelCombatLevel),
+    VITE_E2E_MODEL_STREAK: String(e2eModelCurrentStreak),
+    VITE_E2E_MODEL_SPOT_INDEX: String(e2eModelSpotIndex),
+    VITE_E2E_MODEL_MU: String(e2eModelMu),
+    VITE_E2E_MODEL_SIGMA: String(e2eModelSigma),
+    VITE_E2E_MODEL_INSURANCE: "12",
+    VITE_E2E_MODEL_ORACLE_RECORDED_AT: String(oracleRecordedAt),
+    VITE_BINARY_MARKET_MAKER_WALLET: authority.publicKey.toBase58(),
+    VITE_BINARY_TRADE_TREASURY_WALLET: authority.publicKey.toBase58(),
+    VITE_BINARY_TRADE_MARKET_MAKER_WALLET: authority.publicKey.toBase58(),
+    VITE_HEADLESS_WALLET_SECRET_KEY: Array.from(trader.secretKey).join(","),
+    VITE_HEADLESS_WALLET_NAME: "E2E Trader",
+    VITE_HEADLESS_WALLET_AUTO_CONNECT: headlessWalletAutoConnect,
+  } satisfies Record<string, string>;
+  const existingEnv = await readEnvFile(envPath);
+  await fs.writeFile(
+    envPath,
+    serializeDotEnv({
+      ...existingEnv,
+      ...envValues,
+    }),
+    "utf8",
+  );
+  const existingCurrentMatchId =
+    typeof existingState.currentMatchId === "number" &&
+    Number.isFinite(existingState.currentMatchId)
+      ? existingState.currentMatchId
+      : null;
+  const existingCurrentDuelId =
+    typeof existingState.currentDuelId === "string" &&
+    existingState.currentDuelId.trim().length > 0
+      ? existingState.currentDuelId.trim()
+      : null;
+  const existingCurrentDuelKeyHex =
+    typeof existingState.currentDuelKeyHex === "string" &&
+    existingState.currentDuelKeyHex.trim().length > 0
+      ? existingState.currentDuelKeyHex.trim()
+      : null;
   await fs.writeFile(
     statePath,
     JSON.stringify(
       {
+        ...existingState,
         mode: "localnet",
         cluster: "localnet",
         solanaRpcUrl,
@@ -535,9 +626,9 @@ async function main(): Promise<void> {
         bootstrapWalletPath: bootstrapAuthority.keypairPath,
         solanaTraderPublicKey: trader.publicKey.toBase58(),
         goldMint: goldMint.toBase58(),
-        currentMatchId,
-        currentDuelId: String(currentMatchId),
-        currentDuelKeyHex,
+        currentMatchId: existingCurrentMatchId ?? currentMatchId,
+        currentDuelId: existingCurrentDuelId ?? String(currentMatchId),
+        currentDuelKeyHex: existingCurrentDuelKeyHex ?? currentDuelKeyHex,
         clobConfig: currentMarket.config.toBase58(),
         clobMarketState: currentMarket.marketState.toBase58(),
         clobDuelState: currentMarket.duelState.toBase58(),

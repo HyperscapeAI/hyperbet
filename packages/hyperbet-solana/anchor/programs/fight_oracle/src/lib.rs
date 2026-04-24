@@ -3,7 +3,7 @@
 
 use anchor_lang::prelude::*;
 
-declare_id!("GFdnu7kUnZGiXh4ejWiJSBCUxvq4UfdEeUv9jjFzr5EM");
+declare_id!("7EXSmAP4fcabojJBQbxN7GcBE4hinqfZao1tJcGLTrfB");
 
 pub const ORACLE_CONFIG_SEED: &[u8] = b"oracle_config";
 pub const DUEL_SEED: &[u8] = b"duel";
@@ -172,12 +172,13 @@ pub mod fight_oracle {
             duel_state.winner = MarketSide::None;
         }
 
-        // FIX-4: Lock participant identity and bet timing once betting opens
-        if is_initialized && duel_status_rank(duel_state.status) >= duel_status_rank(DuelStatus::BettingOpen) {
+        // FIX-5: Once a duel is prestaged, its manifest becomes immutable.
+        if is_initialized {
             require!(participant_a_hash == duel_state.participant_a_hash, ErrorCode::ParticipantHashImmutable);
             require!(participant_b_hash == duel_state.participant_b_hash, ErrorCode::ParticipantHashImmutable);
             require!(bet_open_ts == duel_state.bet_open_ts, ErrorCode::TimingImmutable);
             require!(bet_close_ts == duel_state.bet_close_ts, ErrorCode::TimingImmutable);
+            require!(duel_start_ts == duel_state.duel_start_ts, ErrorCode::TimingImmutable);
         }
 
         duel_state.duel_key = duel_key;
@@ -721,9 +722,9 @@ pub enum ErrorCode {
     BettingWindowActive,
     #[msg("Duel must be in Challenged status for reproposal")]
     NotChallenged,
-    #[msg("Participant hashes are immutable after betting opens")]
+    #[msg("Participant hashes are immutable after duel prepare")]
     ParticipantHashImmutable,
-    #[msg("Bet timing is immutable after betting opens")]
+    #[msg("Bet timing is immutable after duel prepare")]
     TimingImmutable,
     #[msg("Config is already initialized")]
     AlreadyInitialized,

@@ -10,6 +10,7 @@ interface PointsDisplayProps {
   walletAddress: string | null;
   compact?: boolean;
   locale?: UiLocale;
+  scope?: "wallet" | "linked";
 }
 
 interface PointsData {
@@ -215,6 +216,7 @@ export function PointsDisplay({
   walletAddress,
   compact = false,
   locale,
+  scope = "linked",
 }: PointsDisplayProps) {
   const resolvedLocale = resolveUiLocale(locale);
   const copy = getPointsDisplayCopy(resolvedLocale);
@@ -241,13 +243,13 @@ export function PointsDisplay({
 
       const [pointsRes, rankRes, multiplierRes] = await Promise.all([
         fetch(
-          `${GAME_API_URL}/api/arena/points/${walletAddress}?scope=linked`,
+          `${GAME_API_URL}/api/arena/points/${walletAddress}?scope=${scope}`,
           { cache: "no-store" },
         ),
-        fetch(`${GAME_API_URL}/api/arena/points/rank/${walletAddress}`, {
+        fetch(`${GAME_API_URL}/api/arena/points/rank/${walletAddress}?scope=${scope}`, {
           cache: "no-store",
         }).catch(() => null),
-        fetch(`${GAME_API_URL}/api/arena/points/multiplier/${walletAddress}`, {
+        fetch(`${GAME_API_URL}/api/arena/points/multiplier/${walletAddress}?scope=${scope}`, {
           cache: "no-store",
         }).catch(() => null),
       ]);
@@ -278,7 +280,7 @@ export function PointsDisplay({
     } finally {
       setLoading(false);
     }
-  }, [resolvedLocale, walletAddress]);
+  }, [resolvedLocale, scope, walletAddress]);
 
   useEffect(() => {
     void fetchPoints();

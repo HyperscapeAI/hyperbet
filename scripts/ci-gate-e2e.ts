@@ -7,9 +7,10 @@ import {
   rootDir,
   runCommand,
   writeJsonArtifact,
-} from "./ci-lib";
+} from "./ci-lib.js";
 
 type ChainKey = "solana" | "bsc" | "avax";
+type GateSurface = "unified";
 
 type LocalPortConfig = {
   appPort: string;
@@ -29,7 +30,12 @@ type ControlFile = {
   >;
 };
 
-function parseArgs(): ChainKey {
+function parseArgs(): { chain: ChainKey; surface: GateSurface } {
+  const surfaceArg =
+    process.argv
+      .slice(2)
+      .find((arg) => arg.startsWith("--surface="))
+      ?.slice("--surface=".length) ?? "unified";
   const targetArg =
     process.argv
       .slice(2)
@@ -38,15 +44,21 @@ function parseArgs(): ChainKey {
   if (targetArg !== "solana" && targetArg !== "bsc" && targetArg !== "avax") {
     throw new Error(`unsupported e2e chain ${targetArg}`);
   }
-  return targetArg;
+  if (surfaceArg !== "unified") {
+    throw new Error(`unsupported e2e surface ${surfaceArg}`);
+  }
+  return { chain: targetArg, surface: surfaceArg as GateSurface };
 }
 
-const chain = parseArgs();
-const artifactRoot = resolveArtifactRoot(`e2e-${chain}`);
-const appRoot = path.join(rootDir, `packages/hyperbet-${chain}/app`);
+const { chain, surface } = parseArgs();
+const artifactRoot = resolveArtifactRoot(`e2e-${surface}-${chain}`);
+const appRoot =
+  surface === "unified"
+    ? path.join(rootDir, "packages/hyperbet-evm/app")
+    : path.join(rootDir, `packages/hyperbet-${chain}/app`);
 const anchorRoot = path.join(rootDir, "packages/hyperbet-solana/anchor");
 const evmRoot =
-  chain === "solana"
+  surface !== "unified" && chain === "solana"
     ? null
     : path.join(rootDir, "packages/evm-contracts");
 const statePath = path.join(appRoot, "tests/e2e/state.json");
@@ -57,15 +69,6 @@ const bootstrapKeypairPath = path.join(
 );
 const buildLogPath = path.join("/tmp", `hyperbet-${chain}-e2e-build.log`);
 const evmBuildLogPath = path.join("/tmp", `hyperbet-${chain}-e2e-evm-build.log`);
-const marketFlowGrepByChain: Record<ChainKey, string> = {
-  solana:
-    "solana predictions place YES and NO orders and stage a proposed winner claim|solana open prediction markets recover after keeper and proxy restarts|solana cancelled duel refunds and clears claim state",
-  bsc:
-    "evm predictions place YES and NO orders on a fresh live market|bsc prediction markets recover after keeper restarts|bsc cancelled prediction markets refund and clear positions",
-  avax:
-    "evm predictions place YES and NO orders on a fresh live market|avax prediction markets recover after keeper restarts|avax cancelled prediction markets refund and clear positions",
-};
-
 const localPortConfigByChain: Record<ChainKey, LocalPortConfig> = {
   solana: {
     appPort: "4281",
@@ -121,11 +124,14 @@ async function prebuild(harnessEnv: NodeJS.ProcessEnv): Promise<void> {
 
 async function runGate(): Promise<void> {
   await ensureBootstrapWallet();
-  const harnessEnv = {
+  const harnessEnv: Record<string, string> = {
+    E2E_GATED_CHAIN: chain,
+    E2E_GATED_SURFACE: surface,
     E2E_SOLANA_BOOTSTRAP_KEYPAIR: bootstrapKeypairPath,
     SOLANA_BOOTSTRAP_KEYPAIR: bootstrapKeypairPath,
     ANCHOR_WALLET: bootstrapKeypairPath,
     E2E_SKIP_PREBUILD: "true",
+    E2E_EVM_BUILD_LOG_PATH: evmBuildLogPath,
     PW_HEADLESS: process.env.PW_HEADLESS ?? "1",
     PW_WEBGPU_ARGS: process.env.PW_WEBGPU_ARGS ?? "--enable-unsafe-webgpu",
     E2E_APP_PORT: localPortConfigByChain[chain].appPort,
@@ -144,33 +150,23 @@ async function runGate(): Promise<void> {
 
   await runCommand(
     "bash",
-    [
-      "scripts/run-e2e-local.sh",
-      "tests/e2e/market-flows.e2e.ts",
-      "--grep",
-      marketFlowGrepByChain[chain],
-    ],
+    ["scripts/run-e2e-local.sh", "tests/e2e/unified-app.e2e.ts"],
     {
       cwd: appRoot,
       env: harnessEnv,
-      stdoutFile: path.join(artifactRoot, "market-flows.out.log"),
-      stderrFile: path.join(artifactRoot, "market-flows.err.log"),
+      stdoutFile: path.join(artifactRoot, "unified-app.out.log"),
+      stderrFile: path.join(artifactRoot, "unified-app.err.log"),
     },
   );
 
   await runCommand(
     "bash",
-    [
-      "scripts/run-e2e-local.sh",
-      "tests/e2e/app-tabs-and-apis.e2e.ts",
-      "--grep",
-      "keeper backend exposes all app-facing data endpoints",
-    ],
+    ["scripts/run-e2e-local.sh", "tests/e2e/debug-page.e2e.ts"],
     {
       cwd: appRoot,
       env: harnessEnv,
-      stdoutFile: path.join(artifactRoot, "api-smoke.out.log"),
-      stderrFile: path.join(artifactRoot, "api-smoke.err.log"),
+      stdoutFile: path.join(artifactRoot, "debug-page.out.log"),
+      stderrFile: path.join(artifactRoot, "debug-page.err.log"),
     },
   );
 }

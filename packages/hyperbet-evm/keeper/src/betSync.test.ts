@@ -6,11 +6,13 @@ import {
   parseBetSyncBootstrapState,
   parseBetSyncEvent,
   parsePredictionMarketsOverview,
+  publicStreamStateChanged,
   resolveBetSyncReplayMode,
   rollPredictionMarketsOverview,
   selectBetSyncReplayUntilSeq,
   selectBetSyncResumeSeq,
   toStreamStateFromBetSyncEvent,
+  type StreamState,
 } from "./betSync";
 
 describe("bet-sync helpers", () => {
@@ -21,6 +23,13 @@ describe("bet-sync helpers", () => {
       sourceEpoch: 4,
       seq: 12,
       emittedAt: 1_700_000_000_000,
+      cycle: {
+        cycleId: "raw-cycle-12",
+        phase: "RESOLUTION",
+        winnerId: "agent-a",
+        winnerName: "Agent A",
+        winReason: "knockout",
+      },
       duelId: "duel-12",
       duelKey: `0x${duelKey}`,
       phase: "FIGHTING",
@@ -38,23 +47,301 @@ describe("bet-sync helpers", () => {
       arenaPositions: { agent1: [0, 0, 0], agent2: [1, 0, 0] },
       leaderboard: [{ id: "a" }],
       rendererHealth: { ready: true, degradedReason: null, updatedAt: 123 },
+      marketParity: {
+        bundleId: "bundle-12",
+        duelKey: `0x${duelKey}`,
+        duelId: "duel-12",
+        revision: 4,
+        requiredChains: ["solana", "bsc"],
+        confirmedChains: ["solana"],
+        state: "awaiting_confirmations",
+        phase: "ANNOUNCEMENT",
+        safeToBet: false,
+        openedAtMs: null,
+        lockedAtMs: null,
+        resolvedAtMs: null,
+        freezeReason: null,
+        updatedAtMs: 1_700_000_000_001,
+        receipts: [
+          {
+            chainKey: "solana",
+            preparedAtMs: 1_700_000_000_001,
+            openedAtMs: null,
+            lockedAtMs: null,
+            resolvedAtMs: null,
+            cancelledAtMs: null,
+            confirmedAtMs: 1_700_000_000_001,
+            lifecycleStatus: "PENDING",
+            txRef: "sol-tx",
+            note: null,
+          },
+        ],
+      },
     });
 
     expect(parsed).not.toBeNull();
     expect(parsed?.duelKey).toBe(duelKey);
+    expect(parsed?.marketParity).toMatchObject({
+      bundleId: "bundle-12",
+      duelKey,
+      state: "awaiting_confirmations",
+      safeToBet: false,
+    });
 
     expect(toStreamStateFromBetSyncEvent(parsed!)).toMatchObject({
       seq: 12,
       emittedAt: 1_700_000_000_000,
+      marketParity: {
+        bundleId: "bundle-12",
+        duelKey,
+        state: "awaiting_confirmations",
+        safeToBet: false,
+      },
       cycle: {
+        cycleId: "raw-cycle-12",
         duelId: "duel-12",
         duelKey: duelKey,
         duelKeyHex: `0x${duelKey}`,
         phase: "FIGHTING",
         phaseVersion: 3,
+        winnerId: null,
+        winnerName: null,
+        winReason: null,
+        rawCycle: {
+          cycleId: "raw-cycle-12",
+          phase: "RESOLUTION",
+          winnerId: "agent-a",
+          winnerName: "Agent A",
+          winReason: "knockout",
+        },
         seed: "777",
         replayHash: "cd".repeat(32),
       },
+    });
+  });
+
+  test("preserves canonical delivery and authority contract fields", () => {
+    const parsed = parseBetSyncEvent({
+      sourceEpoch: 7,
+      seq: 12,
+      emittedAt: 1_712_345_678_000,
+      channel: {
+        id: "main",
+        mode: "always_on",
+      },
+      publicReadiness: {
+        ready: false,
+        reason: "manifest_stale",
+      },
+      canonicalDestination: {
+        id: "canonical-cloudflare",
+        playbackReady: false,
+      },
+      fallbackDestination: {
+        id: "fallback-self-hls",
+        playbackReady: true,
+      },
+      delivery: {
+        mode: "self_hls",
+        provider: "self_hls",
+        playbackUrl: "https://example.com/live/stream.m3u8",
+        hlsUrl: "https://example.com/live/stream.m3u8",
+        llhlsUrl: null,
+        ingestUrl: null,
+      },
+      canonicalAuthority: {
+        providerLive: true,
+        playbackProbeReady: false,
+        decision: "blocked",
+        reason: "probe_unready",
+        revision: 9,
+        updatedAt: 1_712_345_678_100,
+        liveInputId: "live-input-123",
+        videoUid: "video-456",
+        lifecycleStatus: "connected",
+        playbackUrl: "https://video.example/live.m3u8?protocol=llhls",
+        playbackProbeStatusCode: 503,
+        playbackManifestStatus: "stale",
+      },
+      sourceRuntime: {
+        ready: false,
+        statusSource: "external_worker",
+        captureMode: "cdp",
+        degradedReason: "worker_missing",
+      },
+      deliveryHealth: {
+        ready: false,
+        degradedReason: "manifest_stale",
+      },
+    });
+
+    expect(parsed).not.toBeNull();
+    expect(parsed?.delivery).toEqual({
+      mode: "self_hls",
+      provider: "self_hls",
+      playbackUrl: "https://example.com/live/stream.m3u8",
+      hlsUrl: "https://example.com/live/stream.m3u8",
+      llhlsUrl: null,
+      ingestUrl: null,
+    });
+    expect(parsed?.publicReadiness).toEqual({
+      ready: false,
+      reason: "manifest_stale",
+    });
+    expect(parsed?.canonicalAuthority).toEqual({
+      providerLive: true,
+      playbackProbeReady: false,
+      decision: "blocked",
+      reason: "probe_unready",
+      revision: 9,
+      updatedAt: 1_712_345_678_100,
+      liveInputId: "live-input-123",
+      videoUid: "video-456",
+      lifecycleStatus: "connected",
+      playbackUrl: "https://video.example/live.m3u8?protocol=llhls",
+      playbackProbeStatusCode: 503,
+      playbackManifestStatus: "stale",
+    });
+
+    expect(toStreamStateFromBetSyncEvent(parsed!)).toMatchObject({
+      delivery: {
+        mode: "self_hls",
+        provider: "self_hls",
+        playbackUrl: "https://example.com/live/stream.m3u8",
+      },
+      publicReadiness: {
+        ready: false,
+        reason: "manifest_stale",
+      },
+      canonicalAuthority: {
+        decision: "blocked",
+        reason: "probe_unready",
+        revision: 9,
+      },
+      sourceRuntime: {
+        ready: false,
+        statusSource: "external_worker",
+        captureMode: "cdp",
+      },
+      deliveryHealth: {
+        ready: false,
+        degradedReason: "manifest_stale",
+      },
+    });
+  });
+
+  test("preserves broadcastTimeline without disturbing legacy cycle fields", () => {
+    const parsed = parseBetSyncEvent({
+      schemaVersion: 3,
+      sourceEpoch: 8,
+      seq: 13,
+      emittedAt: 1_712_345_679_000,
+      duelId: "duel-2",
+      duelKey: "22".repeat(32),
+      phase: "FIGHTING",
+      betOpenTime: 1_000,
+      betCloseTime: 2_000,
+      fightStartTime: 3_000,
+      duelEndTime: 9_000,
+      broadcastTimeline: {
+        phase: "COUNTDOWN",
+        betOpenTime: 5_000,
+        betCloseTime: 6_000,
+        fightStartTime: 7_000,
+        duelEndTime: 13_000,
+        presentationDelayMs: 4_000,
+        updatedAt: 1_712_345_679_000,
+      },
+    });
+
+    expect(parsed?.broadcastTimeline).toEqual({
+      phase: "COUNTDOWN",
+      betOpenTime: 5_000,
+      betCloseTime: 6_000,
+      fightStartTime: 7_000,
+      duelEndTime: 13_000,
+      presentationDelayMs: 4_000,
+      updatedAt: 1_712_345_679_000,
+    });
+    expect(parsed?.betCloseTime).toBe(2_000);
+
+    const nextState = toStreamStateFromBetSyncEvent(parsed!);
+    expect(nextState.cycle.broadcastTimeline).toEqual({
+      phase: "COUNTDOWN",
+      betOpenTime: 5_000,
+      betCloseTime: 6_000,
+      fightStartTime: 7_000,
+      duelEndTime: 13_000,
+      presentationDelayMs: 4_000,
+      updatedAt: 1_712_345_679_000,
+    });
+    expect(nextState.cycle.betCloseTime).toBe(2_000);
+    expect(nextState.phase).toBe("FIGHTING");
+    expect(nextState.phaseVersion).toBeNull();
+    expect(nextState.broadcastTimeline).toEqual({
+      phase: "COUNTDOWN",
+      betOpenTime: 5_000,
+      betCloseTime: 6_000,
+      fightStartTime: 7_000,
+      duelEndTime: 13_000,
+      presentationDelayMs: 4_000,
+      updatedAt: 1_712_345_679_000,
+    });
+  });
+
+  test("preserves sourceTimeline alongside the projected timeline", () => {
+    const parsed = parseBetSyncEvent({
+      schemaVersion: 3,
+      sourceEpoch: 8,
+      seq: 14,
+      emittedAt: 1_712_345_680_000,
+      duelId: "duel-3",
+      duelKey: "33".repeat(32),
+      phase: "COUNTDOWN",
+      broadcastTimeline: {
+        phase: "COUNTDOWN",
+        betOpenTime: 5_000,
+        betCloseTime: 6_000,
+        fightStartTime: 7_000,
+        duelEndTime: 13_000,
+        presentationDelayMs: 4_000,
+        updatedAt: 1_712_345_680_000,
+      },
+      sourceTimeline: {
+        phase: "FIGHTING",
+        betOpenTime: 1_000,
+        betCloseTime: 2_000,
+        fightStartTime: 3_000,
+        duelEndTime: 9_000,
+        updatedAt: 1_712_345_676_000,
+      },
+    });
+
+    expect(parsed?.sourceTimeline).toEqual({
+      phase: "FIGHTING",
+      betOpenTime: 1_000,
+      betCloseTime: 2_000,
+      fightStartTime: 3_000,
+      duelEndTime: 9_000,
+      updatedAt: 1_712_345_676_000,
+    });
+
+    const nextState = toStreamStateFromBetSyncEvent(parsed!);
+    expect(nextState.cycle.sourceTimeline).toEqual({
+      phase: "FIGHTING",
+      betOpenTime: 1_000,
+      betCloseTime: 2_000,
+      fightStartTime: 3_000,
+      duelEndTime: 9_000,
+      updatedAt: 1_712_345_676_000,
+    });
+    expect(nextState.sourceTimeline).toEqual({
+      phase: "FIGHTING",
+      betOpenTime: 1_000,
+      betCloseTime: 2_000,
+      fightStartTime: 3_000,
+      duelEndTime: 9_000,
+      updatedAt: 1_712_345_676_000,
     });
   });
 
@@ -83,6 +370,71 @@ describe("bet-sync helpers", () => {
         duelId: "duel-88",
         phase: "COUNTDOWN",
       },
+    });
+  });
+
+  test("retains latest event delivery fields during bootstrap", () => {
+    const parsed = parseBetSyncBootstrapState({
+      sourceEpoch: 9,
+      latestSeq: 101,
+      latestEvent: {
+        sourceEpoch: 9,
+        seq: 101,
+        emittedAt: 1_712_345_678_999,
+        delivery: {
+          mode: "self_hls",
+          provider: "self_hls",
+          playbackUrl: "https://example.com/live/stream.m3u8",
+          hlsUrl: "https://example.com/live/stream.m3u8",
+          llhlsUrl: null,
+          ingestUrl: null,
+        },
+        publicReadiness: {
+          ready: true,
+          reason: null,
+        },
+        canonicalAuthority: {
+          providerLive: true,
+          playbackProbeReady: true,
+          decision: "ready",
+          reason: null,
+          revision: 5,
+          updatedAt: 1_712_345_679_111,
+          liveInputId: "live-input-123",
+          videoUid: "video-456",
+          lifecycleStatus: "connected",
+          playbackUrl: "https://video.example/live.m3u8",
+          playbackProbeStatusCode: 200,
+          playbackManifestStatus: "ok",
+        },
+      },
+    });
+
+    expect(parsed?.latestEvent?.delivery).toEqual({
+      mode: "self_hls",
+      provider: "self_hls",
+      playbackUrl: "https://example.com/live/stream.m3u8",
+      hlsUrl: "https://example.com/live/stream.m3u8",
+      llhlsUrl: null,
+      ingestUrl: null,
+    });
+    expect(parsed?.latestEvent?.publicReadiness).toEqual({
+      ready: true,
+      reason: null,
+    });
+    expect(parsed?.latestEvent?.canonicalAuthority).toEqual({
+      providerLive: true,
+      playbackProbeReady: true,
+      decision: "ready",
+      reason: null,
+      revision: 5,
+      updatedAt: 1_712_345_679_111,
+      liveInputId: "live-input-123",
+      videoUid: "video-456",
+      lifecycleStatus: "connected",
+      playbackUrl: "https://video.example/live.m3u8",
+      playbackProbeStatusCode: 200,
+      playbackManifestStatus: "ok",
     });
   });
 
@@ -119,12 +471,26 @@ describe("bet-sync helpers", () => {
         },
         markets: [],
         updatedAt: 11,
+        sourceEmittedAt: 11,
+        serverEmittedAt: 11,
       },
       11,
     );
 
     expect(next.live?.duel.duelId).toBe("duel-next");
     expect(next.recentSettlement?.duel.duelId).toBe("duel-live");
+    // recentSettlement.sourceEmittedAt must be preserved from the
+    // previous live surface — rolling forward does not re-stamp the
+    // source anchor. The selector in commit 3 depends on this invariant
+    // to place recentSettlement at the right point on the viewer's
+    // playback timeline.
+    expect(next.recentSettlement?.sourceEmittedAt).toBe(10);
+    // live.sourceEmittedAt comes from the new live surface.
+    expect(next.live?.sourceEmittedAt).toBe(11);
+    // Envelope max over the two surfaces.
+    expect(next.sourceEmittedAt).toBe(11);
+    // serverEmittedAt tracks the roll wall-clock.
+    expect(next.serverEmittedAt).toBe(11);
   });
 
   test("preserves stronger lifecycle state when the same duel refresh weakens", () => {
@@ -158,6 +524,8 @@ describe("bet-sync helpers", () => {
           },
         ],
         updatedAt: 100,
+        sourceEmittedAt: 100,
+        serverEmittedAt: 100,
       },
       {
         duel: {
@@ -187,6 +555,8 @@ describe("bet-sync helpers", () => {
           },
         ],
         updatedAt: 200,
+        sourceEmittedAt: 200,
+        serverEmittedAt: 200,
       },
     );
 
@@ -277,6 +647,245 @@ describe("bet-sync helpers", () => {
         eventEmittedAt: 1_000,
         toleranceMs: 1_000,
       }),
+    ).toBe(false);
+  });
+
+  test("detects same-duel readiness flips in polled stream state", () => {
+    const base = {
+      type: "STREAMING_STATE_UPDATE" as const,
+      cycle: {
+        cycleId: "cycle-1",
+        phase: "FIGHTING",
+        duelId: "duel-1",
+        duelKeyHex: "0x11",
+        winnerId: null,
+      },
+      leaderboard: [],
+      cameraTarget: "arena",
+      seq: 10,
+      emittedAt: 1_700_000_000_000,
+      publicReadiness: {
+        ready: false,
+        reason: "source_unready",
+      },
+      canonicalAuthority: {
+        providerLive: true,
+        playbackProbeReady: false,
+        decision: "blocked",
+        reason: "source_unready",
+        revision: 9,
+        playbackManifestStatus: "stale",
+      },
+      sourceRuntime: {
+        ready: false,
+        statusSource: "external_worker",
+        captureMode: "cdp",
+        degradedReason: "worker_missing",
+      },
+      rendererHealth: {
+        ready: false,
+        degradedReason: "render_tick_stale",
+      },
+      deliveryHealth: {
+        ready: false,
+        degradedReason: "manifest_stale",
+      },
+      delivery: {
+        mode: "external_hls",
+        provider: "cloudflare_stream",
+        playbackUrl: "https://video.example/live.m3u8?protocol=llhls",
+      },
+      channel: {
+        id: "main",
+        mode: "always_on",
+        canonicalDestinationId: "canonical-cloudflare",
+        publicPlaybackUrl: "https://video.example/live.m3u8?protocol=llhls",
+      },
+      canonicalDestination: {
+        id: "canonical-cloudflare",
+        playbackReady: false,
+        manifestStatus: "stale",
+      },
+    };
+
+    const next = {
+      ...base,
+      seq: 11,
+      emittedAt: 1_700_000_000_500,
+      publicReadiness: {
+        ready: true,
+        reason: null,
+      },
+      canonicalAuthority: {
+        ...base.canonicalAuthority,
+        playbackProbeReady: true,
+        decision: "ready",
+        reason: null,
+        revision: 10,
+        playbackManifestStatus: "ok",
+      },
+      sourceRuntime: {
+        ...base.sourceRuntime,
+        ready: true,
+        degradedReason: null,
+      },
+      rendererHealth: {
+        ready: true,
+        degradedReason: null,
+      },
+      deliveryHealth: {
+        ready: true,
+        degradedReason: null,
+      },
+      canonicalDestination: {
+        ...base.canonicalDestination,
+        playbackReady: true,
+        manifestStatus: "ok",
+      },
+    };
+
+    expect(
+      publicStreamStateChanged(
+        base as unknown as StreamState,
+        next as unknown as StreamState,
+      ),
+    ).toBe(true);
+  });
+
+  test("ignores seq and emittedAt churn when the public stream surface is unchanged", () => {
+    const base = {
+      type: "STREAMING_STATE_UPDATE" as const,
+      cycle: {
+        cycleId: "cycle-1",
+        phase: "FIGHTING",
+        duelId: "duel-1",
+        duelKeyHex: "0x11",
+      },
+      leaderboard: [],
+      cameraTarget: "arena",
+      seq: 10,
+      emittedAt: 1_700_000_000_000,
+      publicReadiness: {
+        ready: true,
+        reason: null,
+      },
+      canonicalAuthority: {
+        providerLive: true,
+        playbackProbeReady: true,
+        decision: "ready",
+        reason: null,
+        revision: 9,
+        playbackManifestStatus: "ok",
+      },
+      sourceRuntime: {
+        ready: true,
+        statusSource: "external_worker",
+        captureMode: "cdp",
+        degradedReason: null,
+      },
+      rendererHealth: {
+        ready: true,
+        degradedReason: null,
+      },
+    };
+
+    const next = {
+      ...base,
+      seq: 11,
+      emittedAt: 1_700_000_000_500,
+    };
+
+    expect(
+      publicStreamStateChanged(
+        base as unknown as StreamState,
+        next as unknown as StreamState,
+      ),
+    ).toBe(false);
+  });
+
+  test("ignores volatile cycle and timeline telemetry churn", () => {
+    const base = {
+      type: "STREAMING_STATE_UPDATE" as const,
+      cycle: {
+        cycleId: "cycle-1",
+        phase: "FIGHTING",
+        phaseVersion: 4,
+        duelId: "duel-1",
+        duelKeyHex: "0x11",
+        winnerId: null,
+        rawCycle: {
+          telemetryNonce: 1,
+        },
+        rendererHealth: {
+          ready: true,
+          degradedReason: null,
+          updatedAt: 100,
+        },
+      },
+      leaderboard: [],
+      cameraTarget: "arena",
+      seq: 10,
+      emittedAt: 1_700_000_000_000,
+      broadcastTimeline: {
+        phase: "FIGHTING",
+        updatedAt: 100,
+      },
+      sourceTimeline: {
+        phase: "FIGHTING",
+        updatedAt: 100,
+      },
+      publicReadiness: {
+        ready: true,
+        reason: null,
+      },
+      canonicalAuthority: {
+        providerLive: true,
+        playbackProbeReady: true,
+        decision: "ready",
+        reason: null,
+        revision: 9,
+        playbackManifestStatus: "ok",
+      },
+      sourceRuntime: {
+        ready: true,
+        statusSource: "external_worker",
+        captureMode: "cdp",
+        degradedReason: null,
+      },
+      rendererHealth: {
+        ready: true,
+        degradedReason: null,
+      },
+    };
+
+    const next = {
+      ...base,
+      cycle: {
+        ...base.cycle,
+        rawCycle: {
+          telemetryNonce: 2,
+        },
+        rendererHealth: {
+          ready: true,
+          degradedReason: null,
+          updatedAt: 200,
+        },
+      },
+      broadcastTimeline: {
+        ...base.broadcastTimeline,
+        updatedAt: 200,
+      },
+      sourceTimeline: {
+        ...base.sourceTimeline,
+        updatedAt: 200,
+      },
+    };
+
+    expect(
+      publicStreamStateChanged(
+        base as unknown as StreamState,
+        next as unknown as StreamState,
+      ),
     ).toBe(false);
   });
 });

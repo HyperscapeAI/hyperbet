@@ -65,6 +65,7 @@ export type DbAgentRating = AgentRating & {
 };
 
 export type DbPerpsOracleSnapshot = {
+  chainKey: "bsc";
   agentId: string;
   marketId: number;
   spotIndex: number;
@@ -77,6 +78,7 @@ export type DbPerpsOracleSnapshot = {
 export type DbPerpsMarketStatus = "ACTIVE" | "CLOSE_ONLY" | "ARCHIVED";
 
 export type DbPerpsMarketRecord = {
+  chainKey: "bsc";
   agentId: string;
   marketId: number;
   rank: number | null;
@@ -91,6 +93,15 @@ export type DbPerpsMarketRecord = {
   status: DbPerpsMarketStatus;
   lastSeenAt: number;
   deprecatedAt: number | null;
+  updatedAt: number;
+};
+
+export type DbBetSyncCheckpoint = {
+  sourceEpoch: number;
+  lastSeenSeq: number;
+  lastAppliedSeq: number;
+  replayMode: string | null;
+  degradedReason: string | null;
   updatedAt: number;
 };
 
@@ -352,6 +363,7 @@ db.run(`CREATE TABLE IF NOT EXISTS agent_ratings (
 
 db.run(`CREATE TABLE IF NOT EXISTS perps_oracle_snapshots (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
+  chain_key TEXT NOT NULL DEFAULT 'bsc',
   agent_id TEXT NOT NULL,
   market_id INTEGER NOT NULL,
   spot_index REAL NOT NULL,
@@ -362,12 +374,13 @@ db.run(`CREATE TABLE IF NOT EXISTS perps_oracle_snapshots (
 )`);
 
 db.run(`CREATE INDEX IF NOT EXISTS idx_perps_oracle_snapshots_agent_time
-  ON perps_oracle_snapshots (agent_id, recorded_at DESC)`);
+  ON perps_oracle_snapshots (chain_key, agent_id, recorded_at DESC)`);
 
 db.run(`CREATE INDEX IF NOT EXISTS idx_perps_oracle_snapshots_market_time
-  ON perps_oracle_snapshots (market_id, recorded_at DESC)`);
+  ON perps_oracle_snapshots (chain_key, market_id, recorded_at DESC)`);
 
 db.run(`CREATE TABLE IF NOT EXISTS perps_markets (
+  chain_key TEXT NOT NULL DEFAULT 'bsc',
   agent_id TEXT PRIMARY KEY,
   market_id INTEGER NOT NULL UNIQUE,
   rank INTEGER,
@@ -386,7 +399,37 @@ db.run(`CREATE TABLE IF NOT EXISTS perps_markets (
 )`);
 
 db.run(`CREATE INDEX IF NOT EXISTS idx_perps_markets_status_seen
-  ON perps_markets (status, last_seen_at DESC)`);
+  ON perps_markets (chain_key, status, last_seen_at DESC)`);
+try {
+  db.run(
+    "ALTER TABLE perps_oracle_snapshots ADD COLUMN chain_key TEXT NOT NULL DEFAULT 'bsc'",
+  );
+} catch {
+  // Column already exists.
+}
+try {
+  db.run(
+    "ALTER TABLE perps_markets ADD COLUMN chain_key TEXT NOT NULL DEFAULT 'bsc'",
+  );
+} catch {
+  // Column already exists.
+}
+db.run(`UPDATE perps_oracle_snapshots
+          SET chain_key = 'bsc'
+        WHERE chain_key IS NULL OR TRIM(chain_key) = ''`);
+db.run(`UPDATE perps_markets
+          SET chain_key = 'bsc'
+        WHERE chain_key IS NULL OR TRIM(chain_key) = ''`);
+
+db.run(`CREATE TABLE IF NOT EXISTS bet_sync_checkpoint (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  source_epoch INTEGER NOT NULL DEFAULT 0,
+  last_seen_seq INTEGER NOT NULL DEFAULT 0,
+  last_applied_seq INTEGER NOT NULL DEFAULT 0,
+  replay_mode TEXT,
+  degraded_reason TEXT,
+  updated_at INTEGER NOT NULL DEFAULT 0
+)`);
 
 // ── Prepared statements ───────────────────────────────────────────────────────
 
@@ -467,15 +510,16 @@ const upsertAgentRating = db.prepare(`INSERT INTO agent_ratings
     updated_at = excluded.updated_at`);
 
 const insertPerpsOracleSnapshot = db.prepare(`INSERT INTO perps_oracle_snapshots
-  (agent_id, market_id, spot_index, conservative_skill, mu, sigma, recorded_at)
-  VALUES ($agentId, $marketId, $spotIndex, $conservativeSkill, $mu, $sigma, $recordedAt)`);
+  (chain_key, agent_id, market_id, spot_index, conservative_skill, mu, sigma, recorded_at)
+  VALUES ($chainKey, $agentId, $marketId, $spotIndex, $conservativeSkill, $mu, $sigma, $recordedAt)`);
 
 const upsertPerpsMarket = db.prepare(`INSERT INTO perps_markets
-  (agent_id, market_id, rank, name, provider, model, wins, losses, win_rate,
+  (chain_key, agent_id, market_id, rank, name, provider, model, wins, losses, win_rate,
    combat_level, current_streak, status, last_seen_at, deprecated_at, updated_at)
-  VALUES ($agentId, $marketId, $rank, $name, $provider, $model, $wins, $losses, $winRate,
+  VALUES ($chainKey, $agentId, $marketId, $rank, $name, $provider, $model, $wins, $losses, $winRate,
           $combatLevel, $currentStreak, $status, $lastSeenAt, $deprecatedAt, $updatedAt)
   ON CONFLICT(agent_id) DO UPDATE SET
+    chain_key = excluded.chain_key,
     market_id = excluded.market_id,
     rank = excluded.rank,
     name = excluded.name,
@@ -489,6 +533,17 @@ const upsertPerpsMarket = db.prepare(`INSERT INTO perps_markets
     status = excluded.status,
     last_seen_at = excluded.last_seen_at,
     deprecated_at = excluded.deprecated_at,
+    updated_at = excluded.updated_at`);
+
+const upsertBetSyncCheckpoint = db.prepare(`INSERT INTO bet_sync_checkpoint
+  (id, source_epoch, last_seen_seq, last_applied_seq, replay_mode, degraded_reason, updated_at)
+  VALUES (1, $sourceEpoch, $lastSeenSeq, $lastAppliedSeq, $replayMode, $degradedReason, $updatedAt)
+  ON CONFLICT(id) DO UPDATE SET
+    source_epoch = excluded.source_epoch,
+    last_seen_seq = excluded.last_seen_seq,
+    last_applied_seq = excluded.last_applied_seq,
+    replay_mode = excluded.replay_mode,
+    degraded_reason = excluded.degraded_reason,
     updated_at = excluded.updated_at`);
 
 // ── Load (hydrate in-memory state from DB at startup) ─────────────────────────
@@ -507,6 +562,7 @@ export type HydratedState = {
   invitedWalletsByWallet: Map<string, Set<string>>;
   referralFeeShareGoldByWallet: Map<string, number>;
   treasuryFeesFromReferralsByWallet: Map<string, number>;
+  betSyncCheckpoint: DbBetSyncCheckpoint | null;
 };
 
 export function loadAll(betLimit = 5000): HydratedState {
@@ -655,6 +711,30 @@ export function loadAll(betLimit = 5000): HydratedState {
     );
   }
 
+  const checkpointRow = db
+    .prepare(
+      `SELECT source_epoch, last_seen_seq, last_applied_seq, replay_mode, degraded_reason, updated_at
+         FROM bet_sync_checkpoint
+        WHERE id = 1`,
+    )
+    .get() as Record<string, unknown> | null;
+  const betSyncCheckpoint = checkpointRow
+    ? {
+        sourceEpoch: Number(checkpointRow.source_epoch ?? 0),
+        lastSeenSeq: Number(checkpointRow.last_seen_seq ?? 0),
+        lastAppliedSeq: Number(checkpointRow.last_applied_seq ?? 0),
+        replayMode:
+          checkpointRow.replay_mode == null
+            ? null
+            : String(checkpointRow.replay_mode),
+        degradedReason:
+          checkpointRow.degraded_reason == null
+            ? null
+            : String(checkpointRow.degraded_reason),
+        updatedAt: Number(checkpointRow.updated_at ?? 0),
+      }
+    : null;
+
   console.log(
     `[db] loaded ${bets.length} bets, ${walletDisplay.size} wallets, ${pointsByWallet.size} point records from ${DB_PATH}`,
   );
@@ -673,6 +753,7 @@ export function loadAll(betLimit = 5000): HydratedState {
     invitedWalletsByWallet,
     referralFeeShareGoldByWallet,
     treasuryFeesFromReferralsByWallet,
+    betSyncCheckpoint,
   };
 }
 
@@ -795,6 +876,17 @@ export function saveReferralFees(
   });
 }
 
+export function saveBetSyncCheckpoint(checkpoint: DbBetSyncCheckpoint): void {
+  upsertBetSyncCheckpoint.run({
+    $sourceEpoch: checkpoint.sourceEpoch,
+    $lastSeenSeq: checkpoint.lastSeenSeq,
+    $lastAppliedSeq: checkpoint.lastAppliedSeq,
+    $replayMode: checkpoint.replayMode,
+    $degradedReason: checkpoint.degradedReason,
+    $updatedAt: checkpoint.updatedAt,
+  });
+}
+
 export function loadAgentRatings(): Record<string, AgentRating> {
   const ratings: Record<string, AgentRating> = {};
   for (const row of db
@@ -818,17 +910,18 @@ export function loadPerpsOracleSnapshots(
   const rows = agentId
     ? (db
         .prepare(
-          `SELECT agent_id, market_id, spot_index, conservative_skill, mu, sigma, recorded_at
+          `SELECT chain_key, agent_id, market_id, spot_index, conservative_skill, mu, sigma, recorded_at
            FROM perps_oracle_snapshots
-           WHERE agent_id = ?
+           WHERE chain_key = 'bsc' AND agent_id = ?
            ORDER BY recorded_at DESC
            LIMIT ?`,
         )
         .all(agentId, limit) as Array<Record<string, unknown>>)
     : (db
         .prepare(
-          `SELECT agent_id, market_id, spot_index, conservative_skill, mu, sigma, recorded_at
+          `SELECT chain_key, agent_id, market_id, spot_index, conservative_skill, mu, sigma, recorded_at
            FROM perps_oracle_snapshots
+           WHERE chain_key = 'bsc'
            ORDER BY recorded_at DESC
            LIMIT ?`,
         )
@@ -836,6 +929,7 @@ export function loadPerpsOracleSnapshots(
 
   return rows.map(
     (row): DbPerpsOracleSnapshot => ({
+      chainKey: "bsc",
       agentId: String(row.agent_id),
       marketId: Number(row.market_id),
       spotIndex: Number(row.spot_index),
@@ -853,18 +947,19 @@ export function loadPerpsMarkets(
   const rows = status
     ? (db
         .prepare(
-          `SELECT agent_id, market_id, rank, name, provider, model, wins, losses, win_rate,
+          `SELECT chain_key, agent_id, market_id, rank, name, provider, model, wins, losses, win_rate,
                   combat_level, current_streak, status, last_seen_at, deprecated_at, updated_at
            FROM perps_markets
-           WHERE status = ?
+           WHERE chain_key = 'bsc' AND status = ?
            ORDER BY COALESCE(rank, 2147483647) ASC, name ASC`,
         )
         .all(status) as Array<Record<string, unknown>>)
     : (db
         .prepare(
-          `SELECT agent_id, market_id, rank, name, provider, model, wins, losses, win_rate,
+          `SELECT chain_key, agent_id, market_id, rank, name, provider, model, wins, losses, win_rate,
                   combat_level, current_streak, status, last_seen_at, deprecated_at, updated_at
            FROM perps_markets
+           WHERE chain_key = 'bsc'
            ORDER BY
              CASE status
                WHEN 'ACTIVE' THEN 0
@@ -878,6 +973,7 @@ export function loadPerpsMarkets(
 
   return rows.map(
     (row): DbPerpsMarketRecord => ({
+      chainKey: "bsc",
       agentId: String(row.agent_id),
       marketId: Number(row.market_id),
       rank: row.rank == null ? null : Number(row.rank),
@@ -935,6 +1031,7 @@ export function saveAgentRatings(
 
 export function savePerpsOracleSnapshot(snapshot: DbPerpsOracleSnapshot): void {
   insertPerpsOracleSnapshot.run({
+    $chainKey: "bsc",
     $agentId: snapshot.agentId,
     $marketId: snapshot.marketId,
     $spotIndex: snapshot.spotIndex,
@@ -947,6 +1044,7 @@ export function savePerpsOracleSnapshot(snapshot: DbPerpsOracleSnapshot): void {
 
 export function savePerpsMarket(record: DbPerpsMarketRecord): void {
   upsertPerpsMarket.run({
+    $chainKey: "bsc",
     $agentId: record.agentId,
     $marketId: record.marketId,
     $rank: record.rank,

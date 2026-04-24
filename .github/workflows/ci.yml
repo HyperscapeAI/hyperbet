@@ -223,16 +223,24 @@ jobs:
         include:
           - package: hyperbet-solana
             workspace_target: hyperbet-solana
-            audit_target: pages:solana
+            audit_target: pages:legacy
             build_mode: mainnet-beta
             solana_cluster: mainnet-beta
+            keeper_url_var: HYPERBET_SOLANA_KEEPER_URL
+            keeper_ws_url_var: HYPERBET_SOLANA_KEEPER_WS_URL
+            keeper_fallback_url: "https://api.hyperbet.win"
+            keeper_fallback_ws_url: "wss://api.hyperbet.win/ws"
             avax_chain_id: ""
             avax_gold_clob_address: ""
           - package: hyperbet-bsc
             workspace_target: hyperbet-bsc
-            audit_target: pages:bsc
+            audit_target: pages:legacy
             build_mode: mainnet-beta
             solana_cluster: mainnet-beta
+            keeper_url_var: HYPERBET_BSC_KEEPER_URL
+            keeper_ws_url_var: HYPERBET_BSC_KEEPER_WS_URL
+            keeper_fallback_url: "https://bsc-api.hyperbet.win"
+            keeper_fallback_ws_url: "wss://bsc-api.hyperbet.win/ws"
             avax_chain_id: ""
             avax_gold_clob_address: ""
           - package: hyperbet-avax
@@ -240,12 +248,16 @@ jobs:
             audit_target: app:avax
             build_mode: testnet
             solana_cluster: testnet
+            keeper_url_var: HYPERBET_AVAX_KEEPER_URL
+            keeper_ws_url_var: HYPERBET_AVAX_KEEPER_WS_URL
+            keeper_fallback_url: "https://avax-api.hyperbet.win"
+            keeper_fallback_ws_url: "wss://avax-api.hyperbet.win/ws"
             avax_chain_id: ""
             avax_gold_clob_address: ""
     env:
       CF_PAGES_COMMIT_SHA: ${{ github.sha }}
-      VITE_GAME_API_URL: https://api.hyperbet.win
-      VITE_GAME_WS_URL: wss://api.hyperbet.win/ws
+      VITE_GAME_API_URL: ${{ vars[matrix.keeper_url_var] || matrix.keeper_fallback_url }}
+      VITE_GAME_WS_URL: ${{ vars[matrix.keeper_ws_url_var] || matrix.keeper_fallback_ws_url }}
       VITE_SOLANA_CLUSTER: ${{ matrix.solana_cluster }}
       VITE_USE_GAME_RPC_PROXY: "true"
       VITE_USE_GAME_EVM_RPC_PROXY: "true"
@@ -335,8 +347,8 @@ jobs:
     needs: shared-validation
     env:
       CF_PAGES_COMMIT_SHA: ${{ github.sha }}
-      VITE_GAME_API_URL: https://api.hyperbet.win
-      VITE_GAME_WS_URL: wss://api.hyperbet.win/ws
+      VITE_GAME_API_URL: ${{ vars.HYPERBET_BSC_KEEPER_URL || 'https://bsc-api.hyperbet.win' }}
+      VITE_GAME_WS_URL: ${{ vars.HYPERBET_BSC_KEEPER_WS_URL || 'wss://bsc-api.hyperbet.win/ws' }}
       VITE_SOLANA_CLUSTER: mainnet-beta
       VITE_USE_GAME_RPC_PROXY: "true"
       VITE_USE_GAME_EVM_RPC_PROXY: "true"

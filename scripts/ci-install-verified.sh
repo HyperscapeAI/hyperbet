@@ -113,10 +113,44 @@ resolve_lockfile() {
   fi
 }
 
-verify_lockfile_clean() {
+lockfile_snapshot_path() {
   local lockfile="$1"
 
-  if ! git -C "$ROOT_DIR" diff --exit-code -- "$lockfile" >/dev/null; then
+  echo "$TMPDIR/lockfile.$(echo "$lockfile" | tr '/.' '__').snapshot"
+}
+
+capture_lockfile_snapshot() {
+  local lockfile="$1"
+  local snapshot
+
+  snapshot="$(lockfile_snapshot_path "$lockfile")"
+  if [[ -e "$snapshot" ]]; then
+    return 0
+  fi
+
+  if [[ -f "$ROOT_DIR/$lockfile" ]]; then
+    cp "$ROOT_DIR/$lockfile" "$snapshot"
+  else
+    : > "$snapshot.missing"
+  fi
+}
+
+verify_lockfile_clean() {
+  local lockfile="$1"
+  local snapshot
+
+  snapshot="$(lockfile_snapshot_path "$lockfile")"
+
+  if [[ -f "$snapshot.missing" ]]; then
+    if [[ -f "$ROOT_DIR/$lockfile" ]]; then
+      echo "Lockfile drift detected after install: $lockfile" >&2
+      git -C "$ROOT_DIR" diff -- "$lockfile" >&2 || true
+      exit 1
+    fi
+    return 0
+  fi
+
+  if ! cmp -s "$snapshot" "$ROOT_DIR/$lockfile"; then
     echo "Lockfile drift detected after install: $lockfile" >&2
     git -C "$ROOT_DIR" diff -- "$lockfile" >&2 || true
     exit 1
@@ -140,6 +174,7 @@ install_target() {
 
   cwd="$(resolve_cwd "$target")"
   lockfile="$(resolve_lockfile "$cwd")"
+  capture_lockfile_snapshot "$lockfile"
 
   if target_requires_root_install "$target"; then
     install_root_workspace

@@ -139,9 +139,11 @@ function truncateWallet(wallet: string): string {
 export function PointsHistory({
   walletAddress,
   locale,
+  scope = "linked",
 }: {
   walletAddress: string | null;
   locale?: UiLocale;
+  scope?: "wallet" | "linked";
 }) {
   const resolvedLocale = resolveUiLocale(locale);
   const copy = getHistoryCopy(resolvedLocale);
@@ -169,6 +171,7 @@ export function PointsHistory({
       const params = new URLSearchParams({
         limit: String(pageSize),
         offset: String(page * pageSize),
+        scope,
       });
       if (eventFilter) params.set("eventType", eventFilter);
 
@@ -193,7 +196,7 @@ export function PointsHistory({
     } finally {
       setLoading(false);
     }
-  }, [copy, eventFilter, page, walletAddress]);
+  }, [copy, eventFilter, page, scope, walletAddress]);
 
   useEffect(() => {
     void fetchHistory();

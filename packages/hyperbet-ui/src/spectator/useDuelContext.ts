@@ -37,6 +37,23 @@ export type DuelContextState = {
     cycleId?: string;
     duelId?: string | null;
     duelKeyHex?: string | null;
+    broadcastTimeline?: {
+      phase?: string | null;
+      betOpenTime?: number | null;
+      betCloseTime?: number | null;
+      fightStartTime?: number | null;
+      duelEndTime?: number | null;
+      presentationDelayMs?: number;
+      updatedAt?: number | null;
+    } | null;
+    sourceTimeline?: {
+      phase?: string | null;
+      betOpenTime?: number | null;
+      betCloseTime?: number | null;
+      fightStartTime?: number | null;
+      duelEndTime?: number | null;
+      updatedAt?: number | null;
+    } | null;
     betOpenTime?: number | null;
     betCloseTime?: number | null;
     fightStartTime?: number | null;
@@ -50,6 +67,24 @@ export type DuelContextState = {
   };
   leaderboard: unknown[];
   cameraTarget: string | null;
+  /**
+   * Source-time emission anchor for this context response — the upstream
+   * `streamState.emittedAt` of the frame we last observed. The viewer-clock
+   * selector (commit 3) keys duel-context history off this field.
+   * Nullable for backward compatibility with keeper builds that predate
+   * the commit-2 contract.
+   */
+  sourceEmittedAt?: number | null;
+  /**
+   * Server-clock timestamp at which the keeper emitted this response.
+   * Staleness / max-age budgets key off this field.
+   */
+  serverEmittedAt?: number | null;
+  /**
+   * Legacy top-level wall-clock stamp (equal to `sourceEmittedAt` on
+   * keeper builds that carry it). Kept for backwards compatibility.
+   */
+  updatedAt?: number | null;
 };
 
 const POLL_INTERVAL_MS = 3000;
@@ -85,6 +120,14 @@ function normalizeDuelContext(raw: unknown): DuelContextState | null {
   const r = raw as Record<string, unknown>;
   if (!r.cycle || typeof r.cycle !== "object") return null;
   const cycle = r.cycle as Record<string, unknown>;
+  const broadcastTimeline =
+    cycle.broadcastTimeline && typeof cycle.broadcastTimeline === "object"
+      ? (cycle.broadcastTimeline as Record<string, unknown>)
+      : null;
+  const sourceTimeline =
+    cycle.sourceTimeline && typeof cycle.sourceTimeline === "object"
+      ? (cycle.sourceTimeline as Record<string, unknown>)
+      : null;
   return {
     type: typeof r.type === "string" ? r.type : "STREAMING_DUEL_CONTEXT",
     cycle: {
@@ -99,15 +142,98 @@ function normalizeDuelContext(raw: unknown): DuelContextState | null {
         typeof cycle.duelKeyHex === "string" || cycle.duelKeyHex === null
           ? (cycle.duelKeyHex as string | null)
           : null,
+      broadcastTimeline: broadcastTimeline
+        ? {
+            phase:
+              typeof broadcastTimeline.phase === "string" ||
+              broadcastTimeline.phase === null
+                ? (broadcastTimeline.phase as string | null)
+                : null,
+            betOpenTime:
+              typeof broadcastTimeline.betOpenTime === "number"
+                ? broadcastTimeline.betOpenTime
+                : null,
+            betCloseTime:
+              typeof broadcastTimeline.betCloseTime === "number"
+                ? broadcastTimeline.betCloseTime
+                : null,
+            fightStartTime:
+              typeof broadcastTimeline.fightStartTime === "number"
+                ? broadcastTimeline.fightStartTime
+                : null,
+            duelEndTime:
+              typeof broadcastTimeline.duelEndTime === "number"
+                ? broadcastTimeline.duelEndTime
+                : null,
+            presentationDelayMs:
+              typeof broadcastTimeline.presentationDelayMs === "number"
+                ? broadcastTimeline.presentationDelayMs
+                : 0,
+            updatedAt:
+              typeof broadcastTimeline.updatedAt === "number"
+                ? broadcastTimeline.updatedAt
+                : null,
+          }
+        : null,
+      sourceTimeline: sourceTimeline
+        ? {
+            phase:
+              typeof sourceTimeline.phase === "string" ||
+              sourceTimeline.phase === null
+                ? (sourceTimeline.phase as string | null)
+                : null,
+            betOpenTime:
+              typeof sourceTimeline.betOpenTime === "number"
+                ? sourceTimeline.betOpenTime
+                : null,
+            betCloseTime:
+              typeof sourceTimeline.betCloseTime === "number"
+                ? sourceTimeline.betCloseTime
+                : null,
+            fightStartTime:
+              typeof sourceTimeline.fightStartTime === "number"
+                ? sourceTimeline.fightStartTime
+                : null,
+            duelEndTime:
+              typeof sourceTimeline.duelEndTime === "number"
+                ? sourceTimeline.duelEndTime
+                : null,
+            updatedAt:
+              typeof sourceTimeline.updatedAt === "number"
+                ? sourceTimeline.updatedAt
+                : null,
+          }
+        : null,
       betOpenTime:
-        typeof cycle.betOpenTime === "number" ? cycle.betOpenTime : null,
+        typeof broadcastTimeline?.betOpenTime === "number"
+          ? broadcastTimeline.betOpenTime
+          : typeof cycle.betOpenTime === "number"
+            ? cycle.betOpenTime
+            : null,
       betCloseTime:
-        typeof cycle.betCloseTime === "number" ? cycle.betCloseTime : null,
+        typeof broadcastTimeline?.betCloseTime === "number"
+          ? broadcastTimeline.betCloseTime
+          : typeof cycle.betCloseTime === "number"
+            ? cycle.betCloseTime
+            : null,
       fightStartTime:
-        typeof cycle.fightStartTime === "number" ? cycle.fightStartTime : null,
+        typeof broadcastTimeline?.fightStartTime === "number"
+          ? broadcastTimeline.fightStartTime
+          : typeof cycle.fightStartTime === "number"
+            ? cycle.fightStartTime
+            : null,
       duelEndTime:
-        typeof cycle.duelEndTime === "number" ? cycle.duelEndTime : null,
-      phase: typeof cycle.phase === "string" ? cycle.phase : undefined,
+        typeof broadcastTimeline?.duelEndTime === "number"
+          ? broadcastTimeline.duelEndTime
+          : typeof cycle.duelEndTime === "number"
+            ? cycle.duelEndTime
+            : null,
+      phase:
+        typeof broadcastTimeline?.phase === "string"
+          ? broadcastTimeline.phase
+          : typeof cycle.phase === "string"
+            ? cycle.phase
+            : undefined,
       winnerId:
         typeof cycle.winnerId === "string" || cycle.winnerId === null
           ? (cycle.winnerId as string | null)
@@ -134,6 +260,21 @@ function normalizeDuelContext(raw: unknown): DuelContextState | null {
       typeof r.cameraTarget === "string" || r.cameraTarget === null
         ? (r.cameraTarget as string | null)
         : null,
+    // Commit-2 contract fields. Backfill source → updatedAt when the
+    // keeper predates the contract so the selector always has an anchor.
+    sourceEmittedAt:
+      typeof r.sourceEmittedAt === "number"
+        ? r.sourceEmittedAt
+        : typeof r.updatedAt === "number"
+          ? r.updatedAt
+          : null,
+    serverEmittedAt:
+      typeof r.serverEmittedAt === "number"
+        ? r.serverEmittedAt
+        : typeof r.updatedAt === "number"
+          ? r.updatedAt
+          : null,
+    updatedAt: typeof r.updatedAt === "number" ? r.updatedAt : null,
   };
 }
 

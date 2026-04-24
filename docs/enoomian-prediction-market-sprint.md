@@ -2,6 +2,8 @@
 
 > **TL;DR:** Historical sprint tracker for `enoomian/prediction-market-sprint-base`. Status: closed. Keep this as branch history only. It is not the current phase-1 launch closeout plan. Use [`docs/release/pm-launch-execution-plan.md`](release/pm-launch-execution-plan.md) and [`docs/release/prediction-market-launch-freeze-tracker.md`](release/prediction-market-launch-freeze-tracker.md) for current status.
 
+> Current open-work ownership now lives in [`docs/release/tracking-document-map.md`](release/tracking-document-map.md) and [`docs/release/github-project-production-backlog.md`](release/github-project-production-backlog.md).
+
 This is the living gate tracker for the `enoomian/prediction-market-sprint-base` branch.
 
 Update this document every time the sprint base branch is pushed, or when the
@@ -524,8 +526,7 @@ Delivered:
 Targeted verification:
 
 - `node --import tsx scripts/ci-env-audit.ts --target=ci-shared --json`
-- `VITE_GAME_API_URL=https://api.hyperbet.win VITE_GAME_WS_URL=wss://api.hyperbet.win/ws VITE_SOLANA_CLUSTER=mainnet-beta VITE_USE_GAME_RPC_PROXY=true VITE_USE_GAME_EVM_RPC_PROXY=true VITE_BSC_CHAIN_ID=56 VITE_BSC_GOLD_CLOB_ADDRESS=0x443C09B1E7bb7bA3392b02500772B185654A6F33 VITE_BASE_CHAIN_ID=8453 VITE_BASE_GOLD_CLOB_ADDRESS=0xb8c66D6895Bafd1B0027F2c0865865043064437C node --import tsx scripts/ci-env-audit.ts --target=pages:solana --json`
-- `VITE_GAME_API_URL=https://api.hyperbet.win VITE_GAME_WS_URL=wss://api.hyperbet.win/ws VITE_SOLANA_CLUSTER=mainnet-beta VITE_USE_GAME_RPC_PROXY=true VITE_USE_GAME_EVM_RPC_PROXY=true VITE_BSC_CHAIN_ID=56 VITE_BSC_GOLD_CLOB_ADDRESS=0x443C09B1E7bb7bA3392b02500772B185654A6F33 VITE_BASE_CHAIN_ID=8453 VITE_BASE_GOLD_CLOB_ADDRESS=0xb8c66D6895Bafd1B0027F2c0865865043064437C node --import tsx scripts/ci-env-audit.ts --target=pages:bsc --json`
+- `VITE_GAME_API_URL=https://api.hyperbet.win VITE_GAME_WS_URL=wss://api.hyperbet.win/ws VITE_SOLANA_CLUSTER=mainnet-beta VITE_USE_GAME_RPC_PROXY=true VITE_USE_GAME_EVM_RPC_PROXY=true VITE_BSC_CHAIN_ID=56 VITE_BSC_GOLD_CLOB_ADDRESS=0x443C09B1E7bb7bA3392b02500772B185654A6F33 VITE_BASE_CHAIN_ID=8453 VITE_BASE_GOLD_CLOB_ADDRESS=0xb8c66D6895Bafd1B0027F2c0865865043064437C node --import tsx scripts/ci-env-audit.ts --target=pages:legacy --json`
 - `CI_AUDIT_REQUIRE_RUNTIME=true HYPERBET_KEEPER_URL=https://api.hyperbet.win RAILWAY_PROJECT_ID=test RAILWAY_PRODUCTION_ENVIRONMENT_ID=test RAILWAY_KEEPER_SERVICE_ID=test SOLANA_RPC_URL=https://api.mainnet-beta.solana.com node --import tsx scripts/ci-env-audit.ts --target=keeper:solana --json`
 - `CI_AUDIT_REQUIRE_RUNTIME=true HYPERBET_KEEPER_URL=https://bsc-api.hyperbet.win RAILWAY_PROJECT_ID=test RAILWAY_PRODUCTION_ENVIRONMENT_ID=test RAILWAY_KEEPER_SERVICE_ID=test BSC_RPC_URL=https://bsc-dataseed.binance.org node --import tsx scripts/ci-env-audit.ts --target=keeper:bsc --json`
 - `CI_AUDIT_REQUIRE_RUNTIME=true HYPERBET_KEEPER_URL=https://avax-api.hyperbet.win RAILWAY_PROJECT_ID=test RAILWAY_PRODUCTION_ENVIRONMENT_ID=test RAILWAY_KEEPER_SERVICE_ID=test AVAX_RPC_URL=https://api.avax.network/ext/bc/C/rpc node --import tsx scripts/ci-env-audit.ts --target=keeper:avax --json`

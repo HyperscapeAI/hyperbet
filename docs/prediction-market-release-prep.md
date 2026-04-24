@@ -1,14 +1,23 @@
 # Prediction Market Release Prep
 
-> **TL;DR:** As of 2026-03-25, the repo is materially stronger and now carries full-product phase-1 rails for `PM + internal AMM + perps` across `Solana devnet`, `BSC testnet`, and `AVAX Fuji`, but the release train is still not deploy-only. The remaining blockers are truthful launch-chain mainnet registry values, staged environment provisioning, shared testnet token/address inputs, governance/evidence closeout, and the frozen audit packet plus external audit/remediation cycle.
+> **TL;DR:** As of 2026-03-25, the repo is materially stronger and now carries full-product phase-1 rails for `PM + internal AMM + perps` plus the surrounding app shell and account surfaces that users actually touch. The active production-readiness gate is `Solana devnet + BSC testnet`; AVAX Fuji evidence is preserved but isolated and non-blocking. The remaining blockers are truthful active-scope registry values, staged environment provisioning, shared testnet token/address inputs, app-shell and account-surface closure, governance/evidence closeout, and the frozen audit packet plus external audit/remediation cycle.
 
 This document is the reviewer-facing release summary for the current launch
 closeout train on `audit/develop-pm-hardening`.
 
+Detailed implementation work is tracked in:
+
+- [GitHub Project Production Backlog](release/github-project-production-backlog.md)
+- [Runtime Integration Readiness Matrix](release/runtime-integration-readiness-matrix.md)
+- [Tracking Document Map](release/tracking-document-map.md)
+
 ## Phase-1 Product Definition
 
-- Launch chains: `Solana`, `BSC`, `AVAX`
+- Active production-readiness chains: `Solana`, `BSC`
+- Preserved but isolated follow-on lane: `AVAX`
 - Non-blocking add-chain lane: `Base`
+- Implementation target: shared `EVM` runtime plus `SVM`, with `BSC` as the
+  current active EVM proving wrapper
 - User-facing surfaces:
   - `PM/CLOB duels`
   - `perps/models`
@@ -19,7 +28,11 @@ closeout train on `audit/develop-pm-hardening`.
 
 - PM-core hardening is merged for oracle finality, order semantics, governance
   freezes, and protocol guardrails.
-- AMM settlement truth is now oracle-only on both EVM and Solana.
+- repo artifact policy is enforced in CI, and the previously flagged tracked
+  Solana deploy artifacts are no longer present in the tracked tree.
+- AMM settlement implementation is materially stronger than before, but the
+  production settlement model still needs an explicit freeze between
+  oracle-driven and challenge-window paths.
 - Solana perps pause remains callable after freeze.
 - Solana full-product deploy, init, freeze, and verify paths now include
   `lvr_amm`.
@@ -34,16 +47,23 @@ closeout train on `audit/develop-pm-hardening`.
 
 ## What Is Still Blocking
 
-### 1. Launch-chain canonical truth is incomplete
+Detailed execution tickets for every blocker below live in the canonical
+backlog. This document is the summary view, not the issue owner.
 
-Strict launch-chain mainnet canonical truth is still incomplete, even though the
+### 1. Active launch-chain canonical truth is incomplete
+
+Strict active-scope canonical truth is still incomplete, even though the
 develop-side Stage-A closeout gate now validates the real PR contract for
-`Solana devnet + BSC testnet` while AVAX is intentionally deferred:
+`Solana devnet + BSC testnet` while AVAX is intentionally isolated:
 
+- active-scope launch constants still imply `avax` in places that should now
+  reflect the parked-chain decision
+- default feature flags still understate the intended active product surface
 - `solana`: `goldAmmMarketProgramId`
 - `bsc`: `goldAmmRouterAddress`, `mUsdTokenAddress`, `goldTokenAddress`,
   `skillOracleAddress`, `perpEngineAddress`
-- `avax`: PM-core plus AMM and perps canonical fields
+- `avax`: PM-core plus AMM and perps canonical fields remain preserved
+  follow-on work and are not blocking the current production-readiness path
 
 Those values must still come from final mainnet deployment receipts only before
 any true launch promotion to `main` or `staging`.
@@ -61,13 +81,11 @@ That means GitHub staged proof and staged soak cannot run honestly yet.
 
 ### 3. Local Stage-A is only partially unblocked
 
-Local non-mainnet deploy and verification are now feasible, but the full BSC
-and AVAX AMM/perps rehearsal still needs shared token/address inputs:
+Local non-mainnet deploy and verification are now feasible, but the active BSC
+AMM/perps rehearsal still needs shared token/address inputs:
 
 - `BSC_TESTNET_MUSD_TOKEN_ADDRESS`
-- `AVAX_FUJI_MUSD_TOKEN_ADDRESS`
 - `BSC_TESTNET_GOLD_TOKEN_ADDRESS`
-- `AVAX_FUJI_GOLD_TOKEN_ADDRESS`
 - optional perps margin token addresses when margin is not the GOLD token
 
 ### 4. Governance and audit evidence are not complete
@@ -81,6 +99,17 @@ the final package still needs:
 - soak artifact bundles
 - final RC freeze manifest
 - external audit findings and remediation output
+
+### 5. AMM settlement truth, coordinated full-product smoke, and full app-shell closure are not yet closed
+
+- the EVM AMM still exposes both `settleMarket()` and `settleFromOracle()`
+- the Solana AMM settlement path still carries compatibility-oriented optional
+  account handling that needs either tighter validation or an audit-grade
+  rationale
+- PM has the strongest live evidence today; coordinated staged smoke and
+  evidence for the full active product destination still need to be frozen
+- wallet/account, points/referral, and broader app-shell product claims still
+  need one frozen acceptance and support contract for the active runtimes
 
 ## Gold Asset Boundary
 
@@ -103,10 +132,16 @@ see:
 
 Reviewers should verify that the repo now reflects these truths consistently:
 
-- phase-1 launch scope is `Solana + BSC + AVAX`
+- active production-readiness scope is `Solana + BSC`
+- AVAX is preserved but isolated and non-blocking
 - `Base` is non-blocking
-- launch proof is `PM + perps + AMM`, not PM-only
+- `BSC` is the active EVM wrapper, not the exclusive EVM implementation target
+- launch destination is `PM + perps + internal AMM`, not PM-only
+- active launch scope includes the application shell and account surfaces
+  around those products, not only the underlying market engines
 - stage/testnet proof does not equal mainnet canonical truth
+- AMM settlement-model closure and coordinated full-product smoke are still
+  open blockers
 - launch remains blocked on registry truth, staged env provisioning, and audit
   evidence
 

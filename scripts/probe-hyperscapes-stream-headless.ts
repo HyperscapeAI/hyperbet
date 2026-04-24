@@ -31,6 +31,26 @@ type ProbeSnapshot = {
   bestState: FrameState | null;
 };
 
+type ProbeFailure = {
+  source: "console" | "pageerror" | "requestfailed" | "response";
+  kind: string;
+  text: string;
+  url?: string;
+  status?: number;
+};
+
+type AssetAuditEntry = {
+  label: string;
+  url: string;
+  expectedType: "binary" | "json";
+  ok: boolean;
+  kind?: string;
+  status?: number;
+  contentType?: string | null;
+  bodyPreview?: string;
+  error?: string;
+};
+
 type PlaywrightRuntime = {
   chromium: {
     launch(options?: Record<string, unknown>): Promise<{
@@ -260,6 +280,163 @@ async function collectPageState(page: any): Promise<ProbeSnapshot> {
   };
 }
 
+function normalizeText(value: string | undefined): string {
+  return (value ?? "").replace(/\s+/g, " ").trim();
+}
+
+function isIgnoredProbeNoise(text: string): boolean {
+  return (
+    text.includes("Cannot redefine property: ethereum") ||
+    text.includes("Origin not allowed") ||
+    text.includes("onPlayerUpdated: No local player found")
+  );
+}
+
+function isHyperscapeHost(hostname: string): boolean {
+  return /(?:hyperscape|hyperbet)/i.test(hostname);
+}
+
+function isFirstPartyAssetUrl(rawUrl: string | undefined, targetUrl: string): boolean {
+  if (!rawUrl) return false;
+
+  try {
+    const parsed = new URL(rawUrl);
+    const target = new URL(targetUrl);
+    const pathname = parsed.pathname.toLowerCase();
+    const looksLikeAssetPath =
+      pathname.includes("/game-assets/") ||
+      pathname.includes("/manifests/") ||
+      pathname.includes("/models/") ||
+      pathname.includes("/emotes/") ||
+      pathname.endsWith(".vrm") ||
+      pathname.endsWith(".glb") ||
+      pathname.endsWith(".gltf") ||
+      pathname.endsWith(".json");
+
+    return (
+      looksLikeAssetPath &&
+      (parsed.origin === target.origin || isHyperscapeHost(parsed.hostname))
+    );
+  } catch {
+    return false;
+  }
+}
+
+function extractRelevantUrl(
+  text: string,
+  fallbackUrl: string | undefined,
+  targetUrl: string,
+): string | undefined {
+  if (isFirstPartyAssetUrl(fallbackUrl, targetUrl)) {
+    return fallbackUrl;
+  }
+
+  const matches = text.match(/https?:\/\/\S+/g) ?? [];
+  for (const match of matches) {
+    const candidate = match.replace(/[),.;]+$/, "");
+    if (isFirstPartyAssetUrl(candidate, targetUrl)) {
+      return candidate;
+    }
+  }
+
+  return undefined;
+}
+
+function classifyProbeFailure(
+  source: ProbeFailure["source"],
+  text: string,
+  targetUrl: string,
+  fallbackUrl?: string,
+  status?: number,
+): ProbeFailure | null {
+  const normalized = normalizeText(text);
+  if (!normalized || isIgnoredProbeNoise(normalized)) {
+    return null;
+  }
+
+  let relevantUrl = extractRelevantUrl(normalized, fallbackUrl, targetUrl);
+  if (!relevantUrl) {
+    if (normalized.includes("world-config.json")) {
+      relevantUrl = "world-config.json";
+    } else if (normalized.includes("buildings.json")) {
+      relevantUrl = "buildings.json";
+    } else if (normalized.includes("vegetation.json")) {
+      relevantUrl = "vegetation.json";
+    } else if (normalized.includes("lod-settings.json")) {
+      relevantUrl = "lod-settings.json";
+    }
+  }
+
+  if (
+    typeof status === "number" &&
+    status >= 400 &&
+    isFirstPartyAssetUrl(relevantUrl, targetUrl)
+  ) {
+    return {
+      source,
+      kind:
+        relevantUrl?.includes("world-config.json") && status === 404
+          ? "missing-world-config"
+          : `asset-http-${status}`,
+      text: normalized,
+      url: relevantUrl,
+      status,
+    };
+  }
+
+  if (!relevantUrl) {
+    return null;
+  }
+
+  const lowered = normalized.toLowerCase();
+  let kind: string | null = null;
+  if (lowered.includes("no-response")) {
+    kind = "asset-service-worker-no-response";
+  } else if (lowered.includes("net::err_failed")) {
+    kind = "asset-net-err-failed";
+  } else if (lowered.includes("failed to fetch")) {
+    kind = "asset-fetch-failed";
+  } else if (lowered.includes("cors")) {
+    kind = "asset-cors";
+  } else if (
+    relevantUrl.includes("world-config.json") &&
+    (lowered.includes("404") || lowered.includes("not found"))
+  ) {
+    kind = "missing-world-config";
+  } else if (
+    relevantUrl.includes("buildings.json") &&
+    lowered.includes("invalid")
+  ) {
+    kind = "invalid-buildings-manifest";
+  } else if (
+    relevantUrl.includes("vegetation.json") &&
+    (lowered.includes("unexpected token <") ||
+      lowered.includes("json") ||
+      lowered.includes("parse"))
+  ) {
+    kind = "invalid-vegetation-manifest";
+  } else if (
+    relevantUrl.includes("lod-settings.json") &&
+    (lowered.includes("unexpected token <") ||
+      lowered.includes("json") ||
+      lowered.includes("parse"))
+  ) {
+    kind = "invalid-lod-settings-manifest";
+  }
+
+  if (!kind) {
+    return null;
+  }
+
+  return {
+    source,
+    kind,
+    text: normalized,
+    url: relevantUrl,
+    status,
+  };
+}
+
 function isReady(snapshot: ProbeSnapshot): boolean {
   const state = snapshot.bestState;
   return Boolean(
@@ -268,6 +445,214 @@ function isReady(snapshot: ProbeSnapshot): boolean {
       state.rendererHealth?.ready === true &&
       !state.rendererHealth?.degradedReason,
   );
+}
+
+async function runAssetAudit(
+  page: any,
+  targetUrl: string,
+  assetBaseOverride?: string,
+): Promise<AssetAuditEntry[]> {
+  const auditScript = `
+    const pointerPrefix = "version https://git-lfs.github.com/spec/v1";
+    const runtimeEnvBase =
+      typeof window.env?.PUBLIC_CDN_URL === "string"
+        ? window.env.PUBLIC_CDN_URL.trim()
+        : "";
+    const runtimeWindowBase =
+      typeof window.__CDN_URL === "string" ? window.__CDN_URL.trim() : "";
+    const normalizeAssetBaseUrl = (value) =>
+      typeof value === "string" && value.trim().length > 0
+        ? value.trim().replace(/\\/+$/, "")
+        : "";
+    const resolveAssetBaseUrl = async () => {
+      if (assetBaseOverride) {
+        return normalizeAssetBaseUrl(assetBaseOverride);
+      }
+      if (runtimeEnvBase) {
+        return normalizeAssetBaseUrl(runtimeEnvBase);
+      }
+      if (runtimeWindowBase) {
+        return normalizeAssetBaseUrl(runtimeWindowBase);
+      }
+
+      const assetConfigScriptUrls = Array.from(
+        document.querySelectorAll('script[src], link[rel="modulepreload"][href]'),
+      )
+        .map((node) => node.getAttribute("src") || node.getAttribute("href"))
+        .filter((value) => typeof value === "string" && value.length > 0)
+        .map((value) => new URL(value, pageUrl).toString());
+      const apiConfigScriptUrl = assetConfigScriptUrls.find((scriptUrl) =>
+        /\\/assets\\/api-config-[^/]+\\.js(?:$|\\?)/.test(scriptUrl),
+      );
+      if (apiConfigScriptUrl) {
+        try {
+          const apiConfigModule = await import(apiConfigScriptUrl);
+          for (const exportValue of Object.values(apiConfigModule)) {
+            const normalized = normalizeAssetBaseUrl(exportValue);
+            if (normalized.endsWith("/game-assets")) {
+              return normalized;
+            }
+          }
+        } catch {
+          // Fall through to text scanning if dynamic import fails.
+        }
+      }
+      for (const scriptUrl of assetConfigScriptUrls) {
+        try {
+          const scriptText = await fetch(scriptUrl, { cache: "no-store" }).then((response) =>
+            response.ok ? response.text() : ""
+          );
+          const match = scriptText.match(/https?:\\/\\/[^"'\\s]+\\/game-assets/g);
+          if (match && match[0]) {
+            return normalizeAssetBaseUrl(match[0]);
+          }
+        } catch {
+          continue;
+        }
+      }
+
+      return normalizeAssetBaseUrl(new URL("/game-assets", pageUrl).toString());
+    };
+    const assetBaseUrl = await resolveAssetBaseUrl();
+
+    const targets = [
+      { label: "avatar-vrm", expectedType: "binary", path: "avatars/avatar-male-01.vrm" },
+      { label: "mob-vrm", expectedType: "binary", path: "models/mobs/bandit/bandit.vrm" },
+      { label: "npc-vrm", expectedType: "binary", path: "models/npcs/banker/banker.vrm" },
+      { label: "resource-glb", expectedType: "binary", path: "models/mining-rocks/essence-rock/essence-rock.glb" },
+      { label: "emote-glb", expectedType: "binary", path: "emotes/emote-walk.glb?s=1.3" },
+      { label: "item-manifest", expectedType: "json", path: "manifests/items/ammunition.json" },
+      { label: "vegetation-manifest", expectedType: "json", path: "manifests/vegetation.json" },
+      { label: "world-config-manifest", expectedType: "json", path: "manifests/world-config.json" },
+      { label: "buildings-manifest", expectedType: "json", path: "manifests/buildings.json" }
+    ];
+
+    const readBinaryPrefix = async (response, maxBytes = 256) => {
+      const reader = response.body && response.body.getReader ? response.body.getReader() : null;
+      if (!reader) {
+        return (await response.text()).slice(0, maxBytes);
+      }
+
+      const decoder = new TextDecoder();
+      const chunks = [];
+      let totalBytes = 0;
+      try {
+        while (totalBytes < maxBytes) {
+          const { done, value } = await reader.read();
+          if (done || !value) {
+            break;
+          }
+          const slice = value.subarray(0, Math.max(0, maxBytes - totalBytes));
+          chunks.push(slice);
+          totalBytes += slice.byteLength;
+          if (totalBytes >= maxBytes) {
+            break;
+          }
+        }
+      } finally {
+        await reader.cancel().catch(() => undefined);
+      }
+
+      const merged = new Uint8Array(totalBytes);
+      let offset = 0;
+      for (const chunk of chunks) {
+        merged.set(chunk, offset);
+        offset += chunk.byteLength;
+      }
+      return decoder.decode(merged).slice(0, maxBytes);
+    };
+
+    const results = [];
+    for (const target of targets) {
+      const url = new URL(target.path, assetBaseUrl + "/").toString();
+      try {
+        const response = await fetch(url, { mode: "cors", cache: "no-store" });
+        const baseEntry = {
+          label: target.label,
+          url,
+          expectedType: target.expectedType,
+          status: response.status,
+          contentType: response.headers.get("content-type")
+        };
+
+        if (!response.ok) {
+          results.push({ ...baseEntry, ok: false, kind: "http-" + response.status });
+          continue;
+        }
+
+        if (target.expectedType === "json") {
+          const body = await response.text();
+          const bodyPreview = body.slice(0, 200);
+          if (bodyPreview.startsWith(pointerPrefix)) {
+            results.push({ ...baseEntry, ok: false, kind: "git-lfs-pointer", bodyPreview });
+            continue;
+          }
+
+          try {
+            JSON.parse(body);
+            results.push({ ...baseEntry, ok: true, bodyPreview });
+          } catch (error) {
+            results.push({
+              ...baseEntry,
+              ok: false,
+              kind: "invalid-json",
+              bodyPreview,
+              error: error instanceof Error ? error.message : String(error)
+            });
+          }
+          continue;
+        }
+
+        const bodyPreview = await readBinaryPrefix(response);
+        if (
+          (baseEntry.contentType || "").toLowerCase().includes("text/html") ||
+          bodyPreview.trimStart().startsWith("<!doctype")
+        ) {
+          results.push({ ...baseEntry, ok: false, kind: "unexpected-html", bodyPreview });
+          continue;
+        }
+        if (bodyPreview.startsWith(pointerPrefix)) {
+          results.push({ ...baseEntry, ok: false, kind: "git-lfs-pointer", bodyPreview });
+          continue;
+        }
+
+        results.push({ ...baseEntry, ok: true, bodyPreview });
+      } catch (error) {
+        results.push({
+          label: target.label,
+          url,
+          expectedType: target.expectedType,
+          ok: false,
+          kind: "fetch-error",
+          error: error instanceof Error ? error.message : String(error)
+        });
+      }
+    }
+
+    return results;
+  `;
+
+  return (await page.evaluate(
+    ({
+      pageUrl,
+      script,
+      assetBaseOverride,
+    }: {
+      pageUrl: string;
+      script: string;
+      assetBaseOverride?: string;
+    }) =>
+      new Function(
+        "pageUrl",
+        "assetBaseOverride",
+        `${script}`,
+      )(pageUrl, assetBaseOverride) as Promise<AssetAuditEntry[]>,
+    {
+      pageUrl: targetUrl,
+      script: `return (async () => { ${auditScript} })();`,
+      assetBaseOverride,
+    },
+  )) as AssetAuditEntry[];
 }
 
 async function main(): Promise<void> {
@@ -294,6 +679,8 @@ async function main(): Promise<void> {
   const browserChannel =
     firstEnv(["PM_STREAM_PROBE_BROWSER_CHANNEL", "PM_SOAK_BROWSER_CHANNEL", "PW_BROWSER_CHANNEL"]) ??
     undefined;
+  const assetBaseOverride =
+    firstEnv(["PM_STREAM_PROBE_ASSET_BASE_URL", "PUBLIC_CDN_URL"]) ?? undefined;
   const launchArgs = parseLaunchArgs(
     firstEnv(["PM_STREAM_PROBE_WEBGPU_ARGS", "PM_SOAK_WEBGPU_ARGS", "PW_WEBGPU_ARGS"]),
   );
@@ -352,6 +739,8 @@ async function main(): Promise<void> {
       launchErrors,
       screenshotPath: null,
       snapshot: null,
+      assetAuditOk: false,
+      assetAudit: [],
     });
     throw new Error(
       `headless stream probe launch failed: ${launchErrors.map((entry) => `${entry.channel ?? "chromium"}:${entry.error}`).join(" | ")}`,
@@ -362,10 +751,71 @@ async function main(): Promise<void> {
     ignoreHTTPSErrors: true,
   });
   const page = await context.newPage();
+  const failures: ProbeFailure[] = [];
+  const failureKeys = new Set<string>();
+  const recordFailure = (failure: ProbeFailure | null) => {
+    if (!failure) {
+      return;
+    }
+    const key = JSON.stringify({
+      source: failure.source,
+      kind: failure.kind,
+      url: failure.url ?? null,
+      status: failure.status ?? null,
+    });
+    if (failureKeys.has(key)) {
+      return;
+    }
+    failureKeys.add(key);
+    failures.push(failure);
+  };
+
+  page.on("console", (message: any) => {
+    recordFailure(classifyProbeFailure("console", message.text(), targetUrl));
+  });
+  page.on("pageerror", (error: Error) => {
+    recordFailure(
+      classifyProbeFailure(
+        "pageerror",
+        error?.stack || error?.message || String(error),
+        targetUrl,
+      ),
+    );
+  });
+  page.on("requestfailed", (request: any) => {
+    const failureText = request.failure()?.errorText ?? "request failed";
+    recordFailure(
+      classifyProbeFailure(
+        "requestfailed",
+        `${request.url()} ${failureText}`,
+        targetUrl,
+        request.url(),
+      ),
+    );
+  });
+  page.on("response", (response: any) => {
+    if (response.status() < 400) {
+      return;
+    }
+    recordFailure(
+      classifyProbeFailure(
+        "response",
+        `${response.url()} HTTP ${response.status()}`,
+        targetUrl,
+        response.url(),
+        response.status(),
+      ),
+    );
+  });
 
   let lastSnapshot: ProbeSnapshot | null = null;
   try {
-    await page.goto(targetUrl, { waitUntil: "domcontentloaded", timeout: 30_000 });
+    await page.goto(targetUrl, {
+      waitUntil: "domcontentloaded",
+      timeout: Math.max(30_000, args.timeoutMs),
+    });
+    const assetAudit = await runAssetAudit(page, targetUrl, assetBaseOverride);
+    const assetAuditOk = assetAudit.every((entry) => entry.ok);
     const startedAt = Date.now();
     while (Date.now() - startedAt < args.timeoutMs) {
       await page.waitForLoadState("domcontentloaded", { timeout: 5_000 }).catch(() => undefined);
@@ -376,8 +826,20 @@ async function main(): Promise<void> {
       }
     }
 
-    const status = lastSnapshot && isReady(lastSnapshot) ? "ready" : "not-ready";
+    const status =
+      lastSnapshot &&
+      isReady(lastSnapshot) &&
+      failures.length === 0 &&
+      assetAuditOk
+        ? "ready"
+        : "not-ready";
     const screenshotPath = path.join(artifactRoot, `stream-${status}.png`);
+    let screenshotError: string | null = null;
+    try {
+      await page.screenshot({ path: screenshotPath, fullPage: false });
+    } catch (error) {
+      screenshotError = error instanceof Error ? error.message : String(error);
+    }
     const probeResult = {
       ok: status === "ready",
       checkedAt: new Date().toISOString(),
@@ -391,12 +853,32 @@ async function main(): Promise<void> {
       launchArgs: selectedLaunch?.args ?? [],
       launchErrors,
       screenshotPath,
+      screenshotError,
       snapshot: lastSnapshot,
+      failures,
+      assetAuditOk,
+      assetAudit,
     };
     writeJsonArtifact(artifactRoot, "probe-result.json", probeResult);
-    await page.screenshot({ path: screenshotPath, fullPage: false });
 
     if (status !== "ready") {
+      if (failures.length > 0) {
+        throw new Error(
+          `headless stream probe failed: detected ${failures.length} first-party asset error(s): ${failures
+            .slice(0, 3)
+            .map((failure) => failure.kind)
+            .join(", ")}`,
+        );
+      }
+      if (!assetAuditOk) {
+        throw new Error(
+          `headless stream probe failed: detected ${assetAudit.filter((entry) => !entry.ok).length} asset audit failure(s): ${assetAudit
+            .filter((entry) => !entry.ok)
+            .slice(0, 3)
+            .map((entry) => `${entry.label}:${entry.kind ?? "unknown"}`)
+            .join(", ")}`,
+        );
+      }
       const degradedReason =
         lastSnapshot?.bestState?.rendererHealth?.degradedReason ??
         "renderer_not_ready";
