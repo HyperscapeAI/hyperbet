@@ -745,7 +745,10 @@ describe("bet-sync helpers", () => {
     };
 
     expect(
-      publicStreamStateChanged(base as StreamState, next as StreamState),
+      publicStreamStateChanged(
+        base as unknown as StreamState,
+        next as unknown as StreamState,
+      ),
     ).toBe(true);
   });
 
@@ -793,7 +796,10 @@ describe("bet-sync helpers", () => {
     };
 
     expect(
-      publicStreamStateChanged(base as StreamState, next as StreamState),
+      publicStreamStateChanged(
+        base as unknown as StreamState,
+        next as unknown as StreamState,
+      ),
     ).toBe(false);
   });
 
@@ -876,7 +882,10 @@ describe("bet-sync helpers", () => {
     };
 
     expect(
-      publicStreamStateChanged(base as StreamState, next as StreamState),
+      publicStreamStateChanged(
+        base as unknown as StreamState,
+        next as unknown as StreamState,
+      ),
     ).toBe(false);
   });
 });
