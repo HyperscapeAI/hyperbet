@@ -8,6 +8,7 @@ Primary runbooks:
 - [PM Confidence Soak](pm-confidence-soak.md)
 - [Staged Live Proof](staged-live-proof.md)
 - [Hyperscapes Local PM Integration](hyperscapes-local-pm-integration.md)
+- [Enoomian AWS GPU Migration](enoomian-aws-gpu-migration.md)
 - [Prediction-Market Governance And Emergency Controls](prediction-market-governance-and-emergency-controls.md)
 - [Signer Policy And Key Rotation](signer-policy-and-key-rotation.md)
 - [Quote Disablement And Safe Restart](quote-disablement-and-safe-restart.md)
@@ -17,3 +18,4 @@ Primary runbooks:
 - [Claim Backlog Drainage](claim-backlog-drainage.md)
 - [Oracle Finality Fail-Closed](oracle-finality-fail-closed.md)
 - [AVAX Fuji Bootstrap Market Smoke](avax-fuji-bootstrap.md)
+- [Enoomian Staging Stream Authority](enoomian-staging-stream-authority.md)
