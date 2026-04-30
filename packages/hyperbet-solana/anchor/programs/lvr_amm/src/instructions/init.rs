@@ -34,6 +34,14 @@ pub struct InitializeAdmin<'info> {
 
     #[account(mut)]
     pub signer: Signer<'info>,
+    #[account(
+        constraint = program.programdata_address()? == Some(program_data.key()) @ PredictionMarketError::UnauthorizedInitializer
+    )]
+    pub program: Program<'info, crate::program::LvrAmm>,
+    #[account(
+        constraint = program_data.upgrade_authority_address == Some(signer.key()) @ PredictionMarketError::UnauthorizedInitializer
+    )]
+    pub program_data: Account<'info, ProgramData>,
     pub system_program: Program<'info, System>,
 }
 

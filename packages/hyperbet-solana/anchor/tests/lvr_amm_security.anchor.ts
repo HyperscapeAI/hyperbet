@@ -26,6 +26,7 @@ import {
   deriveDuelStatePda,
   deriveMintNoPda,
   deriveMintYesPda,
+  deriveProgramDataAddress,
   duelStatusBettingOpen,
   ensureAmmConfig,
   ensureLvrAdmin,
@@ -182,6 +183,43 @@ async function createBetFixture(options?: {
 }
 
 describe("lvr_amm security", () => {
+  it("rejects config initialization by a non-upgrade authority", async function () {
+    const ammConfig = deriveAmmConfigPda(ammProgram.programId);
+    const existingConfig =
+      await (ammProgram.account as any).ammConfig.fetchNullable(ammConfig);
+    if (existingConfig) {
+      this.skip();
+    }
+
+    const attacker = Keypair.generate();
+    await airdrop(provider.connection, attacker.publicKey, 1);
+
+    try {
+      await ammProgram.methods
+        .initializeConfig(
+          attacker.publicKey,
+          attacker.publicKey,
+          fightProgram.programId,
+          200,
+        )
+        .accountsPartial({
+          ammConfig,
+          signer: attacker.publicKey,
+          program: ammProgram.programId,
+          programData: deriveProgramDataAddress(ammProgram.programId),
+          systemProgram: SystemProgram.programId,
+        })
+        .signers([attacker])
+        .rpc();
+      assert.fail("initialize_config accepted a non-upgrade authority");
+    } catch (error: unknown) {
+      assert.ok(
+        hasProgramError(error, "UnauthorizedInitializer"),
+        `expected UnauthorizedInitializer, got ${String(error)}`,
+      );
+    }
+  });
+
   it("rejects settlement with a duel PDA derived from a different duel key", async () => {
     const fixture = await createBetFixture({ expirationOffsetSecs: -60 });
     const now = Math.floor(Date.now() / 1000);
