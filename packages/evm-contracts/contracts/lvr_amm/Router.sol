@@ -52,6 +52,7 @@ contract Router is ReentrancyGuard, IMarketBuyCallback, IMarketSellCallback, IMa
     error MarketNotAllowed();
     error SlippageExceeded();
     error ConfigFrozen();
+    error DynamicMarketsDisabled();
 
     event FeeConfigUpdated(address indexed treasury, uint256 feeBps);
     event FeeConfigFrozen(address indexed admin);
@@ -114,6 +115,7 @@ contract Router is ReentrancyGuard, IMarketBuyCallback, IMarketSellCallback, IMa
         uint256 collateralIn
     ) public {
         _checkRole(MARKET_OPERATOR_ROLE);
+        if (isDynamic) revert DynamicMarketsDisabled();
         bytes32 marketId = keccak256(abi.encode(title, msg.sender, block.timestamp));
         if (knownMarketIds[marketId]) revert MarketAlreadyExists();
 

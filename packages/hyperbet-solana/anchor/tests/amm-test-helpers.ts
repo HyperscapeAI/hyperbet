@@ -401,7 +401,7 @@ export async function initializeCanonicalMarket(
   const ammConfig = deriveAmmConfigPda(program.programId);
 
   const initialLiq = new BN(LAMPORTS_PER_SOL * 5); // 5 SOL initial liquidity
-  const isDynamic = true;
+  const isDynamic = false;
   const description = "Test AMM Open Market";
   const expirationAt = new BN(Date.now() / 1000 + 3600);
 
