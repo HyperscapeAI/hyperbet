@@ -762,7 +762,6 @@ export function App() {
   const {
     session: canonicalStreamSession,
     rawSession: rawCanonicalStreamSession,
-    playback: canonicalPlayback,
     rendererHealth: canonicalRendererHealth,
     deliveryHealth: canonicalDeliveryHealth,
     publicReadiness: canonicalPublicReadiness,
