@@ -88,4 +88,7 @@ pub enum PredictionMarketError {
 
     #[msg("AMM fixed-point overflow")]
     MathFixedPointOverflow,
+
+    #[msg("Initializer must be the program upgrade authority")]
+    UnauthorizedInitializer,
 }
