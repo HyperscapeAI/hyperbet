@@ -57,7 +57,7 @@ contract LvrMarketTest is Test {
             "Market for BTC price event",
             "coingecko",
             TEST_DUEL_KEY,
-            true,
+            false,
             DURATION,
             collateralIn
         );
@@ -71,11 +71,26 @@ contract LvrMarketTest is Test {
         vm.stopPrank();
     }
 
+    function test_DynamicMarketsDisabled() public {
+        vm.startPrank(admin);
+        vm.expectRevert(Router.DynamicMarketsDisabled.selector);
+        router.create(
+            "Dynamic Market",
+            "Disabled until dynamic liquidity is safe",
+            "coingecko",
+            TEST_DUEL_KEY,
+            true,
+            DURATION,
+            100 * 10**18
+        );
+        vm.stopPrank();
+    }
+
     function test_BuyYes() public {
         uint256 collateralIn = 100 * 10**18;
 
         vm.prank(admin);
-        router.create("Test Market", "Desc", "Src", TEST_DUEL_KEY, true, DURATION, collateralIn);
+        router.create("Test Market", "Desc", "Src", TEST_DUEL_KEY, false, DURATION, collateralIn);
 
         address marketAddr = _marketAt(0);
         LvrMarket market = LvrMarket(marketAddr);
@@ -99,7 +114,7 @@ contract LvrMarketTest is Test {
         uint256 collateralIn = 100 * 10**18;
 
         vm.prank(admin);
-        router.create("Test Market", "Desc", "Src", TEST_DUEL_KEY, true, DURATION, collateralIn);
+        router.create("Test Market", "Desc", "Src", TEST_DUEL_KEY, false, DURATION, collateralIn);
 
         address marketAddr = _marketAt(0);
         LvrMarket market = LvrMarket(marketAddr);
@@ -170,7 +185,7 @@ contract LvrMarketTest is Test {
     function test_CreateRequiresMarketOperatorRole() public {
         vm.startPrank(user1);
         vm.expectRevert();
-        router.create("Test Market", "Desc", "Src", TEST_DUEL_KEY, true, DURATION, 100 * 10**18);
+        router.create("Test Market", "Desc", "Src", TEST_DUEL_KEY, false, DURATION, 100 * 10**18);
         vm.stopPrank();
     }
 
@@ -178,7 +193,7 @@ contract LvrMarketTest is Test {
         uint256 collateralIn = 100 * 10**18;
 
         vm.prank(admin);
-        router.create("Test Market", "Desc", "Src", TEST_DUEL_KEY, true, DURATION, collateralIn);
+        router.create("Test Market", "Desc", "Src", TEST_DUEL_KEY, false, DURATION, collateralIn);
         address marketAddr = _marketAt(0);
 
         vm.warp(block.timestamp + 1 hours);
@@ -195,7 +210,7 @@ contract LvrMarketTest is Test {
         uint256 collateralIn = 100 * 10**18;
 
         vm.prank(admin);
-        router.create("Test Market", "Desc", "Src", TEST_DUEL_KEY, true, DURATION, collateralIn);
+        router.create("Test Market", "Desc", "Src", TEST_DUEL_KEY, false, DURATION, collateralIn);
         address marketAddr = _marketAt(0);
         LvrMarket market = LvrMarket(marketAddr);
 
@@ -212,7 +227,7 @@ contract LvrMarketTest is Test {
 
     function test_SettleMarketRequiresPendingState() public {
         vm.prank(admin);
-        router.create("Test Market", "Desc", "Src", TEST_DUEL_KEY, true, DURATION, 100 * 10**18);
+        router.create("Test Market", "Desc", "Src", TEST_DUEL_KEY, false, DURATION, 100 * 10**18);
         address marketAddr = _marketAt(0);
 
         vm.expectRevert(bytes("Invalid Market State"));
@@ -249,13 +264,13 @@ contract LvrMarketTest is Test {
     function test_ZeroDurationReverts() public {
         vm.startPrank(admin);
         vm.expectRevert(bytes("Duration must be positive"));
-        router.create("Zero Duration", "Desc", "Src", keccak256("zero-dur"), true, 0, 100 * 10**18);
+        router.create("Zero Duration", "Desc", "Src", keccak256("zero-dur"), false, 0, 100 * 10**18);
         vm.stopPrank();
     }
 
     function test_GetPriceAfterDeadline() public {
         vm.prank(admin);
-        router.create("Expiring Market", "Desc", "Src", TEST_DUEL_KEY, true, DURATION, 100 * 10**18);
+        router.create("Expiring Market", "Desc", "Src", TEST_DUEL_KEY, false, DURATION, 100 * 10**18);
         address marketAddr = _marketAt(0);
         LvrMarket market = LvrMarket(marketAddr);
 
@@ -298,7 +313,7 @@ contract LvrMarketTest is Test {
 
     function test_AdminResolveSelectorRemoved() public {
         vm.prank(admin);
-        router.create("Bond Slash Test", "Desc", "Src", TEST_DUEL_KEY, true, DURATION, 100 * 10**18);
+        router.create("Bond Slash Test", "Desc", "Src", TEST_DUEL_KEY, false, DURATION, 100 * 10**18);
         address marketAddr = _marketAt(0);
         (bool success, ) = marketAddr.call(abi.encodeWithSignature("adminResolve(uint256)", 1));
         assertFalse(success, "adminResolve should not remain callable");
@@ -309,7 +324,7 @@ contract LvrMarketTest is Test {
         _setupOracleDuel(duelKey);
 
         vm.prank(admin);
-        router.create("Bond Return Test", "Desc", "Src", duelKey, true, DURATION, 100 * 10**18);
+        router.create("Bond Return Test", "Desc", "Src", duelKey, false, DURATION, 100 * 10**18);
         address marketAddr = _lastMarketAddress();
         LvrMarket market = LvrMarket(marketAddr);
 

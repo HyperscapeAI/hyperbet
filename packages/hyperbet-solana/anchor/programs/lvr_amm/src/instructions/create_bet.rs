@@ -17,6 +17,7 @@ pub fn create_bet(
 ) -> Result<()> {
     let config = &ctx.accounts.amm_config;
     require!(!config.paused, PredictionMarketError::MarketPaused);
+    require!(!is_dynamic, PredictionMarketError::DynamicMarketsDisabled);
 
     require!(
         initial_liq > 0,
