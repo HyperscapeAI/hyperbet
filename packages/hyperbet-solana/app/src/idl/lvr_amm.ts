@@ -680,6 +680,13 @@ export type LvrAmm = {
           "signer": true
         },
         {
+          "name": "program",
+          "address": "12E8Lz5w8Qxyj8Fh6LgsCgPDQNJMCLMV1y43LhPrH66w"
+        },
+        {
+          "name": "programData"
+        },
+        {
           "name": "systemProgram",
           "address": "11111111111111111111111111111111"
         }
@@ -726,6 +733,13 @@ export type LvrAmm = {
           "name": "signer",
           "writable": true,
           "signer": true
+        },
+        {
+          "name": "program",
+          "address": "12E8Lz5w8Qxyj8Fh6LgsCgPDQNJMCLMV1y43LhPrH66w"
+        },
+        {
+          "name": "programData"
         },
         {
           "name": "systemProgram",
@@ -1797,6 +1811,11 @@ export type LvrAmm = {
       "code": 6028,
       "name": "mathFixedPointOverflow",
       "msg": "AMM fixed-point overflow"
+    },
+    {
+      "code": 6029,
+      "name": "unauthorizedInitializer",
+      "msg": "Initializer must be the program upgrade authority"
     }
   ],
   "types": [
