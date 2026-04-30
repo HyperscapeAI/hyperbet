@@ -1816,6 +1816,11 @@ export type LvrAmm = {
       "code": 6029,
       "name": "unauthorizedInitializer",
       "msg": "Initializer must be the program upgrade authority"
+    },
+    {
+      "code": 6030,
+      "name": "dynamicMarketsDisabled",
+      "msg": "Dynamic AMM markets are disabled"
     }
   ],
   "types": [

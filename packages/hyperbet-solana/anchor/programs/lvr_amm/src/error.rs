@@ -91,4 +91,7 @@ pub enum PredictionMarketError {
 
     #[msg("Initializer must be the program upgrade authority")]
     UnauthorizedInitializer,
+
+    #[msg("Dynamic AMM markets are disabled")]
+    DynamicMarketsDisabled,
 }

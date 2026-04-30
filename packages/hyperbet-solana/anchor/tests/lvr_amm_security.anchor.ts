@@ -220,6 +220,21 @@ describe("lvr_amm security", () => {
     }
   });
 
+  it("rejects dynamic market creation while dynamic liquidity is disabled", async () => {
+    try {
+      await createBetFixture({
+        isDynamic: true,
+        expirationOffsetSecs: 300,
+      });
+      assert.fail("create_bet_account accepted a dynamic market");
+    } catch (error: unknown) {
+      assert.ok(
+        hasProgramError(error, "DynamicMarketsDisabled"),
+        `expected DynamicMarketsDisabled, got ${String(error)}`,
+      );
+    }
+  });
+
   it("rejects settlement with a duel PDA derived from a different duel key", async () => {
     const fixture = await createBetFixture({ expirationOffsetSecs: -60 });
     const now = Math.floor(Date.now() / 1000);
