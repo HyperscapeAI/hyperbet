@@ -415,9 +415,16 @@ async function runArbitrageScenario(
     throw new Error(`arb bot stake is not discounted: ${combinedStake.toString()}`);
   }
 
-  const latestBlock = await fixture.provider.getBlock("latest");
-  const now = BigInt(latestBlock?.timestamp ?? Math.floor(Date.now() / 1000));
   await lockMarket(fixture, duel, "arbitrage");
+  const storedDuel = await fixture.oracle.getDuel(duel);
+  await fixture.provider.send("evm_setNextBlockTimestamp", [
+    Number(storedDuel.duelStartTs + 1n),
+  ]);
+  await fixture.provider.send("evm_mine", []);
+  const resultBlock = await fixture.provider.getBlock("latest");
+  const duelEndTs = BigInt(
+    resultBlock?.timestamp ?? Number(storedDuel.duelStartTs + 1n),
+  );
   await (
     await fixture.oracle.connect(fixture.reporter).proposeResult(
       duel,
@@ -425,7 +432,7 @@ async function runArbitrageScenario(
       77,
       ethers.keccak256(ethers.toUtf8Bytes("arb-replay")),
       ethers.keccak256(ethers.toUtf8Bytes("arb-result")),
-      now + 180n,
+      duelEndTs,
       "arb-resolved",
     )
   ).wait();

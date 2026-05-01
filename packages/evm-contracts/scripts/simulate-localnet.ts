@@ -116,13 +116,17 @@ async function main() {
     "localnet-simulation-locked",
     DUEL_STATUS_LOCKED,
   );
+  await ethers.provider.send("evm_setNextBlockTimestamp", [Number(now + 121n)]);
+  await ethers.provider.send("evm_mine", []);
+  const resultBlock = await ethers.provider.getBlock("latest");
+  const duelEndTs = BigInt(resultBlock?.timestamp ?? Number(now + 121n));
   await oracle.connect(reporter).proposeResult(
     duel,
     SIDE_A,
     42,
     ethers.keccak256(ethers.toUtf8Bytes("replay")),
     ethers.keccak256(ethers.toUtf8Bytes("result")),
-    now + 180n,
+    duelEndTs,
     "resolved",
   );
   await ethers.provider.send("evm_increaseTime", [3600]);
