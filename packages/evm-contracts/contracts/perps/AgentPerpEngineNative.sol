@@ -20,6 +20,7 @@ contract AgentPerpEngineNative is AccessControl, ReentrancyGuard {
     uint256 public constant DEFAULT_MAX_ORACLE_DELAY = 2 minutes;
     uint256 public constant PARTIAL_LIQUIDATION_TARGET_MARGIN_RATIO = 2_000;
     uint256 public constant MAX_SOCIALIZED_LOSS_BPS = 50;
+    uint256 public constant MAX_INSURANCE_DRAW_DIVISOR = 4;
 
     error InvalidAdmin();
     error InvalidOperator();
@@ -376,6 +377,28 @@ contract AgentPerpEngineNative is AccessControl, ReentrancyGuard {
         }
     }
 
+    function _collectLiquidationLoss(MarketState storage market, Position storage pos, uint256 amount) internal {
+        if (amount == 0) return;
+
+        uint256 fromMargin = amount > pos.margin ? pos.margin : amount;
+        if (fromMargin != 0) {
+            pos.margin -= fromMargin;
+        }
+
+        uint256 deficit = amount - fromMargin;
+        if (deficit == 0) return;
+
+        uint256 fromInsurance = deficit > market.insuranceFund ? market.insuranceFund : deficit;
+        if (fromInsurance != 0) {
+            market.insuranceFund -= fromInsurance;
+        }
+
+        uint256 residualBadDebt = deficit - fromInsurance;
+        if (residualBadDebt != 0) {
+            market.badDebt += residualBadDebt;
+        }
+    }
+
     function _assertStatusAllowsTrade(MarketStatus status, int256 oldSize, int256 sizeDelta) internal pure {
         if (sizeDelta == 0) return;
         if (status == MarketStatus.ACTIVE) return;
@@ -615,17 +638,33 @@ contract AgentPerpEngineNative is AccessControl, ReentrancyGuard {
 
         uint256 closedSize = _abs(liquidationSizeDelta);
         uint256 liquidationPrice = _getExecutionPrice(agentId, liquidationSizeDelta);
+        uint256 startingMargin = pos.margin;
+        int256 realizedPnl = _realizePnl(pos.size, pos.entryPrice, liquidationPrice, closedSize);
 
         _removeOpenInterest(market, pos.size);
 
-        uint256 seizedMargin = pos.margin;
+        if (realizedPnl > 0) {
+            pos.margin += uint256(realizedPnl);
+        } else if (realizedPnl < 0) {
+            _collectLiquidationLoss(market, pos, uint256(-realizedPnl));
+        }
+
         uint256 reward = Math.mulDiv(
-            Math.mulDiv(seizedMargin, config.liquidationRewardBps, BPS),
+            Math.mulDiv(startingMargin, config.liquidationRewardBps, BPS),
             closedSize,
             absSize
         );
-        if (reward > seizedMargin) reward = seizedMargin;
-        pos.margin -= reward;
+        uint256 maxInsuranceDraw = market.insuranceFund / MAX_INSURANCE_DRAW_DIVISOR;
+        uint256 maxReward = pos.margin + maxInsuranceDraw;
+        if (reward > maxReward) reward = maxReward;
+
+        uint256 rewardFromMargin = reward > pos.margin ? pos.margin : reward;
+        pos.margin -= rewardFromMargin;
+
+        uint256 rewardFromInsurance = reward - rewardFromMargin;
+        if (rewardFromInsurance != 0) {
+            market.insuranceFund -= rewardFromInsurance;
+        }
 
         if (isPartial) {
             pos.size += liquidationSizeDelta;
