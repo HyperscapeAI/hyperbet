@@ -190,6 +190,43 @@ describe("gold_perps_market", () => {
     );
   });
 
+  it("rejects EVM-scale funding velocity on Solana config", async () => {
+    try {
+      await program.methods
+        .updateConfig(
+          authority.publicKey,
+          authority.publicKey,
+          authority.publicKey,
+          toBn(DEFAULT_SKEW_SCALE),
+          new anchor.BN("1000000000000"),
+          new anchor.BN(DEFAULT_MAX_ORACLE_STALENESS_SECONDS),
+          toBn(DEFAULT_MIN_ORACLE_SPOT_INDEX),
+          toBn(DEFAULT_MAX_ORACLE_SPOT_INDEX),
+          DEFAULT_MAX_ORACLE_PRICE_DELTA_BPS,
+          toBn(DEFAULT_MAX_LEVERAGE),
+          toBn(DEFAULT_MIN_MARGIN),
+          toBn(DEFAULT_MAX_MARKET_OPEN_INTEREST),
+          toBn(DEFAULT_MIN_MARKET_INSURANCE),
+          DEFAULT_MAINTENANCE_MARGIN_BPS,
+          DEFAULT_LIQUIDATION_FEE_BPS,
+          DEFAULT_TRADE_TREASURY_FEE_BPS,
+          DEFAULT_TRADE_MARKET_MAKER_FEE_BPS,
+        )
+        .accountsPartial({
+          config: configPda(program.programId),
+          authority: authority.publicKey,
+        })
+        .signers([authority])
+        .rpc();
+      assert.fail("EVM-scale funding velocity succeeded");
+    } catch (error: unknown) {
+      assert.ok(
+        hasProgramError(error, "InvalidRiskConfig"),
+        `expected InvalidRiskConfig, got ${String(error)}`,
+      );
+    }
+  });
+
   it("rejects oracle updates outside configured bounds and oversized jumps", async () => {
     await program.methods
       .updateConfig(
