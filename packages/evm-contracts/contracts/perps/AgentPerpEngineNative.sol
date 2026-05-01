@@ -378,6 +378,7 @@ contract AgentPerpEngineNative is AccessControl, ReentrancyGuard {
     }
 
     function _collectLiquidationLoss(MarketState storage market, Position storage pos, uint256 amount) internal {
+        // slither-disable-next-line incorrect-equality
         if (amount == 0) return;
 
         uint256 fromMargin = amount > pos.margin ? pos.margin : amount;
@@ -386,6 +387,7 @@ contract AgentPerpEngineNative is AccessControl, ReentrancyGuard {
         }
 
         uint256 deficit = amount - fromMargin;
+        // slither-disable-next-line incorrect-equality
         if (deficit == 0) return;
 
         uint256 fromInsurance = deficit > market.insuranceFund ? market.insuranceFund : deficit;
