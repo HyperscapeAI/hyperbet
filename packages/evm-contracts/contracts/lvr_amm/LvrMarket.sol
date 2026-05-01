@@ -127,14 +127,14 @@ contract LvrMarket is ReentrancyGuard {
     function settleMarket() external isRouter nonReentrant {
         require(state == MarketState.PENDING, "Invalid Market State");
         require(block.timestamp >= resolutionTimestamp, "Challenge Window Open");
-        // Return bond to proposer with Reward collected through market fees
-        state = MarketState.RESOLVED;
-        IERC20(collateralToken).safeTransfer(proposer, bondValue); // Add fees and then reward the proposer
-
-        emit MarketSettled(outcome, proposer, bondValue);
+        _settleFromOracle();
     }
 
     function settleFromOracle() external isRouter nonReentrant {
+        _settleFromOracle();
+    }
+
+    function _settleFromOracle() private {
         require(state == MarketState.OPEN || state == MarketState.PENDING || state == MarketState.DISPUTED, "Invalid Market State");
 
         // Capture proposer's outcome before overwriting (for bond slashing)
