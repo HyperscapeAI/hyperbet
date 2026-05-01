@@ -269,11 +269,12 @@ contract PmPerpsAdversarialTest is Test {
             DuelOutcomeOracle.DuelStatus.LOCKED
         );
 
+        vm.warp(setupDuelStart);
         vm.prank(reporter);
         duelOracle.proposeResult(
             duelKey, DuelOutcomeOracle.Side(1), 42,
             keccak256("r"), keccak256("h"),
-            uint64(block.timestamp), ""
+            setupDuelStart, ""
         );
 
         vm.warp(block.timestamp + 4000);

@@ -244,6 +244,8 @@ contract GoldClobFuzzTest is Test {
 
     function _resolveDuel(bytes32 duel, DuelOutcomeOracle.Side winner) private {
         _lockDuel(duel);
+        DuelOutcomeOracle.DuelState memory d = oracle.getDuel(duel);
+        if (block.timestamp < d.duelStartTs) vm.warp(d.duelStartTs);
 
         vm.prank(reporter);
         oracle.proposeResult(
@@ -252,7 +254,7 @@ contract GoldClobFuzzTest is Test {
             42,
             _hashLabel("replay"),
             _hashLabel("result"),
-            uint64(block.timestamp + 180),
+            d.duelStartTs,
             "resolved"
         );
         vm.warp(block.timestamp + 3_600);
