@@ -88,4 +88,7 @@ pub enum PredictionMarketError {
 
     #[msg("AMM fixed-point overflow")]
     MathFixedPointOverflow,
+
+    #[msg("Dynamic AMM markets are disabled")]
+    DynamicMarketsDisabled,
 }

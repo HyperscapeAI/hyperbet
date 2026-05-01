@@ -1797,6 +1797,11 @@ export type LvrAmm = {
       "code": 6028,
       "name": "mathFixedPointOverflow",
       "msg": "AMM fixed-point overflow"
+    },
+    {
+      "code": 6029,
+      "name": "dynamicMarketsDisabled",
+      "msg": "Dynamic AMM markets are disabled"
     }
   ],
   "types": [
