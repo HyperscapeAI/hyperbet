@@ -258,7 +258,8 @@ jobs:
         run: bun run dev:bootstrap
 
       - name: Install Playwright browser
-        run: bunx playwright install --with-deps chromium
+        working-directory: packages/hyperbet-${{ matrix.chain }}/app
+        run: ./node_modules/.bin/playwright install --with-deps chromium
 
       - name: AVAX gate posture note
         if: matrix.chain == 'avax'
