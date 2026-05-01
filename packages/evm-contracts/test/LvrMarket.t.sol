@@ -219,6 +219,61 @@ contract LvrMarketTest is Test {
         router.settleMarket(marketAddr);
     }
 
+    function test_ManualSettlementCannotResolveWithoutOracleResult() public {
+        bytes32 duelKey = keccak256("manual-settle-no-oracle-result");
+
+        vm.prank(admin);
+        router.create("Manual Oracle Gate", "Desc", "Src", duelKey, false, DURATION, 100 * 10**18);
+        address marketAddr = _lastMarketAddress();
+        LvrMarket market = LvrMarket(marketAddr);
+
+        vm.warp(block.timestamp + DURATION);
+
+        uint256 bond = market.bondValue();
+        vm.prank(user1);
+        mUSD.approve(address(router), bond);
+        vm.prank(user1);
+        router.proposerOutcome(marketAddr, 0);
+
+        vm.warp(block.timestamp + 5 minutes + 1);
+
+        vm.expectRevert(bytes("Oracle duel not resolved"));
+        router.settleMarket(marketAddr);
+
+        (LvrMarket.MarketState currentState,,,,,,,) = market.getMarketDetails();
+        assertEq(uint256(currentState), uint256(LvrMarket.MarketState.PENDING), "market should stay pending");
+    }
+
+    function test_SettleMarketUsesOracleOutcomeAfterManualProposal() public {
+        bytes32 duelKey = keccak256("manual-settle-oracle-authority");
+        _setupOracleDuel(duelKey);
+
+        vm.prank(admin);
+        router.create("Manual Oracle Override", "Desc", "Src", duelKey, false, DURATION, 100 * 10**18);
+        address marketAddr = _lastMarketAddress();
+        LvrMarket market = LvrMarket(marketAddr);
+
+        vm.warp(block.timestamp + DURATION);
+
+        uint256 bond = market.bondValue();
+        vm.prank(user1);
+        mUSD.approve(address(router), bond);
+        vm.prank(user1);
+        router.proposerOutcome(marketAddr, 0);
+
+        _proposeAndFinalizeOracle(duelKey, DuelOutcomeOracle.Side.B);
+
+        uint256 treasuryBefore = mUSD.balanceOf(treasury);
+        uint256 proposerBefore = mUSD.balanceOf(user1);
+        router.settleMarket(marketAddr);
+
+        (LvrMarket.MarketState currentState,, uint256 mktOutcome,,,,,) = market.getMarketDetails();
+        assertEq(uint256(currentState), uint256(LvrMarket.MarketState.RESOLVED));
+        assertEq(mktOutcome, 1, "manual settlement must use the oracle outcome");
+        assertEq(mUSD.balanceOf(treasury), treasuryBefore + bond, "wrong proposer bond should be slashed");
+        assertEq(mUSD.balanceOf(user1), proposerBefore, "wrong proposer should not receive bond");
+    }
+
     function test_RedeemCollateralPaysWinningSide() public {
         bytes32 duelKey = keccak256("redeem-winning-side");
         _setupOracleDuel(duelKey);
