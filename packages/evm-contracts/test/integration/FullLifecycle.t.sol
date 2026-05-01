@@ -129,9 +129,10 @@ contract FullLifecycleTest is Test {
             d.betOpenTs, d.betCloseTs, d.duelStartTs, "",
             DuelOutcomeOracle.DuelStatus.LOCKED);
 
+        if (block.timestamp < d.duelStartTs) vm.warp(d.duelStartTs);
         vm.prank(reporter);
         duelOracle.proposeResult(duel, DuelOutcomeOracle.Side.A, 42,
-            keccak256("r"), keccak256("h"), uint64(block.timestamp + 100), "");
+            keccak256("r"), keccak256("h"), d.duelStartTs, "");
 
         vm.warp(block.timestamp + 3601);
         vm.prank(finalizer);
@@ -259,10 +260,11 @@ contract FullLifecycleTest is Test {
                 duelOracle.upsertDuel(duels[i], d.participantAHash, d.participantBHash,
                     d.betOpenTs, d.betCloseTs, d.duelStartTs, "",
                     DuelOutcomeOracle.DuelStatus.LOCKED);
+                if (block.timestamp < d.duelStartTs) vm.warp(d.duelStartTs);
                 vm.prank(reporter);
                 duelOracle.proposeResult(duels[i], DuelOutcomeOracle.Side.A, 42,
                     keccak256(abi.encodePacked("r", i)), keccak256(abi.encodePacked("h", i)),
-                    uint64(block.timestamp + 100), "");
+                    d.duelStartTs, "");
                 vm.warp(block.timestamp + 3601);
                 vm.prank(finalizer);
                 duelOracle.finalizeResult(duels[i], "");
@@ -318,9 +320,10 @@ contract FullLifecycleTest is Test {
         duelOracle.upsertDuel(duel, d.participantAHash, d.participantBHash,
             d.betOpenTs, d.betCloseTs, d.duelStartTs, "",
             DuelOutcomeOracle.DuelStatus.LOCKED);
+        if (block.timestamp < d.duelStartTs) vm.warp(d.duelStartTs);
         vm.prank(reporter);
         duelOracle.proposeResult(duel, DuelOutcomeOracle.Side.A, 42,
-            keccak256("r"), keccak256("h"), uint64(block.timestamp + 100), "");
+            keccak256("r"), keccak256("h"), d.duelStartTs, "");
         vm.warp(block.timestamp + 3601);
         vm.prank(finalizer);
         duelOracle.finalizeResult(duel, "");
