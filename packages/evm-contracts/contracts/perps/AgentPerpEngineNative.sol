@@ -391,13 +391,18 @@ contract AgentPerpEngineNative is AccessControl, ReentrancyGuard {
         revert CloseOnlyMode();
     }
 
-    function _assertLeverage(bytes32 agentId, int256 size, uint256 margin) internal view {
+    function _assertPositionHealthy(bytes32 agentId, int256 size, uint256 margin, uint256 entryPrice) internal view {
         if (size == 0) return;
         if (margin == 0) revert Undercollateralized();
         MarketConfig memory config = marketConfigs[agentId];
         uint256 absSize = _abs(size);
-        uint256 execPrice = _getExecutionPrice(agentId, 0);
-        if (Math.mulDiv(absSize, execPrice, margin) > config.maxLeverage) revert MaxLeverageExceeded();
+        uint256 markPrice = _getExecutionPrice(agentId, 0);
+        int256 unrealizedPnl = _realizePnl(size, entryPrice, markPrice, absSize);
+        int256 equity = int256(margin) + unrealizedPnl;
+        if (equity <= 0) revert Underwater();
+
+        uint256 notional = Math.mulDiv(absSize, markPrice, ONE);
+        if (Math.mulDiv(notional, ONE, uint256(equity)) > config.maxLeverage) revert MaxLeverageExceeded();
     }
 
     // ── Position management ──
@@ -502,7 +507,7 @@ contract AgentPerpEngineNative is AccessControl, ReentrancyGuard {
             }
         }
 
-        _assertLeverage(agentId, pos.size, pos.margin);
+        _assertPositionHealthy(agentId, pos.size, pos.margin, pos.entryPrice);
 
         // Track open positions counter
         if (oldSize == 0 && pos.size != 0) {
@@ -524,10 +529,30 @@ contract AgentPerpEngineNative is AccessControl, ReentrancyGuard {
 
     function withdrawMargin(bytes32 agentId, uint256 amount) external nonReentrant {
         if (tradingPaused) revert TradingPaused();
+        if (!marketConfigs[agentId].exists) revert MarketNotFound();
+        _syncOracle(agentId);
+
+        MarketState storage market = markets[agentId];
         Position storage pos = positions[agentId][msg.sender];
+
+        if (pos.size != 0) {
+            int256 rateDelta = market.cumulativeFundingRate - pos.lastCumulativeFundingRate;
+            if (rateDelta != 0) {
+                int256 fundingPayment = (pos.size * rateDelta) / int256(ONE);
+                if (fundingPayment > 0) {
+                    uint256 loss = uint256(fundingPayment);
+                    if (pos.margin < loss) revert Underwater();
+                    pos.margin -= loss;
+                } else {
+                    pos.margin += uint256(-fundingPayment);
+                }
+            }
+            pos.lastCumulativeFundingRate = market.cumulativeFundingRate;
+        }
+
         if (pos.margin < amount) revert InsufficientMargin();
-        _assertLeverage(agentId, pos.size, pos.margin - amount);
         pos.margin -= amount;
+        _assertPositionHealthy(agentId, pos.size, pos.margin, pos.entryPrice);
         emit MarginWithdrawn(agentId, msg.sender, amount);
         Address.sendValue(payable(msg.sender), amount);
     }

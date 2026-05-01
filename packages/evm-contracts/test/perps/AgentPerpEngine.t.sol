@@ -4,6 +4,7 @@ pragma solidity ^0.8.20;
 import "forge-std/Test.sol";
 import "../../contracts/perps/SkillOracle.sol";
 import "../../contracts/perps/AgentPerpEngine.sol";
+import "../../contracts/perps/AgentPerpEngineNative.sol";
 import "../../contracts/MockERC20.sol";
 
 contract AgentPerpEngineTest is Test {
@@ -748,5 +749,57 @@ contract AgentPerpEngineTest is Test {
         // Both fees at 5% (max allowed)
         vm.prank(operator);
         engine.createMarket(agentB, 1_000_000 * 1e18, 5 * 1e18, 1_000, 500, 2 minutes, 0, 500, 500);
+    }
+}
+
+contract AgentPerpEngineNativeHealthTest is Test {
+    SkillOracle oracle;
+    AgentPerpEngineNative engine;
+
+    address admin = address(1);
+    address operator = address(6);
+    address pauser = address(7);
+    address alice = address(2);
+
+    bytes32 agentId = keccak256("MODEL_A");
+
+    function setUp() public {
+        vm.txGasPrice(0);
+        vm.warp(1_000);
+
+        vm.startPrank(admin);
+        oracle = new SkillOracle(100 * 1e18, 2 minutes, admin, admin, pauser);
+        engine = new AgentPerpEngineNative(oracle, 1_000_000 * 1e18, admin, operator, pauser);
+        oracle.updateAgentSkill(agentId, 1500, 0);
+        vm.stopPrank();
+
+        vm.prank(operator);
+        engine.createMarket(agentId);
+
+        vm.deal(alice, 1_000 ether);
+    }
+
+    function testNativeWithdrawMarginRejectsNegativeEquityAfterOracleMove() public {
+        vm.prank(alice);
+        engine.modifyPosition{value: 200 ether}(agentId, int256(5 ether));
+
+        vm.prank(admin);
+        oracle.updateAgentSkill(agentId, 1500, 100);
+
+        vm.expectRevert(AgentPerpEngineNative.Underwater.selector);
+        vm.prank(alice);
+        engine.withdrawMargin(agentId, 1 ether);
+    }
+
+    function testNativeModifyPositionRejectsNegativeEquityAfterOracleMove() public {
+        vm.prank(alice);
+        engine.modifyPosition{value: 200 ether}(agentId, int256(5 ether));
+
+        vm.prank(admin);
+        oracle.updateAgentSkill(agentId, 1500, 100);
+
+        vm.expectRevert(AgentPerpEngineNative.Underwater.selector);
+        vm.prank(alice);
+        engine.modifyPosition{value: 1 ether}(agentId, int256(1 ether));
     }
 }
