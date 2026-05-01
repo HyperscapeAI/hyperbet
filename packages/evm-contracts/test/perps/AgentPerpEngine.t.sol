@@ -4,6 +4,7 @@ pragma solidity ^0.8.20;
 import "forge-std/Test.sol";
 import "../../contracts/perps/SkillOracle.sol";
 import "../../contracts/perps/AgentPerpEngine.sol";
+import "../../contracts/perps/AgentPerpEngineNative.sol";
 import "../../contracts/MockERC20.sol";
 
 contract AgentPerpEngineTest is Test {
@@ -92,6 +93,71 @@ contract AgentPerpEngineTest is Test {
         vm.warp(block.timestamp + 3 minutes);
         vm.expectRevert(AgentPerpEngine.StaleOracle.selector);
         engine.syncOracle(agentId);
+    }
+
+    function testOracleStalenessBlocksLiquidation() public {
+        bytes32 staleAgent = keccak256("STALE_AGENT");
+        bytes32 peerAgent = keccak256("STALE_PEER");
+
+        vm.prank(admin);
+        oracle.updateAgentSkill(staleAgent, 1500, 0);
+        vm.prank(admin);
+        oracle.updateAgentSkill(peerAgent, 1500, 0);
+
+        vm.prank(operator);
+        engine.createMarket(
+            staleAgent,
+            1_000_000 * 1e18,
+            5 * 1e18,
+            1_000,
+            500,
+            1 minutes,
+            0,
+            0,
+            0
+        );
+
+        vm.prank(alice);
+        engine.modifyPosition(staleAgent, 100 * 1e18, 4 * 1e18);
+
+        vm.prank(admin);
+        oracle.updateAgentSkill(staleAgent, 1000, 0);
+
+        vm.warp(block.timestamp + 1 minutes + 1);
+
+        vm.prank(bob);
+        vm.expectRevert(AgentPerpEngine.StaleOracle.selector);
+        engine.liquidate(staleAgent, alice);
+    }
+
+    function testNativeOracleStalenessBlocksLiquidation() public {
+        bytes32 staleAgent = keccak256("NATIVE_STALE_AGENT");
+        bytes32 peerAgent = keccak256("NATIVE_STALE_PEER");
+
+        SkillOracle nativeOracle = new SkillOracle(100 * 1e18, 2 hours, admin, admin, pauser);
+        vm.prank(admin);
+        nativeOracle.updateAgentSkill(staleAgent, 1500, 0);
+        vm.prank(admin);
+        nativeOracle.updateAgentSkill(peerAgent, 1500, 0);
+
+        AgentPerpEngineNative nativeEngine =
+            new AgentPerpEngineNative(nativeOracle, 1_000_000 * 1e18, admin, operator, pauser);
+
+        vm.prank(operator);
+        nativeEngine.createMarket(staleAgent);
+
+        vm.deal(alice, 1_000 ether);
+        vm.prank(alice);
+        nativeEngine.modifyPosition{value: 100 ether}(staleAgent, 4 * 1e18);
+
+        vm.prank(admin);
+        nativeOracle.updateAgentSkill(staleAgent, 1000, 0);
+
+        vm.warp(block.timestamp + nativeEngine.DEFAULT_MAX_ORACLE_DELAY() + 1);
+
+        vm.prank(bob);
+        vm.expectRevert(AgentPerpEngineNative.StaleOracle.selector);
+        nativeEngine.liquidate(staleAgent, alice);
     }
 
     function testOracleStalenessBlocksGetIndexPrice() public {

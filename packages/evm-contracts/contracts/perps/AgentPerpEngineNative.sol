@@ -102,7 +102,6 @@ contract AgentPerpEngineNative is AccessControl, ReentrancyGuard {
     uint256 public immutable fundingVelocity;
     uint256 public immutable maxLeverage;
     bool public tradingPaused;
-    bool private _isLiquidationContext;
 
     event PositionOpened(
         bytes32 indexed agentId,
@@ -249,9 +248,9 @@ contract AgentPerpEngineNative is AccessControl, ReentrancyGuard {
         }
 
         MarketConfig memory config = marketConfigs[agentId];
-        (uint256 mu,, uint256 lastUpdate) = oracle.agentSkills(agentId);
+        (,, uint256 lastUpdate) = oracle.agentSkills(agentId);
         if (lastUpdate == 0) revert UnknownOracleAgent();
-        if (!_isLiquidationContext && block.timestamp - lastUpdate > config.maxOracleDelay) revert StaleOracle();
+        if (block.timestamp - lastUpdate > config.maxOracleDelay) revert StaleOracle();
 
         _updateFunding(agentId);
         price = oracle.getIndexPrice(agentId);
@@ -536,9 +535,7 @@ contract AgentPerpEngineNative is AccessControl, ReentrancyGuard {
 
     function liquidate(bytes32 agentId, address trader) external nonReentrant {
         if (!marketConfigs[agentId].exists) revert MarketNotFound();
-        _isLiquidationContext = true;
         _syncOracle(agentId);
-        _isLiquidationContext = false;
 
         MarketConfig memory config = marketConfigs[agentId];
         MarketState storage market = markets[agentId];
