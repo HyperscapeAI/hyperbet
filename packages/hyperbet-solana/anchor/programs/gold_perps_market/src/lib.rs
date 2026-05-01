@@ -7,6 +7,8 @@ use std::cmp;
 declare_id!("BFbmQbSbf3R6fMDdXKMKQZCTyMhMs9MCcjAhGDBLETXS");
 
 const FUNDING_RATE_PRECISION: i128 = 1_000_000_000;
+// Funding velocity is expressed in Solana 1e9 precision units; EVM-scale 1e12 literals are invalid here.
+const MAX_SOLANA_FUNDING_VELOCITY: u64 = 1_000_000_000;
 const BPS_DENOMINATOR: u64 = 10_000;
 const MARKET_STATUS_ACTIVE: u8 = 0;
 const MARKET_STATUS_CLOSE_ONLY: u8 = 1;
@@ -54,6 +56,7 @@ pub mod gold_perps_market {
     ) -> Result<()> {
         validate_config_inputs(
             default_skew_scale,
+            default_funding_velocity,
             max_oracle_staleness_seconds,
             min_oracle_spot_index,
             max_oracle_spot_index,
@@ -147,6 +150,7 @@ pub mod gold_perps_market {
         );
         validate_config_inputs(
             default_skew_scale,
+            default_funding_velocity,
             max_oracle_staleness_seconds,
             min_oracle_spot_index,
             max_oracle_spot_index,
@@ -905,6 +909,7 @@ fn require_market(market: &MarketState, market_id: u64) -> Result<()> {
 
 fn validate_config_inputs(
     default_skew_scale: u64,
+    default_funding_velocity: u64,
     max_oracle_staleness_seconds: i64,
     min_oracle_spot_index: u64,
     max_oracle_spot_index: u64,
@@ -919,6 +924,10 @@ fn validate_config_inputs(
     trade_market_maker_fee_bps: u16,
 ) -> Result<()> {
     require!(default_skew_scale > 0, PerpsError::InvalidRiskConfig);
+    require!(
+        default_funding_velocity > 0 && default_funding_velocity <= MAX_SOLANA_FUNDING_VELOCITY,
+        PerpsError::InvalidRiskConfig
+    );
     require!(
         max_oracle_staleness_seconds > 0,
         PerpsError::InvalidRiskConfig
@@ -1747,6 +1756,33 @@ pub enum PerpsError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn validate_default_config_with_funding_velocity(default_funding_velocity: u64) -> Result<()> {
+        validate_config_inputs(
+            1_000_000,
+            default_funding_velocity,
+            60,
+            1,
+            1_000_000_000,
+            1_000,
+            10,
+            1,
+            1_000_000_000,
+            1,
+            500,
+            50,
+            10,
+            10,
+        )
+    }
+
+    #[test]
+    fn config_rejects_evm_scale_funding_velocity() {
+        assert!(validate_default_config_with_funding_velocity(1_000).is_ok());
+        assert!(validate_default_config_with_funding_velocity(MAX_SOLANA_FUNDING_VELOCITY).is_ok());
+        assert!(validate_default_config_with_funding_velocity(0).is_err());
+        assert!(validate_default_config_with_funding_velocity(1_000_000_000_000).is_err());
+    }
 
     #[test]
     fn realized_pnl_on_partial_reduction_matches_direction() {
