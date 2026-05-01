@@ -167,6 +167,71 @@ contract GoldClobSettlementTest is Test {
         clob.claim(duel, MARKET_KIND_DUEL_WINNER);
     }
 
+    function testSweepCannotDrainRestingOrderCollateral() public {
+        bytes32 duel = _createOpenMarket("sweep-resting-collateral");
+        uint128 amount = 1_000;
+        uint16 price = 600;
+        uint256 orderValue = _totalOrderValue(SELL_SIDE, price, amount);
+        uint256 refund = _quoteCost(SELL_SIDE, price, amount);
+
+        vm.prank(traderA);
+        clob.placeOrder{value: orderValue}(duel, MARKET_KIND_DUEL_WINNER, SELL_SIDE, price, amount, ORDER_FLAG_GTC);
+
+        assertEq(address(clob).balance, refund, "resting order collateral should be retained");
+
+        vm.expectRevert(bytes("NothingToSweep"));
+        vm.prank(admin);
+        clob.sweepETH(payable(treasury));
+
+        uint256 traderBefore = traderA.balance;
+        vm.prank(traderA);
+        clob.cancelOrder(duel, MARKET_KIND_DUEL_WINNER, 1);
+        assertEq(traderA.balance - traderBefore, refund, "resting collateral must remain refundable");
+    }
+
+    function testSweepCannotDrainResolvedWinnerPayout() public {
+        bytes32 duel = _createOpenMarket("sweep-resolved-payout");
+        uint128 amount = 1_000;
+
+        _matchTrade(duel, 600, amount);
+        _resolveDuel(duel, DuelOutcomeOracle.Side.A);
+
+        vm.expectRevert(bytes("NothingToSweep"));
+        vm.prank(admin);
+        clob.sweepETH(payable(treasury));
+
+        uint256 traderBefore = traderB.balance;
+        vm.prank(traderB);
+        clob.claim(duel, MARKET_KIND_DUEL_WINNER);
+
+        uint256 expectedFee = (uint256(amount) * 200) / 10_000;
+        assertEq(traderB.balance - traderBefore, uint256(amount) - expectedFee, "winner payout must remain claimable");
+    }
+
+    function testSweepTransfersOnlyForcedExcess() public {
+        bytes32 duel = _createOpenMarket("sweep-excess-only");
+        uint128 amount = 1_000;
+        uint16 price = 600;
+        uint256 orderValue = _totalOrderValue(SELL_SIDE, price, amount);
+        uint256 refund = _quoteCost(SELL_SIDE, price, amount);
+
+        vm.prank(traderA);
+        clob.placeOrder{value: orderValue}(duel, MARKET_KIND_DUEL_WINNER, SELL_SIDE, price, amount, ORDER_FLAG_GTC);
+
+        uint256 forcedExcess = 1 ether;
+        vm.deal(admin, forcedExcess);
+        vm.prank(admin);
+        (bool sent,) = payable(address(clob)).call{value: forcedExcess}("");
+        assertTrue(sent, "forced excess transfer failed");
+
+        uint256 treasuryBefore = treasury.balance;
+        vm.prank(admin);
+        clob.sweepETH(payable(treasury));
+
+        assertEq(treasury.balance - treasuryBefore, forcedExcess, "sweep should transfer only excess");
+        assertEq(address(clob).balance, refund, "escrowed collateral must remain in the CLOB");
+    }
+
     function _createOpenMarket(string memory label) private returns (bytes32 duel) {
         duel = _duelKey(label);
         bytes32 participantA = _hashLabel(string.concat(label, "-a"));

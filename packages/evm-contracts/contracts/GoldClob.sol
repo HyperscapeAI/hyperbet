@@ -35,6 +35,7 @@ contract GoldClob is AccessControl, ReentrancyGuard {
     uint256 public tradeTreasuryFeeBps;
     uint256 public tradeMarketMakerFeeBps;
     uint256 public winningsMarketMakerFeeBps;
+    uint256 public reservedNative;
     bool public marketCreationPaused;
     bool public orderPlacementPaused;
 
@@ -390,6 +391,7 @@ contract GoldClob is AccessControl, ReentrancyGuard {
             (progress.executedCost * market.tradeMarketMakerFeeBpsSnapshot) / MAX_FEE_BPS;
         uint256 requiredValue = restingCost + progress.executedCost + tradeTreasuryFee + tradeMarketMakerFee;
         if (msg.value < requiredValue) revert InsufficientNativeValue();
+        _reserveNative(restingCost + progress.executedCost);
         if (tradeTreasuryFee > 0) payable(treasury).sendValue(tradeTreasuryFee);
         if (tradeMarketMakerFee > 0) payable(marketMaker).sendValue(tradeMarketMakerFee);
         uint256 traderRefund = msg.value - requiredValue;
@@ -420,6 +422,7 @@ contract GoldClob is AccessControl, ReentrancyGuard {
         order.prevOrderId = 0;
         order.nextOrderId = 0;
 
+        _releaseNative(refund);
         if (refund > 0) payable(msg.sender).sendValue(refund);
 
         emit OrderCancelled(key, orderId);
@@ -452,6 +455,7 @@ contract GoldClob is AccessControl, ReentrancyGuard {
         order.nextOrderId = 0;
 
         emit OrderCancelled(key, orderId);
+        _releaseNative(refund);
         if (refund > 0) payable(msg.sender).sendValue(refund);
     }
 
@@ -472,11 +476,13 @@ contract GoldClob is AccessControl, ReentrancyGuard {
             if (winningShares > 0) {
                 uint256 fee = (winningShares * market.winningsMarketMakerFeeBpsSnapshot) / MAX_FEE_BPS;
                 payout = winningShares - fee;
+                _releaseNative(winningShares);
                 if (fee > 0) payable(marketMaker).sendValue(fee);
             }
         } else if (status == MarketStatus.CANCELLED) {
             payout = uint256(position.aStake) + uint256(position.bStake);
             _clearPosition(position);
+            _releaseNative(payout);
         } else {
             revert MarketNotSettled();
         }
@@ -893,6 +899,18 @@ contract GoldClob is AccessControl, ReentrancyGuard {
         return orderFlags == ORDER_FLAGS_GTC_POST_ONLY;
     }
 
+    function _reserveNative(uint256 amount) internal {
+        if (amount > 0) {
+            reservedNative += amount;
+        }
+    }
+
+    function _releaseNative(uint256 amount) internal {
+        if (amount > 0) {
+            reservedNative -= amount;
+        }
+    }
+
     function _wouldCrossRestingBook(Market storage market, uint8 side, uint16 price) internal view returns (bool) {
         if (side == BUY_SIDE) {
             return market.bestAsk < MAX_PRICE && market.bestAsk <= price;
@@ -908,10 +926,11 @@ contract GoldClob is AccessControl, ReentrancyGuard {
 
     function sweepETH(address payable to) external onlyRole(DEFAULT_ADMIN_ROLE) nonReentrant {
         uint256 bal = address(this).balance;
-        require(bal > 0, "NothingToSweep");
+        require(bal > reservedNative, "NothingToSweep");
         address payable treasuryRecipient = payable(treasury);
         if (to == address(0) || to != treasuryRecipient) revert InvalidSweepRecipient();
-        treasuryRecipient.sendValue(bal);
-        emit SweepETH(treasuryRecipient, bal);
+        uint256 excess = bal - reservedNative;
+        treasuryRecipient.sendValue(excess);
+        emit SweepETH(treasuryRecipient, excess);
     }
 }
