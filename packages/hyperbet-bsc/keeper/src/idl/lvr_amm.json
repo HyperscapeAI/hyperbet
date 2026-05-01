@@ -674,6 +674,13 @@
           "signer": true
         },
         {
+          "name": "program",
+          "address": "12E8Lz5w8Qxyj8Fh6LgsCgPDQNJMCLMV1y43LhPrH66w"
+        },
+        {
+          "name": "program_data"
+        },
+        {
           "name": "system_program",
           "address": "11111111111111111111111111111111"
         }
@@ -720,6 +727,13 @@
           "name": "signer",
           "writable": true,
           "signer": true
+        },
+        {
+          "name": "program",
+          "address": "12E8Lz5w8Qxyj8Fh6LgsCgPDQNJMCLMV1y43LhPrH66w"
+        },
+        {
+          "name": "program_data"
         },
         {
           "name": "system_program",
@@ -1791,6 +1805,11 @@
       "code": 6028,
       "name": "MathFixedPointOverflow",
       "msg": "AMM fixed-point overflow"
+    },
+    {
+      "code": 6029,
+      "name": "UnauthorizedInitializer",
+      "msg": "Initializer must be the program upgrade authority"
     }
   ],
   "types": [

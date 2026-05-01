@@ -227,6 +227,8 @@ export async function ensureLvrAdmin(
       .accountsPartial({
         adminState,
         signer: authority.publicKey,
+        program: program.programId,
+        programData: deriveProgramDataAddress(program.programId),
         systemProgram: SystemProgram.programId,
       })
       .signers([authority])
@@ -257,6 +259,8 @@ export async function ensureAmmConfig(
       .accountsPartial({
         ammConfig,
         signer: authority.publicKey,
+        program: program.programId,
+        programData: deriveProgramDataAddress(program.programId),
         systemProgram: SystemProgram.programId,
       })
       .signers([authority])
