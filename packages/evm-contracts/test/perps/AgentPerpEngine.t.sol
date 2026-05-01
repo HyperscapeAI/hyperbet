@@ -790,4 +790,16 @@ contract AgentPerpEngineNativeHealthTest is Test {
         vm.prank(alice);
         engine.withdrawMargin(agentId, 1 ether);
     }
+
+    function testNativeModifyPositionRejectsNegativeEquityAfterOracleMove() public {
+        vm.prank(alice);
+        engine.modifyPosition{value: 200 ether}(agentId, int256(5 ether));
+
+        vm.prank(admin);
+        oracle.updateAgentSkill(agentId, 1500, 100);
+
+        vm.expectRevert(AgentPerpEngineNative.Underwater.selector);
+        vm.prank(alice);
+        engine.modifyPosition{value: 1 ether}(agentId, int256(1 ether));
+    }
 }
