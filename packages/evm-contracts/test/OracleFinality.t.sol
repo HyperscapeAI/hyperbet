@@ -274,6 +274,72 @@ contract OracleFinalityTest is Test {
             keccak256("future-replay-2"), keccak256("future-result-2"), 4_001, "");
     }
 
+    function test_reproposeRejectsSameChallengedProposalIdentity() public {
+        bytes32 key = _createLockedDuel(309);
+        vm.warp(4_000);
+
+        bytes32 replayHash = keccak256("disputed-replay");
+        bytes32 resultHash = keccak256("disputed-result");
+
+        vm.prank(reporter);
+        oracle.proposeResult(key, DuelOutcomeOracle.Side.A, 1, replayHash, resultHash, 4_000, "");
+        vm.prank(challenger);
+        oracle.challengeResult(key, "");
+
+        vm.prank(reporter);
+        vm.expectRevert(DuelOutcomeOracle.ProposalExists.selector);
+        oracle.reproposeResult(key, DuelOutcomeOracle.Side.A, 2, replayHash, resultHash, 4_000, "");
+    }
+
+    function test_reproposeDistinctEvidencePreservesChallengedProposal() public {
+        bytes32 key = _createLockedDuel(310);
+        vm.warp(4_000);
+
+        bytes32 originalReplayHash = keccak256("original-replay");
+        bytes32 originalResultHash = keccak256("original-result");
+
+        vm.prank(reporter);
+        bytes32 originalId = oracle.proposeResult(
+            key, DuelOutcomeOracle.Side.A, 1, originalReplayHash, originalResultHash, 4_000, ""
+        );
+        vm.prank(challenger);
+        oracle.challengeResult(key, "");
+
+        bytes32 revisedReplayHash = keccak256("revised-replay");
+        bytes32 revisedResultHash = keccak256("revised-result");
+        vm.prank(reporter);
+        bytes32 revisedId = oracle.reproposeResult(
+            key, DuelOutcomeOracle.Side.A, 2, revisedReplayHash, revisedResultHash, 4_000, ""
+        );
+
+        assertTrue(revisedId != originalId, "reproposal must use distinct evidence identity");
+
+        (
+            bytes32 storedId,
+            bytes32 storedResultHash,
+            bytes32 storedReplayHash,
+            DuelOutcomeOracle.Side storedWinner,
+            uint64 storedSeed,
+            uint64 storedDuelEndTs,
+            uint64 storedProposedAt,
+            bool storedChallenged,
+            bool storedExists
+        ) = oracle.proposals(originalId);
+        assertEq(storedId, originalId, "original proposal id must remain auditable");
+        assertEq(storedResultHash, originalResultHash, "original result hash must remain auditable");
+        assertEq(storedReplayHash, originalReplayHash, "original replay hash must remain auditable");
+        assertEq(uint8(storedWinner), uint8(DuelOutcomeOracle.Side.A), "original winner must remain auditable");
+        assertEq(storedSeed, 1, "original seed must remain auditable");
+        assertEq(storedDuelEndTs, 4_000, "original duel end must remain auditable");
+        assertEq(storedProposedAt, 4_000, "original proposal time must remain auditable");
+        assertTrue(storedChallenged, "original proposal must stay marked challenged");
+        assertTrue(storedExists, "original proposal must stay stored");
+
+        DuelOutcomeOracle.DuelState memory d = oracle.getDuel(key);
+        assertEq(uint8(d.status), uint8(DuelOutcomeOracle.DuelStatus.PROPOSED));
+        assertEq(d.activeProposalId, revisedId);
+    }
+
     function test_noWinnerInCancelled() public {
         bytes32 key = _createLockedDuel(304);
         vm.prank(pauser);

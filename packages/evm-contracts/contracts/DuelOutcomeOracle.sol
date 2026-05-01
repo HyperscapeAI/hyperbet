@@ -347,8 +347,6 @@ contract DuelOutcomeOracle is AccessControl {
         if (winner != Side.A && winner != Side.B) revert InvalidWinner();
         _validateResultTime(duel, duelEndTs);
 
-        delete proposals[duel.activeProposalId];
-
         id = proposalId(duelKey, resultHash, replayHash);
         if (proposals[id].exists) revert ProposalExists();
 
