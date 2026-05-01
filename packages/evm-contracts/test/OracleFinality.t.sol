@@ -61,8 +61,8 @@ contract OracleFinalityTest is Test {
         bytes32 resultHash = keccak256(abi.encode("result", key));
         bytes32 replayHash = keccak256(abi.encode("replay", key));
 
-        // Warp past betCloseTs (2_000) so proposing is allowed
-        if (block.timestamp < 2_001) vm.warp(2_001);
+        // Warp past duelStartTs so a result can exist.
+        if (block.timestamp < 4_000) vm.warp(4_000);
 
         vm.prank(reporter);
         oracle.proposeResult(key, DuelOutcomeOracle.Side.A, 42, replayHash, resultHash, 4_000, "");
@@ -111,8 +111,8 @@ contract OracleFinalityTest is Test {
 
         bytes32 rh = keccak256("r");
         bytes32 rp = keccak256("p");
-        // Warp past betCloseTs (2_000) so proposing is allowed
-        vm.warp(2_001);
+        // Warp past duelStartTs so a result can exist.
+        vm.warp(4_000);
         vm.prank(reporter);
         o.proposeResult(key, DuelOutcomeOracle.Side.A, 1, rp, rh, 4_000, "");
 
@@ -202,7 +202,7 @@ contract OracleFinalityTest is Test {
 
     function test_noWinnerInProposed() public {
         bytes32 key = _createLockedDuel(302);
-        vm.warp(2_001);
+        vm.warp(4_000);
         vm.prank(reporter);
         oracle.proposeResult(key, DuelOutcomeOracle.Side.B, 99,
             keccak256("rp"), keccak256("rh"), 4_000, "");
@@ -212,7 +212,7 @@ contract OracleFinalityTest is Test {
 
     function test_noWinnerInChallenged() public {
         bytes32 key = _createLockedDuel(303);
-        vm.warp(2_001);
+        vm.warp(4_000);
         vm.prank(reporter);
         oracle.proposeResult(key, DuelOutcomeOracle.Side.A, 1,
             keccak256("rp2"), keccak256("rh2"), 4_000, "");
@@ -220,6 +220,58 @@ contract OracleFinalityTest is Test {
         oracle.challengeResult(key, "");
         DuelOutcomeOracle.DuelState memory d = oracle.getDuel(key);
         assertEq(uint8(d.winner), 0);
+    }
+
+    function test_proposeRejectsResultBeforeDuelStart() public {
+        bytes32 key = _createLockedDuel(305);
+        vm.warp(3_000);
+
+        vm.prank(reporter);
+        vm.expectRevert(DuelOutcomeOracle.InvalidDuelEnd.selector);
+        oracle.proposeResult(key, DuelOutcomeOracle.Side.A, 1,
+            keccak256("early-replay"), keccak256("early-result"), 2_000, "");
+    }
+
+    function test_proposeRejectsFutureResultEnd() public {
+        bytes32 key = _createLockedDuel(306);
+        vm.warp(3_000);
+
+        vm.prank(reporter);
+        vm.expectRevert(DuelOutcomeOracle.InvalidDuelEnd.selector);
+        oracle.proposeResult(key, DuelOutcomeOracle.Side.A, 1,
+            keccak256("future-replay"), keccak256("future-result"), 3_001, "");
+    }
+
+    function test_reproposeRejectsResultBeforeDuelStart() public {
+        bytes32 key = _createLockedDuel(307);
+        vm.warp(4_000);
+
+        vm.prank(reporter);
+        oracle.proposeResult(key, DuelOutcomeOracle.Side.A, 1,
+            keccak256("replay"), keccak256("result"), 4_000, "");
+        vm.prank(challenger);
+        oracle.challengeResult(key, "");
+
+        vm.prank(reporter);
+        vm.expectRevert(DuelOutcomeOracle.InvalidDuelEnd.selector);
+        oracle.reproposeResult(key, DuelOutcomeOracle.Side.A, 2,
+            keccak256("early-replay-2"), keccak256("early-result-2"), 2_000, "");
+    }
+
+    function test_reproposeRejectsFutureResultEnd() public {
+        bytes32 key = _createLockedDuel(308);
+        vm.warp(4_000);
+
+        vm.prank(reporter);
+        oracle.proposeResult(key, DuelOutcomeOracle.Side.A, 1,
+            keccak256("replay-future"), keccak256("result-future"), 4_000, "");
+        vm.prank(challenger);
+        oracle.challengeResult(key, "");
+
+        vm.prank(reporter);
+        vm.expectRevert(DuelOutcomeOracle.InvalidDuelEnd.selector);
+        oracle.reproposeResult(key, DuelOutcomeOracle.Side.A, 2,
+            keccak256("future-replay-2"), keccak256("future-result-2"), 4_001, "");
     }
 
     function test_noWinnerInCancelled() public {
@@ -286,7 +338,7 @@ contract OracleFinalityTest is Test {
 
     function test_onlyReporterCanPropose() public {
         bytes32 key = _createLockedDuel(501);
-        vm.warp(2_001);
+        vm.warp(4_000);
         vm.prank(other);
         vm.expectRevert();
         oracle.proposeResult(key, DuelOutcomeOracle.Side.A, 1,
@@ -295,7 +347,7 @@ contract OracleFinalityTest is Test {
 
     function test_onlyFinalizerCanFinalize() public {
         bytes32 key = _createLockedDuel(502);
-        vm.warp(2_001);
+        vm.warp(4_000);
         vm.prank(reporter);
         oracle.proposeResult(key, DuelOutcomeOracle.Side.A, 1,
             keccak256("r3"), keccak256("h3"), 4_000, "");
@@ -308,7 +360,7 @@ contract OracleFinalityTest is Test {
 
     function test_onlyChallengerCanChallenge() public {
         bytes32 key = _createLockedDuel(503);
-        vm.warp(2_001);
+        vm.warp(4_000);
         vm.prank(reporter);
         oracle.proposeResult(key, DuelOutcomeOracle.Side.B, 1,
             keccak256("r4"), keccak256("h4"), 4_000, "");

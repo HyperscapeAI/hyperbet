@@ -370,15 +370,21 @@ async function main() {
       { nonce: await nextNonce(reporter.address) },
     );
     const lockedDuel = await oracle.getDuel(duel);
-    const resolvedBlock = await provider.getBlock("latest");
-    const latestResolvedTs = BigInt(
-      resolvedBlock?.timestamp ?? Math.floor(Date.now() / 1000),
+    const duelStartTs = BigInt(lockedDuel.duelStartTs);
+    const preResultBlock = await provider.getBlock("latest");
+    const preResultTs = BigInt(
+      preResultBlock?.timestamp ?? Math.floor(Date.now() / 1000),
     );
-    const duelBetCloseTs = BigInt(lockedDuel.betCloseTs);
-    const duelEndTs =
-      latestResolvedTs > duelBetCloseTs
-        ? latestResolvedTs
-        : duelBetCloseTs + 1n;
+    if (preResultTs <= duelStartTs) {
+      await provider.send("evm_setNextBlockTimestamp", [
+        Number(duelStartTs + 1n),
+      ]);
+      await provider.send("evm_mine", []);
+    }
+    const resolvedBlock = await provider.getBlock("latest");
+    const duelEndTs = BigInt(
+      resolvedBlock?.timestamp ?? Number(duelStartTs + 1n),
+    );
     await oracleReporter.proposeResult(
       duel,
       WINNER_SIDE_A,

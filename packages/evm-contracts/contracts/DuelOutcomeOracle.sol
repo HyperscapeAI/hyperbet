@@ -290,7 +290,7 @@ contract DuelOutcomeOracle is AccessControl {
         if (duel.status != DuelStatus.LOCKED) revert DuelNotLocked();
         if (block.timestamp < duel.betCloseTs) revert BettingWindowActive();
         if (winner != Side.A && winner != Side.B) revert InvalidWinner();
-        if (duelEndTs < duel.betCloseTs) revert InvalidDuelEnd();
+        _validateResultTime(duel, duelEndTs);
 
         id = proposalId(duelKey, resultHash, replayHash);
         if (proposals[id].exists) revert ProposalExists();
@@ -345,7 +345,7 @@ contract DuelOutcomeOracle is AccessControl {
         _requireSettleable(duel);
         if (duel.status != DuelStatus.CHALLENGED) revert NotChallenged();
         if (winner != Side.A && winner != Side.B) revert InvalidWinner();
-        if (duelEndTs < duel.betCloseTs) revert InvalidDuelEnd();
+        _validateResultTime(duel, duelEndTs);
 
         delete proposals[duel.activeProposalId];
 
@@ -406,5 +406,11 @@ contract DuelOutcomeOracle is AccessControl {
     function _requireSettleable(DuelState storage duel) private view {
         if (duel.status == DuelStatus.RESOLVED) revert DuelAlreadyResolved();
         if (duel.status == DuelStatus.CANCELLED) revert DuelAlreadyCancelled();
+    }
+
+    function _validateResultTime(DuelState storage duel, uint64 duelEndTs) private view {
+        if (duelEndTs < duel.betCloseTs) revert InvalidDuelEnd();
+        if (duelEndTs < duel.duelStartTs) revert InvalidDuelEnd();
+        if (duelEndTs > block.timestamp) revert InvalidDuelEnd();
     }
 }

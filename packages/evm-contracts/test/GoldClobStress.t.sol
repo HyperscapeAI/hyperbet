@@ -69,9 +69,10 @@ contract GoldClobStressTest is Test {
         vm.prank(reporter);
         oracle.upsertDuel(duel, d.participantAHash, d.participantBHash,
             d.betOpenTs, d.betCloseTs, d.duelStartTs, "", DuelOutcomeOracle.DuelStatus.LOCKED);
+        if (block.timestamp < d.duelStartTs) vm.warp(d.duelStartTs);
         vm.prank(reporter);
         oracle.proposeResult(duel, winner, 42, keccak256("r"), keccak256("h"),
-            uint64(block.timestamp + 100), "");
+            d.duelStartTs, "");
         vm.warp(block.timestamp + 3_601);
         vm.prank(finalizer);
         oracle.finalizeResult(duel, "");
