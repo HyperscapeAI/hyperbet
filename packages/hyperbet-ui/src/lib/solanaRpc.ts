@@ -60,6 +60,57 @@ interface SignatureStatusesResult {
   } | null>;
 }
 
+export type SolanaSignatureInspection =
+  | {
+      state: "not_found";
+      confirmationStatus: null;
+      error: null;
+    }
+  | {
+      state: "pending";
+      confirmationStatus: "processed" | null;
+      error: null;
+    }
+  | {
+      state: "confirmed";
+      confirmationStatus: "confirmed" | "finalized";
+      error: null;
+    }
+  | {
+      state: "failed";
+      confirmationStatus: "processed" | "confirmed" | "finalized" | null;
+      error: unknown;
+    };
+
+export class SolanaTransactionExpiredError extends Error {
+  readonly code = "SOLANA_TRANSACTION_EXPIRED";
+
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
+    this.name = "SolanaTransactionExpiredError";
+  }
+}
+
+export function isSolanaTransactionExpiredError(error: unknown): boolean {
+  let current: unknown = error;
+  const seen = new Set<unknown>();
+  while (current && !seen.has(current)) {
+    seen.add(current);
+    if (current instanceof SolanaTransactionExpiredError) return true;
+    const message =
+      current instanceof Error ? current.message : String(current ?? "");
+    if (
+      /blockhash not found|block height exceeded|blockheight exceeded|transaction expired|signature has expired/i.test(
+        message,
+      )
+    ) {
+      return true;
+    }
+    current = current instanceof Error ? current.cause : null;
+  }
+  return false;
+}
+
 function isJsonRpcFailure<T>(
   payload: JsonRpcResponse<T>,
 ): payload is JsonRpcFailure {
@@ -88,7 +139,9 @@ function resolveRpcEndpoint(endpoint: string): string {
 
 function isKeeperSolanaReadProxyEndpoint(endpoint: string): boolean {
   try {
-    return new URL(resolveRpcEndpoint(endpoint)).pathname === "/api/proxy/solana/rpc";
+    return (
+      new URL(resolveRpcEndpoint(endpoint)).pathname === "/api/proxy/solana/rpc"
+    );
   } catch {
     return false;
   }
@@ -163,7 +216,8 @@ async function sendTransactionViaProxySender(
     | { error?: string };
   if (!response.ok || !("signature" in payload)) {
     throw new Error(
-      ("error" in payload && payload.error) || `sendTransaction HTTP ${response.status}`,
+      ("error" in payload && payload.error) ||
+        `sendTransaction HTTP ${response.status}`,
     );
   }
   return payload.signature;
@@ -245,11 +299,83 @@ async function getSignatureStatusesViaConnection(
   }
 }
 
+/**
+ * Inspect a known signed transaction without submitting it again.
+ *
+ * A missing status is intentionally distinct from failure: a recently sent
+ * transaction may not have reached the queried RPC node yet. Callers must keep
+ * retry blocked until this returns a confirmed or failed terminal result.
+ */
+export async function inspectSignatureViaRpc(
+  connection: Connection,
+  signature: string,
+): Promise<SolanaSignatureInspection> {
+  const normalizedSignature = signature.trim();
+  if (!normalizedSignature) {
+    throw new Error("Transaction signature is required for status inspection");
+  }
+
+  const result = await getSignatureStatusesViaConnection(
+    connection,
+    normalizedSignature,
+  );
+  const status = result.value[0];
+  if (!status) {
+    return {
+      state: "not_found",
+      confirmationStatus: null,
+      error: null,
+    };
+  }
+  if (status.err) {
+    return {
+      state: "failed",
+      confirmationStatus: status.confirmationStatus,
+      error: status.err,
+    };
+  }
+  if (
+    status.confirmationStatus === "confirmed" ||
+    status.confirmationStatus === "finalized"
+  ) {
+    return {
+      state: "confirmed",
+      confirmationStatus: status.confirmationStatus,
+      error: null,
+    };
+  }
+  return {
+    state: "pending",
+    confirmationStatus:
+      status.confirmationStatus === "processed" ? "processed" : null,
+    error: null,
+  };
+}
+
+async function getBlockHeightViaRpc(connection: Connection): Promise<number> {
+  try {
+    return await connection.getBlockHeight("confirmed");
+  } catch {
+    return callJsonRpc<number>(connection.rpcEndpoint, "getBlockHeight", [
+      { commitment: "confirmed" },
+    ]);
+  }
+}
+
+type SignatureConfirmationOptions = {
+  timeoutMs?: number;
+  lastValidBlockHeight?: number;
+};
+
 export async function confirmSignatureViaRpc(
   connection: Connection,
   signature: string,
-  timeoutMs = 30_000,
+  options: number | SignatureConfirmationOptions = {},
 ): Promise<void> {
+  const timeoutMs =
+    typeof options === "number" ? options : (options.timeoutMs ?? 30_000);
+  const lastValidBlockHeight =
+    typeof options === "number" ? undefined : options.lastValidBlockHeight;
   const startedAt = Date.now();
   while (Date.now() - startedAt < timeoutMs) {
     const result = await getSignatureStatusesViaConnection(
@@ -265,6 +391,14 @@ export async function confirmSignatureViaRpc(
       status?.confirmationStatus === "finalized"
     ) {
       return;
+    }
+    if (lastValidBlockHeight != null) {
+      const currentBlockHeight = await getBlockHeightViaRpc(connection);
+      if (currentBlockHeight > lastValidBlockHeight) {
+        throw new SolanaTransactionExpiredError(
+          `Transaction ${signature} expired before confirmation; review the latest quote and sign a fresh transaction. It was not automatically resubmitted.`,
+        );
+      }
     }
     await new Promise((resolve) => {
       window.setTimeout(resolve, 500);

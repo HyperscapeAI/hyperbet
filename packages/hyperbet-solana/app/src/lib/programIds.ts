@@ -1,15 +1,7 @@
 import { PublicKey } from "@solana/web3.js";
 
 import { CONFIG } from "./config";
-import {
-  FIGHT_ORACLE_PROGRAM_ADDRESS,
-} from "../generated/fight-oracle/programs";
-import {
-  GOLD_CLOB_MARKET_PROGRAM_ADDRESS,
-} from "../generated/gold-clob-market/programs";
-import {
-  GOLD_PERPS_MARKET_PROGRAM_ADDRESS,
-} from "../generated/gold-perps-market/programs";
+import { FIGHT_ORACLE_PROGRAM_ADDRESS } from "../generated/fight-oracle/programs";
 
 function configuredAddress(configured: string, fallback: string): string {
   const trimmed = configured.trim();
@@ -21,33 +13,4 @@ export const fightOracleProgramAddress = configuredAddress(
   FIGHT_ORACLE_PROGRAM_ADDRESS,
 );
 
-export const goldClobMarketProgramAddress = configuredAddress(
-  CONFIG.goldClobMarketProgramId,
-  GOLD_CLOB_MARKET_PROGRAM_ADDRESS,
-);
-
-export const goldPerpsMarketProgramAddress = configuredAddress(
-  CONFIG.goldPerpsMarketProgramId,
-  GOLD_PERPS_MARKET_PROGRAM_ADDRESS,
-);
-
-export const FIGHT_ORACLE_PROGRAM_ID = new PublicKey(
-  fightOracleProgramAddress,
-);
-
-export const GOLD_CLOB_MARKET_PROGRAM_ID = new PublicKey(
-  goldClobMarketProgramAddress,
-);
-
-export const GOLD_PERPS_MARKET_PROGRAM_ID = new PublicKey(
-  goldPerpsMarketProgramAddress,
-);
-
-export const goldAmmMarketProgramAddress = configuredAddress(
-  CONFIG.goldAmmMarketProgramId,
-  "12E8Lz5w8Qxyj8Fh6LgsCgPDQNJMCLMV1y43LhPrH66w",
-);
-
-export const GOLD_AMM_MARKET_PROGRAM_ID = new PublicKey(
-  goldAmmMarketProgramAddress,
-);
+export const FIGHT_ORACLE_PROGRAM_ID = new PublicKey(fightOracleProgramAddress);

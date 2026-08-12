@@ -8,17 +8,13 @@ import {
   useRef,
   useState,
 } from "react";
-import { PublicKey } from "@solana/web3.js";
-import {
-  resolveUiLocale,
-  type UiLocale,
-} from "@hyperbet/ui/i18n";
+import { LAMPORTS_PER_SOL, PublicKey } from "@solana/web3.js";
+import { resolveUiLocale, type UiLocale } from "@hyperbet/ui/i18n";
 
 import {
   DEFAULT_REFRESH_INTERVAL_MS,
   CONFIG,
   GAME_API_URL,
-  GOLD_DECIMALS,
   UI_SYNC_DELAY_MS,
   getFixedMatchId,
   getCluster,
@@ -31,10 +27,21 @@ import {
 import {
   normalizePredictionMarketDuelKeyHex,
   usePredictionMarketLifecycle,
-} from "@hyperbet/ui/lib/predictionMarkets";
-import { useAppConnection, useAppWallet, useAppWalletModal } from "./lib/appWallet";
+} from "@hyperbet/ui/lib/solanaPredictionMarkets";
+import {
+  useAppConnection,
+  useAppWallet,
+  useAppWalletModal,
+} from "./lib/appWallet";
+import {
+  deriveSolanaBettorShellState,
+  getSolanaBettorShellMessage,
+  resolvePublicLegalDocumentUrls,
+} from "./lib/solanaBettorShell";
+import { useSolanaLaunchReadiness } from "./lib/useSolanaLaunchReadiness";
+import { inspectSolanaClusterIdentity } from "./lib/solanaClusterIdentity";
 import { StreamPlayer } from "@hyperbet/ui/components/StreamPlayer";
-import { PointsDisplay } from "@hyperbet/ui/components/PointsDisplay";
+import { SolanaPointsDisplay } from "@hyperbet/ui/components/SolanaPointsDisplay";
 import type { SolanaClobMarketSnapshot } from "@hyperbet/ui/components/SolanaClobPanel";
 import { getDuelStateDecoder } from "./generated/fight-oracle/accounts";
 import {
@@ -42,12 +49,15 @@ import {
   identifyFightOracleAccount,
   FIGHT_ORACLE_PROGRAM_ADDRESS,
 } from "./generated/fight-oracle/programs";
-import {
-  GOLD_CLOB_MARKET_PROGRAM_ADDRESS,
-} from "./generated/gold-clob-market/programs";
 import { FIGHT_ORACLE_PROGRAM_ID } from "./lib/programIds";
 import { useStreamingState } from "./spectator/useStreamingState";
-import { useDuelContext } from "@hyperbet/ui/spectator/useDuelContext";
+import {
+  deriveSpectatorPresentationState,
+  getSpectatorStatusCopy,
+  getStreamRecoveryHeading,
+  selectSpectatorDisplayPhase,
+  selectSpectatorPresentationUpdate,
+} from "./spectator/presentation";
 import type { LeaderboardEntry } from "./spectator/types";
 import { useResizePanel, useIsMobile } from "@hyperbet/ui/lib/useResizePanel";
 import { ResizeHandle } from "@hyperbet/ui/components/ResizeHandle";
@@ -62,7 +72,7 @@ import {
 } from "recharts";
 
 // ── Shared UI utilities ──────────────────────────────────────────────────────
-function formatGold(v: number, locale: UiLocale = "en"): string {
+function formatAmount(v: number, locale: UiLocale = "en"): string {
   if (locale === "zh" || locale === "ko") {
     const yi = locale === "zh" ? "亿" : "억";
     const wan = locale === "zh" ? "万" : "만";
@@ -117,7 +127,12 @@ function readSolanaE2eRuntimeOverride(): {
 function formatTimeAgo(ts: number, locale: UiLocale = "en"): string {
   const ago = Math.floor((Date.now() - ts) / 1000);
   if (ago < 0) {
-    const nowMap: Record<string, string> = { zh: "刚刚", ko: "방금", pt: "agora", es: "ahora" };
+    const nowMap: Record<string, string> = {
+      zh: "刚刚",
+      ko: "방금",
+      pt: "agora",
+      es: "ahora",
+    };
     return nowMap[locale] ?? "just now";
   }
   const mins = Math.floor(ago / 60);
@@ -152,7 +167,6 @@ function getAppCopy(locale: UiLocale) {
       loadingHistory: "正在加载历史",
       loadingReferral: "正在加载推荐",
       loadingAgentStats: "正在加载代理数据",
-      loadingModelMarkets: "正在加载模型市场",
       leaderboardAndStats: "排行榜与统计",
       unmuteStream: "开启声音",
       muteStream: "静音",
@@ -198,17 +212,17 @@ function getAppCopy(locale: UiLocale) {
       terms: "条款",
       privacy: "隐私",
       round: (value: string) => `第 ${value} 回合`,
-      modelsStatus: (count: number) => `模型市场 · ${count} 个已排名模型`,
       live: "直播",
       stable: "稳定",
       synthetic: "合成",
       phaseLive: "直播",
-      phaseStarting: (value: string | number | null) => `即将开始 ${value ?? ""}`,
+      phaseStarting: (value: string | number | null) =>
+        `即将开始 ${value ?? ""}`,
       phaseResolved: "已结算",
       phaseNextMatch: "下一场",
       phaseIdle: "空闲",
       bettingUnavailable: (cluster: string) =>
-        `${cluster} 上的下注暂时不可用。请稍后重试或切换链。`,
+        `${cluster} 上的下注暂时不可用。请稍后重试并检查 Solana 连接。`,
       record: (wins: number, losses: number) => `${wins}胜-${losses}负`,
       streakValue: (value: number) => `${value}连胜`,
       level: (value: number) => ` · 等级 ${value}`,
@@ -228,7 +242,6 @@ function getAppCopy(locale: UiLocale) {
       loadingHistory: "기록 로딩 중",
       loadingReferral: "추천 로딩 중",
       loadingAgentStats: "에이전트 통계 로딩 중",
-      loadingModelMarkets: "모델 마켓 로딩 중",
       leaderboardAndStats: "리더보드 & 통계",
       unmuteStream: "소리 켜기",
       muteStream: "음소거",
@@ -274,17 +287,17 @@ function getAppCopy(locale: UiLocale) {
       terms: "이용약관",
       privacy: "개인정보",
       round: (value: string) => `${value}라운드`,
-      modelsStatus: (count: number) => `모델 마켓 · ${count}개 랭크 모델`,
       live: "라이브",
       stable: "안정",
       synthetic: "합성",
       phaseLive: "라이브",
-      phaseStarting: (value: string | number | null) => `시작 중 ${value ?? ""}`,
+      phaseStarting: (value: string | number | null) =>
+        `시작 중 ${value ?? ""}`,
       phaseResolved: "정산 완료",
       phaseNextMatch: "다음 경기",
       phaseIdle: "대기",
       bettingUnavailable: (cluster: string) =>
-        `${cluster}에서 베팅이 일시적으로 불가능합니다. 나중에 다시 시도하거나 체인을 변경하세요.`,
+        `${cluster}에서 베팅이 일시적으로 불가능합니다. 나중에 다시 시도하고 Solana 연결을 확인하세요.`,
       record: (wins: number, losses: number) => `${wins}승-${losses}패`,
       streakValue: (value: number) => `${value}연승`,
       level: (value: number) => ` · Lv.${value}`,
@@ -304,7 +317,6 @@ function getAppCopy(locale: UiLocale) {
       loadingHistory: "Carregando histórico",
       loadingReferral: "Carregando indicação",
       loadingAgentStats: "Carregando estatísticas do agente",
-      loadingModelMarkets: "Carregando mercados de modelos",
       leaderboardAndStats: "Ranking & Estatísticas",
       unmuteStream: "Ativar som",
       muteStream: "Silenciar",
@@ -350,17 +362,17 @@ function getAppCopy(locale: UiLocale) {
       terms: "Termos",
       privacy: "Privacidade",
       round: (value: string) => `Rodada #${value}`,
-      modelsStatus: (count: number) => `MERCADO DE MODELOS · ${count} modelos classificados`,
       live: "AO VIVO",
       stable: "ESTÁVEL",
       synthetic: "SINTÉTICO",
       phaseLive: "AO VIVO",
-      phaseStarting: (value: string | number | null) => `Iniciando ${value ?? ""}`,
+      phaseStarting: (value: string | number | null) =>
+        `Iniciando ${value ?? ""}`,
       phaseResolved: "RESOLVIDO",
       phaseNextMatch: "PRÓXIMA PARTIDA",
       phaseIdle: "INATIVO",
       bettingUnavailable: (cluster: string) =>
-        `Apostas temporariamente indisponíveis em ${cluster}. Tente novamente mais tarde ou troque de cadeia.`,
+        `Apostas temporariamente indisponíveis em ${cluster}. Tente novamente mais tarde e verifique a conexão Solana.`,
       record: (wins: number, losses: number) => `${wins}V-${losses}D`,
       streakValue: (value: number) => `${value}V`,
       level: (value: number) => ` · Nv.${value}`,
@@ -380,7 +392,6 @@ function getAppCopy(locale: UiLocale) {
       loadingHistory: "Cargando historial",
       loadingReferral: "Cargando referidos",
       loadingAgentStats: "Cargando estadísticas del agente",
-      loadingModelMarkets: "Cargando mercados de modelos",
       leaderboardAndStats: "Ranking y Stats",
       unmuteStream: "Activar sonido",
       muteStream: "Silenciar",
@@ -426,17 +437,17 @@ function getAppCopy(locale: UiLocale) {
       terms: "Términos",
       privacy: "Privacidad",
       round: (value: string) => `Ronda #${value}`,
-      modelsStatus: (count: number) => `MERCADO DE MODELOS · ${count} modelos clasificados`,
       live: "EN VIVO",
       stable: "ESTABLE",
       synthetic: "SINTÉTICO",
       phaseLive: "EN VIVO",
-      phaseStarting: (value: string | number | null) => `Iniciando ${value ?? ""}`,
+      phaseStarting: (value: string | number | null) =>
+        `Iniciando ${value ?? ""}`,
       phaseResolved: "RESUELTO",
       phaseNextMatch: "SIGUIENTE PARTIDA",
       phaseIdle: "INACTIVO",
       bettingUnavailable: (cluster: string) =>
-        `Las apuestas no están disponibles temporalmente en ${cluster}. Intenta de nuevo más tarde o cambia de cadena.`,
+        `Las apuestas no están disponibles temporalmente en ${cluster}. Inténtalo más tarde y comprueba la conexión de Solana.`,
       record: (wins: number, losses: number) => `${wins}V-${losses}D`,
       streakValue: (value: number) => `${value}V`,
       level: (value: number) => ` · Nv.${value}`,
@@ -455,7 +466,6 @@ function getAppCopy(locale: UiLocale) {
     loadingHistory: "Loading history",
     loadingReferral: "Loading referral",
     loadingAgentStats: "Loading agent stats",
-    loadingModelMarkets: "Loading model markets",
     leaderboardAndStats: "Leaderboard & Stats",
     unmuteStream: "Unmute stream",
     muteStream: "Mute stream",
@@ -501,7 +511,6 @@ function getAppCopy(locale: UiLocale) {
     terms: "Terms",
     privacy: "Privacy",
     round: (value: string) => `Round #${value}`,
-    modelsStatus: (count: number) => `MODELS MARKET · ${count} ranked models`,
     live: "LIVE",
     stable: "STABLE",
     synthetic: "SYNTHETIC",
@@ -511,7 +520,7 @@ function getAppCopy(locale: UiLocale) {
     phaseNextMatch: "NEXT MATCH",
     phaseIdle: "IDLE",
     bettingUnavailable: (cluster: string) =>
-      `Betting is temporarily unavailable on ${cluster}. Please try again later or switch chain.`,
+      `Betting is temporarily unavailable on ${cluster}. Please try again later and check the Solana connection.`,
     record: (wins: number, losses: number) => `${wins}W-${losses}L`,
     streakValue: (value: number) => `${value}W`,
     level: (value: number) => ` · Lv.${value}`,
@@ -552,6 +561,37 @@ function truncateAddr(addr: string): string {
   return `${addr.slice(0, 6)}...${addr.slice(-4)}`;
 }
 
+function formatItemLabel(itemId: string): string {
+  return itemId
+    .split("_")
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function formatWinReason(reason: string | null): string | null {
+  if (!reason) return null;
+  switch (reason.trim().toLowerCase()) {
+    case "kill":
+      return "Knockout";
+    case "hp_advantage":
+      return "Health advantage at the time limit";
+    case "forfeit":
+      return "Forfeit";
+    case "timeout":
+      return "Time limit reached";
+    default:
+      return null;
+  }
+}
+
+function formatAgentWinRate(wins: number, losses: number): string {
+  const decidedDuels = Math.max(0, wins) + Math.max(0, losses);
+  const percent =
+    decidedDuels > 0 ? (Math.max(0, wins) / decidedDuels) * 100 : 0;
+  return `${percent.toFixed(1)}%`;
+}
+
 type BetSide = "YES" | "NO";
 
 type DiscoveredMatch = {
@@ -561,8 +601,8 @@ type DiscoveredMatch = {
   closeTs: number;
   resolvedTs: number | null;
   winner: BetSide | null;
-  agent1Name: string;
-  agent2Name: string;
+  agent1Name: string | null;
+  agent2Name: string | null;
 };
 
 type DuelMetadata = {
@@ -574,13 +614,16 @@ type DuelMetadata = {
 
 type ProgramDeploymentState = {
   checked: boolean;
+  cluster: boolean;
   oracle: boolean;
   market: boolean;
 };
 
 const EMPTY_SOLANA_CLOB_SNAPSHOT: SolanaClobMarketSnapshot = {
+  duelKeyHex: null,
   matchLabel: "-",
   marketStatus: "PENDING",
+  yesProbabilityPercent: null,
   yesPool: 0n,
   noPool: 0n,
   bids: [],
@@ -588,6 +631,7 @@ const EMPTY_SOLANA_CLOB_SNAPSHOT: SolanaClobMarketSnapshot = {
   recentTrades: [],
   chartData: [],
 };
+const BETTOR_STREAM_MAX_AGE_MS = 15_000;
 
 function normalizeTimestamp(value: number): number {
   if (value > 1_000_000_000_000) return Math.floor(value / 1000);
@@ -627,18 +671,13 @@ function sideFromEnum(value: unknown): BetSide | null {
   return null;
 }
 
-function goldDisplay(amount: unknown): string {
+function solDisplay(amount: unknown): string {
   const raw = asNumber(amount, 0);
-  return (raw / 10 ** GOLD_DECIMALS).toFixed(6);
+  return (raw / LAMPORTS_PER_SOL).toFixed(6);
 }
 const SolanaClobPanel = lazy(() =>
   import("./components/SolanaClobPanel").then((module) => ({
     default: module.SolanaClobPanel,
-  })),
-);
-const ModelsMarketView = lazy(() =>
-  import("./components/ModelsMarketView").then((module) => ({
-    default: module.ModelsMarketView,
   })),
 );
 const PointsLeaderboard = lazy(() =>
@@ -651,9 +690,9 @@ const PointsHistory = lazy(() =>
     default: module.PointsHistory,
   })),
 );
-const ReferralPanel = lazy(() =>
-  import("@hyperbet/ui/components/ReferralPanel").then((module) => ({
-    default: module.ReferralPanel,
+const SolanaReferralPanel = lazy(() =>
+  import("@hyperbet/ui/components/SolanaReferralPanel").then((module) => ({
+    default: module.SolanaReferralPanel,
   })),
 );
 function PanelFallback({
@@ -692,12 +731,15 @@ export function App() {
   const isE2eMode = import.meta.env.MODE === "e2e";
   const isE2eDebugMode =
     isE2eMode && new URLSearchParams(window.location.search).has("debug");
-  const solanaWalletAddress = wallet.publicKey?.toBase58() ?? null;
-  const shouldPollChainData = true;
+  const isLocalTestCluster = getCluster() === "localnet";
+  const transactionsEnabled = CONFIG.transactionsEnabled;
+  const solanaWalletAddress = transactionsEnabled
+    ? (wallet.publicKey?.toBase58() ?? null)
+    : null;
+  const shouldPollChainData = transactionsEnabled;
   const pointsWalletAddress = solanaWalletAddress;
   const invitePlatformQuery = "solana";
 
-  const [surfaceMode, setSurfaceMode] = useState<"DUELS" | "MODELS">("DUELS");
   const [status, setStatus] = useState<string>("");
   const [currentMatch, setCurrentMatch] = useState<DiscoveredMatch | null>(
     null,
@@ -707,6 +749,7 @@ export function App() {
   const [programDeployment, setProgramDeployment] =
     useState<ProgramDeploymentState>({
       checked: false,
+      cluster: false,
       oracle: false,
       market: false,
     });
@@ -719,7 +762,7 @@ export function App() {
   const [streamSourceIndex, setStreamSourceIndex] = useState(0);
   const [showPointsDrawer, setShowPointsDrawer] = useState(false);
   const rpcUnavailableStatus =
-    "Refresh unavailable: missing Solana RPC/wallet context";
+    "Market data is temporarily unavailable. Please try again shortly.";
 
   // ── Resizable panels ─────────────────────────────────────────────────────
   // Track mobile breakpoint — inline resize styles must NOT apply on mobile
@@ -728,28 +771,41 @@ export function App() {
 
   // Sidebar width (right column)
   const { size: sidebarWidthPx, startDrag: startSidebarDrag } = useResizePanel({
-    initial: 320,
-    min: 200,
-    max: 640,
-    storageKey: "hs-panel-sidebar",
+    initial: 344,
+    min: 300,
+    max: 520,
+    storageKey: "hyperia-duel-sidebar-v2",
   });
   // Bottom panel height
   const { size: bottomHeightPx, startDrag: startBottomDrag } = useResizePanel({
-    initial: 240,
-    min: 80,
-    max: 560,
-    storageKey: "hs-panel-bottom",
+    initial: 200,
+    min: 140,
+    max: 360,
+    storageKey: "hyperia-duel-bottom-v2",
   });
   const [pointsDrawerTab, setPointsDrawerTab] = useState<
     "leaderboard" | "history" | "referral"
   >("leaderboard");
   const appRootRef = useRef<HTMLDivElement | null>(null);
   const bettingDockInnerRef = useRef<HTMLDivElement | null>(null);
+  const [streamPlaybackDateMs, setStreamPlaybackDateMs] = useState<
+    number | null
+  >(null);
 
-  const { state: streamingState } = useStreamingState();
-  const { context: duelContext } = useDuelContext();
-  const liveCycle = streamingState?.cycle ?? null;
-  const { market: lifecycleMarket } = usePredictionMarketLifecycle("solana");
+  const {
+    state: streamingState,
+    isConnected: streamingConnected,
+    isRendererReady,
+  } = useStreamingState({ presentationTimeMs: streamPlaybackDateMs });
+  const launchReadiness = useSolanaLaunchReadiness({
+    enabled: transactionsEnabled,
+  });
+  const rawLiveCycle = streamingState?.cycle ?? null;
+  const lastPresentableMatchRef = useRef<NonNullable<
+    typeof streamingState
+  > | null>(null);
+  const { duel: lifecycleDuel, market: lifecycleMarket } =
+    usePredictionMarketLifecycle("solana");
   const runtimeE2eOverride = useMemo(
     () =>
       isE2eMode
@@ -763,18 +819,49 @@ export function App() {
   );
   const streamSources = STREAM_URLS;
   const activeStreamUrl = streamSources[streamSourceIndex] ?? "";
+  const [streamPlaybackReady, setStreamPlaybackReady] = useState(false);
+  const legalDocumentUrls = useMemo(
+    () =>
+      resolvePublicLegalDocumentUrls(
+        {
+          termsUrl: import.meta.env.VITE_TERMS_URL,
+          privacyUrl: import.meta.env.VITE_PRIVACY_URL,
+        },
+        window.location.origin,
+      ),
+    [],
+  );
 
   const switchToBackupStream = useCallback(() => {
+    setStreamPlaybackReady(false);
     setStreamSourceIndex((current) =>
       current + 1 < streamSources.length ? current + 1 : current,
     );
   }, [streamSources.length]);
 
   const cycleStreamSource = useCallback(() => {
+    setStreamPlaybackReady(false);
     setStreamSourceIndex((current) =>
       streamSources.length > 1 ? (current + 1) % streamSources.length : current,
     );
   }, [streamSources.length]);
+
+  const handleStreamReady = useCallback(() => {
+    setStreamPlaybackReady(true);
+  }, []);
+
+  const handleStreamUnavailable = useCallback(() => {
+    setStreamPlaybackDateMs(null);
+    setStreamPlaybackReady(false);
+    switchToBackupStream();
+  }, [switchToBackupStream]);
+
+  const handleStreamPlaybackDateChange = useCallback(
+    (playbackDateMs: number | null) => {
+      setStreamPlaybackDateMs(playbackDateMs);
+    },
+    [],
+  );
 
   useEffect(() => {
     if (streamSourceIndex < streamSources.length) return;
@@ -854,14 +941,22 @@ export function App() {
 
   const programsReady =
     programDeployment.checked &&
+    programDeployment.cluster &&
     programDeployment.oracle &&
     programDeployment.market;
 
   const missingProgramMessage = useMemo(() => {
+    if (!programDeployment.cluster) {
+      return `The Solana RPC network does not match ${getCluster()}. Trading is disabled.`;
+    }
     if (getCluster() === "localnet") return "";
     if (programDeployment.oracle && programDeployment.market) return "";
     return `Betting is temporarily unavailable on ${getCluster()}. Please try again later.`;
-  }, [programDeployment.oracle, programDeployment.market]);
+  }, [
+    programDeployment.cluster,
+    programDeployment.oracle,
+    programDeployment.market,
+  ]);
 
   useEffect(() => {
     const id = window.setInterval(() => {
@@ -872,7 +967,12 @@ export function App() {
 
   useEffect(() => {
     if (!shouldPollChainData) {
-      setProgramDeployment({ checked: true, oracle: true, market: true });
+      setProgramDeployment({
+        checked: true,
+        cluster: true,
+        oracle: true,
+        market: true,
+      });
       return;
     }
     if (
@@ -880,7 +980,12 @@ export function App() {
       typeof (connection as { getAccountInfo?: unknown }).getAccountInfo !==
         "function"
     ) {
-      setProgramDeployment({ checked: true, oracle: false, market: false });
+      setProgramDeployment({
+        checked: true,
+        cluster: false,
+        oracle: false,
+        market: false,
+      });
       setStatus(rpcUnavailableStatus);
       return;
     }
@@ -888,7 +993,8 @@ export function App() {
     let cancelled = false;
     void (async () => {
       try {
-        const [oracleInfo, marketInfo] = await Promise.all([
+        const [clusterIdentity, oracleInfo, marketInfo] = await Promise.all([
+          inspectSolanaClusterIdentity(connection, getCluster()),
           connection.getAccountInfo(
             new PublicKey(
               CONFIG.fightOracleProgramId || FIGHT_ORACLE_PROGRAM_ADDRESS,
@@ -896,21 +1002,25 @@ export function App() {
             "confirmed",
           ),
           connection.getAccountInfo(
-            new PublicKey(
-              CONFIG.goldClobMarketProgramId || GOLD_CLOB_MARKET_PROGRAM_ADDRESS,
-            ),
+            new PublicKey(CONFIG.duelMarketProgramId),
             "confirmed",
           ),
         ]);
         if (cancelled) return;
         setProgramDeployment({
           checked: true,
+          cluster: clusterIdentity.matches,
           oracle: Boolean(oracleInfo?.executable),
           market: Boolean(marketInfo?.executable),
         });
       } catch {
         if (cancelled) return;
-        setProgramDeployment({ checked: true, oracle: false, market: false });
+        setProgramDeployment({
+          checked: true,
+          cluster: false,
+          oracle: false,
+          market: false,
+        });
       }
     })();
     return () => {
@@ -936,8 +1046,8 @@ export function App() {
     if (!shouldPollChainData) return;
     if (
       !connection ||
-      typeof (connection as { getProgramAccounts?: unknown }).getProgramAccounts !==
-        "function"
+      typeof (connection as { getProgramAccounts?: unknown })
+        .getProgramAccounts !== "function"
     ) {
       setStatus(rpcUnavailableStatus);
       return;
@@ -963,12 +1073,13 @@ export function App() {
           })
           .map<DiscoveredMatch>((entry) => {
             const account = getDuelStateDecoder().decode(entry.account.data);
-            const status = enumIs(account.status, "bettingOpen") ||
+            const status =
+              enumIs(account.status, "bettingOpen") ||
               enumIs(account.status, "locked")
-              ? "open"
-              : enumIs(account.status, "resolved")
-                ? "resolved"
-                : "unknown";
+                ? "open"
+                : enumIs(account.status, "resolved")
+                  ? "resolved"
+                  : "unknown";
 
             const openTs = normalizeTimestamp(asNumber(account.betOpenTs, 0));
             const closeTs = normalizeTimestamp(asNumber(account.betCloseTs, 0));
@@ -976,15 +1087,16 @@ export function App() {
               ? normalizeTimestamp(asNumber(account.duelEndTs))
               : null;
 
-            const metadataUri = (account.metadataUri as string | undefined) ?? "";
-            let agent1Name = "Agent A";
-            let agent2Name = "Agent B";
+            const metadataUri =
+              (account.metadataUri as string | undefined) ?? "";
+            let agent1Name: string | null = null;
+            let agent2Name: string | null = null;
             let matchId = 0;
             try {
               if (metadataUri.startsWith("{")) {
                 const meta = JSON.parse(metadataUri) as DuelMetadata;
-                agent1Name = meta.agent1 || "Agent A";
-                agent2Name = meta.agent2 || "Agent B";
+                agent1Name = meta.agent1?.trim() || null;
+                agent2Name = meta.agent2?.trim() || null;
                 matchId = Number(meta.duelId ?? meta.matchId ?? 0);
               }
             } catch {
@@ -1034,10 +1146,13 @@ export function App() {
         window.setTimeout(() => {
           if (cancelled) return;
           setCurrentMatch(nextCurrent);
+          setStatus("");
         }, UI_SYNC_DELAY_MS);
-      } catch (error) {
+      } catch {
         if (!cancelled) {
-          setStatus(`Refresh failed: ${(error as Error).message}`);
+          setStatus(
+            "Market data is temporarily unavailable. Retrying shortly.",
+          );
         }
       }
     })();
@@ -1072,61 +1187,154 @@ export function App() {
     return () => window.clearTimeout(id);
   }, [inviteShareStatus]);
 
-  const yesPot = asNumber(solanaClobSnapshot.yesPool, 0);
-  const noPot = asNumber(solanaClobSnapshot.noPool, 0);
-  const totalPot = yesPot + noPot;
-  const yesSharePercent =
-    totalPot > 0 ? Math.round((yesPot / totalPot) * 100) : 50;
-  const noSharePercent = 100 - yesSharePercent;
+  const activeLifecycleMarket =
+    runtimeE2eOverride.duelKey &&
+    normalizePredictionMarketDuelKeyHex(lifecycleMarket?.duelKey ?? null) !==
+      runtimeE2eOverride.duelKey
+      ? null
+      : lifecycleMarket;
+  const activeLifecycleDuel =
+    runtimeE2eOverride.duelKey &&
+    normalizePredictionMarketDuelKeyHex(lifecycleDuel?.duelKey ?? null) !==
+      runtimeE2eOverride.duelKey
+      ? null
+      : lifecycleDuel;
+  const publicStreamConnected =
+    streamingConnected && streamPlaybackReady && isRendererReady;
+  const bettorShell = deriveSolanaBettorShellState({
+    programsChecked: programDeployment.checked,
+    programsReady,
+    walletConnected: pointsWalletAddress !== null,
+    legalDocumentsReady: legalDocumentUrls !== null,
+    keeperChecked: launchReadiness.checked,
+    keeperReady: launchReadiness.ready,
+    nowMs: nowTs * 1_000,
+    streamMaxAgeMs: BETTOR_STREAM_MAX_AGE_MS,
+    streamConnected: publicStreamConnected,
+    hasReceivedStreamState: streamingState !== null,
+    streamCycle: rawLiveCycle
+      ? {
+          cycleId: rawLiveCycle.cycleId,
+          phase: rawLiveCycle.phase,
+          emittedAt: streamingState?.emittedAt,
+          duelId: runtimeE2eOverride.duelId ?? rawLiveCycle.duelId,
+          duelKeyHex:
+            runtimeE2eOverride.duelKey ?? rawLiveCycle.duelKeyHex ?? null,
+          agent1Name: rawLiveCycle.agent1?.name,
+          agent2Name: rawLiveCycle.agent2?.name,
+        }
+      : null,
+    lifecycleDuel: activeLifecycleDuel,
+    lifecycleMarket: activeLifecycleMarket,
+    marketSnapshot: solanaClobSnapshot,
+  });
+  const rawSpectatorPresentation = deriveSpectatorPresentationState({
+    state: streamingState,
+    streamConnected: publicStreamConnected,
+    nowMs: nowTs * 1_000,
+    streamMaxAgeMs: BETTOR_STREAM_MAX_AGE_MS,
+    uiSyncDelayMs: UI_SYNC_DELAY_MS,
+  });
+  if (rawSpectatorPresentation.hasMatchup && streamingState) {
+    lastPresentableMatchRef.current = streamingState;
+  }
+  const spectatorStreamingState = selectSpectatorPresentationUpdate(
+    streamingState,
+    lastPresentableMatchRef.current,
+    publicStreamConnected,
+  );
+  const spectatorPresentation = deriveSpectatorPresentationState({
+    state: spectatorStreamingState,
+    streamConnected: publicStreamConnected,
+    nowMs: nowTs * 1_000,
+    streamMaxAgeMs: BETTOR_STREAM_MAX_AGE_MS,
+    uiSyncDelayMs: UI_SYNC_DELAY_MS,
+  });
+  const streamRecoveryHeading = getStreamRecoveryHeading({
+    playbackReady: streamPlaybackReady,
+    telemetryConnected: streamingConnected,
+    rendererReady: isRendererReady,
+    hasStreamState: streamingState !== null,
+    presentationReady: spectatorPresentation.hasFreshCycle,
+  });
+  const liveCycle = spectatorStreamingState?.cycle ?? rawLiveCycle;
+  const yesPot = bettorShell.showMarketData
+    ? asNumber(solanaClobSnapshot.yesPool, 0)
+    : 0;
+  const noPot = bettorShell.showMarketData
+    ? asNumber(solanaClobSnapshot.noPool, 0)
+    : 0;
+  const yesSharePercent = bettorShell.showMarketData
+    ? solanaClobSnapshot.yesProbabilityPercent
+    : null;
+  const noSharePercent =
+    yesSharePercent === null ? null : 100 - yesSharePercent;
   const effYesPot = yesPot;
   const effNoPot = noPot;
   const effYesPercent = yesSharePercent;
   const effNoPercent = noSharePercent;
-  const effChartData = solanaClobSnapshot.chartData;
-  const effBids = solanaClobSnapshot.bids;
-  const effAsks = solanaClobSnapshot.asks;
-  const effRecentTrades = solanaClobSnapshot.recentTrades;
-  const liveAgent1Name =
-    liveCycle?.agent1?.name?.trim() && liveCycle.agent1.name.trim().length > 0
-      ? liveCycle.agent1.name.trim()
-      : null;
-  const liveAgent2Name =
-    liveCycle?.agent2?.name?.trim() && liveCycle.agent2.name.trim().length > 0
-      ? liveCycle.agent2.name.trim()
-      : null;
-  const effAgent1Name = currentMatch?.agent1Name ?? liveAgent1Name ?? "Agent A";
-  const effAgent2Name = currentMatch?.agent2Name ?? liveAgent2Name ?? "Agent B";
+  const effChartData = bettorShell.showMarketData
+    ? solanaClobSnapshot.chartData
+    : [];
+  const showOddsChart = bettorShell.showMarketData && effChartData.length > 1;
+  const effBids = bettorShell.showMarketData ? solanaClobSnapshot.bids : [];
+  const effAsks = bettorShell.showMarketData ? solanaClobSnapshot.asks : [];
+  const effRecentTrades = bettorShell.showMarketData
+    ? solanaClobSnapshot.recentTrades
+    : [];
+  const effAgent1Name = spectatorPresentation.hasMatchup
+    ? (liveCycle?.agent1?.name ?? "—")
+    : (bettorShell.agent1Name ?? "—");
+  const effAgent2Name = spectatorPresentation.hasMatchup
+    ? (liveCycle?.agent2?.name ?? "—")
+    : (bettorShell.agent2Name ?? "—");
+  const spectatorStatus = getSpectatorStatusCopy({
+    phase: liveCycle?.phase,
+    winnerName: liveCycle?.winnerName,
+    hasFreshCycle: spectatorPresentation.hasFreshCycle,
+    activityLabel: spectatorPresentation.activityLabel,
+  });
+  const effStatus = transactionsEnabled
+    ? status || getSolanaBettorShellMessage(bettorShell.reason)
+    : spectatorStatus;
   const effStatusColor = (() => {
-    if (/failed|error|unavailable|required|not found/i.test(status))
+    if (
+      /failed|error|unavailable|interrupted|required|not found/i.test(effStatus)
+    )
       return "#fda4af";
-    if (/placed|complete|seeded|created|linked/i.test(status)) return "#86efac";
+    if (/open|available|complete|resolved|created|linked/i.test(effStatus))
+      return "#86efac";
     return "rgba(255,255,255,0.78)";
   })();
-  const effStatus = status;
-  const contextAgent1 = duelContext?.cycle.agent1 ?? null;
-  const contextAgent2 = duelContext?.cycle.agent2 ?? null;
+  const hasLiveAuthority = spectatorPresentation.hasFreshCycle;
+  const liveAgent1 = spectatorPresentation.hasMatchup
+    ? (liveCycle?.agent1 ?? null)
+    : null;
+  const liveAgent2 = spectatorPresentation.hasMatchup
+    ? (liveCycle?.agent2 ?? null)
+    : null;
+  const hasAgentTelemetry = liveAgent1 !== null && liveAgent2 !== null;
 
-  // Agent context from live SSE + duel-context polling
+  // Every visible combat field comes from the same HLS-program-date-aligned
+  // frame. Mixing in separately delayed context polling makes HP, damage, and
+  // equipment contradict the rendered fight even when the cycle IDs match.
   const effA1 = {
     id: "agent1",
     name: effAgent1Name,
-    hp: contextAgent1?.hp ?? liveCycle?.agent1?.hp ?? 100,
-    maxHp: contextAgent1?.maxHp ?? liveCycle?.agent1?.maxHp ?? 100,
-    wins: contextAgent1?.wins ?? liveCycle?.agent1?.wins ?? 0,
-    losses: contextAgent1?.losses ?? liveCycle?.agent1?.losses ?? 0,
+    hp: liveAgent1?.hp ?? 0,
+    maxHp: liveAgent1?.maxHp ?? 0,
+    wins: liveAgent1?.wins ?? 0,
+    losses: liveAgent1?.losses ?? 0,
     rank: 1,
-    combatLevel:
-      contextAgent1?.combatLevel ?? liveCycle?.agent1?.combatLevel ?? 1,
-    provider: contextAgent1?.provider ?? liveCycle?.agent1?.provider ?? "",
-    model: contextAgent1?.model ?? liveCycle?.agent1?.model ?? "",
-    damageDealtThisFight:
-      contextAgent1?.damageDealtThisFight ??
-      liveCycle?.agent1?.damageDealtThisFight ??
-      0,
+    combatLevel: liveAgent1?.combatLevel ?? 0,
+    provider: liveAgent1?.provider ?? "",
+    model: liveAgent1?.model ?? "",
+    damageDealtThisFight: liveAgent1?.damageDealtThisFight ?? 0,
     headToHeadWins: 0,
     headToHeadLosses: 0,
-    inventory: contextAgent1?.inventory ?? [],
-    monologues: (contextAgent1?.monologues ?? []) as {
+    equipment: liveAgent1?.equipment ?? {},
+    inventory: liveAgent1?.inventory ?? [],
+    monologues: [] as {
       id: string;
       type: string;
       content: string;
@@ -1136,58 +1344,54 @@ export function App() {
   const effA2 = {
     id: "agent2",
     name: effAgent2Name,
-    hp: contextAgent2?.hp ?? liveCycle?.agent2?.hp ?? 100,
-    maxHp: contextAgent2?.maxHp ?? liveCycle?.agent2?.maxHp ?? 100,
-    wins: contextAgent2?.wins ?? liveCycle?.agent2?.wins ?? 0,
-    losses: contextAgent2?.losses ?? liveCycle?.agent2?.losses ?? 0,
+    hp: liveAgent2?.hp ?? 0,
+    maxHp: liveAgent2?.maxHp ?? 0,
+    wins: liveAgent2?.wins ?? 0,
+    losses: liveAgent2?.losses ?? 0,
     rank: 2,
-    combatLevel:
-      contextAgent2?.combatLevel ?? liveCycle?.agent2?.combatLevel ?? 1,
-    provider: contextAgent2?.provider ?? liveCycle?.agent2?.provider ?? "",
-    model: contextAgent2?.model ?? liveCycle?.agent2?.model ?? "",
-    damageDealtThisFight:
-      contextAgent2?.damageDealtThisFight ??
-      liveCycle?.agent2?.damageDealtThisFight ??
-      0,
+    combatLevel: liveAgent2?.combatLevel ?? 0,
+    provider: liveAgent2?.provider ?? "",
+    model: liveAgent2?.model ?? "",
+    damageDealtThisFight: liveAgent2?.damageDealtThisFight ?? 0,
     headToHeadWins: 0,
     headToHeadLosses: 0,
-    inventory: contextAgent2?.inventory ?? [],
-    monologues: (contextAgent2?.monologues ?? []) as {
+    equipment: liveAgent2?.equipment ?? {},
+    inventory: liveAgent2?.inventory ?? [],
+    monologues: [] as {
       id: string;
       type: string;
       content: string;
       timestamp: number;
     }[],
   };
+  const livePhase = hasLiveAuthority ? (liveCycle?.phase ?? null) : null;
   const effCycle = {
-    cycleId: liveCycle?.cycleId ?? "cycle-0",
-    phase: liveCycle?.phase ?? "IDLE",
-    countdown: liveCycle?.countdown ?? null,
-    winnerName: liveCycle?.winnerName ?? null,
-    winReason: liveCycle?.winReason ?? null,
-    timeRemaining: liveCycle?.timeRemaining ?? 0,
+    cycleId: hasLiveAuthority ? (liveCycle?.cycleId ?? "") : "",
+    phase: selectSpectatorDisplayPhase(livePhase, hasLiveAuthority),
+    countdown: hasLiveAuthority ? (liveCycle?.countdown ?? null) : null,
+    winnerName: hasLiveAuthority ? (liveCycle?.winnerName ?? null) : null,
+    winReason: hasLiveAuthority ? (liveCycle?.winReason ?? null) : null,
+    timeRemaining: hasLiveAuthority ? (liveCycle?.timeRemaining ?? 0) : 0,
   };
-  const effLeaderboard: LeaderboardEntry[] = streamingState?.leaderboard ?? [];
-  const effTotalPool =
-    (typeof effYesPot === "number" ? effYesPot : 0) +
-    (typeof effNoPot === "number" ? effNoPot : 0);
+  const effLeaderboard: LeaderboardEntry[] = publicStreamConnected
+    ? (streamingState?.leaderboard ?? [])
+    : [];
+  const effTotalPool = effYesPot + effNoPot;
   const effPhaseLabel = (() => {
     const p = effCycle.phase;
-    if (p === "FIGHTING") return "LIVE";
+    if (spectatorPresentation.activityLabel === "LIVE") return "LIVE";
     if (p === "COUNTDOWN") return `Starting ${effCycle.countdown ?? ""}`;
-    if (p === "RESOLUTION") return "RESOLVED";
+    if (p === "RESOLUTION" || p === "RESOLVED") return "RESOLVED";
+    if (p === "CANCELLED") return "CANCELLED";
+    if (["LOCKED", "PROPOSED", "CHALLENGED"].includes(p)) return "LOCKED";
     if (p === "ANNOUNCEMENT") return "NEXT MATCH";
-    return "IDLE";
+    return spectatorPresentation.activityLabel;
   })();
-
-  const activeLifecycleMarket =
-    runtimeE2eOverride.duelKey &&
-    normalizePredictionMarketDuelKeyHex(lifecycleMarket?.duelKey ?? null) !==
-      runtimeE2eOverride.duelKey
-      ? null
-      : lifecycleMarket;
   const marketStatusText = _getMarketStatusLabel(
-    activeLifecycleMarket?.lifecycleStatus ?? solanaClobSnapshot.marketStatus,
+    bettorShell.canOpenMarketPanel
+      ? (activeLifecycleMarket?.lifecycleStatus ??
+          solanaClobSnapshot.marketStatus)
+      : null,
     copy,
   );
   const countdownText = formatCountdown(
@@ -1195,20 +1399,52 @@ export function App() {
   );
   // Sidebar bet state
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [retainMarketPanelSession, setRetainMarketPanelSession] =
+    useState(false);
   const [_hmSide, _setHmSide] = useState<BetSide>("YES");
   const [hmBottomTab, setHmBottomTab] = useState<
     "positions" | "orders" | "trades" | "topTraders" | "holders" | "news"
-  >("trades");
+  >("news");
   const [hmMuted, setHmMuted] = useState(true);
+  const matchupLabel = spectatorPresentation.hasMatchup
+    ? `${effA1.name} vs ${effA2.name}`
+    : hasLiveAuthority
+      ? "Between rounds"
+      : "Waiting for matchup";
+  const phaseTimeRemaining =
+    effCycle.timeRemaining > 0
+      ? formatCountdown(Math.ceil(effCycle.timeRemaining / 1_000))
+      : null;
+  const marketNotice = transactionsEnabled
+    ? getSolanaBettorShellMessage(bettorShell.reason)
+    : "Real-money betting is disabled in this local preview.";
 
   useEffect(() => {
-    if (surfaceMode === "MODELS") {
-      setIsSidebarOpen(false);
-    }
-  }, [surfaceMode]);
+    setRetainMarketPanelSession((current) =>
+      isSidebarOpen ? current || bettorShell.canAccessMarketPanel : false,
+    );
+  }, [bettorShell.canAccessMarketPanel, isSidebarOpen]);
+  const shouldRenderMarketPanel =
+    bettorShell.canAccessMarketPanel || retainMarketPanelSession;
+  const shouldRenderInteractiveMarket =
+    transactionsEnabled && shouldRenderMarketPanel;
 
   return (
-    <div className="hm-root" ref={appRootRef}>
+    <div
+      className="hm-root"
+      ref={appRootRef}
+      data-stream-sync-mode={
+        streamPlaybackDateMs === null ? "fixed-delay" : "program-date-time"
+      }
+      data-stream-playback-date-ms={streamPlaybackDateMs ?? undefined}
+      data-stream-state-emitted-at={streamingState?.emittedAt ?? undefined}
+      data-stream-sync-skew-ms={
+        streamPlaybackDateMs !== null &&
+        typeof streamingState?.emittedAt === "number"
+          ? streamPlaybackDateMs - streamingState.emittedAt
+          : undefined
+      }
+    >
       {/* Points / Leaderboard / Referral Drawer */}
       {showPointsDrawer && (
         <div
@@ -1299,11 +1535,12 @@ export function App() {
                   textShadow: "0 0 8px rgba(242,208,138,0.3)",
                 }}
               >
-                Points & Leaderboard
+                {transactionsEnabled ? "Points & Leaderboard" : "Leaderboard"}
               </div>
               <button
                 type="button"
                 data-testid="points-drawer-close"
+                aria-label="Close leaderboard"
                 onClick={() => setShowPointsDrawer(false)}
                 style={{
                   background: "rgba(0,0,0,0.3)",
@@ -1312,7 +1549,7 @@ export function App() {
                   color: "rgba(255,255,255,0.4)",
                   cursor: "pointer",
                   fontSize: 14,
-                  width: 28,
+                  minWidth: 56,
                   height: 28,
                   display: "flex",
                   alignItems: "center",
@@ -1321,7 +1558,7 @@ export function App() {
                   flexShrink: 0,
                 }}
               >
-                ✕
+                Close
               </button>
             </div>
 
@@ -1335,13 +1572,15 @@ export function App() {
                 zIndex: 1,
               }}
             >
-              {(
-                [
-                  { key: "leaderboard" as const, label: copy.leaderboard },
-                  { key: "history" as const, label: copy.history },
-                  { key: "referral" as const, label: copy.referral },
-                ]
-              ).map((tab) => {
+              {[
+                { key: "leaderboard" as const, label: copy.leaderboard },
+                ...(transactionsEnabled
+                  ? [
+                      { key: "history" as const, label: copy.history },
+                      { key: "referral" as const, label: copy.referral },
+                    ]
+                  : []),
+              ].map((tab) => {
                 const isActive = pointsDrawerTab === tab.key;
                 return (
                   <button
@@ -1377,9 +1616,13 @@ export function App() {
             </div>
 
             {/* Non-compact points summary */}
-            <div style={{ marginBottom: 16, position: "relative", zIndex: 1 }}>
-              <PointsDisplay walletAddress={pointsWalletAddress} />
-            </div>
+            {transactionsEnabled ? (
+              <div
+                style={{ marginBottom: 16, position: "relative", zIndex: 1 }}
+              >
+                <SolanaPointsDisplay walletAddress={pointsWalletAddress} />
+              </div>
+            ) : null}
 
             {/* Tab Content */}
             <div
@@ -1391,25 +1634,67 @@ export function App() {
                 overflowY: "auto",
               }}
             >
-              {pointsDrawerTab === "leaderboard" && (
+              {pointsDrawerTab === "leaderboard" &&
+                (transactionsEnabled ? (
+                  <Suspense
+                    fallback={<PanelFallback label={copy.loadingLeaderboard} />}
+                  >
+                    <PointsLeaderboard />
+                  </Suspense>
+                ) : effLeaderboard.length > 0 ? (
+                  <div className="hm-trades-table-wrap">
+                    <table className="hm-trades-table" role="grid">
+                      <thead>
+                        <tr>
+                          <th>Rank</th>
+                          <th>Agent</th>
+                          <th>Record</th>
+                          <th>Win rate</th>
+                          <th>Streak</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {effLeaderboard.map((entry) => (
+                          <tr key={`drawer-${entry.name}`}>
+                            <td className="hm-td-mono">#{entry.rank}</td>
+                            <td>
+                              <strong>{entry.name}</strong>
+                            </td>
+                            <td className="hm-td-mono">
+                              {entry.wins}W–{entry.losses}L
+                            </td>
+                            <td className="hm-td-mono">
+                              {formatAgentWinRate(entry.wins, entry.losses)}
+                            </td>
+                            <td className="hm-td-mono">
+                              {entry.currentStreak > 0
+                                ? `${entry.currentStreak}W`
+                                : "—"}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <PanelFallback
+                    label="No completed duels yet"
+                    minHeight={140}
+                  />
+                ))}
+              {transactionsEnabled && pointsDrawerTab === "history" && (
                 <Suspense
-                  fallback={<PanelFallback label={copy.loadingLeaderboard} />}
+                  fallback={<PanelFallback label={copy.loadingHistory} />}
                 >
-                  <PointsLeaderboard />
-                </Suspense>
-              )}
-              {pointsDrawerTab === "history" && (
-                <Suspense fallback={<PanelFallback label={copy.loadingHistory} />}>
                   <PointsHistory walletAddress={pointsWalletAddress} />
                 </Suspense>
               )}
-              {pointsDrawerTab === "referral" && (
-                <Suspense fallback={<PanelFallback label={copy.loadingReferral} />}>
-                  <ReferralPanel
-                    activeChain="solana"
+              {transactionsEnabled && pointsDrawerTab === "referral" && (
+                <Suspense
+                  fallback={<PanelFallback label={copy.loadingReferral} />}
+                >
+                  <SolanaReferralPanel
                     solanaWallet={solanaWalletAddress}
-                    evmWallet={null}
-                    evmWalletPlatform={null}
                     locale={locale}
                   />
                 </Suspense>
@@ -1450,8 +1735,8 @@ export function App() {
           </div>
           <div data-testid="market-status">Market: {marketStatusText}</div>
           <div data-testid="pool-totals">
-            YES pool: {goldDisplay(yesPot)} GOLD | NO pool: {goldDisplay(noPot)}{" "}
-            GOLD
+            YES pool: {solDisplay(yesPot)} SOL | NO pool: {solDisplay(noPot)}{" "}
+            SOL
           </div>
           <div data-testid="countdown">{countdownText}</div>
           <div data-testid="status">{status}</div>
@@ -1478,10 +1763,9 @@ export function App() {
             <div className="hm-header-mob-row1">
               <div className="hm-logo">
                 <span className="hm-logo-text hm-logo-text--stacked">
-                  HYPERSCAPE
-                  <br />
-                  DUEL ARENA
+                  HYPERBET
                 </span>
+                <span className="hm-logo-context">HYPERIA DUEL ARENA</span>
               </div>
               <div className="hm-header-mob-controls">
                 <button
@@ -1491,10 +1775,17 @@ export function App() {
                   data-testid="points-drawer-open"
                   onClick={() => setShowPointsDrawer(true)}
                 >
-                  🏆
+                  Stats
                 </button>
                 {/* SOL wallet */}
-                {!wallet.connected ? (
+                {!transactionsEnabled ? (
+                  <span
+                    className="hm-header-mob-wallet-btn"
+                    aria-label="Read-only spectator mode"
+                  >
+                    Preview
+                  </span>
+                ) : !wallet.connected ? (
                   <button
                     type="button"
                     className="hm-header-mob-wallet-btn"
@@ -1516,111 +1807,60 @@ export function App() {
                 )}
               </div>
             </div>
-            {/* Row 2: Match strip — name + agent side-select chips */}
-            <div className="hm-header-mob-row2">
-              <div className="hm-view-tabs hm-view-tabs--mobile">
-                <button
-                  data-testid="surface-mode-duels"
-                  className={`hm-view-tab ${surfaceMode === "DUELS" ? "hm-view-tab--active" : ""}`}
-                  onClick={() => startTransition(() => setSurfaceMode("DUELS"))}
-                  type="button"
-                >
-                  Duels
-                </button>
-                <button
-                  data-testid="surface-mode-models"
-                  className={`hm-view-tab ${surfaceMode === "MODELS" ? "hm-view-tab--active" : ""}`}
-                  onClick={() =>
-                    startTransition(() => setSurfaceMode("MODELS"))
-                  }
-                  type="button"
-                >
-                  Models
-                </button>
-              </div>
-              {surfaceMode === "DUELS" ? (
-                <span className="hm-market-name">
-                  {effA1.name} vs {effA2.name}
-                </span>
-              ) : (
-                <div className="hm-mode-summary hm-mode-summary--mobile">
-                  <span className="hm-market-name">MODEL MARKETS</span>
-                  <span className="hm-mode-summary-copy">
-                    No stream. Long or short any ranked model.
-                  </span>
-                </div>
-              )}
-            </div>
           </>
         ) : (
           /* ── Desktop header: original layout ───────────────────────────── */
           <>
             <div className="hm-header-left">
               <div className="hm-logo">
-                <span className="hm-logo-text">HYPERSCAPE DUEL ARENA</span>
-              </div>
-              <div className="hm-view-tabs hm-view-tabs--header">
-                <button
-                  data-testid="surface-mode-duels"
-                  className={`hm-view-tab ${surfaceMode === "DUELS" ? "hm-view-tab--active" : ""}`}
-                  onClick={() => startTransition(() => setSurfaceMode("DUELS"))}
-                  type="button"
-                >
-                  Duels
-                </button>
-                <button
-                  data-testid="surface-mode-models"
-                  className={`hm-view-tab ${surfaceMode === "MODELS" ? "hm-view-tab--active" : ""}`}
-                  onClick={() =>
-                    startTransition(() => setSurfaceMode("MODELS"))
-                  }
-                  type="button"
-                >
-                  Models
-                </button>
+                <span className="hm-logo-text">HYPERBET</span>
+                <span className="hm-logo-context">HYPERIA DUEL ARENA</span>
               </div>
 
-              {surfaceMode === "DUELS" ? (
-                <div className="hm-market-info">
-                  <span className="hm-market-name">
-                    {effA1.name} vs {effA2.name}
-                  </span>
-                </div>
-              ) : (
-                <div className="hm-mode-summary">
-                  <span className="hm-market-name">MODELS MARKET</span>
-                  <span className="hm-mode-summary-copy">
-                    Every ranked model gets its own synthetic perpetual market.
-                  </span>
-                  <span className="hm-mode-summary-meta">
-                    Stream is removed in this mode. Current duel remains{" "}
-                    {effA1.name} vs {effA2.name}.
-                  </span>
-                </div>
-              )}
+              <div className="hm-market-info">
+                <span className="hm-market-name">{matchupLabel}</span>
+              </div>
             </div>
 
             <div className="hm-header-right">
-              <span
-                className="hm-status-text"
-                style={{ color: effStatusColor }}
-              >
-                {surfaceMode === "DUELS"
-                  ? effStatus
-                  : `${effLeaderboard.length} models live`}
+              <span className="hm-live-state">
+                <span
+                  className={`hm-live-state-dot${streamingConnected ? " hm-live-state-dot--connected" : ""}`}
+                  aria-hidden="true"
+                />
+                {spectatorPresentation.activityLabel}
               </span>
-              <PointsDisplay walletAddress={pointsWalletAddress} compact />
+              {isLocalTestCluster ? (
+                <span
+                  className="hm-local-test-state"
+                  aria-label="Local Solana test environment"
+                >
+                  Local test
+                </span>
+              ) : null}
+              {transactionsEnabled ? (
+                <SolanaPointsDisplay
+                  walletAddress={pointsWalletAddress}
+                  compact
+                />
+              ) : null}
               <button
                 type="button"
                 className="dock-collapse-btn"
                 title={copy.leaderboardAndStats}
                 data-testid="points-drawer-open"
                 onClick={() => setShowPointsDrawer(true)}
-                style={{ fontSize: 16 }}
               >
-                🏆
+                Stats
               </button>
-              {!wallet.connected ? (
+              {!transactionsEnabled ? (
+                <span
+                  className="hm-wallet-btn"
+                  aria-label="Read-only spectator mode"
+                >
+                  Preview
+                </span>
+              ) : !wallet.connected ? (
                 <button
                   type="button"
                   className="hm-wallet-btn"
@@ -1645,133 +1885,129 @@ export function App() {
         )}
       </header>
 
-      {surfaceMode === "MODELS" ? (
-        <div className="hm-main hm-main--models">
-          <div className="hm-models-main">
-            <Suspense
-              fallback={
-                <PanelFallback label="Loading model markets" minHeight={480} />
-              }
+      <>
+        {/* Main Content */}
+        <div className="hm-main">
+          <div className="hm-content">
+            <div
+              className={`hm-viewport-row${showOddsChart ? " hm-viewport-row--market" : " hm-viewport-row--spectator"}`}
             >
-              <ModelsMarketView
-                activeMatchup={`${effA1.name} vs ${effA2.name}`}
-              />
-            </Suspense>
-          </div>
-        </div>
-      ) : (
-        <>
-          {/* Main Content */}
-          <div className="hm-main">
-            <div className="hm-content">
-              <div className="hm-viewport-row">
-                {/* Phase status strip — only rendered on mobile, sits above the video */}
-                {isMobile && (
-                  <div className="hm-mob-phase-strip">
-                    <span
-                      className={`hm-phase-badge hm-phase-badge--${effCycle.phase.toLowerCase()}`}
-                    >
-                      {effPhaseLabel}
-                    </span>
-                    <span className="hm-mob-phase-strip-meta">
-                      {effA1.name} vs {effA2.name}
+              {/* Phase status strip — only rendered on mobile, sits above the video */}
+              {isMobile && (
+                <div className="hm-mob-phase-strip">
+                  <span
+                    className={`hm-phase-badge hm-phase-badge--${effCycle.phase.toLowerCase()}`}
+                  >
+                    {effPhaseLabel}
+                  </span>
+                  <span className="hm-mob-phase-strip-meta">
+                    {matchupLabel}
+                  </span>
+                </div>
+              )}
+
+              {/* Game Viewport */}
+              <div className="hm-game-viewport">
+                {activeStreamUrl ? (
+                  <>
+                    <StreamPlayer
+                      streamUrl={activeStreamUrl}
+                      muted={hmMuted}
+                      autoPlay={true}
+                      onStreamUnavailable={handleStreamUnavailable}
+                      onStreamReady={handleStreamReady}
+                      onPlaybackDateChange={handleStreamPlaybackDateChange}
+                      style={{
+                        position: "absolute",
+                        inset: 0,
+                        width: "100%",
+                        height: "100%",
+                      }}
+                    />
+                    {streamRecoveryHeading && (
+                      <div
+                        className="hm-stream-recovery"
+                        role="status"
+                        aria-live="polite"
+                      >
+                        <span className="hm-stream-recovery-pulse" />
+                        <strong>{streamRecoveryHeading}</strong>
+                        <small>
+                          Match and market actions stay unavailable until live
+                          playback and the arena camera are verified.
+                        </small>
+                      </div>
+                    )}
+                    <div className="hm-stream-controls">
+                      <button
+                        className="hm-stream-mute-btn"
+                        onClick={() => setHmMuted((m) => !m)}
+                        type="button"
+                        aria-label={
+                          hmMuted ? copy.unmuteStream : copy.muteStream
+                        }
+                      >
+                        {hmMuted ? (
+                          <svg
+                            width="18"
+                            height="18"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          >
+                            <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+                            <line x1="23" y1="9" x2="17" y2="15" />
+                            <line x1="17" y1="9" x2="23" y2="15" />
+                          </svg>
+                        ) : (
+                          <svg
+                            width="18"
+                            height="18"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          >
+                            <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+                            <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
+                            <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
+                          </svg>
+                        )}
+                      </button>
+                      {streamSources.length > 1 && (
+                        <button
+                          className="hm-stream-source-btn"
+                          onClick={cycleStreamSource}
+                          type="button"
+                        >
+                          Source {streamSourceIndex + 1}/{streamSources.length}
+                        </button>
+                      )}
+                    </div>
+                  </>
+                ) : (
+                  <div className="hm-game-placeholder">
+                    <div className="hm-game-bg" />
+                    <span className="hm-game-waiting">
+                      Waiting for stream&hellip;
                     </span>
                   </div>
                 )}
+              </div>
 
-                {/* Game Viewport */}
-                <div className="hm-game-viewport">
-                  {activeStreamUrl ? (
-                    <>
-                      <StreamPlayer
-                        streamUrl={activeStreamUrl}
-                        muted={hmMuted}
-                        autoPlay={true}
-                        onStreamUnavailable={switchToBackupStream}
-                        style={{
-                          position: "absolute",
-                          inset: 0,
-                          width: "100%",
-                          height: "100%",
-                        }}
-                      />
-                      <div className="hm-stream-controls">
-                        <button
-                          className="hm-stream-mute-btn"
-                          onClick={() => setHmMuted((m) => !m)}
-                          type="button"
-                          aria-label={hmMuted ? copy.unmuteStream : copy.muteStream}
-                        >
-                          {hmMuted ? (
-                            <svg
-                              width="18"
-                              height="18"
-                              viewBox="0 0 24 24"
-                              fill="none"
-                              stroke="currentColor"
-                              strokeWidth="2"
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                            >
-                              <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
-                              <line x1="23" y1="9" x2="17" y2="15" />
-                              <line x1="17" y1="9" x2="23" y2="15" />
-                            </svg>
-                          ) : (
-                            <svg
-                              width="18"
-                              height="18"
-                              viewBox="0 0 24 24"
-                              fill="none"
-                              stroke="currentColor"
-                              strokeWidth="2"
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                            >
-                              <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
-                              <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
-                              <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
-                            </svg>
-                          )}
-                        </button>
-                        {streamSources.length > 1 && (
-                          <button
-                            className="hm-stream-source-btn"
-                            onClick={cycleStreamSource}
-                            type="button"
-                          >
-                            Source {streamSourceIndex + 1}/
-                            {streamSources.length}
-                          </button>
-                        )}
-                      </div>
-                    </>
-                  ) : (
-                    <div className="hm-game-placeholder">
-                      <div className="hm-game-bg" />
-                      <span className="hm-game-waiting">
-                        Waiting for stream&hellip;
-                      </span>
-                    </div>
-                  )}
-                </div>
-
-                {/* Odds Chart */}
+              {/* Odds history only earns primary space once real data exists. */}
+              {showOddsChart && (
                 <div className="hm-chart-panel">
-                  <div className="hm-chart-toolbar">
-                    <button className="hm-chart-tool-btn" type="button">
-                      +
-                    </button>
-                    <button className="hm-chart-tool-btn" type="button">
-                      &#9881;
-                    </button>
-                    <button className="hm-chart-tool-btn" type="button">
-                      &#9634;
-                    </button>
-                  </div>
                   <div className="hm-chart-price-label">
                     <span className="hm-chart-price-current">
-                      {(effYesPercent / 100).toFixed(1)}
+                      {effYesPercent === null
+                        ? "—"
+                        : `${effYesPercent.toFixed(1)}%`}
                     </span>
                   </div>
                   <div className="hm-chart-container">
@@ -1779,7 +2015,10 @@ export function App() {
                       <LineChart data={effChartData}>
                         <XAxis
                           dataKey="time"
-                          tick={{ fill: "rgba(255,255,255,0.3)", fontSize: 11 }}
+                          tick={{
+                            fill: "rgba(255,255,255,0.3)",
+                            fontSize: 11,
+                          }}
                           tickLine={false}
                           axisLine={{ stroke: "rgba(255,255,255,0.08)" }}
                           tickFormatter={(v: number) => {
@@ -1789,7 +2028,10 @@ export function App() {
                         />
                         <YAxis
                           domain={[0, 100]}
-                          tick={{ fill: "rgba(255,255,255,0.3)", fontSize: 11 }}
+                          tick={{
+                            fill: "rgba(255,255,255,0.3)",
+                            fontSize: 11,
+                          }}
                           tickLine={false}
                           axisLine={{ stroke: "rgba(255,255,255,0.08)" }}
                           width={40}
@@ -1821,244 +2063,267 @@ export function App() {
                     </ResponsiveContainer>
                   </div>
                 </div>
-              </div>
+              )}
+            </div>
 
-              <ResizeHandle
-                direction="v"
-                onMouseDown={(e) => startBottomDrag(e, "y", true)}
-              />
+            <ResizeHandle
+              direction="v"
+              onMouseDown={(e) => startBottomDrag(e, "y", true)}
+            />
 
-              {/* Bottom Panel */}
-              <div
-                className="hm-bottom-panel"
-                style={isMobile ? undefined : { height: bottomHeightPx }}
-              >
-                <nav className="hm-bottom-tabs" role="tablist">
-                  {(
-                    [
-                      ["trades" as const, copy.trades],
-                      ["orders" as const, copy.orderBook],
-                      ["news" as const, copy.matchLog],
-                      ["holders" as const, copy.agents],
-                      ["topTraders" as const, copy.leaderboard],
-                      ["positions" as const, copy.positions],
-                    ]
-                  ).map(([key, label]) => (
-                    <button
-                      key={key}
-                      role="tab"
-                      data-testid={`duels-bottom-tab-${key}`}
-                      aria-selected={hmBottomTab === key}
-                      className={`hm-bottom-tab ${hmBottomTab === key ? "hm-bottom-tab--active" : ""}`}
-                      onClick={() => setHmBottomTab(key as typeof hmBottomTab)}
-                      type="button"
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </nav>
-
-                {hmBottomTab === "trades" && (
-                  <div
-                    className="hm-trades-panel"
-                    role="tabpanel"
-                    data-testid="duels-bottom-panel-trades"
+            {/* Bottom Panel */}
+            <div
+              className="hm-bottom-panel"
+              style={
+                isMobile
+                  ? undefined
+                  : {
+                      height:
+                        !transactionsEnabled && hmBottomTab === "news"
+                          ? 86
+                          : bottomHeightPx,
+                    }
+              }
+            >
+              <nav className="hm-bottom-tabs" role="tablist">
+                {[
+                  ["holders" as const, copy.agents],
+                  ["news" as const, copy.matchLog],
+                  ["trades" as const, copy.trades],
+                  ["orders" as const, copy.orderBook],
+                  ["topTraders" as const, copy.leaderboard],
+                  ["positions" as const, copy.positions],
+                ].map(([key, label]) => (
+                  <button
+                    key={key}
+                    role="tab"
+                    data-testid={`duels-bottom-tab-${key}`}
+                    aria-selected={hmBottomTab === key}
+                    className={`hm-bottom-tab ${hmBottomTab === key ? "hm-bottom-tab--active" : ""}`}
+                    onClick={() => setHmBottomTab(key as typeof hmBottomTab)}
+                    type="button"
                   >
-                    <div className="hm-trades-summary">
-                      <span>
-                        {copy.pool} <strong>{formatGold(effTotalPool, locale)}</strong>
-                      </span>
-                      <span>
-                        {effA1.name} <strong>{effYesPercent}%</strong>
-                      </span>
-                      <span>
-                        {effA2.name} <strong>{effNoPercent}%</strong>
-                      </span>
-                      <span>
-                        Trades <strong>{effRecentTrades.length}</strong>
-                      </span>
-                    </div>
-                    <div className="hm-trades-table-wrap">
-                      <table className="hm-trades-table" role="grid">
-                        <thead>
-                          <tr>
-                            <th>{copy.side}</th>
-                            <th>{copy.agent}</th>
-                            <th>{copy.price}</th>
-                            <th>{copy.amount}</th>
-                            <th>{copy.age}</th>
-                            <th>{copy.trader}</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {effRecentTrades.map((trade, i) => (
-                            <tr key={trade.id ?? i}>
-                              <td>
-                                <span
-                                  className={`hm-type-label ${trade.side === "YES" ? "hm-type-label--buy" : "hm-type-label--sell"}`}
-                                >
-                                  {trade.side === "YES" ? "BUY" : "SELL"}
-                                </span>
-                              </td>
-                              <td>
-                                <span className="hm-outcome-badge">
-                                  {trade.side === "YES"
-                                    ? effA1.name
-                                    : effA2.name}
-                                </span>
-                              </td>
-                              <td className="hm-td-mono">
-                                {(trade.price ?? 0).toFixed(2)}
-                              </td>
-                              <td className="hm-td-mono">
-                                {formatGold(trade.amount ?? 0)}
-                              </td>
-                              <td className="hm-td-dim">
-                                {formatTimeAgo(trade.time ?? Date.now())}
-                              </td>
-                              <td className="hm-td-trader">
-                                <span className="hm-trader-addr">
-                                  {truncateAddr(trade.trader ?? "")}
-                                </span>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
+                    {label}
+                  </button>
+                ))}
+              </nav>
+
+              {hmBottomTab === "trades" && (
+                <div
+                  className="hm-trades-panel"
+                  role="tabpanel"
+                  data-testid="duels-bottom-panel-trades"
+                >
+                  <div className="hm-trades-summary">
+                    <span>
+                      {copy.pool}{" "}
+                      <strong>
+                        {bettorShell.showMarketData
+                          ? `${solDisplay(effTotalPool)} SOL`
+                          : "—"}
+                      </strong>
+                    </span>
+                    <span>
+                      {effA1.name}{" "}
+                      <strong>
+                        {effYesPercent === null ? "—" : `${effYesPercent}%`}
+                      </strong>
+                    </span>
+                    <span>
+                      {effA2.name}{" "}
+                      <strong>
+                        {effNoPercent === null ? "—" : `${effNoPercent}%`}
+                      </strong>
+                    </span>
+                    <span>
+                      Trades{" "}
+                      <strong>
+                        {bettorShell.showMarketData
+                          ? effRecentTrades.length
+                          : "—"}
+                      </strong>
+                    </span>
                   </div>
-                )}
-
-                {hmBottomTab === "orders" && (
-                  <div
-                    className="hm-trades-panel"
-                    role="tabpanel"
-                    data-testid="duels-bottom-panel-orders"
-                  >
-                    <div className="hm-orderbook">
-                      <div className="hm-ob-side hm-ob-side--bids">
-                        <div className="hm-ob-header">BIDS ({effA1.name})</div>
-                        {effBids.map((level, i) => (
-                          <div
-                            key={`bid-${i}`}
-                            className="hm-ob-row hm-ob-row--bid"
-                          >
-                            <span className="hm-ob-price">
-                              {level.price.toFixed(2)}
-                            </span>
-                            <span className="hm-ob-amount">
-                              {formatGold(level.amount)}
-                            </span>
-                            <div
-                              className="hm-ob-depth"
-                              style={{
-                                width: `${Math.min(100, (level.amount / (effTotalPool || 1)) * 100)}%`,
-                              }}
-                            />
-                          </div>
-                        ))}
-                      </div>
-                      <div className="hm-ob-spread">
-                        <span>
-                          Spread: {Math.abs(effYesPercent - effNoPercent)}%
-                        </span>
-                      </div>
-                      <div className="hm-ob-side hm-ob-side--asks">
-                        <div className="hm-ob-header">ASKS ({effA2.name})</div>
-                        {effAsks.map((level, i) => (
-                          <div
-                            key={`ask-${i}`}
-                            className="hm-ob-row hm-ob-row--ask"
-                          >
-                            <span className="hm-ob-price">
-                              {level.price.toFixed(2)}
-                            </span>
-                            <span className="hm-ob-amount">
-                              {formatGold(level.amount)}
-                            </span>
-                            <div
-                              className="hm-ob-depth hm-ob-depth--ask"
-                              style={{
-                                width: `${Math.min(100, (level.amount / (effTotalPool || 1)) * 100)}%`,
-                              }}
-                            />
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-
-                {hmBottomTab === "topTraders" && (
-                  <div
-                    className="hm-trades-panel"
-                    role="tabpanel"
-                    data-testid="duels-bottom-panel-topTraders"
-                  >
-                    <div className="hm-trades-table-wrap">
-                      <table className="hm-trades-table" role="grid">
-                        <thead>
-                          <tr>
-                            <th>Rank</th>
-                            <th>Agent</th>
-                            <th>Provider</th>
-                            <th>Wins</th>
-                            <th>Losses</th>
-                            <th>Win Rate</th>
-                            <th>Streak</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {effLeaderboard.map((entry) => (
-                            <tr key={entry.name}>
-                              <td className="hm-td-mono">#{entry.rank}</td>
-                              <td>
-                                <strong>{entry.name}</strong>
-                              </td>
-                              <td className="hm-td-dim">{entry.provider}</td>
-                              <td
-                                className="hm-td-mono"
-                                style={{ color: "#22c55e" }}
+                  <div className="hm-trades-table-wrap">
+                    <table className="hm-trades-table" role="grid">
+                      <thead>
+                        <tr>
+                          <th>{copy.side}</th>
+                          <th>{copy.agent}</th>
+                          <th>{copy.price}</th>
+                          <th>{copy.amount}</th>
+                          <th>{copy.age}</th>
+                          <th>{copy.trader}</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {effRecentTrades.map((trade, i) => (
+                          <tr key={trade.id ?? i}>
+                            <td>
+                              <span
+                                className={`hm-type-label ${trade.side === "YES" ? "hm-type-label--buy" : "hm-type-label--sell"}`}
                               >
-                                {entry.wins}
-                              </td>
-                              <td
-                                className="hm-td-mono"
-                                style={{ color: "#ef4444" }}
-                              >
-                                {entry.losses}
-                              </td>
-                              <td className="hm-td-mono">
-                                {entry.winRate.toFixed(1)}%
-                              </td>
-                              <td className="hm-td-mono">
-                                {entry.currentStreak > 0
-                                  ? `${entry.currentStreak}W`
-                                  : "—"}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
+                                {trade.side === "YES" ? "BUY" : "SELL"}
+                              </span>
+                            </td>
+                            <td>
+                              <span className="hm-outcome-badge">
+                                {trade.side === "YES" ? effA1.name : effA2.name}
+                              </span>
+                            </td>
+                            <td className="hm-td-mono">
+                              {(trade.price ?? 0).toFixed(2)}
+                            </td>
+                            <td className="hm-td-mono">
+                              {formatAmount(trade.amount ?? 0)}
+                            </td>
+                            <td className="hm-td-dim">
+                              {formatTimeAgo(trade.time ?? Date.now())}
+                            </td>
+                            <td className="hm-td-trader">
+                              <span className="hm-trader-addr">
+                                {truncateAddr(trade.trader ?? "")}
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {hmBottomTab === "orders" && (
+                <div
+                  className="hm-trades-panel"
+                  role="tabpanel"
+                  data-testid="duels-bottom-panel-orders"
+                >
+                  <div className="hm-orderbook">
+                    <div className="hm-ob-side hm-ob-side--bids">
+                      <div className="hm-ob-header">BIDS ({effA1.name})</div>
+                      {effBids.map((level, i) => (
+                        <div
+                          key={`bid-${i}`}
+                          className="hm-ob-row hm-ob-row--bid"
+                        >
+                          <span className="hm-ob-price">
+                            {level.price.toFixed(2)}
+                          </span>
+                          <span className="hm-ob-amount">
+                            {formatAmount(level.amount)}
+                          </span>
+                          <div
+                            className="hm-ob-depth"
+                            style={{
+                              width: `${Math.min(100, (level.amount / (effTotalPool || 1)) * 100)}%`,
+                            }}
+                          />
+                        </div>
+                      ))}
+                    </div>
+                    <div className="hm-ob-spread">
+                      <span>
+                        Spread:{" "}
+                        {effYesPercent === null || effNoPercent === null
+                          ? "—"
+                          : `${Math.abs(effYesPercent - effNoPercent)}%`}
+                      </span>
+                    </div>
+                    <div className="hm-ob-side hm-ob-side--asks">
+                      <div className="hm-ob-header">ASKS ({effA2.name})</div>
+                      {effAsks.map((level, i) => (
+                        <div
+                          key={`ask-${i}`}
+                          className="hm-ob-row hm-ob-row--ask"
+                        >
+                          <span className="hm-ob-price">
+                            {level.price.toFixed(2)}
+                          </span>
+                          <span className="hm-ob-amount">
+                            {formatAmount(level.amount)}
+                          </span>
+                          <div
+                            className="hm-ob-depth hm-ob-depth--ask"
+                            style={{
+                              width: `${Math.min(100, (level.amount / (effTotalPool || 1)) * 100)}%`,
+                            }}
+                          />
+                        </div>
+                      ))}
                     </div>
                   </div>
-                )}
+                </div>
+              )}
 
-                {hmBottomTab === "holders" && (
-                  <div
-                    className="hm-trades-panel"
-                    role="tabpanel"
-                    data-testid="duels-bottom-panel-holders"
-                  >
+              {hmBottomTab === "topTraders" && (
+                <div
+                  className="hm-trades-panel"
+                  role="tabpanel"
+                  data-testid="duels-bottom-panel-topTraders"
+                >
+                  <div className="hm-trades-table-wrap">
+                    <table className="hm-trades-table" role="grid">
+                      <thead>
+                        <tr>
+                          <th>Rank</th>
+                          <th>Agent</th>
+                          <th>Wins</th>
+                          <th>Losses</th>
+                          <th>Win Rate</th>
+                          <th>Streak</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {effLeaderboard.map((entry) => (
+                          <tr key={entry.name}>
+                            <td className="hm-td-mono">#{entry.rank}</td>
+                            <td>
+                              <strong>{entry.name}</strong>
+                            </td>
+                            <td
+                              className="hm-td-mono"
+                              style={{ color: "#22c55e" }}
+                            >
+                              {entry.wins}
+                            </td>
+                            <td
+                              className="hm-td-mono"
+                              style={{ color: "#ef4444" }}
+                            >
+                              {entry.losses}
+                            </td>
+                            <td className="hm-td-mono">
+                              {formatAgentWinRate(entry.wins, entry.losses)}
+                            </td>
+                            <td className="hm-td-mono">
+                              {entry.currentStreak > 0
+                                ? `${entry.currentStreak}W`
+                                : "—"}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {hmBottomTab === "holders" && (
+                <div
+                  className="hm-trades-panel"
+                  role="tabpanel"
+                  data-testid="duels-bottom-panel-holders"
+                >
+                  {hasAgentTelemetry ? (
                     <div className="hm-agents-detail">
                       {[effA1, effA2].map((agent) => {
                         const hpPct =
                           agent.maxHp > 0
                             ? Math.max(
-                              0,
-                              Math.min(100, (agent.hp / agent.maxHp) * 100),
-                            )
+                                0,
+                                Math.min(100, (agent.hp / agent.maxHp) * 100),
+                              )
                             : 0;
                         const hpColor =
                           agent.hp < 25
@@ -2071,11 +2336,9 @@ export function App() {
                             <div className="hm-agent-card-header">
                               <strong>{agent.name}</strong>
                               <span className="hm-agent-meta">
-                                {agent.provider}
-                                {agent.model ? ` · ${agent.model}` : ""}
                                 {agent.combatLevel
-                                  ? ` · Lv.${agent.combatLevel}`
-                                  : ""}
+                                  ? `Combat Lv. ${agent.combatLevel}`
+                                  : "Combat profile"}
                               </span>
                             </div>
                             {/* HP bar — always visible, quick health read */}
@@ -2110,6 +2373,29 @@ export function App() {
                                 </span>
                               </div>
                             </div>
+                            {agent.inventory.length > 0 && (
+                              <div className="hm-agent-loadout">
+                                <span className="hm-agent-loadout-label">
+                                  Loadout
+                                </span>
+                                <div className="hm-agent-loadout-items">
+                                  {agent.inventory
+                                    .filter((item) => Boolean(item?.itemId))
+                                    .slice(0, 5)
+                                    .map((item) => (
+                                      <span
+                                        className="hm-agent-loadout-item"
+                                        key={`${agent.id}-${item.slot}-${item.itemId}`}
+                                      >
+                                        {formatItemLabel(item.itemId)}
+                                        {item.quantity > 1
+                                          ? ` ×${item.quantity}`
+                                          : ""}
+                                      </span>
+                                    ))}
+                                </div>
+                              </div>
+                            )}
                             {agent.monologues &&
                               agent.monologues.length > 0 && (
                                 <div className="hm-agent-monologues">
@@ -2132,102 +2418,116 @@ export function App() {
                         );
                       })}
                     </div>
-                  </div>
-                )}
+                  ) : (
+                    <PanelFallback
+                      label="Agent telemetry unavailable"
+                      minHeight={160}
+                    />
+                  )}
+                </div>
+              )}
 
-                {hmBottomTab === "news" && (
-                  <div
-                    className="hm-trades-panel"
-                    role="tabpanel"
-                    data-testid="duels-bottom-panel-news"
-                  >
-                    <div className="hm-match-log">
-                      <div className="hm-log-entry">
-                        <span className="hm-log-phase">{effCycle.phase}</span>
-                        <span
-                          className="hm-log-text"
-                          style={{ color: effStatusColor }}
-                        >
-                          {effStatus}
+              {hmBottomTab === "news" && (
+                <div
+                  className="hm-trades-panel"
+                  role="tabpanel"
+                  data-testid="duels-bottom-panel-news"
+                >
+                  <div className="hm-match-log">
+                    <div className="hm-log-entry">
+                      <span className="hm-log-phase">{effPhaseLabel}</span>
+                      <span
+                        className="hm-log-text"
+                        style={{ color: effStatusColor }}
+                      >
+                        {effStatus}
+                      </span>
+                    </div>
+                    {effCycle.winnerName && (
+                      <div className="hm-log-entry hm-log-entry--winner">
+                        <span className="hm-log-phase">RESULT</span>
+                        <span className="hm-log-text">
+                          {effCycle.winnerName} wins
+                          {formatWinReason(effCycle.winReason)
+                            ? ` — ${formatWinReason(effCycle.winReason)}.`
+                            : "."}
                         </span>
                       </div>
-                      {effCycle.winnerName && (
-                        <div className="hm-log-entry hm-log-entry--winner">
-                          <span className="hm-log-phase">RESULT</span>
-                          <span className="hm-log-text">
-                            {effCycle.winnerName} wins! {effCycle.winReason}
+                    )}
+                    {[...effA1.monologues, ...effA2.monologues]
+                      .sort((a, b) => b.timestamp - a.timestamp)
+                      .slice(0, 10)
+                      .map((m) => (
+                        <div key={m.id} className="hm-log-entry">
+                          <span className="hm-log-phase">
+                            {m.type.toUpperCase()}
                           </span>
+                          <span className="hm-log-text">{m.content}</span>
                         </div>
-                      )}
-                      {[...effA1.monologues, ...effA2.monologues]
-                        .sort((a, b) => b.timestamp - a.timestamp)
-                        .slice(0, 10)
-                        .map((m) => (
-                          <div key={m.id} className="hm-log-entry">
-                            <span className="hm-log-phase">
-                              {m.type.toUpperCase()}
-                            </span>
-                            <span className="hm-log-text">{m.content}</span>
-                          </div>
-                        ))}
-                    </div>
+                      ))}
                   </div>
-                )}
-
-
-                {
-                  hmBottomTab === "positions" && (
-                    <div
-                      className="hm-empty-tab"
-                      role="tabpanel"
-                      data-testid="duels-bottom-panel-positions"
-                    >
-                      <p>No open positions</p>
-                    </div>
-                  )
-                }
-              </div >
-            </div >
-
-            <ResizeHandle
-              direction="h"
-              onMouseDown={(e) => startSidebarDrag(e, "x", true)}
-            />
-
-            {/* ── RIGHT SIDEBAR: Real betting or mock controls ──────────────── */}
-            <aside
-              className={`hm-sidebar${isSidebarOpen ? " hm-sidebar--open" : ""}`}
-              aria-label="Trading controls"
-              style={
-                isMobile
-                  ? undefined
-                  : { width: sidebarWidthPx, minWidth: sidebarWidthPx }
-              }
-            >
-              {/* Agent matchup header — close button lives here so it never floats over agent names */}
-              <div className="hm-matchup-header">
-                <span className="hm-matchup-label">Current Match</span>
-                <div className="hm-matchup-header-right">
-                  <span
-                    className={`hm-phase-badge hm-phase-badge--${effCycle.phase.toLowerCase()} hm-phase-badge--sm`}
-                  >
-                    {effPhaseLabel}
-                  </span>
-                  <button
-                    className="hm-sidebar-close"
-                    type="button"
-                    aria-label="Close trading panel"
-                    onClick={() => setIsSidebarOpen(false)}
-                  >
-                    ×
-                  </button>
                 </div>
+              )}
+
+              {hmBottomTab === "positions" && (
+                <div
+                  className="hm-empty-tab"
+                  role="tabpanel"
+                  data-testid="duels-bottom-panel-positions"
+                >
+                  <p>No open positions</p>
+                </div>
+              )}
+            </div>
+          </div>
+
+          <ResizeHandle
+            direction="h"
+            onMouseDown={(e) => startSidebarDrag(e, "x", true)}
+          />
+
+          {/* ── RIGHT SIDEBAR: Real betting or mock controls ──────────────── */}
+          <aside
+            className={`hm-sidebar${isSidebarOpen ? " hm-sidebar--open" : ""}`}
+            aria-label={
+              transactionsEnabled ? copy.tradingControls : "Live match details"
+            }
+            style={
+              isMobile
+                ? undefined
+                : { width: sidebarWidthPx, minWidth: sidebarWidthPx }
+            }
+          >
+            {/* Agent matchup header — close button lives here so it never floats over agent names */}
+            <div className="hm-matchup-header">
+              <span className="hm-matchup-label">
+                {spectatorPresentation.hasMatchup
+                  ? "Current Match"
+                  : hasLiveAuthority
+                    ? "Between rounds"
+                    : "Waiting for stream"}
+              </span>
+              <div className="hm-matchup-header-right">
+                <span
+                  className={`hm-phase-badge hm-phase-badge--${effCycle.phase.toLowerCase()} hm-phase-badge--sm`}
+                >
+                  {effPhaseLabel}
+                </span>
+                <button
+                  className="hm-sidebar-close"
+                  type="button"
+                  aria-label="Close trading panel"
+                  onClick={() => setIsSidebarOpen(false)}
+                >
+                  Close
+                </button>
               </div>
+            </div>
 
-
-              {/* Market type tabs + betting panels */}
-              <div className="hm-market-panel-wrap">
-                <div className="hm-market-panel-body">
+            {/* Market type tabs + betting panels */}
+            <div className="hm-market-panel-wrap">
+              <div className="hm-market-panel-body">
+                {shouldRenderInteractiveMarket ? (
                   <Suspense
                     fallback={
                       <PanelFallback
@@ -2240,84 +2540,170 @@ export function App() {
                       agent1Name={effAgent1Name}
                       agent2Name={effAgent2Name}
                       compact={true}
+                      tradingEnabled={bettorShell.canOpenMarketPanel}
                       onMarketSnapshot={handleSolanaClobSnapshot}
                     />
                   </Suspense>
-                </div>
+                ) : (
+                  <div className="hm-spectator-rail">
+                    <div className="hm-spectator-fighters">
+                      {!hasLiveAuthority ? (
+                        <div className="hm-spectator-unavailable" role="status">
+                          <strong>Match details unavailable</strong>
+                          <span>{spectatorStatus}</span>
+                        </div>
+                      ) : (
+                        [effA1, effA2].map((agent, index) => {
+                          const hpPercent =
+                            agent.maxHp > 0
+                              ? Math.max(
+                                  0,
+                                  Math.min(100, (agent.hp / agent.maxHp) * 100),
+                                )
+                              : 0;
+                          const equippedItemIds = Object.values(
+                            agent.equipment ?? {},
+                          ).filter(
+                            (itemId): itemId is string =>
+                              typeof itemId === "string" && itemId.length > 0,
+                          );
+                          const railLoadoutItemIds = [
+                            ...equippedItemIds,
+                            ...agent.inventory.flatMap((item) =>
+                              item?.itemId ? [item.itemId] : [],
+                            ),
+                          ]
+                            .filter(
+                              (itemId, itemIndex, items) =>
+                                items.indexOf(itemId) === itemIndex,
+                            )
+                            .slice(0, 4);
+                          return (
+                            <section
+                              className="hm-spectator-fighter"
+                              key={agent.id}
+                            >
+                              <div className="hm-spectator-fighter-heading">
+                                <span>Agent {index + 1}</span>
+                                <strong>{agent.name}</strong>
+                              </div>
+                              <div className="hm-spectator-hp-row">
+                                <div className="hm-spectator-hp-track">
+                                  <span
+                                    style={{ width: `${hpPercent}%` }}
+                                    className="hm-spectator-hp-fill"
+                                  />
+                                </div>
+                                <span>
+                                  {agent.hp}/{agent.maxHp}
+                                </span>
+                              </div>
+                              <div className="hm-spectator-fighter-meta">
+                                <span>
+                                  {agent.combatLevel
+                                    ? `Combat ${agent.combatLevel}`
+                                    : "Combat profile"}
+                                </span>
+                                <span>
+                                  {agent.wins}W–{agent.losses}L
+                                </span>
+                                <span>{agent.damageDealtThisFight} damage</span>
+                              </div>
+                              {railLoadoutItemIds.length > 0 && (
+                                <div className="hm-spectator-loadout">
+                                  {railLoadoutItemIds.map((itemId) => (
+                                    <span key={`${agent.id}-rail-${itemId}`}>
+                                      {formatItemLabel(itemId)}
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
+                            </section>
+                          );
+                        })
+                      )}
+                    </div>
+                    <div className="hm-spectator-cycle">
+                      <span className="hm-spectator-cycle-label">
+                        Fight status
+                      </span>
+                      <strong>{effPhaseLabel}</strong>
+                      {phaseTimeRemaining && (
+                        <span className="hm-spectator-cycle-time">
+                          {phaseTimeRemaining}
+                        </span>
+                      )}
+                    </div>
+                    <div className="hm-market-notice" role="status">
+                      <strong>
+                        {transactionsEnabled
+                          ? "Betting unavailable"
+                          : "Local preview"}
+                      </strong>
+                      <span>{marketNotice}</span>
+                    </div>
+                  </div>
+                )}
               </div>
+            </div>
 
+            {legalDocumentUrls ? (
               <p className="hm-legal-text">
-                By trading, you agree to our <a href="#terms">Terms</a> &amp;{" "}
-                <a href="#privacy">Privacy</a>
+                By trading, you agree to our{" "}
+                <a href={legalDocumentUrls.termsUrl}>Terms</a> &amp;{" "}
+                <a href={legalDocumentUrls.privacyUrl}>Privacy</a>
               </p>
-            </aside>
-          </div >
-
-          {/* Mobile FAB — opens the sidebar sheet */}
-          {
-            !isSidebarOpen && (
-              <button
-                className="hm-bet-fab"
-                type="button"
-                onClick={() => setIsSidebarOpen(true)}
-                aria-label="Open trading panel"
-              >
-                <svg
-                  width="16"
-                  height="16"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2.5"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <line x1="12" y1="5" x2="12" y2="19" />
-                  <line x1="5" y1="12" x2="19" y2="12" />
-                </svg>
-                Place Bet
-              </button>
-            )
-          }
-
-          {/* Backdrop — close sidebar when tapping outside */}
-          {
-            isSidebarOpen && (
-              <div
-                style={{
-                  position: "fixed",
-                  inset: 0,
-                  zIndex: 48,
-                  background: "rgba(0,0,0,0.5)",
-                  backdropFilter: "blur(2px)",
-                }}
-                onClick={() => setIsSidebarOpen(false)}
-                aria-hidden="true"
-              />
-            )
-          }
-        </>
-      )
-      }
-
-      {/* Status bar */}
-      <footer className="hm-statusbar" role="contentinfo">
-        <span className="hm-statusbar-link">
-          {surfaceMode === "DUELS"
-            ? `${effA1.name} vs ${effA2.name} · Round #${effCycle.cycleId.split("-").pop()}`
-            : `MODELS MARKET · ${effLeaderboard.length} ranked models`}
-        </span>
-        <div className="hm-statusbar-right">
-          <span className="hm-status-indicator" />
-          <span>
-            {surfaceMode === "DUELS"
-              ? effCycle.phase === "FIGHTING"
-                ? "LIVE"
-                : "STABLE"
-              : "SYNTHETIC"}
-          </span>
+            ) : null}
+          </aside>
         </div>
-      </footer>
-    </div >
+
+        {/* Mobile FAB — opens the sidebar sheet */}
+        {!isSidebarOpen && (
+          <button
+            className="hm-bet-fab"
+            type="button"
+            onClick={() => setIsSidebarOpen(true)}
+            aria-label={
+              transactionsEnabled
+                ? bettorShell.actionLabel
+                : "View match details"
+            }
+            disabled={transactionsEnabled && !bettorShell.canAccessMarketPanel}
+          >
+            {transactionsEnabled && (
+              <svg
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <line x1="12" y1="5" x2="12" y2="19" />
+                <line x1="5" y1="12" x2="19" y2="12" />
+              </svg>
+            )}
+            {transactionsEnabled ? bettorShell.actionLabel : "Match"}
+          </button>
+        )}
+
+        {/* Backdrop — close sidebar when tapping outside */}
+        {isSidebarOpen && (
+          <div
+            style={{
+              position: "fixed",
+              inset: 0,
+              zIndex: 48,
+              background: "rgba(0,0,0,0.5)",
+              backdropFilter: "blur(2px)",
+            }}
+            onClick={() => setIsSidebarOpen(false)}
+            aria-hidden="true"
+          />
+        )}
+      </>
+    </div>
   );
 }

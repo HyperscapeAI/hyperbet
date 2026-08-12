@@ -16,6 +16,18 @@ export interface AgentInfo {
   wins: number;
   losses: number;
   damageDealtThisFight: number;
+  equipment?: Readonly<Record<string, string>>;
+  inventory?: ReadonlyArray<{
+    slot: number;
+    itemId: string;
+    quantity: number;
+  }>;
+}
+
+export interface RendererHealthInfo {
+  ready: boolean;
+  degradedReason: string | null;
+  updatedAt: number | null;
 }
 
 export interface LeaderboardEntry {
@@ -48,6 +60,7 @@ export interface StreamingCycle {
   winnerId: string | null;
   winnerName: string | null;
   winReason: string | null;
+  rendererHealth?: RendererHealthInfo | null;
   seed?: string | null;
   replayHash?: string | null;
 }

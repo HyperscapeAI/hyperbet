@@ -1227,15 +1227,15 @@ async function takeScreenshot(
             streamReady:
               (
                 window as typeof window & {
-                  __HYPERSCAPE_STREAM_READY__?: unknown;
+                  __HYPERIA_STREAM_READY__?: unknown;
                 }
-              ).__HYPERSCAPE_STREAM_READY__ ?? null,
+              ).__HYPERIA_STREAM_READY__ ?? null,
             rendererHealth:
               (
                 window as typeof window & {
-                  __HYPERSCAPE_STREAM_RENDERER_HEALTH__?: unknown;
+                  __HYPERIA_STREAM_RENDERER_HEALTH__?: unknown;
                 }
-              ).__HYPERSCAPE_STREAM_RENDERER_HEALTH__ ?? null,
+              ).__HYPERIA_STREAM_RENDERER_HEALTH__ ?? null,
             canvasCount: document.querySelectorAll("canvas").length,
           })),
           timeoutMs,
@@ -1261,13 +1261,13 @@ async function takeScreenshot(
         .map((frame) => frame.getAttribute("src") ?? "")
         .slice(0, 8);
       const streamReady =
-        (window as typeof window & { __HYPERSCAPE_STREAM_READY__?: unknown })
-          .__HYPERSCAPE_STREAM_READY__ ?? null;
+        (window as typeof window & { __HYPERIA_STREAM_READY__?: unknown })
+          .__HYPERIA_STREAM_READY__ ?? null;
       const rendererHealth = (
         window as typeof window & {
-          __HYPERSCAPE_STREAM_RENDERER_HEALTH__?: unknown;
+          __HYPERIA_STREAM_RENDERER_HEALTH__?: unknown;
         }
-      ).__HYPERSCAPE_STREAM_RENDERER_HEALTH__ ?? null;
+      ).__HYPERIA_STREAM_RENDERER_HEALTH__ ?? null;
       return {
         href: location.href,
         title: document.title,
@@ -1492,11 +1492,11 @@ function safeSlug(value: string): string {
 
 function localScreenshotTargets(): ScreenshotTarget[] {
   const targets: ScreenshotTarget[] = [];
-  const hyperscapes =
-    optionalEnv("HYPERSCAPES_UI_URL") ??
+  const hyperia =
+    optionalEnv("HYPERIA_UI_URL") ??
     "http://127.0.0.1:3333/stream.html?disableBridgeCapture=1";
   const hyperbet = optionalEnv("HYPERBET_UI_URL") ?? "http://127.0.0.1:4179/";
-  targets.push({ name: "hyperscapes", url: hyperscapes, fullPage: false });
+  targets.push({ name: "hyperia", url: hyperia, fullPage: false });
   targets.push({ name: "hyperbet", url: hyperbet, fullPage: false });
   targets.push({
     name: "hyperbet-stream",
@@ -1969,7 +1969,7 @@ async function runLocalSoak(args: MonitorArgs): Promise<void> {
           context,
           "local",
           "idle_seed_required",
-          "local Hyperscapes duel stream is still IDLE; create and start two local agents before the soak clock starts",
+          "local Hyperia duel stream is still IDLE; create and start two local agents before the soak clock starts",
           {
             ...snapshot,
             sourceDuelKey,

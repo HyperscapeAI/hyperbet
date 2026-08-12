@@ -1,6 +1,8 @@
 # hyperbet-sdk
 
-Python SDK for interacting with the Hyperbet prediction market on **EVM (BSC / AVAX)** and **Solana**.
+Python SDK for the SOL-only Hyperbet duel market. The package binds one
+explicit Solana RPC, signer, fight-oracle program, and duel-market program; it
+does not contain fallback program identities or alternate-chain clients.
 
 ## Installation
 
@@ -10,87 +12,83 @@ pip install hyperbet-sdk
 poetry add hyperbet-sdk
 ```
 
-## Quick Start
+## Quick start
 
 ```python
 import asyncio
+import os
+
 from hyperbet_sdk import HyperbetClient
-from hyperbet_sdk.types import SdkConfig, CreateOrderParams
+from hyperbet_sdk.types import CreateOrderParams, SdkConfig
 
-client = HyperbetClient(SdkConfig(
-    evm_private_key="0x...",
-    solana_private_key="base58-encoded-secret-key",
-    # Optional — falls back to public RPCs if omitted
-    bsc_rpc_url="https://bsc-mainnet.g.alchemy.com/v2/YOUR_KEY",
-    solana_rpc_url="https://mainnet.helius-rpc.com/?api-key=YOUR_KEY",
-))
+client = HyperbetClient(
+    SdkConfig(
+        solana_private_key=os.environ["SOLANA_PRIVATE_KEY"],
+        solana_rpc_url=os.environ["SOLANA_RPC_URL"],
+        duel_market_program_id=os.environ["DUEL_MARKET_PROGRAM_ID"],
+        fight_oracle_program_id=os.environ["FIGHT_ORACLE_PROGRAM_ID"],
+        stream_url=os.environ.get("HYPERIA_STREAM_URL"),
+    )
+)
 
-# Place an order on BSC
-client.evm_bsc.place_order(CreateOrderParams(
-    duel_id="my-duel-id",
-    side="buy",
-    price=600,          # 60.0% implied probability
-    amount=10000000000000000,  # 0.01 ETH worth of shares
-))
 
-# Place an order on Solana (async)
 async def main():
-    await client.solana.place_order(CreateOrderParams(
-        duel_id="0" * 64,  # 32-byte hex duel key
-        side="sell",
-        price=400,
-        amount=5000,
-    ))
+    signature = await client.solana.place_order(
+        CreateOrderParams(
+            duel_key_hex="0" * 64,
+            side="YES",
+            outcome_price_millis=600,
+            amount_lamports=10_000,
+            behavior="GTC",
+        )
+    )
+    print(signature)
+
 
 asyncio.run(main())
-
-# Subscribe to live duel updates
-async def stream_demo():
-    client.stream.subscribe(lambda event: print("Stream:", event))
-    await client.stream.connect()
-
-asyncio.run(stream_demo())
 ```
+
+`outcome_price_millis` is the selected outcome's probability from `1` to
+`999`. `amount_lamports` is the program's native-SOL payout unit and must be
+positive, fit in a `u64`, and be divisible by `1000`, matching the on-chain
+precision rule. For `NO`, the client converts the selected-outcome price to the
+program's complementary ask price.
+
+Program identities are mandatory because launch deployments must be verified
+externally before use. Do not substitute the example duel key or unverified
+addresses in a real transaction.
 
 ## Clients
 
-| Client | Chain | Library |
-|--------|-------|---------|
-| `HyperbetEVMClient` | BSC, AVAX | web3.py v7 |
-| `HyperbetSolanaClient` | Solana | solana-py + anchorpy |
-| `HyperbetStreamClient` | WebSocket | websockets |
+| Client                   | Purpose                                             |
+| ------------------------ | --------------------------------------------------- |
+| `HyperbetSolanaClient`   | Native-SOL duel orders, recovery, and settlement    |
+| `HyperbetStreamClient`   | Optional canonical Hyperia WebSocket subscriptions |
 
-## RPC Fallback Defaults
+## Solana API
 
-| Chain | Default Public RPC |
-|-------|-------------------|
-| BSC | `https://bsc-dataseed.binance.org/` |
-| AVAX | `https://api.avax.network/ext/bc/C/rpc` |
-| Solana | `https://api.mainnet-beta.solana.com` |
+- `place_order(params)` — place a GTC, IOC, or post-only order after rebuilding
+  the canonical current account graph.
+- `cancel_order(params)` — cancel an open resting order owned by the signer.
+- `reclaim_order(params)` — reclaim a resting order after the market locks or
+  reaches a terminal state.
+- `close_filled_order(params)` — recover signer-owned rent from an inactive,
+  fully filled, unlinked order account.
+- `claim(params)` — claim a resolved payout or cancelled-market refund.
+- `close_losing_balance(params)` — close a resolved losing balance without
+  attempting a payout.
 
-Pass your own Alchemy, Helius, or QuickNode URLs via the `SdkConfig` for better performance.
-
-## API
-
-### `HyperbetEVMClient`
-- `place_order(params)` — Place a CLOB order
-- `cancel_order(params)` — Cancel an existing order
-- `claim(params)` — Claim winnings after resolution
-
-### `HyperbetSolanaClient` (async)
-- `place_order(params)` — Place a CLOB order (derives PDAs automatically)
-- `cancel_order(params)` — Cancel order
-- `claim(params)` — Claim winnings
-
-### `HyperbetStreamClient` (async)
-- `connect()` — Open WebSocket connection
-- `subscribe(callback)` — Register an event listener
-- `disconnect()` — Close connection
+The on-chain programs remain the final authority and reject stale state.
+Applications should also present a fresh pre-signature quote, validate wallet
+funding, and show durable transaction-recovery states; the launch app implements
+those product-level controls.
 
 ## Development
 
 ```bash
 poetry install
-poetry run pytest -p no:anchorpy   # Run tests
-poetry build                       # Build for PyPI
+poetry run ruff check hyperbet_sdk tests
+poetry run ruff format --check hyperbet_sdk tests
+poetry run pytest -p no:anchorpy
+poetry build
 ```

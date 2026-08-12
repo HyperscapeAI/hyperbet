@@ -1,37 +1,33 @@
 import { describe, expect, test } from "bun:test";
 
 import {
-  BETTING_DEPLOYMENTS,
-  normalizeSolanaCluster,
-  resolveBettingSolanaDeployment,
-} from "../deployments";
+  SOLANA_V1_DEPLOYMENTS,
+  normalizeSolanaV1Cluster,
+  resolveSolanaV1Deployment,
+} from "../deployments/v1";
 
 describe("betting deployment manifest", () => {
   test("normalizes build/runtime cluster aliases", () => {
-    expect(normalizeSolanaCluster("mainnet")).toBe("mainnet-beta");
-    expect(normalizeSolanaCluster("production")).toBe("mainnet-beta");
-    expect(normalizeSolanaCluster("e2e")).toBe("localnet");
-    expect(normalizeSolanaCluster("stream-ui")).toBe("devnet");
+    expect(normalizeSolanaV1Cluster("mainnet")).toBe("mainnet-beta");
+    expect(normalizeSolanaV1Cluster("production")).toBe("mainnet-beta");
+    expect(normalizeSolanaV1Cluster("e2e")).toBe("localnet");
+    expect(normalizeSolanaV1Cluster("stream-ui")).toBe("devnet");
   });
 
-  test("resolves solana deployments from the shared manifest", () => {
-    const testnet = resolveBettingSolanaDeployment("testnet");
+  test("resolves Solana deployments from the dedicated v1 manifest", () => {
+    const testnet = resolveSolanaV1Deployment("testnet");
     expect(testnet.fightOracleProgramId).toBe(
-      BETTING_DEPLOYMENTS.solana.testnet.fightOracleProgramId,
+      SOLANA_V1_DEPLOYMENTS.solana.testnet.fightOracleProgramId,
     );
-    expect(testnet.goldClobMarketProgramId).toBe(
-      BETTING_DEPLOYMENTS.solana.testnet.goldClobMarketProgramId,
-    );
-    expect(testnet.goldPerpsMarketProgramId).toBe(
-      BETTING_DEPLOYMENTS.solana.testnet.goldPerpsMarketProgramId,
+    expect(testnet.duelMarketProgramId).toBe(
+      SOLANA_V1_DEPLOYMENTS.solana.testnet.duelMarketProgramId,
     );
   });
 
   test("requires non-empty Solana program ids for every cluster", () => {
-    for (const deployment of Object.values(BETTING_DEPLOYMENTS.solana)) {
+    for (const deployment of Object.values(SOLANA_V1_DEPLOYMENTS.solana)) {
       expect(deployment.fightOracleProgramId.length).toBeGreaterThan(0);
-      expect(deployment.goldClobMarketProgramId.length).toBeGreaterThan(0);
-      expect(deployment.goldPerpsMarketProgramId.length).toBeGreaterThan(0);
+      expect(deployment.duelMarketProgramId.length).toBeGreaterThan(0);
     }
   });
 });

@@ -12,6 +12,8 @@ import { CONFIG } from "./config";
 const DEFAULT_HEADLESS_WALLET_NAME = "Headless Test Wallet";
 const HEADLESS_ICON =
   "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='40'%3E%3Crect width='40' height='40' rx='8' fill='%230d58a6'/%3E%3Cpath d='M10 20h20M10 14h20M10 26h20' stroke='white' stroke-width='2'/%3E%3C/svg%3E";
+const E2E_REJECT_NEXT_SIGNATURE_KEY =
+  "hyperbet.e2e.reject-next-wallet-signature";
 
 type HeadlessWalletEntry = {
   name?: string;
@@ -37,6 +39,17 @@ function keypairFromSecret(secretKey: Uint8Array): Keypair {
   return secretKey.length === 32
     ? Keypair.fromSeed(secretKey)
     : Keypair.fromSecretKey(secretKey);
+}
+
+function shouldRejectNextE2eSignature(): boolean {
+  if (import.meta.env.MODE !== "e2e" || typeof window === "undefined") {
+    return false;
+  }
+  if (window.sessionStorage.getItem(E2E_REJECT_NEXT_SIGNATURE_KEY) !== "1") {
+    return false;
+  }
+  window.sessionStorage.removeItem(E2E_REJECT_NEXT_SIGNATURE_KEY);
+  return true;
 }
 
 function parseSecretKey(secret: string): Uint8Array {
@@ -182,6 +195,9 @@ function createHeadlessSession(
     signMessage: async (message: Uint8Array) =>
       ed25519.sign(message, keypair.secretKey.slice(0, 32)),
     signTransaction: async (transaction) => {
+      if (shouldRejectNextE2eSignature()) {
+        throw new Error("User rejected the request");
+      }
       const web3Transaction = transaction as unknown as
         | Transaction
         | VersionedTransaction;

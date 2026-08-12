@@ -28,15 +28,14 @@ import {
 } from "./clob-test-helpers";
 import { configureAnchorTests } from "./test-anchor";
 import { FightOracle } from "../target/types/fight_oracle";
-import { GoldClobMarket } from "../target/types/gold_clob_market";
+import { DuelMarket } from "../target/types/duel_market";
 
 describe("hyperbet-solana", () => {
   const provider = configureAnchorTests();
   anchor.setProvider(provider);
 
   const fightProgram = anchor.workspace.FightOracle as Program<FightOracle>;
-  const clobProgram = anchor.workspace
-    .GoldClobMarket as Program<GoldClobMarket>;
+  const clobProgram = anchor.workspace.DuelMarket as Program<DuelMarket>;
   const authority = (provider.wallet as anchor.Wallet & { payer: Keypair })
     .payer;
 
@@ -123,7 +122,7 @@ describe("hyperbet-solana", () => {
     const now = Math.floor(Date.now() / 1000);
     const betOpenTs = now - 120;
     const betCloseTs = now + 15;
-    const duelStartTs = now + 75;
+    const duelStartTs = betCloseTs;
     await Promise.all([
       airdrop(provider.connection, treasury.publicKey, 2),
       airdrop(provider.connection, marketMaker.publicKey, 2),
@@ -183,13 +182,9 @@ describe("hyperbet-solana", () => {
       betOpenTs,
       betCloseTs,
       duelStartTs,
-      metadataUri: "https://hyperscape.gg/tests/demo/locked",
+      metadataUri: "https://hyperia.gg/tests/demo/locked",
     });
-    await syncMarketFromDuel(
-      clobProgram,
-      market.marketState,
-      market.duelState,
-    );
+    await syncMarketFromDuel(clobProgram, market.marketState, market.duelState);
 
     let marketState = await clobProgram.account.marketState.fetch(
       market.marketState,
@@ -200,16 +195,14 @@ describe("hyperbet-solana", () => {
       winner: marketSideA(),
       duelEndTs: betCloseTs,
       seed: 777,
-      metadataUri: "https://hyperscape.gg/tests/demo/resolved",
+      metadataUri: "https://hyperia.gg/tests/demo/resolved",
     });
     await finalizeDuelResult(fightProgram, authority, market.duelKey);
-    await syncMarketFromDuel(
-      clobProgram,
-      market.marketState,
-      market.duelState,
-    );
+    await syncMarketFromDuel(clobProgram, market.marketState, market.duelState);
 
-    marketState = await clobProgram.account.marketState.fetch(market.marketState);
+    marketState = await clobProgram.account.marketState.fetch(
+      market.marketState,
+    );
     assert.deepStrictEqual(marketState.status, { resolved: {} });
     assert.deepStrictEqual(marketState.winner, { a: {} });
 
@@ -234,7 +227,7 @@ describe("hyperbet-solana", () => {
     assert.strictEqual(marketMakerAfter - marketMakerBefore, 20);
   });
 
-  it("refunds cancelled markets based on exact locked collateral", async () => {
+  it("refunds cancelled markets based on exact collateral and fee escrow", async () => {
     const maker = Keypair.generate();
     const taker = Keypair.generate();
     await Promise.all([
@@ -286,22 +279,23 @@ describe("hyperbet-solana", () => {
       fightProgram,
       authority,
       market.duelKey,
-      "https://hyperscape.gg/tests/demo/cancelled",
+      "https://hyperia.gg/tests/demo/cancelled",
     );
-    await syncMarketFromDuel(
-      clobProgram,
-      market.marketState,
-      market.duelState,
-    );
+    await syncMarketFromDuel(clobProgram, market.marketState, market.duelState);
 
     const takerStateBeforeClaim = await clobProgram.account.userBalance.fetch(
       takerBid.userBalance,
     );
     assert.strictEqual(takerStateBeforeClaim.aShares.toString(), "1000");
     assert.strictEqual(takerStateBeforeClaim.bShares.toString(), "0");
+    assert.strictEqual(takerStateBeforeClaim.aLockedLamports.toString(), "600");
     assert.strictEqual(
-      takerStateBeforeClaim.aLockedLamports.toString(),
-      "600",
+      takerStateBeforeClaim.tradeTreasuryFeeLamports.toString(),
+      "6",
+    );
+    assert.strictEqual(
+      takerStateBeforeClaim.tradeMarketMakerFeeLamports.toString(),
+      "6",
     );
     const vaultBalanceBeforeClaim = await provider.connection.getBalance(
       market.vault,
@@ -320,9 +314,13 @@ describe("hyperbet-solana", () => {
     );
     const takerState = await provider.connection.getAccountInfo(userBalance);
     assert.strictEqual(takerState, null);
-    assert.strictEqual(vaultBalanceBeforeClaim - vaultBalanceAfterClaim, 600);
+    assert.strictEqual(
+      vaultBalanceBeforeClaim - vaultBalanceAfterClaim,
+      Number(takerStateBeforeClaim.aLockedLamports.toString()) +
+        Number(takerStateBeforeClaim.tradeTreasuryFeeLamports.toString()) +
+        Number(takerStateBeforeClaim.tradeMarketMakerFeeLamports.toString()),
+    );
   });
-
 
   it("keeps disputed proposals fail-closed and rejects settlement", async () => {
     const maker = Keypair.generate();
@@ -330,7 +328,7 @@ describe("hyperbet-solana", () => {
     const now = Math.floor(Date.now() / 1000);
     const betOpenTs = now - 120;
     const betCloseTs = now + 15;
-    const duelStartTs = now + 75;
+    const duelStartTs = betCloseTs;
     await Promise.all([
       airdrop(provider.connection, maker.publicKey, 5),
       airdrop(provider.connection, taker.publicKey, 5),
@@ -340,12 +338,12 @@ describe("hyperbet-solana", () => {
       fightProgram,
       clobProgram,
       authority,
-        {
-          duelKey: uniqueDuelKey("disputed-claim"),
-          betOpenTs,
-          betCloseTs,
-          duelStartTs,
-        },
+      {
+        duelKey: uniqueDuelKey("disputed-claim"),
+        betOpenTs,
+        betCloseTs,
+        duelStartTs,
+      },
     );
 
     await ensureOracleReady(
@@ -404,7 +402,9 @@ describe("hyperbet-solana", () => {
     await challengeDuelResult(fightProgram, authority, market.duelKey);
     await syncMarketFromDuel(clobProgram, market.marketState, market.duelState);
 
-    const marketState = await clobProgram.account.marketState.fetch(market.marketState);
+    const marketState = await clobProgram.account.marketState.fetch(
+      market.marketState,
+    );
     assert.deepStrictEqual(marketState.status, { locked: {} });
 
     try {
@@ -473,7 +473,7 @@ describe("hyperbet-solana", () => {
     });
     await proposeDuelResult(fightProgram, authority, duelKey, {
       winner: marketSideA(),
-      duelEndTs: now + 5,
+      duelEndTs: now,
     });
 
     try {
@@ -526,7 +526,7 @@ describe("hyperbet-solana", () => {
     });
     await proposeDuelResult(fightProgram, authority, duelKey, {
       winner: marketSideA(),
-      duelEndTs: now + 5,
+      duelEndTs: now,
     });
 
     try {
@@ -534,7 +534,7 @@ describe("hyperbet-solana", () => {
         fightProgram,
         authority,
         duelKey,
-        "https://hyperscape.gg/duels/final",
+        "https://hyperia.gg/duels/final",
         { skipDisputeWindowWait: true },
       );
       assert.fail("finalization during dispute window should fail");
@@ -568,7 +568,7 @@ describe("hyperbet-solana", () => {
     });
     await proposeDuelResult(fightProgram, authority, duelKey, {
       winner: marketSideA(),
-      duelEndTs: now + 5,
+      duelEndTs: now,
     });
 
     await new Promise((resolve) => setTimeout(resolve, 61_500));
@@ -598,7 +598,7 @@ describe("hyperbet-solana", () => {
       betOpenTs: now - 120,
       betCloseTs: now - 10,
       duelStartTs: now - 5,
-      metadataUri: "https://hyperscape.gg/tests/demo/locked",
+      metadataUri: "https://hyperia.gg/tests/demo/locked",
     });
 
     try {
@@ -609,7 +609,7 @@ describe("hyperbet-solana", () => {
         betOpenTs: now - 60,
         betCloseTs: now + 60,
         duelStartTs: now + 120,
-        metadataUri: "https://hyperscape.gg/tests/demo/regressed",
+        metadataUri: "https://hyperia.gg/tests/demo/regressed",
       });
       assert.fail("lifecycle regression succeeded");
     } catch (error: unknown) {
@@ -632,7 +632,7 @@ describe("hyperbet-solana", () => {
       fightProgram,
       authority,
       market.duelKey,
-      "https://hyperscape.gg/tests/demo/cancelled-once",
+      "https://hyperia.gg/tests/demo/cancelled-once",
     );
 
     try {
@@ -640,7 +640,7 @@ describe("hyperbet-solana", () => {
         fightProgram,
         authority,
         market.duelKey,
-        "https://hyperscape.gg/tests/demo/cancelled-twice",
+        "https://hyperia.gg/tests/demo/cancelled-twice",
       );
       assert.fail("repeated cancellation succeeded");
     } catch (error: unknown) {

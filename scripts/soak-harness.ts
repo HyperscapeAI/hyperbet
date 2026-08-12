@@ -2,7 +2,7 @@
  * soak-harness.ts — Active trading soak test for prediction markets.
  *
  * Exercises CLOB, AMM, Perps, Oracle, Claims, and Reconciliation every
- * duel cycle against local Anvil chains + live Hyperscapes game server.
+ * duel cycle against local Anvil chains + live Hyperia game server.
  *
  * Usage:
  *   anvil --port 18545 --chain-id 97 --block-time 1 --accounts 20 --balance 10000 --code-size-limit 49152

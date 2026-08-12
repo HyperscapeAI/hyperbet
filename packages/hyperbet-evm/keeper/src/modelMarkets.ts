@@ -7,7 +7,7 @@ export const MAX_INDEX = 120;
 const MAX_Z_SCORE = 4;
 
 export function modelMarketIdFromCharacterId(characterId: string): number {
-  const namespaced = `hyperscape:model:${characterId.trim().toLowerCase()}`;
+  const namespaced = `hyperia:model:${characterId.trim().toLowerCase()}`;
   let hash = 0xcbf29ce484222325n;
   const fnvPrime = 0x100000001b3n;
   const maxSafeMarketId = 0x1fffffffffffffn;

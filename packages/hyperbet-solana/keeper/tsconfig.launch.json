@@ -1,0 +1,33 @@
+{
+  "extends": "./tsconfig.json",
+  "include": [
+    "src/clobOrderSizing.ts",
+    "src/db.ts",
+    "src/duelBot.ts",
+    "src/duelTerminalPolicy.ts",
+    "src/feePolicy.ts",
+    "src/feedConfig.ts",
+    "src/game-client.ts",
+    "src/keeperRoles.ts",
+    "src/launchCommon.ts",
+    "src/launchHealth.ts",
+    "src/marketRecovery.ts",
+    "src/nativeAmount.ts",
+    "src/readiness.ts",
+    "src/resolve.ts",
+    "src/resultHash.ts",
+    "src/service.ts",
+    "src/solanaBetAccounting.ts",
+    "src/solanaBetReconciliation.ts",
+    "src/solanaLifecycle.ts",
+    "src/solanaLifecycleIndexer.ts",
+    "src/solanaMarketMakerPolicy.ts",
+    "src/solanaProgramIdentity.ts",
+    "src/solanaRpcProxyPolicy.ts",
+    "src/solanaTerminalSettlement.ts",
+    "src/solanaWallet.ts",
+    "src/terminalLedger.ts",
+    "src/terminalOps.ts",
+    "src/walletKeys.ts"
+  ]
+}

@@ -38,7 +38,7 @@ fi
 
 DUEL_SOURCE="${ACCEPTANCE_DUEL_SOURCE:-${E2E_DUEL_SOURCE:-synthetic_publish}}"
 case "$DUEL_SOURCE" in
-  synthetic_publish|real_hyperscapes) ;;
+  synthetic_publish|real_hyperia) ;;
   *)
     echo "[stage-a-acceptance] unsupported duel source: $DUEL_SOURCE" >&2
     exit 1
@@ -160,7 +160,7 @@ start_evm_keeper() {
   local port="${ACCEPTANCE_EVM_KEEPER_PORT:-8080}"
   local publish_key="${ACCEPTANCE_STREAM_PUBLISH_KEY:-hyperbet-stage-a-local-write-key}"
   local enable_stream_publish="true"
-  if [[ "$DUEL_SOURCE" == "real_hyperscapes" ]]; then
+  if [[ "$DUEL_SOURCE" == "real_hyperia" ]]; then
     enable_stream_publish="false"
   fi
 
@@ -203,7 +203,7 @@ start_solana_keeper() {
   local clob_program="${GOLD_CLOB_MARKET_PROGRAM_ID:-$(resolve_solana_clob_program)}"
   local perps_program="${GOLD_PERPS_MARKET_PROGRAM_ID:-$(resolve_solana_perps_program)}"
   local enable_stream_publish="true"
-  if [[ "$DUEL_SOURCE" == "real_hyperscapes" ]]; then
+  if [[ "$DUEL_SOURCE" == "real_hyperia" ]]; then
     enable_stream_publish="false"
   fi
 

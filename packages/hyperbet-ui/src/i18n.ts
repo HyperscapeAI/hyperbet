@@ -23,7 +23,6 @@ type UiCopy = {
   noPool: string;
   actionLabel: (action: "buy" | "sell") => string;
   betAmountLabel: (symbol: string) => string;
-  sellPanelDescription: (mode: "supported" | "evm" | "disabled") => string;
   overall: string;
   headToHead: string;
   damage: string;
@@ -57,15 +56,6 @@ const UI_COPY: Record<UiLocale, UiCopy> = {
     noPool: "NO Pool",
     actionLabel: (action) => (action === "buy" ? "BUY" : "SELL"),
     betAmountLabel: (symbol) => `Bet amount in ${symbol}`,
-    sellPanelDescription: (mode) => {
-      if (mode === "supported") {
-        return "Submit sell-side orders with the controls below.";
-      }
-      if (mode === "evm") {
-        return "EVM sell orders supported via the EVM panel.";
-      }
-      return "Sell disabled until market resolution.";
-    },
     overall: "OVR",
     headToHead: "H2H",
     damage: "DMG",
@@ -97,15 +87,6 @@ const UI_COPY: Record<UiLocale, UiCopy> = {
     noPool: "NO 池",
     actionLabel: (action) => (action === "buy" ? "买入" : "卖出"),
     betAmountLabel: (symbol) => `下注金额（${symbol}）`,
-    sellPanelDescription: (mode) => {
-      if (mode === "supported") {
-        return "可使用下方控件提交卖出订单。";
-      }
-      if (mode === "evm") {
-        return "EVM 卖出订单请在 EVM 面板中操作。";
-      }
-      return "市场结算前暂不支持卖出。";
-    },
     overall: "总计",
     headToHead: "交手",
     damage: "伤害",
@@ -137,11 +118,6 @@ const UI_COPY: Record<UiLocale, UiCopy> = {
     noPool: "NO 풀",
     actionLabel: (action) => (action === "buy" ? "매수" : "매도"),
     betAmountLabel: (symbol) => `${symbol} 베팅 금액`,
-    sellPanelDescription: (mode) => {
-      if (mode === "supported") return "아래 컨트롤로 매도 주문을 제출하세요.";
-      if (mode === "evm") return "EVM 패널에서 매도 주문을 지원합니다.";
-      return "시장 정산 전까지 매도가 비활성화됩니다.";
-    },
     overall: "종합",
     headToHead: "상대전적",
     damage: "피해",
@@ -173,11 +149,6 @@ const UI_COPY: Record<UiLocale, UiCopy> = {
     noPool: "Pool NÃO",
     actionLabel: (action) => (action === "buy" ? "COMPRAR" : "VENDER"),
     betAmountLabel: (symbol) => `Valor da aposta em ${symbol}`,
-    sellPanelDescription: (mode) => {
-      if (mode === "supported") return "Envie ordens de venda com os controles abaixo.";
-      if (mode === "evm") return "Ordens de venda EVM suportadas pelo painel EVM.";
-      return "Venda desativada até a resolução do mercado.";
-    },
     overall: "GERAL",
     headToHead: "H2H",
     damage: "DANO",
@@ -209,11 +180,6 @@ const UI_COPY: Record<UiLocale, UiCopy> = {
     noPool: "Pool NO",
     actionLabel: (action) => (action === "buy" ? "COMPRAR" : "VENDER"),
     betAmountLabel: (symbol) => `Monto de apuesta en ${symbol}`,
-    sellPanelDescription: (mode) => {
-      if (mode === "supported") return "Envíe órdenes de venta con los controles de abajo.";
-      if (mode === "evm") return "Órdenes de venta EVM soportadas a través del panel EVM.";
-      return "Venta deshabilitada hasta la resolución del mercado.";
-    },
     overall: "TOTAL",
     headToHead: "H2H",
     damage: "DAÑO",
@@ -322,8 +288,6 @@ export function formatLocaleAmount(value: number, locale: UiLocale): string {
 
 export function formatTimeAgoLabel(ts: number, locale: UiLocale): string {
   const ago = Math.floor((Date.now() - ts) / 1000);
-  const mins = Math.floor(Math.max(0, ago) / 60);
-  const secs = Math.max(0, ago) % 60;
   if (ago < 0) {
     const nowMap: Record<UiLocale, string> = {
       en: "just now",
@@ -333,6 +297,24 @@ export function formatTimeAgoLabel(ts: number, locale: UiLocale): string {
       es: "justo ahora",
     };
     return nowMap[locale];
+  }
+  const mins = Math.floor(ago / 60);
+  const secs = ago % 60;
+  if (mins >= 1_440) {
+    const days = Math.floor(mins / 1_440);
+    if (locale === "zh") return `${days}天前`;
+    if (locale === "ko") return `${days}일 전`;
+    if (locale === "pt") return `${days}d atrás`;
+    if (locale === "es") return `hace ${days}d`;
+    return `${days}d ago`;
+  }
+  if (mins >= 60) {
+    const hours = Math.floor(mins / 60);
+    if (locale === "zh") return `${hours}小时前`;
+    if (locale === "ko") return `${hours}시간 전`;
+    if (locale === "pt") return `${hours}h atrás`;
+    if (locale === "es") return `hace ${hours}h`;
+    return `${hours}h ago`;
   }
   if (locale === "zh") {
     if (mins > 0) return `${mins}分${secs}秒前`;

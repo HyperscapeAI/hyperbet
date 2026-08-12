@@ -4,17 +4,14 @@ import { spawnSync } from "node:child_process";
 
 import { runDoctor } from "./dev-doctor";
 
-const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const rootDir = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "..",
+);
 const target = process.argv[2];
 
-const packageByTarget: Record<string, string> = {
-  solana: "packages/hyperbet-solana",
-  bsc: "packages/hyperbet-bsc",
-  avax: "packages/hyperbet-avax",
-};
-
-if (!target || !packageByTarget[target]) {
-  console.error("Usage: bun scripts/run-local-demo.ts <solana|bsc|avax>");
+if (target !== "solana") {
+  console.error("Usage: bun scripts/run-local-demo.ts solana");
   process.exit(1);
 }
 
@@ -26,11 +23,13 @@ const missingInstalls = doctor.messages.some(
 );
 
 if (!doctor.ok || missingInstalls) {
-  console.error("Local demo prerequisites are not satisfied. Run `bun run dev:doctor`.");
+  console.error(
+    "Local demo prerequisites are not satisfied. Run `bun run dev:doctor`.",
+  );
   process.exit(1);
 }
 
-const packageDir = path.join(rootDir, packageByTarget[target]);
+const packageDir = path.join(rootDir, "packages/hyperbet-solana");
 const result = spawnSync("bun", ["run", "dev:local"], {
   cwd: packageDir,
   stdio: "inherit",

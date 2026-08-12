@@ -26,9 +26,9 @@ const meta = {
     yesPot: 145.2,
     noPot: 112.4,
     totalPot: 257.6,
-    goldPriceUsd: 0.0712,
+    assetPriceUsd: 0.0712,
     locale: "zh",
-    assetSymbol: "AVAX",
+    assetSymbol: "SOL",
     trades: sampleTrades,
   },
 } satisfies Meta<typeof RecentTrades>;

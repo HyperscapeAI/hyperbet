@@ -1,55 +1,32 @@
-# Release Memo: Phase-1 RC Candidate
+# Hyperbet Solana Release Memo
 
-> **TL;DR:** This memo tracks the current release-candidate posture for the `Solana + BSC + AVAX` phase-1 launch product. The repo now has full-product non-mainnet rails for `PM/CLOB duels + perps/models + internal AMM`, but launch is still blocked on canonical mainnet registry truth, staged environment provisioning, governance/evidence receipts, and the external audit/remediation cycle.
+- Release identifier:
+- Git SHA:
+- Date/UTC window:
+- Release owner:
+- Program IDs and SBF hashes:
+- App/service build identifiers:
 
-## Release Candidate
+## Scope
 
-- Candidate label: `rc-2026-03-phase1-launch`
-- Active closeout branch: `audit/develop-pm-hardening`
-- Release prep summary: [../prediction-market-release-prep.md](../prediction-market-release-prep.md)
-- Launch-ops evidence index: [launch-ops-evidence-index.md](launch-ops-evidence-index.md)
-- Freeze tracker: [prediction-market-launch-freeze-tracker.md](prediction-market-launch-freeze-tracker.md)
+State the exact user experience and confirm the two-program/native-SOL boundary.
 
-## Product Scope
+## Verification
 
-- Launch chains: `Solana`, `BSC`, `AVAX`
-- Non-blocking add-chain lane: `Base`
-- User-facing launch surfaces:
-  - `PM/CLOB duels`
-  - `perps/models`
-- Internal launch-critical surface:
-  - `AMM` as headless MM and liquidity engine
+List every required command, pass count, duration, and artifact link. Include validator, exploit, keeper, UI, browser, build, scope, and staged evidence.
 
-## Repo Snapshot
+## On-chain and operational state
 
-- PM-core hardening is merged.
-- AMM settlement is oracle-only on EVM and Solana.
-- Solana perps pause survives config freeze.
-- Solana full-product deploy, init, freeze, and verify paths include `lvr_amm`.
-- EVM deploy receipts and verification now cover PM, AMM, and perps.
-- Staged proof and soak rails now target launch-scope `pm`, `perps`, and `amm`
-  surfaces.
+Record program identity, upgrade authority, frozen roles/fees/dispute window, lifecycle-index start slot, RPC retention, readiness, alerting, signer custody, and rollback readiness.
 
-## Blocking Items
+## Risks and approvals
 
-- launch-chain canonical mainnet registry fields are still incomplete
-- GitHub staged environment vars and secrets are not provisioned yet
-- shared BSC and AVAX testnet token addresses are still missing for local
-  AMM/perps rehearsal
-- governance transfer and freeze receipts are still pending
-- final audit packet, external audit, and remediation are still pending
+List open/accepted risks with owner, rationale, expiry, and approving authority. Attach security, operations, product, legal/compliance, and release decisions.
 
-## Evidence Links
+## Decision
 
-- [Production deploy guide](../hyperbet-production-deploy.md)
-- [Staged proof runbook](../runbooks/staged-live-proof.md)
-- [Soak runbook](../runbooks/pm-confidence-soak.md)
-- [Testnet operations ledger](testnet-operations-ledger.md)
-- [External audit checklist](external-audit-package-checklist.md)
+- [ ] promote
+- [ ] hold
+- [ ] rollback
 
-## Current Decision
-
-- Current decision: not ready for unrestricted real-funds launch
-- Next honest milestone: complete local Stage-A deploy and verify, provision the
-  staged environment, capture launch-scope staged proof and soak artifacts, and
-  then populate launch-chain canonical mainnet truth from final receipts
+Decision rationale and UTC timestamp:

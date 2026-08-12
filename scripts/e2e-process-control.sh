@@ -6,7 +6,7 @@ CONTROL_PATH="${2:-}"
 SERVICE="${3:-}"
 
 if [[ -z "$ACTION" || -z "$CONTROL_PATH" || -z "$SERVICE" ]]; then
-  echo "usage: $0 <start|stop|restart|status|wait-ready> <control-path> <service>" >&2
+  echo "usage: $0 <start|stop|kill|restart|status|wait-ready> <control-path> <service>" >&2
   exit 1
 fi
 
@@ -36,6 +36,7 @@ rpc_url="$(read_service_field "rpcUrl")"
 stream_state_url="$(read_service_field "streamStateUrl")"
 app_dir="$(jq -r '.appDir // empty' "$CONTROL_PATH")"
 start_command="$(read_service_field "startCommand")"
+restart_signal="$(read_service_field "restartSignal")"
 
 require_file() {
   local label="$1"
@@ -78,7 +79,7 @@ listener_pids_for_port() {
 listener_pids_for_service() {
   local port=""
   case "$SERVICE" in
-    keeper|hyperscapes|hyperscapesClient)
+    keeper|hyperia|hyperiaClient)
       port="$(port_from_url "$health_url")"
       ;;
     solanaProxy|anvil)
@@ -117,10 +118,81 @@ stop_pid() {
   exit 1
 }
 
+kill_pid_immediately() {
+  local pid="$1"
+  if [[ -z "$pid" ]] || ! kill -0 "$pid" >/dev/null 2>&1; then
+    return 0
+  fi
+
+  kill -9 "$pid" >/dev/null 2>&1 || true
+  for _ in {1..10}; do
+    if ! kill -0 "$pid" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 1
+  done
+
+  echo "failed to hard-stop service \"$SERVICE\" (pid $pid)" >&2
+  exit 1
+}
+
+process_tree_pids() {
+  local root_pid="$1"
+  [[ -z "$root_pid" ]] && return 0
+  local pending="$root_pid"
+  local discovered="$root_pid"
+  local current_pid=""
+  local child_pid=""
+
+  while [[ -n "$pending" ]]; do
+    current_pid="${pending%% *}"
+    if [[ "$pending" == *" "* ]]; then
+      pending="${pending#* }"
+    else
+      pending=""
+    fi
+    while IFS= read -r child_pid; do
+      [[ -z "$child_pid" ]] && continue
+      if [[ " $discovered " == *" $child_pid "* ]]; then
+        continue
+      fi
+      discovered="$discovered $child_pid"
+      pending="${pending:+$pending }$child_pid"
+    done < <(pgrep -P "$current_pid" 2>/dev/null || true)
+  done
+
+  printf '%s\n' $discovered
+}
+
+kill_process_tree_immediately() {
+  local root_pid="$1"
+  [[ -z "$root_pid" ]] && return 0
+  local tree_pids=""
+  tree_pids="$(process_tree_pids "$root_pid")"
+  [[ -z "$tree_pids" ]] && return 0
+  echo "hard-stop-tree service=$SERVICE pids=$(printf '%s' "$tree_pids" | tr '\n' ',')"
+  local tree_pid=""
+  while IFS= read -r tree_pid; do
+    [[ -z "$tree_pid" ]] && continue
+    kill -9 "$tree_pid" >/dev/null 2>&1 || true
+  done <<<"$tree_pids"
+}
+
 stop_service() {
   local pid
   pid="$(pid_from_file)"
-  stop_pid "$pid"
+  local hard_stop="false"
+  if [[ "$ACTION" == "kill" && "$restart_signal" != "SIGKILL" ]]; then
+    echo "service \"$SERVICE\" does not authorize an immediate SIGKILL" >&2
+    exit 1
+  fi
+  if [[ "$restart_signal" == "SIGKILL" && ( "$ACTION" == "restart" || "$ACTION" == "kill" ) ]]; then
+    hard_stop="true"
+    echo "hard-stopping service=$SERVICE pid=${pid:-missing}"
+    kill_process_tree_immediately "$pid"
+  else
+    stop_pid "$pid"
+  fi
 
   local listener_pid
   local listener_pids
@@ -128,8 +200,33 @@ stop_service() {
   if [[ -n "$listener_pids" ]]; then
     while IFS= read -r listener_pid; do
       [[ -z "$listener_pid" || "$listener_pid" == "$pid" ]] && continue
-      stop_pid "$listener_pid"
+      if [[ "$hard_stop" == "true" ]]; then
+        kill_pid_immediately "$listener_pid"
+      else
+        stop_pid "$listener_pid"
+      fi
     done <<<"$listener_pids"
+  fi
+
+  if [[ "$hard_stop" == "true" ]]; then
+    local remaining_listener_pids=""
+    for _ in {1..20}; do
+      remaining_listener_pids="$(listener_pids_for_service)"
+      if [[ -z "$remaining_listener_pids" ]]; then
+        break
+      fi
+      while IFS= read -r listener_pid; do
+        [[ -z "$listener_pid" ]] && continue
+        kill_pid_immediately "$listener_pid"
+      done <<<"$remaining_listener_pids"
+      sleep 0.25
+    done
+    remaining_listener_pids="$(listener_pids_for_service)"
+    if [[ -n "$remaining_listener_pids" ]]; then
+      echo "service \"$SERVICE\" retained a listener after SIGKILL: $remaining_listener_pids" >&2
+      exit 1
+    fi
+    echo "hard-stopped service=$SERVICE listener=none"
   fi
 
   rm -f "$pid_file"
@@ -148,6 +245,19 @@ wait_for_http_url() {
 
 wait_for_keeper() {
   wait_for_http_url "$health_url"
+}
+
+wait_for_keeper_bot() {
+  for _ in {1..90}; do
+    local response
+    response="$(curl -s "$health_url" || true)"
+    if [[ -n "$response" ]] && \
+      [[ "$(printf '%s' "$response" | jq -r '.running == true and .health.chainKey == "solana"' 2>/dev/null || true)" == "true" ]]; then
+      return 0
+    fi
+    sleep 1
+  done
+  return 1
 }
 
 wait_for_solana_proxy() {
@@ -178,7 +288,7 @@ wait_for_anvil() {
   return 1
 }
 
-wait_for_hyperscapes() {
+wait_for_hyperia() {
   if ! wait_for_http_url "$health_url"; then
     return 1
   fi
@@ -196,7 +306,7 @@ wait_for_hyperscapes() {
   return 1
 }
 
-wait_for_hyperscapes_client() {
+wait_for_hyperia_client() {
   wait_for_http_url "$health_url"
 }
 
@@ -205,17 +315,20 @@ wait_for_service() {
     keeper)
       wait_for_keeper
       ;;
+    keeperBot)
+      wait_for_keeper_bot
+      ;;
     solanaProxy)
       wait_for_solana_proxy
       ;;
     anvil)
       wait_for_anvil
       ;;
-    hyperscapes)
-      wait_for_hyperscapes
+    hyperia)
+      wait_for_hyperia
       ;;
-    hyperscapesClient)
-      wait_for_hyperscapes_client
+    hyperiaClient)
+      wait_for_hyperia_client
       ;;
     *)
       echo "unsupported service \"$SERVICE\"" >&2
@@ -254,6 +367,10 @@ start_shell_service() {
 
 start_keeper() {
   start_shell_service "keeper env file" "keeper did not become ready after restart"
+}
+
+start_keeper_bot() {
+  start_shell_service "keeper bot env file" "keeper bot did not become ready after restart"
 }
 
 start_solana_proxy() {
@@ -296,12 +413,12 @@ start_anvil() {
   fi
 }
 
-start_hyperscapes() {
-  start_shell_service "hyperscapes env file" "hyperscapes did not become ready after restart"
+start_hyperia() {
+  start_shell_service "hyperia env file" "hyperia did not become ready after restart"
 }
 
-start_hyperscapes_client() {
-  start_shell_service "hyperscapes client env file" "hyperscapes client did not become ready after restart"
+start_hyperia_client() {
+  start_shell_service "hyperia client env file" "hyperia client did not become ready after restart"
 }
 
 start_service() {
@@ -309,17 +426,20 @@ start_service() {
     keeper)
       start_keeper
       ;;
+    keeperBot)
+      start_keeper_bot
+      ;;
     solanaProxy)
       start_solana_proxy
       ;;
     anvil)
       start_anvil
       ;;
-    hyperscapes)
-      start_hyperscapes
+    hyperia)
+      start_hyperia
       ;;
-    hyperscapesClient)
-      start_hyperscapes_client
+    hyperiaClient)
+      start_hyperia_client
       ;;
     *)
       echo "unsupported service \"$SERVICE\"" >&2
@@ -352,6 +472,9 @@ case "$ACTION" in
     start_service
     ;;
   stop)
+    stop_service
+    ;;
+  kill)
     stop_service
     ;;
   restart)

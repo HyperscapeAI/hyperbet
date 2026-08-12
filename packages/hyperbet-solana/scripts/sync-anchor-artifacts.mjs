@@ -23,39 +23,31 @@ const artifactTargets = [
     copyTypes: false,
   },
   {
-    label: "hyperbet-bsc app",
-    dir: path.join(rootDir, "..", "hyperbet-bsc", "app", "src", "idl"),
-    copyTypes: true,
-  },
-  {
-    label: "hyperbet-bsc keeper",
-    dir: path.join(rootDir, "..", "hyperbet-bsc", "keeper", "src", "idl"),
-    copyTypes: true,
-  },
-  {
-    label: "hyperbet-avax keeper",
-    dir: path.join(rootDir, "..", "hyperbet-avax", "keeper", "src", "idl"),
-    copyTypes: true,
-  },
-  {
-    label: "hyperbet-evm keeper",
-    dir: path.join(rootDir, "..", "hyperbet-evm", "keeper", "src", "idl"),
-    copyTypes: true,
-  },
-  {
     label: "market-maker-bot",
     dir: path.join(rootDir, "..", "market-maker-bot", "src", "idl"),
     copyTypes: false,
-    programs: ["gold_clob_market", "lvr_amm"],
+    programs: ["duel_market"],
+  },
+  {
+    label: "TypeScript SDK",
+    dir: path.join(rootDir, "..", "hyperbet-sdk", "src", "solana", "idl"),
+    copyTypes: false,
+  },
+  {
+    label: "Python SDK",
+    dir: path.join(
+      rootDir,
+      "..",
+      "hyperbet-sdk-py",
+      "hyperbet_sdk",
+      "solana",
+      "idl",
+    ),
+    copyTypes: false,
   },
 ];
 
-const programNames = [
-  "fight_oracle",
-  "gold_clob_market",
-  "gold_perps_market",
-  "lvr_amm",
-];
+const programNames = ["fight_oracle", "duel_market"];
 
 for (const programName of programNames) {
   const sourceFile = path.join(anchorIdlDir, `${programName}.json`);

@@ -1,6 +1,5 @@
-import type { Address } from "@solana/kit";
-
-import { resolveBettingSolanaDeployment } from "../../../deployments";
+import { resolveSolanaV1Deployment } from "../../../deployments/v1";
+import { buildSolanaRpcProxyUrl } from "./runtimeUrls";
 
 export type SolanaCluster = "localnet" | "devnet" | "testnet" | "mainnet-beta";
 
@@ -127,23 +126,11 @@ export const RUNTIME_ENV: Environment = resolveRuntimeEnvironment(ACTIVE_ENV);
 
 function buildSolanaProgramConfig(
   environment: Environment,
-): Pick<
-  EnvConfig,
-  | "fightOracleProgramId"
-  | "goldClobMarketProgramId"
-  | "goldPerpsMarketProgramId"
-  | "goldAmmMarketProgramId"
-  | "goldMint"
-  | "usdcMint"
-> {
-  const deployment = resolveBettingSolanaDeployment(environment);
+): Pick<EnvConfig, "fightOracleProgramId" | "duelMarketProgramId"> {
+  const deployment = resolveSolanaV1Deployment(environment);
   return {
     fightOracleProgramId: deployment.fightOracleProgramId,
-    goldClobMarketProgramId: deployment.goldClobMarketProgramId,
-    goldPerpsMarketProgramId: deployment.goldPerpsMarketProgramId,
-    goldAmmMarketProgramId: deployment.goldAmmMarketProgramId,
-    goldMint: deployment.goldMint,
-    usdcMint: deployment.usdcMint,
+    duelMarketProgramId: deployment.duelMarketProgramId,
   };
 }
 
@@ -152,11 +139,7 @@ export interface EnvConfig {
   rpcUrl: string;
   wsUrl?: string;
   fightOracleProgramId: string;
-  goldClobMarketProgramId: string;
-  goldPerpsMarketProgramId: string;
-  goldAmmMarketProgramId: string;
-  goldMint: string;
-  usdcMint?: string;
+  duelMarketProgramId: string;
   betWindowSeconds: number;
   newRoundBetWindowSeconds: number;
   autoSeedDelaySeconds: number;
@@ -165,11 +148,11 @@ export interface EnvConfig {
   binaryMarketMakerWallet?: string;
   binaryTradeTreasuryWallet?: string;
   binaryTradeMarketMakerWallet?: string;
-  goldDecimals: number;
   enableAutoSeed: boolean;
   gameApiUrl: string;
   gameWsUrl: string;
   streamUrl: string;
+  transactionsEnabled: boolean;
   uiSyncDelayMs: number;
   refreshIntervalMs: number;
   headlessWalletName: string;
@@ -179,10 +162,10 @@ export interface EnvConfig {
   jupiterBaseUrl: string;
 }
 
-const DEFAULT_STREAM_URL = "https://www.twitch.tv/hyperscapeai";
+const DEFAULT_STREAM_URL = "";
 const DEFAULT_STREAM_FALLBACK_URL = "";
 const DEFAULT_GAME_API_URL = "http://127.0.0.1:5555";
-const DEFAULT_PRODUCTION_GAME_API_URL = "https://gold-betting-keeper-production.up.railway.app";
+const DEFAULT_PRODUCTION_GAME_API_URL = "";
 
 const baseConfig: Partial<EnvConfig> = {
   betWindowSeconds: 300,
@@ -193,11 +176,11 @@ const baseConfig: Partial<EnvConfig> = {
   binaryMarketMakerWallet: "",
   binaryTradeTreasuryWallet: "",
   binaryTradeMarketMakerWallet: "",
-  goldDecimals: 6,
   enableAutoSeed: true,
   gameApiUrl: DEFAULT_GAME_API_URL,
   gameWsUrl: `${DEFAULT_GAME_API_URL.replace(/^http/, "ws")}/ws`,
   streamUrl: DEFAULT_STREAM_URL,
+  transactionsEnabled: true,
   refreshIntervalMs: 5000,
   jupiterBaseUrl: "https://lite-api.jup.ag",
 
@@ -244,7 +227,6 @@ const ENV_CONFIGS: Record<Environment, EnvConfig> = {
     cluster: "localnet",
     rpcUrl: "http://127.0.0.1:8899",
     wsUrl: "ws://127.0.0.1:8900",
-    goldMint: "XeYyjz6Y351cyYDJAyghh6gJja9NF1ssiAXuem8YDyx",
     streamUrl: "",
     enableAutoSeed: false,
     refreshIntervalMs: 1500,
@@ -303,7 +285,8 @@ const suppressDefaultStreamFallback =
   envGameApiUrl != null &&
   envGameApiUrl !== baseEnvConfig.gameApiUrl;
 const defaultPrimaryStreamUrl =
-  envStreamUrl ?? (suppressDefaultStreamFallback ? "" : baseEnvConfig.streamUrl);
+  envStreamUrl ??
+  (suppressDefaultStreamFallback ? "" : baseEnvConfig.streamUrl);
 const resolvedStreamSources = (() => {
   if (envStreamSources.length > 0) {
     return uniqueList(envStreamSources);
@@ -327,17 +310,9 @@ export const CONFIG: EnvConfig = {
   fightOracleProgramId:
     readEnvString("VITE_FIGHT_ORACLE_PROGRAM_ID") ??
     baseEnvConfig.fightOracleProgramId,
-  goldClobMarketProgramId:
-    readEnvString("VITE_GOLD_CLOB_MARKET_PROGRAM_ID") ??
-    baseEnvConfig.goldClobMarketProgramId,
-  goldPerpsMarketProgramId:
-    readEnvString("VITE_GOLD_PERPS_MARKET_PROGRAM_ID") ??
-    baseEnvConfig.goldPerpsMarketProgramId,
-  goldAmmMarketProgramId:
-    readEnvString("VITE_GOLD_AMM_MARKET_PROGRAM_ID") ??
-    baseEnvConfig.goldAmmMarketProgramId,
-  goldMint: readEnvString("VITE_GOLD_MINT") ?? baseEnvConfig.goldMint,
-  usdcMint: readEnvString("VITE_USDC_MINT") ?? baseEnvConfig.usdcMint,
+  duelMarketProgramId:
+    readEnvString("VITE_DUEL_MARKET_PROGRAM_ID") ??
+    baseEnvConfig.duelMarketProgramId,
   betWindowSeconds: readEnvNumber(
     "VITE_BET_WINDOW_SECONDS",
     baseEnvConfig.betWindowSeconds,
@@ -352,10 +327,7 @@ export const CONFIG: EnvConfig = {
   ),
   marketMakerSeedSol: readEnvNumber(
     "VITE_MARKET_MAKER_SEED_SOL",
-    readEnvNumber(
-      "VITE_MARKET_MAKER_SEED_GOLD",
-      baseEnvConfig.marketMakerSeedSol,
-    ),
+    baseEnvConfig.marketMakerSeedSol,
   ),
   betFeeBps: readEnvNumber("VITE_BET_FEE_BPS", baseEnvConfig.betFeeBps),
   binaryMarketMakerWallet:
@@ -367,7 +339,6 @@ export const CONFIG: EnvConfig = {
   binaryTradeMarketMakerWallet:
     readEnvString("VITE_BINARY_TRADE_MARKET_MAKER_WALLET") ??
     baseEnvConfig.binaryTradeMarketMakerWallet,
-  goldDecimals: readEnvNumber("VITE_GOLD_DECIMALS", baseEnvConfig.goldDecimals),
   enableAutoSeed: readEnvBoolean(
     "VITE_ENABLE_AUTO_SEED",
     baseEnvConfig.enableAutoSeed,
@@ -375,6 +346,10 @@ export const CONFIG: EnvConfig = {
   gameApiUrl: resolvedGameApiUrl,
   gameWsUrl: resolvedGameWsUrl,
   streamUrl: resolvedStreamUrl,
+  transactionsEnabled: readEnvBoolean(
+    "VITE_TRANSACTIONS_ENABLED",
+    baseEnvConfig.transactionsEnabled,
+  ),
   uiSyncDelayMs: readEnvNumber(
     "VITE_UI_SYNC_DELAY_MS",
     baseEnvConfig.uiSyncDelayMs,
@@ -399,28 +374,13 @@ export const CONFIG: EnvConfig = {
     readEnvString("VITE_JUPITER_BASE_URL") ?? baseEnvConfig.jupiterBaseUrl,
 };
 
-// Legacy exports retained for downstream callers that still import the token mints.
-export const GOLD_MAINNET_MINT =
-  "DK9nBUMfdu4XprPRWeh8f6KnQiGWD8Z4xz3yzs9gpump" as Address;
-
-export const SOL_MINT =
-  "So11111111111111111111111111111111111111112" as Address;
-
-export const USDC_MINT =
-  "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v" as Address;
-
 export const DEFAULT_BET_WINDOW_SECONDS = CONFIG.betWindowSeconds;
 export const DEFAULT_NEW_ROUND_BET_WINDOW_SECONDS =
   CONFIG.newRoundBetWindowSeconds;
 export const DEFAULT_AUTO_SEED_DELAY_SECONDS = CONFIG.autoSeedDelaySeconds;
 export const DEFAULT_SEED_SOL_AMOUNT = CONFIG.marketMakerSeedSol;
 export const DEFAULT_BET_FEE_BPS = CONFIG.betFeeBps;
-export const GOLD_DECIMALS = CONFIG.goldDecimals;
 export const DEFAULT_REFRESH_INTERVAL_MS = CONFIG.refreshIntervalMs;
-
-export function toBaseUnits(amount: number, decimals = GOLD_DECIMALS): bigint {
-  return BigInt(Math.floor(amount * 10 ** decimals));
-}
 
 export const STREAM_URL: string = CONFIG.streamUrl;
 export const STREAM_URLS: string[] = resolvedStreamSources;
@@ -506,7 +466,12 @@ export function getRpcUrl(): string {
   if (!USE_GAME_RPC_PROXY || CONFIG.cluster === "localnet") {
     return CONFIG.rpcUrl;
   }
-  return `${GAME_API_URL}/api/proxy/solana/rpc?cluster=${encodeURIComponent(CONFIG.cluster)}`;
+  return buildSolanaRpcProxyUrl({
+    configuredBase: GAME_API_URL,
+    browserOrigin:
+      typeof window !== "undefined" ? window.location.origin : null,
+    cluster: CONFIG.cluster,
+  });
 }
 
 export function getWsUrl(): string | undefined {

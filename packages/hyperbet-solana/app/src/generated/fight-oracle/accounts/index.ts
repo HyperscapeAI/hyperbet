@@ -8,3 +8,4 @@
 
 export * from './duelState.js';
 export * from './oracleConfig.js';
+export * from './proposalRecord.js';

@@ -240,7 +240,7 @@ function buildControlledCycle(
       agent1: {
         id: `staged-${tag}-agent-a`,
         name: "Stage Agent A",
-        provider: "Hyperscape",
+        provider: "Hyperia",
         model: "stage-alpha",
         hp: 90,
         maxHp: 100,

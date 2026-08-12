@@ -16,6 +16,12 @@ export interface AgentInfo {
   wins: number;
   losses: number;
   damageDealtThisFight: number;
+  equipment?: Readonly<Record<string, string>>;
+  inventory?: ReadonlyArray<{
+    slot: number;
+    itemId: string;
+    quantity: number;
+  }>;
 }
 
 export interface RendererHealthInfo {

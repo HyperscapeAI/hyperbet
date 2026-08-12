@@ -320,7 +320,7 @@ const BIRDEYE_API_BASE =
   process.env.BIRDEYE_API_BASE?.trim() || "https://public-api.birdeye.so";
 const ITEM_MANIFEST_BASE_URL =
   process.env.ITEM_MANIFEST_BASE_URL?.trim() ||
-  "https://assets.hyperscape.club/manifests/items";
+  "https://assets.hyperia.club/manifests/items";
 const STREAM_STATE_SOURCE_URL =
   process.env.STREAM_STATE_SOURCE_URL?.trim() || "";
 const STREAM_STATE_SOURCE_BEARER_TOKEN =

@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import type { MockAgentContext } from "../lib/useMockStreamingEngine";
 import type { StreamingPhase } from "../spectator/types";
-import { GAME_API_URL } from "../lib/config";
+import { GAME_API_URL } from "../lib/solanaConfig";
 import { resolveUiLocale, getUiCopy } from "../i18n";
 
 interface FightOverlayProps {

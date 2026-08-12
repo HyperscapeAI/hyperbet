@@ -4,30 +4,27 @@ import { chromium } from "@playwright/test";
 
 const EXPECTED_COMPONENTS = [
   "AgentStats",
-  "ChainSelector",
-  "EvmBettingPanel",
   "FightOverlay",
-  "LocaleSelector",
-  "ModelsMarketView",
   "OrderBook",
-  "PointsDisplay",
   "PointsHistory",
   "PointsLeaderboard",
   "PredictionMarketPanel",
   "RecentTrades",
-  "ReferralPanel",
   "ResizeHandle",
-  "Sidebar",
   "SolanaClobPanel",
+  "SolanaManagedOrderConfirmationDialog",
+  "SolanaManagedOrders",
+  "SolanaPointsDisplay",
+  "SolanaReferralPanel",
+  "SolanaSettlementHistory",
+  "SolanaTransactionFeedbackCard",
   "StreamPlayer",
-  "Tabs",
-  "WalletLinkCard",
 ];
 
-const EXPECTED_FRAMES = [
-  "FullAppLayout",
-  "StreamUIApp",
-];
+// Full-app frame stories were intentionally removed when the client roots were
+// deduplicated. Keep this explicit so a new frame fixture cannot silently skip
+// visual capture.
+const EXPECTED_FRAMES = [];
 
 const baseUrl = "http://127.0.0.1:6006";
 const outputDir = path.resolve(process.cwd(), "storybook-artifacts");
@@ -53,21 +50,27 @@ const index = await indexResponse.json();
 
 function filterStories(prefix) {
   return Object.values(index.entries)
-    .filter((entry) => entry.type === "story" && entry.title.startsWith(`${prefix}/`))
+    .filter(
+      (entry) => entry.type === "story" && entry.title.startsWith(`${prefix}/`),
+    )
     .sort((left, right) => left.title.localeCompare(right.title));
 }
 
 const componentStories = filterStories("Components");
 const frameStories = filterStories("Frames");
 
-const renderedComponents = componentStories.map((entry) =>
-  entry.title.replace("Components/", ""),
-);
-const renderedFrames = frameStories.map((entry) =>
-  entry.title.replace("Frames/", ""),
-);
+const renderedComponents = [
+  ...new Set(
+    componentStories.map((entry) => entry.title.replace("Components/", "")),
+  ),
+];
+const renderedFrames = [
+  ...new Set(frameStories.map((entry) => entry.title.replace("Frames/", ""))),
+];
 
-if (JSON.stringify(renderedComponents) !== JSON.stringify(EXPECTED_COMPONENTS)) {
+if (
+  JSON.stringify(renderedComponents) !== JSON.stringify(EXPECTED_COMPONENTS)
+) {
   throw new Error(
     `Component story coverage mismatch.\nexpected: ${EXPECTED_COMPONENTS.join(", ")}\nactual: ${renderedComponents.join(", ")}`,
   );
@@ -90,69 +93,253 @@ const browser = await chromium.launch({
   args: ["--disable-dev-shm-usage"],
 });
 
+const desktopProfile = {
+  label: "desktop",
+  suffix: "",
+  viewport: { width: 1440, height: 1200 },
+  reducedMotion: "no-preference",
+  enforceNoHorizontalOverflow: false,
+};
+const mobileReducedMotionProfile = {
+  label: "mobile + reduced motion",
+  suffix: "-mobile-reduced-motion",
+  viewport: { width: 390, height: 844 },
+  reducedMotion: "reduce",
+  enforceNoHorizontalOverflow: true,
+};
+
 for (const entry of allStories) {
-  const page = await browser.newPage({
-    viewport: {
-      width: 1440,
-      height: 1200,
-    },
-  });
-  const storyErrors = [];
-  const handleConsole = (message) => {
-    if (message.type() === "error") {
-      storyErrors.push(message.text());
+  const profiles = [
+    "Components/SolanaManagedOrderConfirmationDialog",
+    "Components/SolanaManagedOrders",
+    "Components/SolanaTransactionFeedbackCard",
+  ].includes(entry.title)
+    ? [desktopProfile, mobileReducedMotionProfile]
+    : [desktopProfile];
+
+  for (const profile of profiles) {
+    const page = await browser.newPage({
+      viewport: profile.viewport,
+      reducedMotion: profile.reducedMotion,
+    });
+    const storyErrors = [];
+    const handleConsole = (message) => {
+      if (message.type() === "error") {
+        const location = message.location();
+        const source = location.url ? ` (${location.url})` : "";
+        storyErrors.push(`${message.text()}${source}`);
+      }
+    };
+    const handlePageError = (error) => {
+      storyErrors.push(error.message);
+    };
+    const handleResponse = (response) => {
+      if (response.status() >= 400) {
+        storyErrors.push(`${response.status()} ${response.url()}`);
+      }
+    };
+    page.on("console", handleConsole);
+    page.on("pageerror", handlePageError);
+    page.on("response", handleResponse);
+
+    const url = `${baseUrl}/iframe.html?id=${entry.id}&viewMode=story`;
+    process.stdout.write(`capturing ${entry.title} (${profile.label}) ... `);
+
+    await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30_000 });
+    await page.waitForTimeout(400);
+    const root = page.locator("#storybook-root > *").first();
+    await root.waitFor({
+      state: "visible",
+      timeout: 15_000,
+    });
+    const box = await root.boundingBox();
+    if (!box || box.width < 120 || box.height < 120) {
+      throw new Error(
+        `Story rendered too small to verify: ${entry.title} (${profile.label})`,
+      );
     }
-  };
-  const handlePageError = (error) => {
-    storyErrors.push(error.message);
-  };
-  page.on("console", handleConsole);
-  page.on("pageerror", handlePageError);
 
-  const url = `${baseUrl}/iframe.html?id=${entry.id}&viewMode=story`;
-  process.stdout.write(`capturing ${entry.title} ... `);
+    const bodyText = (await page.locator("body").innerText()).trim();
+    if (/No Preview|ReferenceError|TypeError|Failed to fetch/i.test(bodyText)) {
+      throw new Error(
+        `Story failed to render cleanly: ${entry.title} (${profile.label})`,
+      );
+    }
 
-  await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30_000 });
-  await page.waitForTimeout(400);
-  const root = page.locator("#storybook-root > *").first();
-  await root.waitFor({
-    state: "visible",
-    timeout: 15_000,
-  });
-  const box = await root.boundingBox();
-  if (!box || box.width < 120 || box.height < 120) {
-    throw new Error(`Story rendered too small to verify: ${entry.title}`);
-  }
+    if (entry.title === "Components/SolanaClobPanel") {
+      if (!bodyText.includes("0.482") || !bodyText.includes("0.518")) {
+        throw new Error(
+          "Solana CLOB fixture did not render both sides of the order book",
+        );
+      }
+      if (/Checking network fees|正在核对网络费/i.test(bodyText)) {
+        throw new Error(
+          "Disconnected Solana CLOB fixture is stuck in wallet-funding checks",
+        );
+      }
+    }
 
-  const bodyText = (await page.locator("body").innerText()).trim();
-  if (/No Preview|ReferenceError|TypeError|Failed to fetch/i.test(bodyText)) {
-    throw new Error(`Story failed to render cleanly: ${entry.title}`);
-  }
+    if (profile.enforceNoHorizontalOverflow) {
+      const layout = await page.evaluate(() => ({
+        viewportWidth: window.innerWidth,
+        bodyWidth: document.body.scrollWidth,
+        documentWidth: document.documentElement.scrollWidth,
+      }));
+      if (
+        layout.bodyWidth > layout.viewportWidth + 1 ||
+        layout.documentWidth > layout.viewportWidth + 1
+      ) {
+        throw new Error(
+          `Horizontal overflow in ${entry.title} (${profile.label}): viewport=${layout.viewportWidth}, body=${layout.bodyWidth}, document=${layout.documentWidth}`,
+        );
+      }
+    }
 
-  const safeTitle = entry.title.replace(/^(Components|Frames)\//, "");
-  const safeName = entry.name.toLowerCase().replace(/\s+/g, "-");
-  await page.screenshot({
-    path: path.join(outputDir, `${safeTitle}-${safeName}.png`),
-    fullPage: true,
-  });
-  const screenshotBuffer = await fs.readFile(
-    path.join(outputDir, `${safeTitle}-${safeName}.png`),
-  );
-  const { width, height } = readPngSize(screenshotBuffer);
-  if (width < 120 || height < 120) {
-    throw new Error(
-      `Screenshot dimensions too small for ${entry.title}: ${width}x${height}`,
+    if (entry.title === "Components/SolanaTransactionFeedbackCard") {
+      const feedback = page.locator(
+        '[data-testid="storybook-transaction-feedback"]',
+      );
+      const state = await feedback.getAttribute("data-state");
+      const expectedRole = state === "error" ? "alert" : "status";
+      if ((await feedback.getAttribute("role")) !== expectedRole) {
+        throw new Error(
+          `Incorrect live-region role for ${entry.name} (${profile.label})`,
+        );
+      }
+      const accessibilityTree = await feedback.ariaSnapshot();
+      if (!accessibilityTree.startsWith(`- ${expectedRole}`)) {
+        throw new Error(
+          `Feedback is missing from the accessibility tree for ${entry.name} (${profile.label})\n${accessibilityTree}`,
+        );
+      }
+      const reviewButtons = await feedback.getByRole("button").count();
+      if (
+        (state === "error" && reviewButtons !== 1) ||
+        (state !== "error" && reviewButtons !== 0)
+      ) {
+        throw new Error(
+          `Unexpected recovery-action count for ${entry.name} (${profile.label}): ${reviewButtons}`,
+        );
+      }
+
+      const contrastResults = await feedback.evaluate((card) => {
+        function parseColor(value) {
+          const match = value.match(
+            /rgba?\(\s*([\d.]+)[,\s]+([\d.]+)[,\s]+([\d.]+)(?:\s*[,/]\s*([\d.]+))?\s*\)/,
+          );
+          if (!match) throw new Error(`Unsupported browser color: ${value}`);
+          return {
+            r: Number(match[1]),
+            g: Number(match[2]),
+            b: Number(match[3]),
+            a: match[4] == null ? 1 : Number(match[4]),
+          };
+        }
+
+        function composite(foreground, background) {
+          const alpha = foreground.a + background.a * (1 - foreground.a);
+          if (alpha === 0) return { r: 0, g: 0, b: 0, a: 0 };
+          return {
+            r:
+              (foreground.r * foreground.a +
+                background.r * background.a * (1 - foreground.a)) /
+              alpha,
+            g:
+              (foreground.g * foreground.a +
+                background.g * background.a * (1 - foreground.a)) /
+              alpha,
+            b:
+              (foreground.b * foreground.a +
+                background.b * background.a * (1 - foreground.a)) /
+              alpha,
+            a: alpha,
+          };
+        }
+
+        function effectiveBackground(element) {
+          const ancestors = [];
+          let current = element;
+          while (current instanceof Element) {
+            ancestors.push(current);
+            current = current.parentElement;
+          }
+          let background = { r: 255, g: 255, b: 255, a: 1 };
+          for (const ancestor of ancestors.reverse()) {
+            background = composite(
+              parseColor(getComputedStyle(ancestor).backgroundColor),
+              background,
+            );
+          }
+          return background;
+        }
+
+        function luminance(color) {
+          const channels = [color.r, color.g, color.b].map((channel) => {
+            const normalized = channel / 255;
+            return normalized <= 0.04045
+              ? normalized / 12.92
+              : ((normalized + 0.055) / 1.055) ** 2.4;
+          });
+          return (
+            0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2]
+          );
+        }
+
+        return Array.from(
+          card.querySelectorAll(
+            "strong, code, a, button, [data-testid$='-warning']",
+          ),
+        ).map((element) => {
+          const background = effectiveBackground(element);
+          const foreground = composite(
+            parseColor(getComputedStyle(element).color),
+            background,
+          );
+          const lighter = Math.max(
+            luminance(foreground),
+            luminance(background),
+          );
+          const darker = Math.min(luminance(foreground), luminance(background));
+          return {
+            element: element.tagName.toLowerCase(),
+            text: element.textContent?.trim().slice(0, 60) ?? "",
+            ratio: (lighter + 0.05) / (darker + 0.05),
+          };
+        });
+      });
+      const contrastFailures = contrastResults.filter(
+        (result) => result.ratio < 4.5,
+      );
+      if (contrastFailures.length > 0) {
+        throw new Error(
+          `WCAG text contrast failure for ${entry.name} (${profile.label}): ${JSON.stringify(contrastFailures)}`,
+        );
+      }
+    }
+
+    const safeTitle = entry.title.replace(/^(Components|Frames)\//, "");
+    const safeName = entry.name.toLowerCase().replace(/\s+/g, "-");
+    const screenshotPath = path.join(
+      outputDir,
+      `${safeTitle}-${safeName}${profile.suffix}.png`,
     );
-  }
-  if (storyErrors.length > 0) {
-    throw new Error(
-      `Story emitted console/page errors: ${entry.title}\n${storyErrors.join("\n")}`,
-    );
-  }
+    await page.screenshot({ path: screenshotPath, fullPage: true });
+    const screenshotBuffer = await fs.readFile(screenshotPath);
+    const { width, height } = readPngSize(screenshotBuffer);
+    if (width < profile.viewport.width || height < profile.viewport.height) {
+      throw new Error(
+        `Screenshot dimensions too small for ${entry.title} (${profile.label}): ${width}x${height}`,
+      );
+    }
+    if (storyErrors.length > 0) {
+      throw new Error(
+        `Story emitted console/page errors: ${entry.title} (${profile.label})\n${storyErrors.join("\n")}`,
+      );
+    }
 
-  await page.close();
-
-  process.stdout.write("ok\n");
+    await page.close();
+    process.stdout.write("ok\n");
+  }
 }
 
 await browser.close();

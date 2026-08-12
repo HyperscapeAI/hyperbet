@@ -7,6 +7,7 @@ declare_id!("GFdnu7kUnZGiXh4ejWiJSBCUxvq4UfdEeUv9jjFzr5EM");
 
 pub const ORACLE_CONFIG_SEED: &[u8] = b"oracle_config";
 pub const DUEL_SEED: &[u8] = b"duel";
+pub const PROPOSAL_SEED: &[u8] = b"proposal";
 
 #[program]
 pub mod fight_oracle {
@@ -70,8 +71,14 @@ pub mod fight_oracle {
             ctx.accounts.authority.key(),
             ErrorCode::Unauthorized
         );
-        require!(!ctx.accounts.oracle_config.config_frozen, ErrorCode::ConfigFrozen);
-        require!(authority == ctx.accounts.oracle_config.authority, ErrorCode::ConfigAuthorityImmutable);
+        require!(
+            !ctx.accounts.oracle_config.config_frozen,
+            ErrorCode::ConfigFrozen
+        );
+        require!(
+            authority == ctx.accounts.oracle_config.authority,
+            ErrorCode::ConfigAuthorityImmutable
+        );
         require!(authority != Pubkey::default(), ErrorCode::InvalidAuthority);
         require!(reporter != Pubkey::default(), ErrorCode::InvalidReporter);
         require!(finalizer != Pubkey::default(), ErrorCode::InvalidFinalizer);
@@ -97,7 +104,10 @@ pub mod fight_oracle {
             ctx.accounts.authority.key(),
             ErrorCode::Unauthorized
         );
-        require!(!ctx.accounts.oracle_config.config_frozen, ErrorCode::ConfigFrozen);
+        require!(
+            !ctx.accounts.oracle_config.config_frozen,
+            ErrorCode::ConfigFrozen
+        );
         ctx.accounts.oracle_config.config_frozen = true;
         Ok(())
     }
@@ -173,11 +183,25 @@ pub mod fight_oracle {
         }
 
         // FIX-4: Lock participant identity and bet timing once betting opens
-        if is_initialized && duel_status_rank(duel_state.status) >= duel_status_rank(DuelStatus::BettingOpen) {
-            require!(participant_a_hash == duel_state.participant_a_hash, ErrorCode::ParticipantHashImmutable);
-            require!(participant_b_hash == duel_state.participant_b_hash, ErrorCode::ParticipantHashImmutable);
-            require!(bet_open_ts == duel_state.bet_open_ts, ErrorCode::TimingImmutable);
-            require!(bet_close_ts == duel_state.bet_close_ts, ErrorCode::TimingImmutable);
+        if is_initialized
+            && duel_status_rank(duel_state.status) >= duel_status_rank(DuelStatus::BettingOpen)
+        {
+            require!(
+                participant_a_hash == duel_state.participant_a_hash,
+                ErrorCode::ParticipantHashImmutable
+            );
+            require!(
+                participant_b_hash == duel_state.participant_b_hash,
+                ErrorCode::ParticipantHashImmutable
+            );
+            require!(
+                bet_open_ts == duel_state.bet_open_ts,
+                ErrorCode::TimingImmutable
+            );
+            require!(
+                bet_close_ts == duel_state.bet_close_ts,
+                ErrorCode::TimingImmutable
+            );
         }
 
         duel_state.duel_key = duel_key;
@@ -212,6 +236,12 @@ pub mod fight_oracle {
             duel_state.status != DuelStatus::Resolved && duel_state.status != DuelStatus::Cancelled,
             ErrorCode::DuelAlreadyFinalized
         );
+        require!(
+            duel_state.status == DuelStatus::Scheduled
+                || duel_state.status == DuelStatus::BettingOpen
+                || duel_state.status == DuelStatus::Locked,
+            ErrorCode::InvalidLifecycleTransition
+        );
         duel_state.status = DuelStatus::Cancelled;
         duel_state.active_proposal = [0_u8; 32];
         emit!(DuelCancelled {
@@ -238,8 +268,6 @@ pub mod fight_oracle {
             winner == MarketSide::A || winner == MarketSide::B,
             ErrorCode::InvalidWinner
         );
-        require!(duel_end_ts > 0, ErrorCode::InvalidLifecycleTransition);
-
         let duel_state = &mut ctx.accounts.duel_state;
         require!(
             duel_state.status != DuelStatus::Cancelled,
@@ -249,19 +277,30 @@ pub mod fight_oracle {
             duel_state.status == DuelStatus::Locked,
             ErrorCode::InvalidLifecycleTransition
         );
-        require!(
-            duel_end_ts >= duel_state.bet_close_ts,
-            ErrorCode::InvalidLifecycleTransition
-        );
-
-        // FIX-6: Parity with EVM — block proposals while betting window is still active
         let clock = Clock::get()?;
         require!(
             clock.unix_timestamp >= duel_state.bet_close_ts,
             ErrorCode::BettingWindowActive
         );
+        validate_result_time(duel_state, duel_end_ts, clock.unix_timestamp)?;
 
         let proposal_id = proposal_id_for(duel_state.duel_key, result_hash, replay_hash);
+        let proposal_record = &mut ctx.accounts.proposal_record;
+        require!(
+            proposal_record.proposal_id == [0_u8; 32],
+            ErrorCode::ProposalExists
+        );
+        proposal_record.duel_key = duel_state.duel_key;
+        proposal_record.proposal_id = proposal_id;
+        proposal_record.result_hash = result_hash;
+        proposal_record.replay_hash = replay_hash;
+        proposal_record.winner = winner;
+        proposal_record.seed = seed;
+        proposal_record.duel_end_ts = duel_end_ts;
+        proposal_record.proposed_at = clock.unix_timestamp;
+        proposal_record.challenged = false;
+        proposal_record.bump = ctx.bumps.proposal_record;
+
         duel_state.status = DuelStatus::Proposed;
         duel_state.active_proposal = proposal_id;
         duel_state.pending_winner = winner;
@@ -269,7 +308,7 @@ pub mod fight_oracle {
         duel_state.pending_result_hash = result_hash;
         duel_state.pending_replay_hash = replay_hash;
         duel_state.pending_duel_end_ts = duel_end_ts;
-        duel_state.pending_proposed_at = Clock::get()?.unix_timestamp;
+        duel_state.pending_proposed_at = clock.unix_timestamp;
         duel_state.pending_challenged = false;
 
         emit!(ResultProposed {
@@ -300,6 +339,14 @@ pub mod fight_oracle {
             ErrorCode::NotProposed
         );
         require!(!duel_state.pending_challenged, ErrorCode::AlreadyChallenged);
+        require!(
+            ctx.accounts.proposal_record.proposal_id == duel_state.active_proposal,
+            ErrorCode::ProposalRecordMismatch
+        );
+        require!(
+            !ctx.accounts.proposal_record.challenged,
+            ErrorCode::AlreadyChallenged
+        );
 
         let now = Clock::get()?.unix_timestamp;
         let challenge_deadline = duel_state
@@ -310,6 +357,7 @@ pub mod fight_oracle {
 
         duel_state.pending_challenged = true;
         duel_state.status = DuelStatus::Challenged;
+        ctx.accounts.proposal_record.challenged = true;
 
         emit!(ResultChallenged {
             duel_key: duel_state.duel_key,
@@ -350,19 +398,30 @@ pub mod fight_oracle {
             winner == MarketSide::A || winner == MarketSide::B,
             ErrorCode::InvalidWinner
         );
-        require!(duel_end_ts > 0, ErrorCode::InvalidLifecycleTransition);
-        require!(
-            duel_end_ts >= duel_state.bet_close_ts,
-            ErrorCode::InvalidLifecycleTransition
-        );
-
         let clock = Clock::get()?;
         require!(
             clock.unix_timestamp >= duel_state.bet_close_ts,
             ErrorCode::BettingWindowActive
         );
+        validate_result_time(duel_state, duel_end_ts, clock.unix_timestamp)?;
 
         let proposal_id = proposal_id_for(duel_state.duel_key, result_hash, replay_hash);
+        let proposal_record = &mut ctx.accounts.proposal_record;
+        require!(
+            proposal_record.proposal_id == [0_u8; 32],
+            ErrorCode::ProposalExists
+        );
+        proposal_record.duel_key = duel_state.duel_key;
+        proposal_record.proposal_id = proposal_id;
+        proposal_record.result_hash = result_hash;
+        proposal_record.replay_hash = replay_hash;
+        proposal_record.winner = winner;
+        proposal_record.seed = seed;
+        proposal_record.duel_end_ts = duel_end_ts;
+        proposal_record.proposed_at = clock.unix_timestamp;
+        proposal_record.challenged = false;
+        proposal_record.bump = ctx.bumps.proposal_record;
+
         duel_state.status = DuelStatus::Proposed;
         duel_state.active_proposal = proposal_id;
         duel_state.pending_winner = winner;
@@ -447,6 +506,16 @@ fn proposal_id_for(duel_key: [u8; 32], result_hash: [u8; 32], replay_hash: [u8; 
     solana_keccak_hasher::hashv(&[&duel_key, &result_hash, &replay_hash]).to_bytes()
 }
 
+fn validate_result_time(duel_state: &DuelState, duel_end_ts: i64, now: i64) -> Result<()> {
+    require!(
+        duel_end_ts >= duel_state.bet_close_ts
+            && duel_end_ts >= duel_state.duel_start_ts
+            && duel_end_ts <= now,
+        ErrorCode::InvalidResultTime
+    );
+    Ok(())
+}
+
 #[derive(Accounts)]
 pub struct InitializeOracle<'info> {
     #[account(mut)]
@@ -513,7 +582,13 @@ pub struct CancelDuel<'info> {
 }
 
 #[derive(Accounts)]
-#[instruction(duel_key: [u8; 32])]
+#[instruction(
+    duel_key: [u8; 32],
+    _winner: MarketSide,
+    _seed: u64,
+    replay_hash: [u8; 32],
+    result_hash: [u8; 32]
+)]
 pub struct ProposeResult<'info> {
     #[account(mut)]
     pub reporter: Signer<'info>,
@@ -525,11 +600,31 @@ pub struct ProposeResult<'info> {
     pub oracle_config: Account<'info, OracleConfig>,
     #[account(mut, seeds = [DUEL_SEED, duel_key.as_ref()], bump = duel_state.bump)]
     pub duel_state: Account<'info, DuelState>,
+    #[account(
+        init_if_needed,
+        payer = reporter,
+        space = 8 + ProposalRecord::INIT_SPACE,
+        seeds = [
+            PROPOSAL_SEED,
+            duel_key.as_ref(),
+            result_hash.as_ref(),
+            replay_hash.as_ref(),
+        ],
+        bump,
+    )]
+    pub proposal_record: Account<'info, ProposalRecord>,
+    pub system_program: Program<'info, System>,
 }
 
 // FIX-3: Accounts for reproposing after a challenge
 #[derive(Accounts)]
-#[instruction(duel_key: [u8; 32])]
+#[instruction(
+    duel_key: [u8; 32],
+    _winner: MarketSide,
+    _seed: u64,
+    replay_hash: [u8; 32],
+    result_hash: [u8; 32]
+)]
 pub struct ReproposeResult<'info> {
     #[account(mut)]
     pub reporter: Signer<'info>,
@@ -541,6 +636,20 @@ pub struct ReproposeResult<'info> {
     pub oracle_config: Account<'info, OracleConfig>,
     #[account(mut, seeds = [DUEL_SEED, duel_key.as_ref()], bump = duel_state.bump)]
     pub duel_state: Account<'info, DuelState>,
+    #[account(
+        init_if_needed,
+        payer = reporter,
+        space = 8 + ProposalRecord::INIT_SPACE,
+        seeds = [
+            PROPOSAL_SEED,
+            duel_key.as_ref(),
+            result_hash.as_ref(),
+            replay_hash.as_ref(),
+        ],
+        bump,
+    )]
+    pub proposal_record: Account<'info, ProposalRecord>,
+    pub system_program: Program<'info, System>,
 }
 
 #[derive(Accounts)]
@@ -555,6 +664,18 @@ pub struct ChallengeResult<'info> {
     pub oracle_config: Account<'info, OracleConfig>,
     #[account(mut, seeds = [DUEL_SEED, duel_key.as_ref()], bump = duel_state.bump)]
     pub duel_state: Account<'info, DuelState>,
+    #[account(
+        mut,
+        seeds = [
+            PROPOSAL_SEED,
+            duel_state.duel_key.as_ref(),
+            duel_state.pending_result_hash.as_ref(),
+            duel_state.pending_replay_hash.as_ref(),
+        ],
+        bump = proposal_record.bump,
+        constraint = proposal_record.duel_key == duel_state.duel_key @ ErrorCode::ProposalRecordMismatch,
+    )]
+    pub proposal_record: Account<'info, ProposalRecord>,
 }
 
 #[derive(Accounts)]
@@ -609,6 +730,21 @@ pub struct DuelState {
     pub pending_challenged: bool,
     #[max_len(200)]
     pub metadata_uri: String,
+    pub bump: u8,
+}
+
+#[account]
+#[derive(InitSpace)]
+pub struct ProposalRecord {
+    pub duel_key: [u8; 32],
+    pub proposal_id: [u8; 32],
+    pub result_hash: [u8; 32],
+    pub replay_hash: [u8; 32],
+    pub winner: MarketSide,
+    pub seed: u64,
+    pub duel_end_ts: i64,
+    pub proposed_at: i64,
+    pub challenged: bool,
     pub bump: u8,
 }
 
@@ -721,6 +857,12 @@ pub enum ErrorCode {
     BettingWindowActive,
     #[msg("Duel must be in Challenged status for reproposal")]
     NotChallenged,
+    #[msg("Result timestamp must be at or after duel start and no later than chain time")]
+    InvalidResultTime,
+    #[msg("Proposal evidence identity has already been used")]
+    ProposalExists,
+    #[msg("Proposal record does not match the duel's active proposal")]
+    ProposalRecordMismatch,
     #[msg("Participant hashes are immutable after betting opens")]
     ParticipantHashImmutable,
     #[msg("Bet timing is immutable after betting opens")]

@@ -8,3 +8,6 @@ bun.lock
 *.log
 coverage
 dist
+src/*.test.ts
+src/*.fixture.ts
+src/fight.ts

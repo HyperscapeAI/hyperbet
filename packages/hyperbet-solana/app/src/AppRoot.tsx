@@ -4,7 +4,8 @@ import { SolanaProvider } from "@solana/react-hooks";
 import { watchWalletStandardConnectors } from "@solana/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
-import { AppWalletProvider } from "./lib/appWallet";
+import { AppWalletProvider, SpectatorAppWalletProvider } from "./lib/appWallet";
+import { CONFIG } from "./lib/config";
 import { createFrameworkClient } from "./lib/frameworkClient";
 import { createHeadlessWalletConnectorsFromEnv } from "./lib/headlessWallet";
 import { App } from "./App";
@@ -18,7 +19,11 @@ if (!(globalThis as { Buffer?: typeof Buffer }).Buffer) {
 
 const queryClient = new QueryClient();
 
-export default function AppRoot() {
+function AppContent() {
+  return IS_STREAM_UI ? <StreamUIApp /> : <App />;
+}
+
+function TransactionWalletRoot() {
   const [walletScanVersion, setWalletScanVersion] = useState(0);
   const headlessWallets = useMemo(
     () => createHeadlessWalletConnectorsFromEnv(),
@@ -68,13 +73,25 @@ export default function AppRoot() {
         storageKey: "hyperbet-solana:last-wallet",
       }}
     >
-      <QueryClientProvider client={queryClient}>
-        <AppWalletProvider
-          headlessAutoConnectorId={autoConnectHeadlessConnectorId}
-        >
-          {IS_STREAM_UI ? <StreamUIApp /> : <App />}
-        </AppWalletProvider>
-      </QueryClientProvider>
+      <AppWalletProvider
+        headlessAutoConnectorId={autoConnectHeadlessConnectorId}
+      >
+        <AppContent />
+      </AppWalletProvider>
     </SolanaProvider>
+  );
+}
+
+export default function AppRoot() {
+  return (
+    <QueryClientProvider client={queryClient}>
+      {CONFIG.transactionsEnabled ? (
+        <TransactionWalletRoot />
+      ) : (
+        <SpectatorAppWalletProvider>
+          <AppContent />
+        </SpectatorAppWalletProvider>
+      )}
+    </QueryClientProvider>
   );
 }

@@ -20,7 +20,7 @@ interface RecentTradesProps {
   yesPot: number;
   noPot: number;
   totalPot: number;
-  goldPriceUsd: number | null;
+  assetPriceUsd: number | null;
   locale?: UiLocale;
   assetSymbol?: string;
   trades: Trade[]; // Real trades
@@ -30,9 +30,9 @@ export function RecentTrades({
   yesPot,
   noPot,
   totalPot,
-  goldPriceUsd,
+  assetPriceUsd,
   locale,
-  assetSymbol = "GOLD",
+  assetSymbol = "SOL",
   trades,
 }: RecentTradesProps) {
   const resolvedLocale = resolveUiLocale(locale);
@@ -62,7 +62,8 @@ export function RecentTrades({
           display: "flex",
           justifyContent: "space-between",
           alignItems: "center",
-          borderBottom: "1px solid var(--hm-border-subtle, rgba(255,255,255,0.05))",
+          borderBottom:
+            "1px solid var(--hm-border-subtle, rgba(255,255,255,0.05))",
           paddingBottom: 4,
         }}
       >
@@ -80,7 +81,7 @@ export function RecentTrades({
         >
           {copy.recentTrades}
         </div>
-        {goldPriceUsd !== null && false /* Shown in chart area instead */}
+        {assetPriceUsd !== null && false /* Shown in chart area instead */}
       </div>
 
       {/* Header */}
@@ -163,7 +164,8 @@ export function RecentTrades({
                 <div
                   style={{
                     flex: 1,
-                    color: trade.side === "YES" ? "var(--hm-buy)" : "var(--hm-sell)",
+                    color:
+                      trade.side === "YES" ? "var(--hm-buy)" : "var(--hm-sell)",
                     fontWeight: 900,
                     fontFamily: "var(--hm-font-display)",
                     letterSpacing: 1,
@@ -178,7 +180,10 @@ export function RecentTrades({
                       width: 6,
                       height: 6,
                       borderRadius: "50%",
-                      background: trade.side === "YES" ? "var(--hm-buy)" : "var(--hm-sell)",
+                      background:
+                        trade.side === "YES"
+                          ? "var(--hm-buy)"
+                          : "var(--hm-sell)",
                       boxShadow:
                         trade.side === "YES"
                           ? "0 0 6px var(--hm-trade-buy-glow, rgba(34,197,94,0.5))"
@@ -212,8 +217,6 @@ export function RecentTrades({
           })
         )}
       </div>
-
-
     </>
   );
 }

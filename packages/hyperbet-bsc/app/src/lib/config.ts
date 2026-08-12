@@ -14,12 +14,7 @@ export type SolanaCluster = "localnet" | "devnet" | "testnet" | "mainnet-beta";
 // ============================================================================
 
 export type Environment =
-  | "devnet"
-  | "testnet"
-  | "mainnet-beta"
-  | "localnet"
-  | "e2e"
-  | "stream-ui";
+  "devnet" | "testnet" | "mainnet-beta" | "localnet" | "e2e" | "stream-ui";
 
 const ENVIRONMENT_ALIASES: Record<string, Environment> = {
   development: "devnet",
@@ -273,10 +268,11 @@ interface EnvConfig {
   walletConnectProjectId: string;
 }
 
-const DEFAULT_STREAM_URL = "https://www.twitch.tv/hyperscapeai";
+const DEFAULT_STREAM_URL = "";
 const DEFAULT_STREAM_FALLBACK_URL = "";
 const DEFAULT_GAME_API_URL = "http://127.0.0.1:5555";
-const DEFAULT_PRODUCTION_GAME_API_URL = "https://gold-betting-keeper-production.up.railway.app";
+const DEFAULT_PRODUCTION_GAME_API_URL =
+  "https://gold-betting-keeper-production.up.railway.app";
 
 const baseConfig: Partial<EnvConfig> = {
   betWindowSeconds: 300,
@@ -407,7 +403,8 @@ const suppressDefaultStreamFallback =
   envGameApiUrl != null &&
   envGameApiUrl !== baseEnvConfig.gameApiUrl;
 const defaultPrimaryStreamUrl =
-  envStreamUrl ?? (suppressDefaultStreamFallback ? "" : baseEnvConfig.streamUrl);
+  envStreamUrl ??
+  (suppressDefaultStreamFallback ? "" : baseEnvConfig.streamUrl);
 const resolvedStreamSources = (() => {
   if (envStreamSources.length > 0) {
     return uniqueList(envStreamSources);
@@ -681,10 +678,9 @@ export const BASE_CHAIN_ID: number = CONFIG.baseChainId;
 export const BASE_GOLD_CLOB_ADDRESS: string = CONFIG.baseGoldClobAddress;
 export const BASE_GOLD_TOKEN_ADDRESS: string = CONFIG.baseGoldTokenAddress;
 
-export const AVAX_RPC_URL: string =
-  shouldUseGameEvmRpcProxy()
-    ? `${GAME_API_URL}/api/proxy/evm/rpc?chain=${encodeURIComponent("avax")}`
-    : CONFIG.avaxRpcUrl;
+export const AVAX_RPC_URL: string = shouldUseGameEvmRpcProxy()
+  ? `${GAME_API_URL}/api/proxy/evm/rpc?chain=${encodeURIComponent("avax")}`
+  : CONFIG.avaxRpcUrl;
 export const AVAX_CHAIN_ID: number = CONFIG.avaxChainId;
 export const AVAX_GOLD_CLOB_ADDRESS: string = CONFIG.avaxGoldClobAddress;
 export const AVAX_GOLD_TOKEN_ADDRESS: string = CONFIG.avaxGoldTokenAddress;

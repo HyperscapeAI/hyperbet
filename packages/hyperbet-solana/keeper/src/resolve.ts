@@ -1,18 +1,23 @@
 import BN from "bn.js";
 import { type Program } from "@coral-xyz/anchor";
+import { PublicKey, SystemProgram } from "@solana/web3.js";
 import yargs from "yargs";
 import { hideBin } from "yargs/helpers";
 import type { FightOracle } from "./idl/fight_oracle";
 
 import {
-  createPrograms,
+  createLaunchPrograms,
   duelKeyHexToBytes,
   enumIs,
   findDuelStatePda,
   findOracleConfigPda,
+  findProposalRecordPda,
   readKeypair,
-  requireEnv,
-} from "./common";
+} from "./launchCommon";
+import {
+  resolveKeeperRoleRefs,
+  validateKeeperRoleSeparation,
+} from "./keeperRoles";
 import { buildResultHash } from "./resultHash";
 
 const args = await yargs(hideBin(process.argv))
@@ -45,8 +50,32 @@ const args = await yargs(hideBin(process.argv))
   .strict()
   .parse();
 
-const oracleAuthority = readKeypair(requireEnv("ORACLE_AUTHORITY_KEYPAIR"));
-const { fightOracle } = createPrograms(oracleAuthority);
+const cluster =
+  process.env.SOLANA_CLUSTER || process.env.CLUSTER || "mainnet-beta";
+const roleRefs = resolveKeeperRoleRefs(process.env);
+const feePayer = readKeypair(roleRefs.feePayerKeypair);
+const reporter = readKeypair(roleRefs.oracleReporterKeypair);
+const finalizer = readKeypair(roleRefs.oracleFinalizerKeypair);
+const marketOperator = readKeypair(roleRefs.clobMarketOperatorKeypair);
+const marketMaker = readKeypair(roleRefs.marketMakerKeypair);
+const challenger = new PublicKey(roleRefs.oracleChallengerWallet);
+const oracleConfigAuthority = roleRefs.oracleConfigAuthorityKeypair
+  ? readKeypair(roleRefs.oracleConfigAuthorityKeypair)
+  : null;
+const clobConfigAuthority = roleRefs.clobConfigAuthorityKeypair
+  ? readKeypair(roleRefs.clobConfigAuthorityKeypair)
+  : null;
+validateKeeperRoleSeparation(cluster, {
+  feePayer: feePayer.publicKey,
+  oracleReporter: reporter.publicKey,
+  oracleFinalizer: finalizer.publicKey,
+  oracleChallenger: challenger,
+  clobMarketOperator: marketOperator.publicKey,
+  marketMaker: marketMaker.publicKey,
+  oracleConfigAuthority: oracleConfigAuthority?.publicKey ?? null,
+  clobConfigAuthority: clobConfigAuthority?.publicKey ?? null,
+});
+const { connection, fightOracle } = createLaunchPrograms(feePayer);
 const oracleProgram: Program<FightOracle> = fightOracle;
 const oracleAccounts = oracleProgram.account as Record<
   string,
@@ -58,8 +87,16 @@ const duelPda = findDuelStatePda(fightOracle.programId, duelKey);
 const oracleConfigPda = findOracleConfigPda(fightOracle.programId);
 
 const duelState = await oracleAccounts["duelState"].fetch(duelPda);
-const oracleConfig = await oracleAccounts["oracleConfig"].fetch(oracleConfigPda);
-const nowTs = Math.floor(Date.now() / 1000);
+const oracleConfig =
+  await oracleAccounts["oracleConfig"].fetch(oracleConfigPda);
+const confirmedSlot = await connection.getSlot("confirmed");
+const confirmedChainTs = await connection.getBlockTime(confirmedSlot);
+if (!Number.isSafeInteger(confirmedChainTs) || Number(confirmedChainTs) <= 0) {
+  throw new Error(
+    "Confirmed Solana block time is unavailable; refusing to resolve",
+  );
+}
+const nowTs = Number(confirmedChainTs);
 
 let proposeResultSig: string | null = null;
 let finalizeResultSig: string | null = null;
@@ -71,6 +108,9 @@ if (!enumIs(duelState.status, "resolved")) {
   if (nowTs < Number(duelState.betCloseTs)) {
     throw new Error("Bet window still open; refusing to resolve early");
   }
+  if (nowTs < Number(duelState.duelStartTs)) {
+    throw new Error("Duel has not started; refusing to fabricate an end time");
+  }
 
   const replayHashHex = args["replay-hash"].trim().toLowerCase();
   if (!/^[0-9a-f]{64}$/.test(replayHashHex)) {
@@ -78,11 +118,18 @@ if (!enumIs(duelState.status, "resolved")) {
   }
 
   if (enumIs(duelState.status, "locked")) {
+    const replayHash = Array.from(Buffer.from(replayHashHex, "hex"));
     const resultHash = buildResultHash(
       args["duel-key"],
       args.winner === "a" ? "A" : "B",
       args.seed,
       replayHashHex,
+    );
+    const proposalRecord = findProposalRecordPda(
+      oracleProgram.programId,
+      duelKey,
+      resultHash,
+      replayHash,
     );
 
     proposeResultSig = await oracleProgram.methods
@@ -90,18 +137,19 @@ if (!enumIs(duelState.status, "resolved")) {
         Array.from(duelKey),
         args.winner === "a" ? { a: {} } : { b: {} },
         new BN(args.seed),
-        Array.from(Buffer.from(replayHashHex, "hex")),
+        replayHash,
         resultHash,
         new BN(nowTs),
         args.metadata,
       )
-      .accounts(
-        {
-          reporter: oracleAuthority.publicKey,
-          oracleConfig: oracleConfigPda,
-          duelState: duelPda,
-        } as never,
-      )
+      .accounts({
+        reporter: reporter.publicKey,
+        oracleConfig: oracleConfigPda,
+        duelState: duelPda,
+        proposalRecord,
+        systemProgram: SystemProgram.programId,
+      } as never)
+      .signers([reporter])
       .rpc();
   }
 
@@ -117,13 +165,12 @@ if (!enumIs(duelState.status, "resolved")) {
     if (nowTs >= finalizableAt) {
       finalizeResultSig = await oracleProgram.methods
         .finalizeResult(Array.from(duelKey), args.metadata)
-        .accounts(
-          {
-            finalizer: oracleAuthority.publicKey,
-            oracleConfig: oracleConfigPda,
-            duelState: duelPda,
-          } as never,
-        )
+        .accounts({
+          finalizer: finalizer.publicKey,
+          oracleConfig: oracleConfigPda,
+          duelState: duelPda,
+        } as never)
+        .signers([finalizer])
         .rpc();
     }
   }

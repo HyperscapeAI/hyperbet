@@ -63,11 +63,7 @@ function getAgentStatsCopy(locale: UiLocale) {
       };
 }
 
-export function AgentStats({
-  agent,
-  side = "left",
-  locale,
-}: AgentStatsProps) {
+export function AgentStats({ agent, side = "left", locale }: AgentStatsProps) {
   const resolvedLocale = resolveUiLocale(locale);
   const copy = getAgentStatsCopy(resolvedLocale);
   if (!agent) {
@@ -196,7 +192,9 @@ export function AgentStats({
             letterSpacing: 2,
           }}
         >
-          <span style={{ color: "rgba(255,255,255,0.4)" }}>{copy.hpStatus}</span>
+          <span style={{ color: "rgba(255,255,255,0.4)" }}>
+            {copy.hpStatus}
+          </span>
           <span style={{ color: isLowHp ? "#ff0d3c" : "#00ffcc" }}>
             {agent.hp} / {agent.maxHp}
           </span>

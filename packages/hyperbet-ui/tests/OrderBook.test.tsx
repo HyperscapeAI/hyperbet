@@ -11,7 +11,7 @@ describe("OrderBook", () => {
         yesPot={40}
         noPot={60}
         totalPot={100}
-        goldPriceUsd={2015.1234}
+        assetPriceUsd={2015.1234}
         bids={[{ price: 0.55, amount: 10, total: 10 }]}
         asks={[{ price: 0.65, amount: 8, total: 8 }]}
       />,
@@ -30,7 +30,7 @@ describe("OrderBook", () => {
         yesPot={40}
         noPot={60}
         totalPot={100}
-        goldPriceUsd={2015.1234}
+        assetPriceUsd={2015.1234}
         locale="zh"
         bids={[{ price: 0.55, amount: 10, total: 10 }]}
         asks={[{ price: 0.65, amount: 8, total: 8 }]}
@@ -42,5 +42,21 @@ describe("OrderBook", () => {
     expect(container.textContent).toContain("数量");
     expect(container.textContent).toContain("总计");
     expect(container.textContent).toContain("价差: 0.000");
+  });
+
+  it("does not invent a midpoint or spread when the CLOB quote is unavailable", () => {
+    const { container } = render(
+      <OrderBook
+        yesPot={0}
+        noPot={0}
+        totalPot={0}
+        assetPriceUsd={null}
+        midPrice={null}
+      />,
+    );
+
+    expect(container.textContent).toContain("—");
+    expect(container.textContent).not.toContain("0.500");
+    expect(container.textContent).not.toContain("Spread: 0.000");
   });
 });

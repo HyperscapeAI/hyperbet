@@ -76,6 +76,10 @@ import {
 import { getSimulationBackendKind } from "./backends/index.js";
 import { EvmSimulationBackend } from "./backends/evm.js";
 import { SolanaSimulationBackend } from "./backends/solana/backend.js";
+import {
+    resolveSimulationRuntimeTarget,
+    simulationRuntimeUsesEvm,
+} from "./simulation-target.js";
 
 // ─── Config ──────────────────────────────────────────────────────────────────
 const __filename = fileURLToPath(import.meta.url);
@@ -83,6 +87,12 @@ const __dirname = dirname(__filename);
 const ANVIL_PORT = Number(process.env.SIM_ANVIL_PORT ?? "18546");
 const WS_PORT = Number(process.env.SIM_WS_PORT ?? "3400");
 const HTTP_PORT = Number(process.env.SIM_HTTP_PORT ?? "3401");
+const SIMULATION_RUNTIME_TARGET = resolveSimulationRuntimeTarget(
+    process.env.SIM_RUNTIME_TARGET,
+);
+const EVM_BOOTSTRAP_ENABLED = simulationRuntimeUsesEvm(
+    SIMULATION_RUNTIME_TARGET,
+);
 const PUBLIC_DIR = join(__dirname, "..", "public");
 const CONTRACTS_DIR = join(__dirname, "..", "..", "evm-contracts");
 const SCENARIO_HISTORY_LIMIT = 50;
@@ -3778,13 +3788,17 @@ async function main(): Promise<void> {
     console.log("╚══════════════════════════════════════════════════════════╝");
     loadScenarioState();
 
-    // 1. Start Anvil
-    await startAnvil();
-
-    // 2. Deploy contracts
-    await deployContracts();
-    await captureScenarioBaseline();
-    await broadcastState();
+    if (EVM_BOOTSTRAP_ENABLED) {
+        // The mixed/EVM dashboard retains its interactive Anvil baseline.
+        await startAnvil();
+        await deployContracts();
+        await captureScenarioBaseline();
+        await broadcastState();
+    } else {
+        console.log(
+            "[bootstrap] Solana-only runtime selected; skipping Anvil and EVM deployment",
+        );
+    }
 
     // 3. Start HTTP server
     const httpServer = createServer((req, res) => {
@@ -3800,8 +3814,10 @@ async function main(): Promise<void> {
         wsClients.add(ws);
         console.log(`[ws] Client connected (total: ${wsClients.size})`);
 
-        // Send initial state
-        broadcastState();
+        // EVM state is unavailable by design in a Solana-only gate.
+        if (EVM_BOOTSTRAP_ENABLED) {
+            broadcastState();
+        }
         broadcast({ type: "events_bulk", data: eventLog.slice(-200) });
 
         ws.on("message", (data) => handleWsMessage(data.toString()));

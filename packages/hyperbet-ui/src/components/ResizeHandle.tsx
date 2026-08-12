@@ -8,7 +8,7 @@ interface ResizeHandleProps {
 
 /**
  * Thin draggable separator between two panels.
- * Visually highlights on hover and shows a gold accent while active.
+ * Visually highlights on hover and shows a warm accent while active.
  */
 export function ResizeHandle({
   direction,

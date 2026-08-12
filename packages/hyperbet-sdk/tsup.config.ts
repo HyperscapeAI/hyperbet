@@ -9,11 +9,5 @@ export default defineConfig({
   clean: true,
   bundle: true,
   minify: false,
-  external: [
-    "ethers",
-    "@solana/web3.js",
-    "@coral-xyz/anchor",
-    "bn.js",
-    "bs58"
-  ]
+  external: ["@solana/web3.js", "@coral-xyz/anchor", "bn.js", "bs58"],
 });

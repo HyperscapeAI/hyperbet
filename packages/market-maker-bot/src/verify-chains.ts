@@ -145,8 +145,16 @@ export const verifyEvmChain = async (
       };
     }
 
-    const clob = new ethers.Contract(params.goldClobAddress, EVM_CLOB_ABI, provider);
-    const amm = new ethers.Contract(params.goldAmmRouterAddress, EVM_AMM_ABI, provider);
+    const clob = new ethers.Contract(
+      params.goldClobAddress,
+      EVM_CLOB_ABI,
+      provider,
+    );
+    const amm = new ethers.Contract(
+      params.goldAmmRouterAddress,
+      EVM_AMM_ABI,
+      provider,
+    );
     const skillOracle = new ethers.Contract(
       params.skillOracleAddress,
       EVM_SKILL_ORACLE_ABI,
@@ -185,10 +193,14 @@ export const verifyEvmChain = async (
     ]);
 
     const ok =
-      ethers.getAddress(clobOracle) === ethers.getAddress(params.duelOracleAddress) &&
-      ethers.getAddress(ammOracle) === ethers.getAddress(params.duelOracleAddress) &&
-      ethers.getAddress(ammMUsd) === ethers.getAddress(params.mUsdTokenAddress) &&
-      ethers.getAddress(perpOracle) === ethers.getAddress(params.skillOracleAddress) &&
+      ethers.getAddress(clobOracle) ===
+        ethers.getAddress(params.duelOracleAddress) &&
+      ethers.getAddress(ammOracle) ===
+        ethers.getAddress(params.duelOracleAddress) &&
+      ethers.getAddress(ammMUsd) ===
+        ethers.getAddress(params.mUsdTokenAddress) &&
+      ethers.getAddress(perpOracle) ===
+        ethers.getAddress(params.skillOracleAddress) &&
       ethers.getAddress(perpMarginToken) ===
         ethers.getAddress(params.perpMarginTokenAddress) &&
       ammFrozen === true &&
@@ -231,11 +243,16 @@ export const verifySolanaChain = async (
       connection.getAccountInfo(goldPerpsProgramId, "confirmed"),
     ]);
 
-    if (!clobInfo?.executable || !ammInfo?.executable || !perpsInfo?.executable) {
+    if (
+      !clobInfo?.executable ||
+      !ammInfo?.executable ||
+      !perpsInfo?.executable
+    ) {
       return {
         chain: "solana",
         ok: false,
-        details: "one or more Solana launch programs are missing or not executable",
+        details:
+          "one or more Solana launch programs are missing or not executable",
       };
     }
 
@@ -307,7 +324,9 @@ function parseDeployment(args: Array<string>): DeploymentMode {
   return value;
 }
 
-function firstNonEmptyValue(...values: Array<string | undefined>): string | null {
+function firstNonEmptyValue(
+  ...values: Array<string | undefined>
+): string | null {
   for (const value of values) {
     const trimmed = value?.trim();
     if (trimmed) {
@@ -320,7 +339,10 @@ function firstNonEmptyValue(...values: Array<string | undefined>): string | null
 function resolveNonMainnetEvmCheck(
   chain: BettingEvmChain,
 ): EvmSurfaceCheck | CheckResult {
-  const runtime = resolveEvmAcceptanceRuntime(chain as "bsc" | "avax", process.env);
+  const runtime = resolveEvmAcceptanceRuntime(
+    chain as "bsc" | "avax",
+    process.env,
+  );
   const deployment = resolveBettingEvmDeploymentForChain(chain, "testnet");
   const rpcUrl = runtime.rpcUrl;
   if (!rpcUrl) {
@@ -353,17 +375,17 @@ function resolveNonMainnetEvmCheck(
     }
   }
 
-    return {
-      chain,
-      rpcUrl,
-      expectedChainId: BigInt(
-        firstNonEmptyValue(
-          process.env[expectedChainIdEnvVar(chain)],
-          process.env[`${chain.toUpperCase()}_TESTNET_CHAIN_ID`],
-          process.env[`${chain.toUpperCase()}_STAGING_CHAIN_ID`],
-          `${deployment.chainId}`,
-        )!,
-      ),
+  return {
+    chain,
+    rpcUrl,
+    expectedChainId: BigInt(
+      firstNonEmptyValue(
+        process.env[expectedChainIdEnvVar(chain)],
+        process.env[`${chain.toUpperCase()}_TESTNET_CHAIN_ID`],
+        process.env[`${chain.toUpperCase()}_STAGING_CHAIN_ID`],
+        `${deployment.chainId}`,
+      )!,
+    ),
     duelOracleAddress: normalizeAddress(addressFields.duelOracleAddress!),
     goldClobAddress: normalizeAddress(addressFields.goldClobAddress!),
     goldAmmRouterAddress: normalizeAddress(addressFields.goldAmmRouterAddress!),
@@ -371,7 +393,9 @@ function resolveNonMainnetEvmCheck(
     goldTokenAddress: normalizeAddress(addressFields.goldTokenAddress!),
     skillOracleAddress: normalizeAddress(addressFields.skillOracleAddress!),
     perpEngineAddress: normalizeAddress(addressFields.perpEngineAddress!),
-    perpMarginTokenAddress: normalizeAddress(addressFields.perpMarginTokenAddress!),
+    perpMarginTokenAddress: normalizeAddress(
+      addressFields.perpMarginTokenAddress!,
+    ),
   };
 }
 
@@ -379,8 +403,15 @@ function resolveProductionEvmCheck(
   chain: BettingEvmChain,
 ): EvmSurfaceCheck | CheckResult {
   try {
-    const runtime = resolveBettingEvmRuntimeEnv(chain, "mainnet-beta", process.env);
-    const deployment = resolveBettingEvmDeploymentForChain(chain, "mainnet-beta");
+    const runtime = resolveBettingEvmRuntimeEnv(
+      chain,
+      "mainnet-beta",
+      process.env,
+    );
+    const deployment = resolveBettingEvmDeploymentForChain(
+      chain,
+      "mainnet-beta",
+    );
     const addresses = {
       duelOracleAddress: runtime.duelOracleAddress,
       goldClobAddress: runtime.goldClobAddress,
@@ -416,7 +447,9 @@ function resolveProductionEvmCheck(
       goldTokenAddress: normalizeAddress(addresses.goldTokenAddress),
       skillOracleAddress: normalizeAddress(addresses.skillOracleAddress),
       perpEngineAddress: normalizeAddress(addresses.perpEngineAddress),
-      perpMarginTokenAddress: normalizeAddress(addresses.perpMarginTokenAddress),
+      perpMarginTokenAddress: normalizeAddress(
+        addresses.perpMarginTokenAddress,
+      ),
     };
   } catch (error) {
     return {
@@ -442,7 +475,7 @@ function resolveNonMainnetSolanaCheck(): SolanaSurfaceCheck | CheckResult {
   }
 
   const goldClobProgramId =
-    process.env.SOLANA_VERIFY_GOLD_CLOB_PROGRAM_ID?.trim() ||
+    process.env.SOLANA_VERIFY_DUEL_MARKET_PROGRAM_ID?.trim() ||
     process.env.SOLANA_VERIFY_PROGRAM_ID?.trim() ||
     runtime.goldClobProgramId;
   const goldAmmProgramId =
@@ -527,9 +560,10 @@ async function run() {
       })()
     : null;
 
-  const results = await Promise.all(
-    [...evmChecks, ...(solanaCheck ? [solanaCheck] : [])],
-  );
+  const results = await Promise.all([
+    ...evmChecks,
+    ...(solanaCheck ? [solanaCheck] : []),
+  ]);
 
   if (jsonOutput) {
     console.log(JSON.stringify(results, null, 2));

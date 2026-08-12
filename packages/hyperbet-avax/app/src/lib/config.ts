@@ -9,12 +9,7 @@ import {
 // ============================================================================
 
 export type Environment =
-  | "devnet"
-  | "testnet"
-  | "mainnet-beta"
-  | "localnet"
-  | "e2e"
-  | "stream-ui";
+  "devnet" | "testnet" | "mainnet-beta" | "localnet" | "e2e" | "stream-ui";
 
 const ENVIRONMENT_ALIASES: Record<string, Environment> = {
   development: "devnet",
@@ -147,10 +142,7 @@ function buildEvmConfig(
   environment: Environment,
 ): Pick<
   EnvConfig,
-  | "avaxRpcUrl"
-  | "avaxChainId"
-  | "avaxGoldClobAddress"
-  | "avaxGoldTokenAddress"
+  "avaxRpcUrl" | "avaxChainId" | "avaxGoldClobAddress" | "avaxGoldTokenAddress"
 > {
   const defaults = resolveBettingEvmDefaults(
     asDeploymentEnvironment(environment),
@@ -188,7 +180,7 @@ export interface EnvConfig {
   avaxGoldTokenAddress: string;
 }
 
-const DEFAULT_STREAM_URL = "https://www.twitch.tv/hyperscapeai";
+const DEFAULT_STREAM_URL = "";
 const DEFAULT_STREAM_FALLBACK_URL = "";
 const DEFAULT_GAME_API_URL = "http://127.0.0.1:5555";
 const DEFAULT_PRODUCTION_GAME_API_URL = "https://api.hyperbet.win";

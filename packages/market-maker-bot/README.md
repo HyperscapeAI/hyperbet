@@ -20,9 +20,9 @@ Solana execution now requires all of the following:
 - `SOLANA_PRIVATE_KEY` for a real funded signer
 - `SOLANA_RPC_URL`
 - `FIGHT_ORACLE_PROGRAM_ID`
-- `GOLD_CLOB_MARKET_PROGRAM_ID`
+- `DUEL_MARKET_PROGRAM_ID`
 
-`SOLANA_ARENA_MARKET_PROGRAM_ID` is still accepted as a deprecated alias for `GOLD_CLOB_MARKET_PROGRAM_ID`.
+`SOLANA_ARENA_MARKET_PROGRAM_ID` is still accepted as a deprecated alias for `DUEL_MARKET_PROGRAM_ID`.
 
 If the Solana signer, program, or config PDA is unavailable, the bot disables only Solana execution and continues quoting on the enabled EVM chains.
 
@@ -40,7 +40,7 @@ This writes wallet key material to `wallets.generated.json`. Keep that file priv
 bun run start:multi -- --config wallets.generated.json --stagger-ms 1200
 ```
 
-Any wallet with `MM_ENABLE_SOLANA=true` needs a funded `solanaPrivateKey`. Shared Solana env such as `SOLANA_RPC_URL`, `FIGHT_ORACLE_PROGRAM_ID`, and `GOLD_CLOB_MARKET_PROGRAM_ID` can live under `defaults`.
+Any wallet with `MM_ENABLE_SOLANA=true` needs a funded `solanaPrivateKey`. Shared Solana env such as `SOLANA_RPC_URL`, `FIGHT_ORACLE_PROGRAM_ID`, and `DUEL_MARKET_PROGRAM_ID` can live under `defaults`.
 
 Optional:
 

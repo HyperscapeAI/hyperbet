@@ -6,9 +6,7 @@ import {
 } from "../packages/hyperbet-chain-registry/src/index.ts";
 
 export type AcceptanceDeployment = "staging" | "testnet";
-export type AcceptanceDuelSource =
-  | "synthetic_publish"
-  | "real_hyperscapes";
+export type AcceptanceDuelSource = "synthetic_publish" | "real_hyperia";
 export type AcceptanceEvmChain = "bsc" | "avax";
 export type AcceptanceChain = "solana" | AcceptanceEvmChain;
 
@@ -61,10 +59,7 @@ export function parseAcceptanceDuelSource(
   if (!normalized) {
     return fallback;
   }
-  if (
-    normalized === "synthetic_publish" ||
-    normalized === "real_hyperscapes"
-  ) {
+  if (normalized === "synthetic_publish" || normalized === "real_hyperia") {
     return normalized;
   }
   throw new Error(`Unsupported acceptance duel source: ${value}`);
@@ -108,10 +103,7 @@ function solanaDefaultRpc(cluster: BettingSolanaCluster): string {
     : "https://api.devnet.solana.com";
 }
 
-function evmAlchemyRpc(
-  chain: AcceptanceEvmChain,
-  env: EnvMap,
-): string | null {
+function evmAlchemyRpc(chain: AcceptanceEvmChain, env: EnvMap): string | null {
   const upper = chain.toUpperCase();
   const explicit = firstNonEmptyEnv(env, [
     `${upper}_ALCHEMY_RPC_URL`,
@@ -167,10 +159,7 @@ export function deriveRpcWsUrl(rpcUrl: string): string {
   return parsed.toString();
 }
 
-function resolveSolanaRpcWsUrl(
-  env: EnvMap,
-  rpcUrl: string,
-): string {
+function resolveSolanaRpcWsUrl(env: EnvMap, rpcUrl: string): string {
   return (
     firstNonEmptyEnv(env, [
       "SOLANA_ALCHEMY_WS_URL",
@@ -191,7 +180,10 @@ export function resolveAcceptanceUrls(
   const candidates =
     chain === "solana"
       ? {
-          pages: ["HYPERBET_SOLANA_PAGES_TESTNET_URL", "HYPERBET_SOLANA_PAGES_STAGING_URL"],
+          pages: [
+            "HYPERBET_SOLANA_PAGES_TESTNET_URL",
+            "HYPERBET_SOLANA_PAGES_STAGING_URL",
+          ],
           keeper: [
             "HYPERBET_SOLANA_KEEPER_TESTNET_URL",
             "HYPERBET_SOLANA_KEEPER_STAGING_URL",
@@ -358,9 +350,7 @@ export function resolveEvmAcceptanceRuntime(
   };
 }
 
-export function resolveSolanaAcceptanceRuntime(
-  env: EnvMap = process.env,
-): {
+export function resolveSolanaAcceptanceRuntime(env: EnvMap = process.env): {
   cluster: BettingSolanaCluster;
   rpcUrl: string;
   rpcWsUrl: string;
@@ -378,20 +368,15 @@ export function resolveSolanaAcceptanceRuntime(
   marketMakerKeypair: string | null;
 } {
   const cluster = normalizeSolanaCluster(
-    firstNonEmptyEnv(env, [
-      ...solanaCandidates("CLUSTER"),
-      "SOLANA_CLUSTER",
-    ]) ?? "devnet",
+    firstNonEmptyEnv(env, [...solanaCandidates("CLUSTER"), "SOLANA_CLUSTER"]) ??
+      "devnet",
   );
   const deployment = resolveBettingSolanaDeployment(cluster);
   const alchemyRpcUrl = solanaAlchemyRpc(cluster, env);
   const rpcUrl =
     firstNonEmptyValue(
       alchemyRpcUrl,
-      firstNonEmptyEnv(env, [
-        ...solanaCandidates("RPC_URL"),
-        "SOLANA_RPC_URL",
-      ]),
+      firstNonEmptyEnv(env, [...solanaCandidates("RPC_URL"), "SOLANA_RPC_URL"]),
     ) ?? solanaDefaultRpc(cluster);
   return {
     cluster,
@@ -421,9 +406,9 @@ export function resolveSolanaAcceptanceRuntime(
       ]) ?? deployment.fightOracleProgramId,
     goldClobProgramId:
       firstNonEmptyEnv(env, [
-        "HYPERBET_SOLANA_TESTNET_GOLD_CLOB_PROGRAM_ID",
-        "HYPERBET_SOLANA_STAGING_GOLD_CLOB_PROGRAM_ID",
-        "STAGE_A_GOLD_CLOB_MARKET_PROGRAM_ID",
+        "HYPERBET_SOLANA_TESTNET_DUEL_MARKET_PROGRAM_ID",
+        "HYPERBET_SOLANA_STAGING_DUEL_MARKET_PROGRAM_ID",
+        "STAGE_A_DUEL_MARKET_PROGRAM_ID",
       ]) ?? deployment.goldClobMarketProgramId,
     goldAmmProgramId:
       firstNonEmptyEnv(env, [
@@ -437,7 +422,10 @@ export function resolveSolanaAcceptanceRuntime(
         "HYPERBET_SOLANA_STAGING_GOLD_PERPS_PROGRAM_ID",
         "STAGE_A_GOLD_PERPS_PROGRAM_ID",
       ]) ?? deployment.goldPerpsMarketProgramId,
-    anchorWallet: firstNonEmptyEnv(env, ["ANCHOR_WALLET", "SOLANA_STAGE_A_WALLET_PATH"]),
+    anchorWallet: firstNonEmptyEnv(env, [
+      "ANCHOR_WALLET",
+      "SOLANA_STAGE_A_WALLET_PATH",
+    ]),
     oracleAuthorityKeypair: firstNonEmptyEnv(env, [
       "HYPERBET_SOLANA_TESTNET_ORACLE_AUTHORITY_KEYPAIR",
       "HYPERBET_SOLANA_STAGING_ORACLE_AUTHORITY_KEYPAIR",
@@ -456,7 +444,9 @@ export function resolveSolanaAcceptanceRuntime(
   };
 }
 
-type SolanaAcceptanceRuntime = ReturnType<typeof resolveSolanaAcceptanceRuntime>;
+type SolanaAcceptanceRuntime = ReturnType<
+  typeof resolveSolanaAcceptanceRuntime
+>;
 
 function dedupeUrls(urls: Array<string>): Array<string> {
   const seen = new Set<string>();

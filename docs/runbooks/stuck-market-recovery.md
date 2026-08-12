@@ -2,54 +2,25 @@
 
 ## Symptoms
 
-- market remains `OPEN`, `LOCKED`, or `UNKNOWN` after the authoritative duel has advanced
-- claim UI is unavailable even though settlement should be final
-- `/api/arena/prediction-markets/active` disagrees with on-chain state
+- market remains open/locked after authoritative duel progression
+- stream, active-market API, bot health, and on-chain state disagree
+- expected claim/refund/cleanup is unavailable
+- `/ready` reports market recovery, parser, index, or terminal-queue failure
 
-## Detection
+## Contain
 
-```bash
-curl -fsSL "$KEEPER_URL/api/arena/prediction-markets/active" | jq
-curl -fsSL "$KEEPER_URL/api/keeper/bot-health" | jq
-curl -fsSL "$KEEPER_URL/status" | jq
-```
+1. Stop the duel keeper to disable new quotes and privileged lifecycle writes.
+2. Keep read and user-safe cleanup surfaces available when they remain trustworthy.
+3. Preserve logs, readiness, bot health, feed checkpoint, lifecycle index, terminal queue, and on-chain accounts.
 
-If the issue is ambiguous, run the closest simulation or runtime smoke for the affected chain:
+## Recover
 
-```bash
-bun run --cwd packages/simulation-dashboard scenario canonical <scenario-id>
-bun run --cwd packages/market-maker-bot smoke:runtime -- --chain <bsc|base|avax>
-```
+1. Verify program identity and frozen configuration.
+2. Verify canonical duel ID/key, timestamps, phase, and feed epoch/sequence.
+3. Inspect the market, duel, vault, active orders, user balances, and terminal evidence on-chain.
+4. Restart the keeper and require canonical discovery/replay to converge without creating a duplicate market or quote.
+5. Use `terminal-ops list` and `terminal-ops inspect` for quarantined work. Requeue only an eligible record with the exact fingerprint, operator identity, and reason.
+6. Never edit SQLite or synthesize a terminal result.
+7. Re-run readiness and a bounded staged reproduction before restoring writes.
 
-## Immediate Containment
-
-1. Disable quoting on the affected market.
-2. Do not force user-facing settlement changes until chain state and keeper state are both inspected.
-
-## Recovery Steps
-
-1. Identify whether the failure is market ensure, sync, resolve, or claim cleanup.
-2. Restart the keeper and confirm it rebuilds the canonical lifecycle record.
-3. If the keeper remains stale, use the appropriate local or staging reproduction flow before touching production state.
-4. Re-run health checks and confirm market state converges before restoring quote traffic.
-
-## Success Criteria
-
-- canonical lifecycle state matches authoritative chain state
-- claimability becomes available when expected
-- no duplicate market creation or settlement side effects appear
-
-## Escalation
-
-Escalate if:
-
-- the keeper cannot reconcile after restart
-- lifecycle records regress after briefly recovering
-- manual intervention would require contract or program changes
-
-## Evidence To Capture
-
-- prediction-markets payload before and after restart
-- bot-health snapshot
-- relevant tx refs or signatures
-- keeper logs around ensure/sync/resolve
+Success requires exact agreement across stream/feed, on-chain state, lifecycle index, terminal ledger, API, and UI with no duplicated value or side effect.

@@ -2,18 +2,22 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SOLANA_ACTIVE_RELEASE_BIN="${SOLANA_ACTIVE_RELEASE_BIN:-$HOME/.local/share/solana/install/active_release/bin}"
+if [[ -d "$SOLANA_ACTIVE_RELEASE_BIN" ]]; then
+  export PATH="$SOLANA_ACTIVE_RELEASE_BIN:$PATH"
+fi
 LEDGER_DIR="${ANCHOR_TEST_LEDGER_DIR:-$ROOT_DIR/.anchor/manual-test-ledger}"
-VALIDATOR_LOG="${ANCHOR_TEST_VALIDATOR_LOG:-/tmp/hyperscape-anchor-validator.log}"
-BUILD_LOG="${ANCHOR_TEST_BUILD_LOG:-/tmp/hyperscape-anchor-build.log}"
-TEST_LOG="${ANCHOR_TEST_LOG:-/tmp/hyperscape-anchor-localnet-test.log}"
+VALIDATOR_LOG="${ANCHOR_TEST_VALIDATOR_LOG:-/tmp/hyperia-anchor-validator.log}"
+BUILD_LOG="${ANCHOR_TEST_BUILD_LOG:-/tmp/hyperia-anchor-build.log}"
+TEST_LOG="${ANCHOR_TEST_LOG:-/tmp/hyperia-anchor-localnet-test.log}"
 RPC_PORT="${ANCHOR_TEST_RPC_PORT:-8899}"
 WS_PORT="${ANCHOR_TEST_WS_PORT:-8900}"
 FAUCET_PORT="${ANCHOR_TEST_FAUCET_PORT:-9900}"
-MAX_ORACLE_STALENESS_SECONDS="${HYPERSCAPE_MAX_ORACLE_STALENESS_SECONDS:-5}"
-DEFAULT_STALE_WAIT_MS="$(((MAX_ORACLE_STALENESS_SECONDS + 2) * 1000))"
-STALE_WAIT_MS="${GOLD_PERPS_TEST_STALE_WAIT_MS:-$DEFAULT_STALE_WAIT_MS}"
+MAX_ORACLE_STALENESS_SECONDS="${HYPERIA_MAX_ORACLE_STALENESS_SECONDS:-5}"
 VALIDATOR_PID=""
 TEST_TARGETS=("$@")
+MOCHA_TIMEOUT_MS="${ANCHOR_TEST_MOCHA_TIMEOUT_MS:-1000000}"
+MOCHA_GREP="${ANCHOR_TEST_MOCHA_GREP:-}"
 
 resolve_wallet_path() {
   local candidates=()
@@ -22,7 +26,7 @@ resolve_wallet_path() {
     candidates+=("${ANCHOR_WALLET}")
   fi
   candidates+=(
-    "$HOME/.config/solana/hyperscape-keys/deployer.json"
+    "$HOME/.config/solana/hyperia-keys/deployer.json"
     "$HOME/.config/solana/id.json"
   )
 
@@ -160,16 +164,11 @@ cd "$ROOT_DIR"
 kill_stale_validator_processes
 
 if [[ "${ANCHOR_MANUAL_TEST_SKIP_BUILD:-0}" != "1" ]]; then
-  if command -v anchor >/dev/null 2>&1; then
-    echo "[anchor-test] building workspace with anchor"
-    anchor build >"$BUILD_LOG" 2>&1
-  else
-    echo "[anchor-test] building workspace without anchor"
-    bash "$ROOT_DIR/scripts/build-workspace.sh" >"$BUILD_LOG" 2>&1
-  fi
+  echo "[anchor-test] building canonical pinned workspace artifacts"
+  bash "$ROOT_DIR/scripts/build-workspace.sh" >"$BUILD_LOG" 2>&1
 fi
 
-for required in solana-test-validator curl jq rg; do
+for required in solana-test-validator curl jq lsof rg; do
   if ! command -v "$required" >/dev/null 2>&1; then
     # GitHub runners used by the generic CI workflow do not ship with Solana CLI.
     # Keep localnet tests mandatory outside CI, but skip them when the validator
@@ -183,32 +182,42 @@ for required in solana-test-validator curl jq rg; do
   fi
 done
 
-if [[ ! -x "$ROOT_DIR/node_modules/.bin/ts-mocha" ]]; then
-  printf 'Missing local ts-mocha binary at %s\n' "$ROOT_DIR/node_modules/.bin/ts-mocha" >&2
+TS_MOCHA_BIN="$ROOT_DIR/node_modules/.bin/ts-mocha"
+if [[ ! -x "$TS_MOCHA_BIN" ]]; then
+  TS_MOCHA_BIN="$ROOT_DIR/../../../node_modules/.bin/ts-mocha"
+fi
+if [[ -x "$TS_MOCHA_BIN" ]]; then
+  TS_MOCHA_COMMAND=("$TS_MOCHA_BIN")
+elif command -v bunx >/dev/null 2>&1; then
+  WORKSPACE_NODE_MODULES="$ROOT_DIR/../../../node_modules"
+  if [[ -d "$WORKSPACE_NODE_MODULES" ]]; then
+    export NODE_PATH="$WORKSPACE_NODE_MODULES${NODE_PATH:+:$NODE_PATH}"
+  fi
+  TS_MOCHA_COMMAND=(bunx "ts-mocha@10.0.0")
+else
+  printf 'Missing ts-mocha binary and bunx fallback\n' >&2
   exit 1
 fi
 
-if [[ ! -f "$ROOT_DIR/target/deploy/fight_oracle.so" || ! -f "$ROOT_DIR/target/deploy/gold_clob_market.so" || ! -f "$ROOT_DIR/target/deploy/gold_perps_market.so" || ! -f "$ROOT_DIR/target/deploy/lvr_amm.so" ]]; then
+if [[ ! -f "$ROOT_DIR/target/deploy/fight_oracle.so" || ! -f "$ROOT_DIR/target/deploy/duel_market.so" ]]; then
   printf 'Missing one or more deploy artifacts under %s\n' "$ROOT_DIR/target/deploy" >&2
   exit 1
 fi
 
 if [[ ${#TEST_TARGETS[@]} -eq 0 ]]; then
   TEST_TARGETS=(
-    tests/black_hat_exploits.ts
     tests/hyperbet.ts
-    tests/gold_clob_market.anchor.ts
-    tests/gold_clob_security.ts
-    tests/gold_perps_market.ts
+    tests/duel_market.anchor.ts
+    tests/duel_market_security.ts
+    tests/oracle-finality.anchor.ts
+    tests/oracle_invariants.ts
   )
 fi
 
 WALLET_PATH="$(resolve_wallet_path)"
 MINT_AUTHORITY="$(resolve_mint_authority "$WALLET_PATH")"
 PROGRAM_ORACLE_ID="$(resolve_program_id fight_oracle B5mRCRDJk9BrnH7regMWW5mpTQ8QG1CcCGSnDxMt8hmo)"
-PROGRAM_CLOB_ID="$(resolve_program_id gold_clob_market DYtd7AoyTX2tbmZ8vpC3mxZgqTpyaDei4TFXZukWBJEf)"
-PROGRAM_PERPS_ID="$(resolve_program_id gold_perps_market 6YjWiway8kaSjwtAinJxqWPvV3DqBVapDWAsSEZjjmbP)"
-PROGRAM_LVR_AMM_ID="$(resolve_program_id lvr_amm BGmzj676aVzRaJ3Hb9BJRYrjtXuhzoc1YTFA6wcucUNF)"
+PROGRAM_CLOB_ID="$(resolve_program_id duel_market DYtd7AoyTX2tbmZ8vpC3mxZgqTpyaDei4TFXZukWBJEf)"
 
 : >"$TEST_LOG"
 
@@ -236,9 +245,7 @@ for test_target in "${TEST_TARGETS[@]}"; do
     --mint "$MINT_AUTHORITY" \
     --ledger "$LEDGER_DIR" \
     --upgradeable-program "$PROGRAM_ORACLE_ID" "$ROOT_DIR/target/deploy/fight_oracle.so" "$WALLET_PATH" \
-    --upgradeable-program "$PROGRAM_CLOB_ID" "$ROOT_DIR/target/deploy/gold_clob_market.so" "$WALLET_PATH" \
-    --upgradeable-program "$PROGRAM_PERPS_ID" "$ROOT_DIR/target/deploy/gold_perps_market.so" "$WALLET_PATH" \
-    --upgradeable-program "$PROGRAM_LVR_AMM_ID" "$ROOT_DIR/target/deploy/lvr_amm.so" "$WALLET_PATH" \
+    --upgradeable-program "$PROGRAM_CLOB_ID" "$ROOT_DIR/target/deploy/duel_market.so" "$WALLET_PATH" \
     >"$VALIDATOR_LOG" 2>&1 &
   VALIDATOR_PID="$!"
 
@@ -248,7 +255,7 @@ for test_target in "${TEST_TARGETS[@]}"; do
     exit 1
   fi
 
-  for program_id in "$PROGRAM_ORACLE_ID" "$PROGRAM_CLOB_ID" "$PROGRAM_PERPS_ID" "$PROGRAM_LVR_AMM_ID"; do
+  for program_id in "$PROGRAM_ORACLE_ID" "$PROGRAM_CLOB_ID"; do
     if ! wait_for_program "$current_rpc_url" "$program_id"; then
       echo "[anchor-test] program $program_id did not become executable" >&2
       tail -n 120 "$VALIDATOR_LOG" >&2 || true
@@ -259,16 +266,21 @@ for test_target in "${TEST_TARGETS[@]}"; do
   sleep 1
 
   echo "[anchor-test] running mocha suite for $test_target"
+  mocha_args=(
+    -p ./tsconfig.json
+    -t "$MOCHA_TIMEOUT_MS"
+    --exit
+  )
+  if [[ -n "$MOCHA_GREP" ]]; then
+    mocha_args+=(--grep "$MOCHA_GREP")
+  fi
+  mocha_args+=("$test_target")
+
   ANCHOR_PROVIDER_URL="$current_rpc_url" \
   ANCHOR_WS_URL="$current_ws_url" \
   ANCHOR_WALLET="$WALLET_PATH" \
-  HYPERSCAPE_MAX_ORACLE_STALENESS_SECONDS="$MAX_ORACLE_STALENESS_SECONDS" \
-  GOLD_PERPS_TEST_STALE_WAIT_MS="$STALE_WAIT_MS" \
-    "$ROOT_DIR/node_modules/.bin/ts-mocha" \
-    -p ./tsconfig.json \
-    -t 1000000 \
-    --exit \
-    "$test_target" | tee -a "$TEST_LOG"
+  HYPERIA_MAX_ORACLE_STALENESS_SECONDS="$MAX_ORACLE_STALENESS_SECONDS" \
+    "${TS_MOCHA_COMMAND[@]}" "${mocha_args[@]}" | tee -a "$TEST_LOG"
 
   stop_validator
   test_index=$((test_index + 1))

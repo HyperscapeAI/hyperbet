@@ -1,0 +1,2598 @@
+{
+  "address": "3QUVoaKJqo1rg9eXe7vyFewJrY75NWdtH8JZfvTb79Uy",
+  "metadata": {
+    "name": "duel_market",
+    "version": "0.1.0",
+    "spec": "0.1.0",
+    "description": "Created with Anchor"
+  },
+  "instructions": [
+    {
+      "name": "cancel_order",
+      "discriminator": [
+        95,
+        129,
+        237,
+        240,
+        8,
+        49,
+        223,
+        132
+      ],
+      "accounts": [
+        {
+          "name": "market_state",
+          "writable": true
+        },
+        {
+          "name": "duel_state"
+        },
+        {
+          "name": "order",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  111,
+                  114,
+                  100,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "market_state"
+              },
+              {
+                "kind": "arg",
+                "path": "order_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "price_level",
+          "writable": true
+        },
+        {
+          "name": "vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "market_state"
+              }
+            ]
+          }
+        },
+        {
+          "name": "user",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "order_id",
+          "type": "u64"
+        },
+        {
+          "name": "side",
+          "type": "u8"
+        },
+        {
+          "name": "price",
+          "type": "u16"
+        }
+      ]
+    },
+    {
+      "name": "claim",
+      "discriminator": [
+        62,
+        198,
+        214,
+        193,
+        213,
+        159,
+        108,
+        210
+      ],
+      "accounts": [
+        {
+          "name": "market_state",
+          "writable": true
+        },
+        {
+          "name": "duel_state"
+        },
+        {
+          "name": "user_balance",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  97,
+                  108,
+                  97,
+                  110,
+                  99,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "market_state"
+              },
+              {
+                "kind": "account",
+                "path": "user"
+              }
+            ]
+          }
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "market_maker",
+          "writable": true
+        },
+        {
+          "name": "vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "market_state"
+              }
+            ]
+          }
+        },
+        {
+          "name": "user",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "close_empty_price_level",
+      "docs": [
+        "Closes an empty shared PriceLevel only to the wallet that originally",
+        "funded the account. Any signer may submit cleanup, but cannot redirect",
+        "the recorded recipient or close a level that still contains book state."
+      ],
+      "discriminator": [
+        177,
+        38,
+        155,
+        18,
+        148,
+        163,
+        151,
+        156
+      ],
+      "accounts": [
+        {
+          "name": "market_state"
+        },
+        {
+          "name": "price_level",
+          "writable": true
+        },
+        {
+          "name": "rent_recipient",
+          "writable": true
+        },
+        {
+          "name": "closer",
+          "signer": true
+        }
+      ],
+      "args": [
+        {
+          "name": "side",
+          "type": "u8"
+        },
+        {
+          "name": "price",
+          "type": "u16"
+        }
+      ]
+    },
+    {
+      "name": "close_filled_order",
+      "docs": [
+        "Returns an inactive, fully filled Order PDA's rent to its original maker.",
+        "This instruction deliberately has no vault or PriceLevel account: it cannot",
+        "move collateral or shared-book rent, and is valid in every market lifecycle."
+      ],
+      "discriminator": [
+        137,
+        142,
+        13,
+        180,
+        17,
+        12,
+        129,
+        122
+      ],
+      "accounts": [
+        {
+          "name": "market_state"
+        },
+        {
+          "name": "order",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  111,
+                  114,
+                  100,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "market_state"
+              },
+              {
+                "kind": "arg",
+                "path": "order_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "user",
+          "writable": true,
+          "signer": true
+        }
+      ],
+      "args": [
+        {
+          "name": "order_id",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "close_losing_balance",
+      "discriminator": [
+        86,
+        226,
+        44,
+        46,
+        219,
+        51,
+        73,
+        47
+      ],
+      "accounts": [
+        {
+          "name": "market_state",
+          "writable": true
+        },
+        {
+          "name": "duel_state"
+        },
+        {
+          "name": "user_balance",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  97,
+                  108,
+                  97,
+                  110,
+                  99,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "market_state"
+              },
+              {
+                "kind": "account",
+                "path": "user"
+              }
+            ]
+          }
+        },
+        {
+          "name": "user",
+          "writable": true,
+          "signer": true
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "continue_order",
+      "discriminator": [
+        52,
+        137,
+        158,
+        152,
+        162,
+        246,
+        203,
+        104
+      ],
+      "accounts": [
+        {
+          "name": "market_state",
+          "writable": true
+        },
+        {
+          "name": "duel_state"
+        },
+        {
+          "name": "user_balance",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  97,
+                  108,
+                  97,
+                  110,
+                  99,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "market_state"
+              },
+              {
+                "kind": "account",
+                "path": "user"
+              }
+            ]
+          }
+        },
+        {
+          "name": "order",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  111,
+                  114,
+                  100,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "market_state"
+              },
+              {
+                "kind": "arg",
+                "path": "order_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "resting_level",
+          "writable": true
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "treasury"
+        },
+        {
+          "name": "market_maker"
+        },
+        {
+          "name": "vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "market_state"
+              }
+            ]
+          }
+        },
+        {
+          "name": "user",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "order_id",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "freeze_config",
+      "docs": [
+        "One-way config freeze — after calling, update_config reverts permanently.",
+        "Pause controls remain functional."
+      ],
+      "discriminator": [
+        30,
+        68,
+        20,
+        154,
+        197,
+        42,
+        47,
+        122
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "signer": true
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "initialize_config",
+      "discriminator": [
+        208,
+        127,
+        21,
+        1,
+        194,
+        190,
+        196,
+        70
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "program",
+          "address": "3QUVoaKJqo1rg9eXe7vyFewJrY75NWdtH8JZfvTb79Uy"
+        },
+        {
+          "name": "program_data"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "market_operator",
+          "type": "pubkey"
+        },
+        {
+          "name": "treasury",
+          "type": "pubkey"
+        },
+        {
+          "name": "market_maker",
+          "type": "pubkey"
+        },
+        {
+          "name": "trade_treasury_fee_bps",
+          "type": "u16"
+        },
+        {
+          "name": "trade_market_maker_fee_bps",
+          "type": "u16"
+        },
+        {
+          "name": "winnings_market_maker_fee_bps",
+          "type": "u16"
+        }
+      ]
+    },
+    {
+      "name": "initialize_market",
+      "discriminator": [
+        35,
+        35,
+        189,
+        193,
+        155,
+        48,
+        170,
+        203
+      ],
+      "accounts": [
+        {
+          "name": "operator",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "duel_state"
+        },
+        {
+          "name": "market_state",
+          "writable": true
+        },
+        {
+          "name": "vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "market_state"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "duel_key",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "market_kind",
+          "type": "u8"
+        }
+      ]
+    },
+    {
+      "name": "place_order",
+      "discriminator": [
+        51,
+        194,
+        155,
+        175,
+        109,
+        130,
+        96,
+        106
+      ],
+      "accounts": [
+        {
+          "name": "market_state",
+          "writable": true
+        },
+        {
+          "name": "duel_state"
+        },
+        {
+          "name": "user_balance",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  98,
+                  97,
+                  108,
+                  97,
+                  110,
+                  99,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "market_state"
+              },
+              {
+                "kind": "account",
+                "path": "user"
+              }
+            ]
+          }
+        },
+        {
+          "name": "new_order",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  111,
+                  114,
+                  100,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "market_state"
+              },
+              {
+                "kind": "arg",
+                "path": "order_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "resting_level",
+          "writable": true
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "treasury"
+        },
+        {
+          "name": "market_maker"
+        },
+        {
+          "name": "vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "market_state"
+              }
+            ]
+          }
+        },
+        {
+          "name": "user",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "order_id",
+          "type": "u64"
+        },
+        {
+          "name": "side",
+          "type": "u8"
+        },
+        {
+          "name": "price",
+          "type": "u16"
+        },
+        {
+          "name": "amount",
+          "type": "u64"
+        },
+        {
+          "name": "order_behavior",
+          "type": "u8"
+        }
+      ]
+    },
+    {
+      "name": "reclaim_resting_order",
+      "discriminator": [
+        6,
+        69,
+        10,
+        23,
+        16,
+        193,
+        161,
+        163
+      ],
+      "accounts": [
+        {
+          "name": "market_state",
+          "writable": true
+        },
+        {
+          "name": "duel_state"
+        },
+        {
+          "name": "order",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  111,
+                  114,
+                  100,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "market_state"
+              },
+              {
+                "kind": "arg",
+                "path": "order_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "price_level",
+          "writable": true
+        },
+        {
+          "name": "vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "market_state"
+              }
+            ]
+          }
+        },
+        {
+          "name": "user",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "order_id",
+          "type": "u64"
+        },
+        {
+          "name": "side",
+          "type": "u8"
+        },
+        {
+          "name": "price",
+          "type": "u16"
+        }
+      ]
+    },
+    {
+      "name": "set_market_paused",
+      "docs": [
+        "Emergency pause/unpause for market creation and order placement.",
+        "Remains functional even after config freeze."
+      ],
+      "discriminator": [
+        233,
+        31,
+        161,
+        248,
+        178,
+        111,
+        102,
+        65
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "signer": true
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "order_placement_paused",
+          "type": "bool"
+        },
+        {
+          "name": "market_creation_paused",
+          "type": "bool"
+        }
+      ]
+    },
+    {
+      "name": "sync_market_from_duel",
+      "docs": [
+        "M-7: Intentionally NOT pause-gated. Market status must sync from oracle",
+        "even during pause so that resolved/cancelled markets can transition and",
+        "users can claim funds. Blocking sync during pause would lock user funds."
+      ],
+      "discriminator": [
+        235,
+        180,
+        137,
+        53,
+        242,
+        12,
+        85,
+        213
+      ],
+      "accounts": [
+        {
+          "name": "market_state",
+          "writable": true
+        },
+        {
+          "name": "duel_state"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "update_config",
+      "discriminator": [
+        29,
+        158,
+        252,
+        191,
+        10,
+        83,
+        219,
+        99
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "signer": true
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "authority",
+          "type": "pubkey"
+        },
+        {
+          "name": "market_operator",
+          "type": "pubkey"
+        },
+        {
+          "name": "treasury",
+          "type": "pubkey"
+        },
+        {
+          "name": "market_maker",
+          "type": "pubkey"
+        },
+        {
+          "name": "trade_treasury_fee_bps",
+          "type": "u16"
+        },
+        {
+          "name": "trade_market_maker_fee_bps",
+          "type": "u16"
+        },
+        {
+          "name": "winnings_market_maker_fee_bps",
+          "type": "u16"
+        }
+      ]
+    },
+    {
+      "name": "withdraw_resolved_trade_fees",
+      "docs": [
+        "Releases escrowed execution fees only after the canonical duel resolves.",
+        "Any signer may submit the transaction, but the snapshotted recipients",
+        "are immutable and the submitter cannot redirect or receive market funds."
+      ],
+      "discriminator": [
+        47,
+        5,
+        186,
+        114,
+        167,
+        92,
+        18,
+        49
+      ],
+      "accounts": [
+        {
+          "name": "market_state",
+          "writable": true
+        },
+        {
+          "name": "duel_state"
+        },
+        {
+          "name": "treasury",
+          "writable": true
+        },
+        {
+          "name": "market_maker",
+          "writable": true
+        },
+        {
+          "name": "vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "market_state"
+              }
+            ]
+          }
+        },
+        {
+          "name": "submitter",
+          "signer": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    }
+  ],
+  "accounts": [
+    {
+      "name": "DuelState",
+      "discriminator": [
+        149,
+        213,
+        59,
+        165,
+        124,
+        116,
+        145,
+        120
+      ]
+    },
+    {
+      "name": "MarketConfig",
+      "discriminator": [
+        119,
+        255,
+        200,
+        88,
+        252,
+        82,
+        128,
+        24
+      ]
+    },
+    {
+      "name": "MarketState",
+      "discriminator": [
+        0,
+        125,
+        123,
+        215,
+        95,
+        96,
+        164,
+        194
+      ]
+    },
+    {
+      "name": "Order",
+      "discriminator": [
+        134,
+        173,
+        223,
+        185,
+        77,
+        86,
+        28,
+        51
+      ]
+    },
+    {
+      "name": "PriceLevel",
+      "discriminator": [
+        236,
+        106,
+        90,
+        162,
+        188,
+        41,
+        219,
+        186
+      ]
+    },
+    {
+      "name": "UserBalance",
+      "discriminator": [
+        187,
+        237,
+        208,
+        146,
+        86,
+        132,
+        29,
+        191
+      ]
+    }
+  ],
+  "events": [
+    {
+      "name": "ClaimSettled",
+      "discriminator": [
+        144,
+        220,
+        131,
+        115,
+        8,
+        187,
+        224,
+        236
+      ]
+    },
+    {
+      "name": "FilledOrderClosed",
+      "discriminator": [
+        203,
+        113,
+        173,
+        86,
+        146,
+        40,
+        155,
+        210
+      ]
+    },
+    {
+      "name": "LosingBalanceClosed",
+      "discriminator": [
+        80,
+        224,
+        236,
+        110,
+        119,
+        254,
+        44,
+        230
+      ]
+    },
+    {
+      "name": "MarketCreated",
+      "discriminator": [
+        88,
+        184,
+        130,
+        231,
+        226,
+        84,
+        6,
+        58
+      ]
+    },
+    {
+      "name": "MarketSynced",
+      "discriminator": [
+        12,
+        197,
+        233,
+        97,
+        244,
+        67,
+        27,
+        33
+      ]
+    },
+    {
+      "name": "OrderCancelled",
+      "discriminator": [
+        108,
+        56,
+        128,
+        68,
+        168,
+        113,
+        168,
+        239
+      ]
+    },
+    {
+      "name": "OrderMatched",
+      "discriminator": [
+        211,
+        0,
+        178,
+        174,
+        61,
+        245,
+        45,
+        250
+      ]
+    },
+    {
+      "name": "OrderPlaced",
+      "discriminator": [
+        96,
+        130,
+        204,
+        234,
+        169,
+        219,
+        216,
+        227
+      ]
+    },
+    {
+      "name": "PriceLevelClosed",
+      "discriminator": [
+        140,
+        218,
+        175,
+        31,
+        175,
+        3,
+        188,
+        23
+      ]
+    },
+    {
+      "name": "ResolvedTradeFeesWithdrawn",
+      "discriminator": [
+        175,
+        48,
+        182,
+        220,
+        188,
+        205,
+        104,
+        152
+      ]
+    },
+    {
+      "name": "RestingOrderReclaimed",
+      "discriminator": [
+        119,
+        79,
+        122,
+        108,
+        115,
+        169,
+        15,
+        78
+      ]
+    },
+    {
+      "name": "SelfTradePolicyTriggered",
+      "discriminator": [
+        83,
+        88,
+        117,
+        16,
+        191,
+        232,
+        1,
+        86
+      ]
+    },
+    {
+      "name": "TradeFeesEscrowed",
+      "discriminator": [
+        43,
+        210,
+        1,
+        86,
+        103,
+        144,
+        154,
+        133
+      ]
+    }
+  ],
+  "errors": [
+    {
+      "code": 6000,
+      "name": "UnauthorizedInitializer",
+      "msg": "Only the upgrade authority can initialize config"
+    },
+    {
+      "code": 6001,
+      "name": "UnauthorizedConfigAuthority",
+      "msg": "Config authority is required for this action"
+    },
+    {
+      "code": 6002,
+      "name": "ConfigAuthorityImmutable",
+      "msg": "Config authority is immutable"
+    },
+    {
+      "code": 6003,
+      "name": "UnauthorizedMarketOperator",
+      "msg": "Market operator is not authorized"
+    },
+    {
+      "code": 6004,
+      "name": "InvalidOperator",
+      "msg": "Market operator pubkey is invalid"
+    },
+    {
+      "code": 6005,
+      "name": "InvalidAuthority",
+      "msg": "Authority pubkey is invalid"
+    },
+    {
+      "code": 6006,
+      "name": "InvalidFeeAccount",
+      "msg": "The provided fee account is invalid"
+    },
+    {
+      "code": 6007,
+      "name": "FeeTooHigh",
+      "msg": "Fee configuration exceeds 100%"
+    },
+    {
+      "code": 6008,
+      "name": "InvalidMarketKind",
+      "msg": "Only duel-winner markets are currently supported"
+    },
+    {
+      "code": 6009,
+      "name": "DuelMismatch",
+      "msg": "The duel account does not match the market"
+    },
+    {
+      "code": 6010,
+      "name": "MarketCreationClosed",
+      "msg": "Markets can only be created while betting is open or locked"
+    },
+    {
+      "code": 6011,
+      "name": "MarketNotOpen",
+      "msg": "Market is not open for new orders"
+    },
+    {
+      "code": 6012,
+      "name": "MarketNotResolved",
+      "msg": "Market is not resolved"
+    },
+    {
+      "code": 6013,
+      "name": "MarketAlreadyResolved",
+      "msg": "Market is already resolved or cancelled"
+    },
+    {
+      "code": 6014,
+      "name": "BettingClosed",
+      "msg": "Betting is closed"
+    },
+    {
+      "code": 6015,
+      "name": "InvalidSide",
+      "msg": "Side must be bid (1) or ask (2)"
+    },
+    {
+      "code": 6016,
+      "name": "InvalidOrderBehavior",
+      "msg": "Order behavior must be GTC (0), IOC (1), or POST_ONLY (2)"
+    },
+    {
+      "code": 6017,
+      "name": "InvalidPrice",
+      "msg": "Price must be between 1 and 999"
+    },
+    {
+      "code": 6018,
+      "name": "InvalidAmount",
+      "msg": "Order amount must be greater than zero"
+    },
+    {
+      "code": 6019,
+      "name": "InvalidOrderId",
+      "msg": "Order id does not match the next expected id"
+    },
+    {
+      "code": 6020,
+      "name": "PostOnlyWouldCross",
+      "msg": "Post-only orders cannot cross the book"
+    },
+    {
+      "code": 6021,
+      "name": "PrecisionError",
+      "msg": "The precision implied by amount and price is invalid"
+    },
+    {
+      "code": 6022,
+      "name": "CostTooLow",
+      "msg": "Order cost is too low"
+    },
+    {
+      "code": 6023,
+      "name": "MathOverflow",
+      "msg": "Math overflow"
+    },
+    {
+      "code": 6024,
+      "name": "PriceLevelMismatch",
+      "msg": "The supplied price level does not match the order"
+    },
+    {
+      "code": 6025,
+      "name": "PriceLevelNotEmpty",
+      "msg": "The supplied price level still contains book state"
+    },
+    {
+      "code": 6026,
+      "name": "InvalidPriceLevelRentRecipient",
+      "msg": "The supplied price-level rent recipient is not the immutable first payer"
+    },
+    {
+      "code": 6027,
+      "name": "OrderSideMismatch",
+      "msg": "The supplied order side does not match the stored order"
+    },
+    {
+      "code": 6028,
+      "name": "OrderPriceMismatch",
+      "msg": "The supplied order price does not match the stored order"
+    },
+    {
+      "code": 6029,
+      "name": "NotOrderMaker",
+      "msg": "Only the order maker can cancel this order"
+    },
+    {
+      "code": 6030,
+      "name": "OrderMarketMismatch",
+      "msg": "The order does not belong to the supplied market"
+    },
+    {
+      "code": 6031,
+      "name": "OrderStillActive",
+      "msg": "An active order cannot be closed as filled"
+    },
+    {
+      "code": 6032,
+      "name": "OrderNotFullyFilled",
+      "msg": "Only a fully filled order can be closed with this instruction"
+    },
+    {
+      "code": 6033,
+      "name": "OrderStillLinked",
+      "msg": "A filled order must be fully unlinked before its account can close"
+    },
+    {
+      "code": 6034,
+      "name": "MissingMatchAccounts",
+      "msg": "Required maker match accounts were not supplied"
+    },
+    {
+      "code": 6035,
+      "name": "MissingTailOrder",
+      "msg": "Required resting tail order account was not supplied"
+    },
+    {
+      "code": 6036,
+      "name": "MissingLinkedOrderAccount",
+      "msg": "A linked prev/next order account is missing"
+    },
+    {
+      "code": 6037,
+      "name": "InvalidRemainingAccount",
+      "msg": "Remaining account verification failed"
+    },
+    {
+      "code": 6038,
+      "name": "OrderNotContinuable",
+      "msg": "Order does not require continuation"
+    },
+    {
+      "code": 6039,
+      "name": "NothingToContinue",
+      "msg": "No order remainder is left to continue"
+    },
+    {
+      "code": 6040,
+      "name": "NothingToClaim",
+      "msg": "Nothing to claim"
+    },
+    {
+      "code": 6041,
+      "name": "NothingToWithdraw",
+      "msg": "No resolved execution fees remain to withdraw"
+    },
+    {
+      "code": 6042,
+      "name": "FeeEscrowInvariantViolation",
+      "msg": "Execution-fee escrow accounting is inconsistent"
+    },
+    {
+      "code": 6043,
+      "name": "AlreadyInitialized",
+      "msg": "Config is already initialized"
+    },
+    {
+      "code": 6044,
+      "name": "OrderPlacementPaused",
+      "msg": "Order placement is paused"
+    },
+    {
+      "code": 6045,
+      "name": "MarketCreationPaused",
+      "msg": "Market creation is paused"
+    },
+    {
+      "code": 6046,
+      "name": "ConfigFrozen",
+      "msg": "Config is permanently frozen"
+    },
+    {
+      "code": 6047,
+      "name": "MarketStillOpen",
+      "msg": "Market is still open"
+    },
+    {
+      "code": 6048,
+      "name": "NothingToReclaim",
+      "msg": "Nothing to reclaim"
+    },
+    {
+      "code": 6049,
+      "name": "MarketHasNoWinner",
+      "msg": "The resolved market has no canonical winner"
+    },
+    {
+      "code": 6050,
+      "name": "WinningBalanceCannotBeClosed",
+      "msg": "A balance with a winning entitlement cannot be closed as a loss"
+    },
+    {
+      "code": 6051,
+      "name": "NothingToClose",
+      "msg": "Nothing remains in the losing balance to close"
+    },
+    {
+      "code": 6052,
+      "name": "InvalidUserBalance",
+      "msg": "The supplied user balance is not canonical"
+    }
+  ],
+  "types": [
+    {
+      "name": "ClaimSettled",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "market_key",
+            "type": "pubkey"
+          },
+          {
+            "name": "user",
+            "type": "pubkey"
+          },
+          {
+            "name": "status",
+            "type": {
+              "defined": {
+                "name": "MarketStatus"
+              }
+            }
+          },
+          {
+            "name": "winner",
+            "type": {
+              "defined": {
+                "name": "MarketSide"
+              }
+            }
+          },
+          {
+            "name": "payout_lamports",
+            "type": "u64"
+          },
+          {
+            "name": "winnings_fee_lamports",
+            "type": "u64"
+          },
+          {
+            "name": "refunded_trade_treasury_fee_lamports",
+            "type": "u64"
+          },
+          {
+            "name": "refunded_trade_market_maker_fee_lamports",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "DuelState",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "duel_key",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "participant_a_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "participant_b_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "status",
+            "type": {
+              "defined": {
+                "name": "DuelStatus"
+              }
+            }
+          },
+          {
+            "name": "winner",
+            "type": {
+              "defined": {
+                "name": "MarketSide"
+              }
+            }
+          },
+          {
+            "name": "bet_open_ts",
+            "type": "i64"
+          },
+          {
+            "name": "bet_close_ts",
+            "type": "i64"
+          },
+          {
+            "name": "duel_start_ts",
+            "type": "i64"
+          },
+          {
+            "name": "duel_end_ts",
+            "type": "i64"
+          },
+          {
+            "name": "seed",
+            "type": "u64"
+          },
+          {
+            "name": "result_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "replay_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "active_proposal",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "pending_winner",
+            "type": {
+              "defined": {
+                "name": "MarketSide"
+              }
+            }
+          },
+          {
+            "name": "pending_seed",
+            "type": "u64"
+          },
+          {
+            "name": "pending_result_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "pending_replay_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "pending_duel_end_ts",
+            "type": "i64"
+          },
+          {
+            "name": "pending_proposed_at",
+            "type": "i64"
+          },
+          {
+            "name": "pending_challenged",
+            "type": "bool"
+          },
+          {
+            "name": "metadata_uri",
+            "type": "string"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "DuelStatus",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Scheduled"
+          },
+          {
+            "name": "BettingOpen"
+          },
+          {
+            "name": "Locked"
+          },
+          {
+            "name": "Proposed"
+          },
+          {
+            "name": "Challenged"
+          },
+          {
+            "name": "Resolved"
+          },
+          {
+            "name": "Cancelled"
+          }
+        ]
+      }
+    },
+    {
+      "name": "FilledOrderClosed",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "market_key",
+            "type": "pubkey"
+          },
+          {
+            "name": "order_id",
+            "type": "u64"
+          },
+          {
+            "name": "maker",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "LosingBalanceClosed",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "market_key",
+            "type": "pubkey"
+          },
+          {
+            "name": "user",
+            "type": "pubkey"
+          },
+          {
+            "name": "a_shares",
+            "type": "u64"
+          },
+          {
+            "name": "b_shares",
+            "type": "u64"
+          },
+          {
+            "name": "a_locked_lamports",
+            "type": "u64"
+          },
+          {
+            "name": "b_locked_lamports",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "MarketConfig",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "market_operator",
+            "type": "pubkey"
+          },
+          {
+            "name": "treasury",
+            "type": "pubkey"
+          },
+          {
+            "name": "market_maker",
+            "type": "pubkey"
+          },
+          {
+            "name": "trade_treasury_fee_bps",
+            "type": "u16"
+          },
+          {
+            "name": "trade_market_maker_fee_bps",
+            "type": "u16"
+          },
+          {
+            "name": "winnings_market_maker_fee_bps",
+            "type": "u16"
+          },
+          {
+            "name": "order_placement_paused",
+            "type": "bool"
+          },
+          {
+            "name": "market_creation_paused",
+            "type": "bool"
+          },
+          {
+            "name": "config_frozen",
+            "type": "bool"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "MarketCreated",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "duel_key",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "market_key",
+            "type": "pubkey"
+          },
+          {
+            "name": "market_kind",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "MarketSide",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "None"
+          },
+          {
+            "name": "A"
+          },
+          {
+            "name": "B"
+          }
+        ]
+      }
+    },
+    {
+      "name": "MarketState",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "duel_state",
+            "type": "pubkey"
+          },
+          {
+            "name": "duel_key",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "market_kind",
+            "type": "u8"
+          },
+          {
+            "name": "status",
+            "type": {
+              "defined": {
+                "name": "MarketStatus"
+              }
+            }
+          },
+          {
+            "name": "winner",
+            "type": {
+              "defined": {
+                "name": "MarketSide"
+              }
+            }
+          },
+          {
+            "name": "trade_treasury_fee_bps_snapshot",
+            "type": "u16"
+          },
+          {
+            "name": "trade_market_maker_fee_bps_snapshot",
+            "type": "u16"
+          },
+          {
+            "name": "winnings_market_maker_fee_bps_snapshot",
+            "type": "u16"
+          },
+          {
+            "name": "next_order_id",
+            "type": "u64"
+          },
+          {
+            "name": "best_bid",
+            "type": "u16"
+          },
+          {
+            "name": "best_ask",
+            "type": "u16"
+          },
+          {
+            "name": "authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "treasury",
+            "type": "pubkey"
+          },
+          {
+            "name": "market_maker",
+            "type": "pubkey"
+          },
+          {
+            "name": "accrued_trade_treasury_fee_lamports",
+            "type": "u64"
+          },
+          {
+            "name": "accrued_trade_market_maker_fee_lamports",
+            "type": "u64"
+          },
+          {
+            "name": "bid_bitmap",
+            "type": {
+              "array": [
+                "u64",
+                16
+              ]
+            }
+          },
+          {
+            "name": "ask_bitmap",
+            "type": {
+              "array": [
+                "u64",
+                16
+              ]
+            }
+          },
+          {
+            "name": "vault_bump",
+            "type": "u8"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "MarketStatus",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Open"
+          },
+          {
+            "name": "Locked"
+          },
+          {
+            "name": "Resolved"
+          },
+          {
+            "name": "Cancelled"
+          }
+        ]
+      }
+    },
+    {
+      "name": "MarketSynced",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "duel_key",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "market_key",
+            "type": "pubkey"
+          },
+          {
+            "name": "status",
+            "type": {
+              "defined": {
+                "name": "MarketStatus"
+              }
+            }
+          },
+          {
+            "name": "winner",
+            "type": {
+              "defined": {
+                "name": "MarketSide"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "Order",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "market_state",
+            "type": "pubkey"
+          },
+          {
+            "name": "id",
+            "type": "u64"
+          },
+          {
+            "name": "side",
+            "type": "u8"
+          },
+          {
+            "name": "price",
+            "type": "u16"
+          },
+          {
+            "name": "order_behavior",
+            "type": "u8"
+          },
+          {
+            "name": "maker",
+            "type": "pubkey"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          },
+          {
+            "name": "filled",
+            "type": "u64"
+          },
+          {
+            "name": "prev_order_id",
+            "type": "u64"
+          },
+          {
+            "name": "next_order_id",
+            "type": "u64"
+          },
+          {
+            "name": "active",
+            "type": "bool"
+          },
+          {
+            "name": "continuation_pending",
+            "type": "bool"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "OrderCancelled",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "market_key",
+            "type": "pubkey"
+          },
+          {
+            "name": "order_id",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "OrderMatched",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "market_key",
+            "type": "pubkey"
+          },
+          {
+            "name": "maker_order_id",
+            "type": "u64"
+          },
+          {
+            "name": "taker_order_id",
+            "type": "u64"
+          },
+          {
+            "name": "matched_amount",
+            "type": "u64"
+          },
+          {
+            "name": "price",
+            "type": "u16"
+          }
+        ]
+      }
+    },
+    {
+      "name": "OrderPlaced",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "market_key",
+            "type": "pubkey"
+          },
+          {
+            "name": "order_id",
+            "type": "u64"
+          },
+          {
+            "name": "maker",
+            "type": "pubkey"
+          },
+          {
+            "name": "side",
+            "type": "u8"
+          },
+          {
+            "name": "price",
+            "type": "u16"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PriceLevel",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "market_state",
+            "type": "pubkey"
+          },
+          {
+            "name": "rent_recipient",
+            "type": "pubkey"
+          },
+          {
+            "name": "side",
+            "type": "u8"
+          },
+          {
+            "name": "price",
+            "type": "u16"
+          },
+          {
+            "name": "head_order_id",
+            "type": "u64"
+          },
+          {
+            "name": "tail_order_id",
+            "type": "u64"
+          },
+          {
+            "name": "total_open",
+            "type": "u64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PriceLevelClosed",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "market_key",
+            "type": "pubkey"
+          },
+          {
+            "name": "side",
+            "type": "u8"
+          },
+          {
+            "name": "price",
+            "type": "u16"
+          },
+          {
+            "name": "rent_recipient",
+            "type": "pubkey"
+          },
+          {
+            "name": "closer",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ResolvedTradeFeesWithdrawn",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "market_key",
+            "type": "pubkey"
+          },
+          {
+            "name": "treasury",
+            "type": "pubkey"
+          },
+          {
+            "name": "market_maker",
+            "type": "pubkey"
+          },
+          {
+            "name": "treasury_fee_lamports",
+            "type": "u64"
+          },
+          {
+            "name": "market_maker_fee_lamports",
+            "type": "u64"
+          },
+          {
+            "name": "submitter",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "RestingOrderReclaimed",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "market_key",
+            "type": "pubkey"
+          },
+          {
+            "name": "order_id",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "SelfTradePolicyTriggered",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "market_ref",
+            "type": "pubkey"
+          },
+          {
+            "name": "maker_authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "taker_authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "maker_order_id",
+            "type": "u64"
+          },
+          {
+            "name": "taker_order_id",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "TradeFeesEscrowed",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "market_key",
+            "type": "pubkey"
+          },
+          {
+            "name": "order_id",
+            "type": "u64"
+          },
+          {
+            "name": "payer",
+            "type": "pubkey"
+          },
+          {
+            "name": "executed_cost_lamports",
+            "type": "u64"
+          },
+          {
+            "name": "treasury_fee_lamports",
+            "type": "u64"
+          },
+          {
+            "name": "market_maker_fee_lamports",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "UserBalance",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "user",
+            "type": "pubkey"
+          },
+          {
+            "name": "market_state",
+            "type": "pubkey"
+          },
+          {
+            "name": "a_shares",
+            "type": "u64"
+          },
+          {
+            "name": "b_shares",
+            "type": "u64"
+          },
+          {
+            "name": "a_locked_lamports",
+            "type": "u64"
+          },
+          {
+            "name": "b_locked_lamports",
+            "type": "u64"
+          },
+          {
+            "name": "trade_treasury_fee_lamports",
+            "type": "u64"
+          },
+          {
+            "name": "trade_market_maker_fee_lamports",
+            "type": "u64"
+          }
+        ]
+      }
+    }
+  ]
+}

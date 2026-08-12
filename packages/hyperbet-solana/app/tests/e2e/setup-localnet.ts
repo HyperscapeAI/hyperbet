@@ -1,8 +1,9 @@
+import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { AnchorProvider, BN, Idl, Program, Wallet } from "@coral-xyz/anchor";
+import { AnchorProvider, Idl, Program, Wallet } from "@coral-xyz/anchor";
 import {
   ConfirmOptions,
   Keypair,
@@ -16,14 +17,17 @@ import {
 } from "@solana/web3.js";
 
 import fightOracleIdl from "../../../anchor/target/idl/fight_oracle.json";
-import goldClobIdl from "../../../anchor/target/idl/gold_clob_market.json";
-import goldPerpsIdl from "../../../anchor/target/idl/gold_perps_market.json";
+import duelMarketIdl from "../../../anchor/target/idl/duel_market.json";
 import {
   createOpenMarketFixture,
   deriveUserBalancePda,
   uniqueDuelKey,
 } from "../../../anchor/tests/clob-test-helpers";
-import { modelMarketIdFromCharacterId } from "../../../../hyperbet-ui/src/lib/modelMarkets";
+import {
+  normalizeBettingFeedCycle,
+  type StreamingCycle,
+} from "../../../keeper/src/game-client";
+import { buildDuelLifecycleMetadata } from "../../../keeper/src/duelTerminalPolicy";
 
 type SignableTx = Transaction | VersionedTransaction;
 type AnchorLikeWallet = Wallet & { payer: Keypair };
@@ -32,9 +36,6 @@ type IdlWithAddress = Idl & {
   metadata?: {
     address?: string;
   };
-};
-type AccountNamespace = {
-  fetchNullable: (pubkey: PublicKey) => Promise<unknown>;
 };
 
 function resolveIdlAddress(idl: IdlWithAddress, label: string): string {
@@ -45,31 +46,10 @@ function resolveIdlAddress(idl: IdlWithAddress, label: string): string {
   return address;
 }
 
-const BPF_LOADER_UPGRADEABLE_PROGRAM_ID = new PublicKey(
-  "BPFLoaderUpgradeab1e11111111111111111111111",
-);
-const E2E_PERPS_MAX_ORACLE_STALENESS_SECONDS = 3_600;
 const E2E_TRADER_SEED = Uint8Array.from([
   88, 41, 190, 12, 77, 164, 231, 5, 199, 118, 43, 91, 16, 220, 58, 147, 9, 175,
   63, 204, 132, 54, 241, 28, 115, 67, 154, 210, 36, 143, 80, 11,
 ]);
-
-function deriveProgramDataAddress(programId: PublicKey): PublicKey {
-  return PublicKey.findProgramAddressSync(
-    [programId.toBuffer()],
-    BPF_LOADER_UPGRADEABLE_PROGRAM_ID,
-  )[0];
-}
-
-function encodeMarketId(marketId: number): Buffer {
-  const bytes = Buffer.alloc(8);
-  bytes.writeBigUInt64LE(BigInt(marketId), 0);
-  return bytes;
-}
-
-function lamportsBn(sol: number): BN {
-  return new BN(Math.round(sol * LAMPORTS_PER_SOL).toString());
-}
 
 async function loadBootstrapAuthority(): Promise<{
   keypair: Keypair;
@@ -79,7 +59,7 @@ async function loadBootstrapAuthority(): Promise<{
     process.env.E2E_SOLANA_BOOTSTRAP_KEYPAIR,
     path.join(
       process.env.HOME ?? "",
-      ".config/solana/hyperscape-keys/deployer.json",
+      ".config/solana/hyperia-keys/deployer.json",
     ),
     path.join(process.env.HOME ?? "", ".config/solana/id.json"),
   ].filter((value): value is string => Boolean(value?.trim()));
@@ -112,6 +92,22 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function realHyperiaMinimumOpenWindowMs(): number {
+  const raw =
+    process.env.E2E_REAL_HYPERIA_MIN_OPEN_WINDOW_MS?.trim() || "600000";
+  const value = Number.parseInt(raw, 10);
+  if (
+    !/^[1-9][0-9]*$/.test(raw) ||
+    !Number.isSafeInteger(value) ||
+    value < 60_000
+  ) {
+    throw new Error(
+      "E2E_REAL_HYPERIA_MIN_OPEN_WINDOW_MS must be an integer >= 60000",
+    );
+  }
+  return value;
+}
+
 async function getChainUnixTimestamp(
   connection: Connection,
   fallbackUnixSeconds: number,
@@ -120,7 +116,11 @@ async function getChainUnixTimestamp(
     try {
       const slot = await connection.getSlot("confirmed");
       const blockTime = await connection.getBlockTime(slot);
-      if (typeof blockTime === "number" && Number.isFinite(blockTime) && blockTime > 0) {
+      if (
+        typeof blockTime === "number" &&
+        Number.isFinite(blockTime) &&
+        blockTime > 0
+      ) {
         return blockTime;
       }
     } catch {
@@ -233,7 +233,6 @@ async function waitForSignatureConfirmation(
 ): Promise<void> {
   const startedAt = Date.now();
   while (Date.now() - startedAt < timeoutMs) {
-
     try {
       const statuses = await connection.getSignatureStatuses([signature], {
         searchTransactionHistory: true,
@@ -259,22 +258,6 @@ async function waitForSignatureConfirmation(
   }
   throw new Error(
     `Transaction ${signature} was not confirmed within ${timeoutMs}ms`,
-  );
-}
-
-async function waitForAccountExists(
-  connection: Connection,
-  address: PublicKey,
-  timeoutMs = 120_000,
-): Promise<void> {
-  const startedAt = Date.now();
-  while (Date.now() - startedAt < timeoutMs) {
-    const account = await connection.getAccountInfo(address, "confirmed");
-    if (account) return;
-    await sleep(500);
-  }
-  throw new Error(
-    `Account ${address.toBase58()} was not visible within ${timeoutMs}ms`,
   );
 }
 
@@ -324,6 +307,66 @@ function attachReliableSendAndConfirm(
   }) as AnchorProvider["sendAndConfirm"];
 }
 
+function participantHash(agent: StreamingCycle["agent1"]): number[] {
+  const identity = agent?.id?.trim() || agent?.name?.trim() || "unknown";
+  return Array.from(createHash("sha256").update(identity).digest());
+}
+
+async function loadRealHyperiaCycle(): Promise<StreamingCycle> {
+  const sourceUrl = process.env.E2E_HYPERIA_BET_SYNC_STATE_URL?.trim() || "";
+  const bearerToken =
+    process.env.E2E_HYPERIA_BET_SYNC_BEARER_TOKEN?.trim() || "";
+  if (!sourceUrl) {
+    throw new Error(
+      "E2E_HYPERIA_BET_SYNC_STATE_URL is required for real_hyperia mode",
+    );
+  }
+  if (!bearerToken) {
+    throw new Error(
+      "E2E_HYPERIA_BET_SYNC_BEARER_TOKEN is required for real_hyperia mode",
+    );
+  }
+  const minimumOpenWindowMs = realHyperiaMinimumOpenWindowMs();
+
+  const deadline = Date.now() + 120_000;
+  let lastFailure = "source did not return a cycle";
+  while (Date.now() < deadline) {
+    try {
+      const response = await fetch(sourceUrl, {
+        cache: "no-store",
+        headers: { authorization: `Bearer ${bearerToken}` },
+      });
+      if (!response.ok) {
+        lastFailure = `HTTP ${response.status}`;
+      } else {
+        const normalized = normalizeBettingFeedCycle(await response.json());
+        if (!normalized) {
+          lastFailure = "invalid schema-v3 betting frame";
+        } else if (normalized.phase !== "ANNOUNCEMENT") {
+          lastFailure = `phase ${normalized.phase}`;
+        } else if (
+          normalized.competitiveSnapshot?.persisted !== true ||
+          normalized.competitiveSnapshot.diagnostic !== false
+        ) {
+          lastFailure =
+            "competitive snapshot is not persisted production truth";
+        } else if (
+          normalized.betCloseTime === null ||
+          normalized.betCloseTime - Date.now() < minimumOpenWindowMs
+        ) {
+          lastFailure = `betting window has less than ${minimumOpenWindowMs} ms remaining`;
+        } else {
+          return normalized;
+        }
+      }
+    } catch (error) {
+      lastFailure = error instanceof Error ? error.message : String(error);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1_000));
+  }
+  throw new Error(`Real Hyperia cycle did not become ready: ${lastFailure}`);
+}
+
 async function main(): Promise<void> {
   const __dirname = path.dirname(fileURLToPath(import.meta.url));
   const appDir = path.resolve(__dirname, "../..");
@@ -337,8 +380,8 @@ async function main(): Promise<void> {
   const browserSolanaWsUrl =
     process.env.E2E_BROWSER_SOLANA_WS_URL || solanaWsUrl;
   const clobProgramId = resolveIdlAddress(
-    goldClobIdl as unknown as IdlWithAddress,
-    "gold_clob_market",
+    duelMarketIdl as unknown as IdlWithAddress,
+    "duel_market",
   );
   const connection = new Connection(solanaRpcUrl, {
     commitment: "confirmed",
@@ -355,8 +398,7 @@ async function main(): Promise<void> {
   attachReliableSendAndConfirm(provider, connection);
 
   const fightProgram = new Program(fightOracleIdl as Idl, provider);
-  const clobProgram = new Program(goldClobIdl as Idl, provider);
-  const perpsProgram = new Program(goldPerpsIdl as Idl, provider);
+  const clobProgram = new Program(duelMarketIdl as Idl, provider);
 
   await ensureBalance(connection, authority.publicKey, 30 * LAMPORTS_PER_SOL);
   await ensureTransferredBalance(
@@ -366,114 +408,71 @@ async function main(): Promise<void> {
     10 * LAMPORTS_PER_SOL,
   );
 
-  // CLOB settlement uses native SOL in this test stack; the legacy config
-  // key still carries a mint address, so point it at wrapped SOL.
-  const goldMint = new PublicKey("So11111111111111111111111111111111111111112");
-  const e2eModelCharacterId = "e2e-model-alpha";
-  const e2eModelName = "E2E Model Alpha";
-  const e2eModelProvider = "Hyperscape";
-  const e2eModelSlug = "alpha-local";
-  const e2eModelWins = 12;
-  const e2eModelLosses = 4;
-  const e2eModelCombatLevel = 88;
-  const e2eModelCurrentStreak = 4;
-  const e2eModelSpotIndex = 110;
-  const e2eModelMu = 28;
-  const e2eModelSigma = 4;
-  const e2ePerpsMarketId = modelMarketIdFromCharacterId(e2eModelCharacterId);
   const hostNow = Math.floor(Date.now() / 1000);
   const now = await getChainUnixTimestamp(connection, hostNow);
-  const currentMatchId = Math.max(Date.now(), now * 1000);
-  const currentDuelMetadata = JSON.stringify({
-    duelId: currentMatchId,
-    matchId: currentMatchId,
-    agent1: "E2E Active Agent A",
-    agent2: "E2E Active Agent B",
-  });
+  const duelSource =
+    process.env.E2E_DUEL_SOURCE?.trim().toLowerCase() || "synthetic_publish";
+  if (duelSource !== "synthetic_publish" && duelSource !== "real_hyperia") {
+    throw new Error(`Unsupported E2E_DUEL_SOURCE: ${duelSource}`);
+  }
+  const realCycle =
+    duelSource === "real_hyperia" ? await loadRealHyperiaCycle() : null;
+  const currentDuelId =
+    realCycle?.duelId ?? String(Math.max(Date.now(), now * 1000));
+  const parsedMatchId = Number.parseInt(currentDuelId || "", 10);
+  const currentMatchId = Number.isSafeInteger(parsedMatchId)
+    ? parsedMatchId
+    : Math.max(Date.now(), now * 1000);
+  const currentDuelKey = realCycle?.duelKeyHex
+    ? Array.from(Buffer.from(realCycle.duelKeyHex, "hex"))
+    : uniqueDuelKey(
+        `e2e-current-duel:${Date.now()}:${Math.random().toString(16).slice(2)}`,
+      );
+  const currentDuelKeyHex = Buffer.from(currentDuelKey).toString("hex");
+  const betOpenTs = realCycle?.betOpenTime
+    ? Math.floor(realCycle.betOpenTime / 1_000)
+    : now - 30;
+  const betCloseTs = realCycle?.betCloseTime
+    ? Math.floor(realCycle.betCloseTime / 1_000)
+    : now + 3_600;
+  const duelStartTs = realCycle?.fightStartTime
+    ? Math.floor(realCycle.fightStartTime / 1_000)
+    : realCycle
+      ? betCloseTs
+      : now + 3_660;
+  const currentDuelMetadata = realCycle
+    ? buildDuelLifecycleMetadata({
+        duelId: currentDuelId,
+        duelKey: currentDuelKeyHex,
+        snapshotDigest: realCycle.competitiveSnapshotDigest,
+      })
+    : JSON.stringify({
+        duelId: currentDuelId,
+        duelKeyHex: currentDuelKeyHex,
+        matchId: currentMatchId,
+        agent1: "E2E Active Agent A",
+        agent2: "E2E Active Agent B",
+      });
   const currentMarket = await createOpenMarketFixture(
     fightProgram as never,
     clobProgram as never,
     authority,
     {
-      duelKey: uniqueDuelKey(
-        `e2e-current-duel:${Date.now()}:${Math.random().toString(16).slice(2)}`,
-      ),
-      betOpenTs: now - 30,
+      duelKey: currentDuelKey,
+      betOpenTs,
       // Use validator time, not host wall clock, or the local chain can reject
       // orders as already closed while the UI still thinks the market is open.
-      betCloseTs: now + 3_600,
-      duelStartTs: now + 3_660,
+      betCloseTs,
+      duelStartTs,
+      ...(realCycle
+        ? {
+            participantAHash: participantHash(realCycle.agent1),
+            participantBHash: participantHash(realCycle.agent2),
+          }
+        : {}),
       metadataUri: currentDuelMetadata,
     },
   );
-  const currentDuelKeyHex = Buffer.from(currentMarket.duelKey).toString("hex");
-
-  const [perpsConfigPda] = PublicKey.findProgramAddressSync(
-    [Buffer.from("config")],
-    perpsProgram.programId,
-  );
-  const [perpsMarketPda] = PublicKey.findProgramAddressSync(
-    [Buffer.from("market"), encodeMarketId(e2ePerpsMarketId)],
-    perpsProgram.programId,
-  );
-  const perpsAccounts = perpsProgram.account as Record<string, AccountNamespace>;
-  const existingPerpsConfig =
-    await perpsAccounts.configState.fetchNullable(perpsConfigPda);
-  if (!existingPerpsConfig) {
-    await perpsProgram.methods
-      .initializeConfig(
-        authority.publicKey,
-        authority.publicKey,
-        authority.publicKey,
-        lamportsBn(100),
-        new BN(1_000),
-        new BN(E2E_PERPS_MAX_ORACLE_STALENESS_SECONDS),
-        lamportsBn(80),
-        lamportsBn(120),
-        2_500,
-        new BN(5),
-        lamportsBn(0.01),
-        lamportsBn(25),
-        lamportsBn(12),
-        500,
-        100,
-        25,
-        25,
-      )
-      .accountsPartial({
-        config: perpsConfigPda,
-        authority: authority.publicKey,
-        program: perpsProgram.programId,
-        programData: deriveProgramDataAddress(perpsProgram.programId),
-        systemProgram: SystemProgram.programId,
-      })
-      .rpc();
-    await waitForAccountExists(connection, perpsConfigPda);
-  }
-
-  await perpsProgram.methods
-    .updateMarketOracle(
-      new BN(String(e2ePerpsMarketId)),
-      lamportsBn(e2eModelSpotIndex),
-      lamportsBn(e2eModelMu),
-      lamportsBn(e2eModelSigma),
-    )
-    .accountsPartial({
-      config: perpsConfigPda,
-      market: perpsMarketPda,
-      authority: authority.publicKey,
-      systemProgram: SystemProgram.programId,
-    })
-    .rpc();
-
-  await perpsProgram.methods
-    .depositInsurance(new BN(String(e2ePerpsMarketId)), lamportsBn(12))
-    .accountsPartial({
-      market: perpsMarketPda,
-      payer: authority.publicKey,
-      systemProgram: SystemProgram.programId,
-    })
-    .rpc();
 
   const clobUserBalancePda = deriveUserBalancePda(
     clobProgram.programId,
@@ -481,40 +480,21 @@ async function main(): Promise<void> {
     trader.publicKey,
   );
 
-  const oracleRecordedAt = Date.now();
-
   const envBody = [
     "VITE_SOLANA_CLUSTER=localnet",
     `VITE_SOLANA_RPC_URL=${browserSolanaRpcUrl}`,
     `VITE_SOLANA_WS_URL=${browserSolanaWsUrl}`,
     "VITE_USE_LOCAL_SOLANA_RPC_PROXY=true",
     `VITE_FIGHT_ORACLE_PROGRAM_ID=${fightProgram.programId.toBase58()}`,
-    `VITE_GOLD_CLOB_MARKET_PROGRAM_ID=${clobProgramId}`,
-    `VITE_GOLD_BINARY_MARKET_PROGRAM_ID=${clobProgramId}`,
-    `VITE_GOLD_MINT=${goldMint.toBase58()}`,
+    `VITE_DUEL_MARKET_PROGRAM_ID=${clobProgramId}`,
     `VITE_ACTIVE_MATCH_ID=${currentMatchId}`,
     "VITE_BET_WINDOW_SECONDS=300",
     "VITE_NEW_ROUND_BET_WINDOW_SECONDS=300",
     "VITE_AUTO_SEED_DELAY_SECONDS=10",
-    "VITE_MARKET_MAKER_SEED_GOLD=1",
     "VITE_BET_FEE_BPS=200",
-    "VITE_GOLD_DECIMALS=9",
     "VITE_REFRESH_INTERVAL_MS=1500",
     "VITE_ENABLE_AUTO_SEED=false",
     "VITE_E2E_FORCE_WINNER=YES",
-    `VITE_E2E_MODEL_CHARACTER_ID=${e2eModelCharacterId}`,
-    `VITE_E2E_MODEL_NAME=${e2eModelName}`,
-    `VITE_E2E_MODEL_PROVIDER=${e2eModelProvider}`,
-    `VITE_E2E_MODEL_SLUG=${e2eModelSlug}`,
-    `VITE_E2E_MODEL_WINS=${e2eModelWins}`,
-    `VITE_E2E_MODEL_LOSSES=${e2eModelLosses}`,
-    `VITE_E2E_MODEL_COMBAT_LEVEL=${e2eModelCombatLevel}`,
-    `VITE_E2E_MODEL_STREAK=${e2eModelCurrentStreak}`,
-    `VITE_E2E_MODEL_SPOT_INDEX=${e2eModelSpotIndex}`,
-    `VITE_E2E_MODEL_MU=${e2eModelMu}`,
-    `VITE_E2E_MODEL_SIGMA=${e2eModelSigma}`,
-    "VITE_E2E_MODEL_INSURANCE=12",
-    `VITE_E2E_MODEL_ORACLE_RECORDED_AT=${oracleRecordedAt}`,
     `VITE_BINARY_MARKET_MAKER_WALLET=${authority.publicKey.toBase58()}`,
     `VITE_BINARY_TRADE_TREASURY_WALLET=${authority.publicKey.toBase58()}`,
     `VITE_BINARY_TRADE_MARKET_MAKER_WALLET=${authority.publicKey.toBase58()}`,
@@ -534,10 +514,14 @@ async function main(): Promise<void> {
         authority: authority.publicKey.toBase58(),
         bootstrapWalletPath: bootstrapAuthority.keypairPath,
         solanaTraderPublicKey: trader.publicKey.toBase58(),
-        goldMint: goldMint.toBase58(),
         currentMatchId,
-        currentDuelId: String(currentMatchId),
+        currentDuelId,
         currentDuelKeyHex,
+        currentBetOpenTimeMs: betOpenTs * 1_000,
+        currentBetCloseTimeMs: betCloseTs * 1_000,
+        currentFightStartTimeMs: duelStartTs * 1_000,
+        currentPhase: realCycle?.phase ?? "ANNOUNCEMENT",
+        currentDuelSource: duelSource,
         clobConfig: currentMarket.config.toBase58(),
         clobMarketState: currentMarket.marketState.toBase58(),
         clobDuelState: currentMarket.duelState.toBase58(),
@@ -550,11 +534,7 @@ async function main(): Promise<void> {
         placeBetPayAsset: "SOL",
         placeBetAmount: "1",
         placeBetSide: "YES",
-        currentBetWindowSeconds: 300,
-        perpsCharacterId: e2eModelCharacterId,
-        perpsModelName: e2eModelName,
-        perpsMarketId: e2ePerpsMarketId,
-        perpsMarketPda: perpsMarketPda.toBase58(),
+        currentBetWindowSeconds: betCloseTs - betOpenTs,
       },
       null,
       2,
@@ -569,14 +549,12 @@ async function main(): Promise<void> {
         statePath,
         authority: authority.publicKey.toBase58(),
         trader: trader.publicKey.toBase58(),
-        goldMint: goldMint.toBase58(),
         browserSolanaRpcUrl,
         browserSolanaWsUrl,
         currentMatchId,
         currentDuelKeyHex,
         clobMarketState: currentMarket.marketState.toBase58(),
         clobUserBalance: clobUserBalancePda.toBase58(),
-        perpsMarketId: e2ePerpsMarketId,
       },
       null,
       2,

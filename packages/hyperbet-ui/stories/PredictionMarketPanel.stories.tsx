@@ -34,8 +34,8 @@ const meta = {
   args: {
     yesPercent: 56,
     noPercent: 44,
-    yesPool: "145.2 AVAX",
-    noPool: "112.4 AVAX",
+    yesPool: "145.2 SOL",
+    noPool: "112.4 SOL",
     side: "YES",
     setSide: () => undefined,
     amountInput: "2.5",
@@ -45,33 +45,15 @@ const meta = {
     programsReady: true,
     agent1Name: "StormWarden",
     agent2Name: "JadePhoenix",
-    isEvm: true,
     supportsSell: true,
     chartData: sampleChartData,
     bids: sampleBids,
     asks: sampleAsks,
     recentTrades: sampleTrades,
-    goldPriceUsd: 0.0712,
-    currencySymbol: "AVAX",
+    assetPriceUsd: 0.0712,
+    currencySymbol: "SOL",
     locale: "zh",
-    marketAssetSymbol: "AVAX",
-    children: (
-      <button
-        type="button"
-        style={{
-          width: "100%",
-          marginTop: 8,
-          padding: "10px 12px",
-          borderRadius: 8,
-          border: "1px solid rgba(255,255,255,0.12)",
-          background: "rgba(255,255,255,0.06)",
-          color: "#fff",
-          fontWeight: 700,
-        }}
-      >
-        Close Position
-      </button>
-    ),
+    marketAssetSymbol: "SOL",
   },
 } satisfies Meta<typeof PredictionMarketPanel>;
 

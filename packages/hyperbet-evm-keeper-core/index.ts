@@ -46,11 +46,11 @@ export type VerifiedExternalBetRecord = {
 
 export const DEFAULT_ALLOWED_APP_DOMAINS = [
   "hyperbet.win",
-  "hyperscape.bet",
-  "hyperscape.gg",
+  "hyperia.bet",
+  "hyperia.gg",
   "hyperbet.pages.dev",
-  "hyperscape.club",
-  "hyperscape.pages.dev",
+  "hyperia.club",
+  "hyperia.pages.dev",
 ] as const;
 
 const GOLD_CLOB_PLACE_ORDER_DISCRIMINATOR = createHash("sha256")

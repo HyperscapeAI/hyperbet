@@ -20,19 +20,9 @@ export const SOLANA_STAGE_A_PROGRAMS = [
     envIdVar: "STAGE_A_FIGHT_ORACLE_PROGRAM_ID",
   },
   {
-    binaryName: "gold_clob_market",
-    envKeypairVar: "STAGE_A_GOLD_CLOB_MARKET_PROGRAM_KEYPAIR",
-    envIdVar: "STAGE_A_GOLD_CLOB_MARKET_PROGRAM_ID",
-  },
-  {
-    binaryName: "lvr_amm",
-    envKeypairVar: "STAGE_A_GOLD_AMM_PROGRAM_KEYPAIR",
-    envIdVar: "STAGE_A_GOLD_AMM_PROGRAM_ID",
-  },
-  {
-    binaryName: "gold_perps_market",
-    envKeypairVar: "STAGE_A_GOLD_PERPS_PROGRAM_KEYPAIR",
-    envIdVar: "STAGE_A_GOLD_PERPS_PROGRAM_ID",
+    binaryName: "duel_market",
+    envKeypairVar: "STAGE_A_DUEL_MARKET_PROGRAM_KEYPAIR",
+    envIdVar: "STAGE_A_DUEL_MARKET_PROGRAM_ID",
   },
 ] as const;
 

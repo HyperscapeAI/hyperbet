@@ -427,7 +427,7 @@ const args = await yargs(hideBin(process.argv))
   .option("game-url", {
     type: "string",
     default: process.env.GAME_URL || "http://localhost:3000",
-    describe: "URL of the Hyperscape game server",
+    describe: "URL of the Hyperia game server",
   })
   .strict()
   .parse();
@@ -436,7 +436,7 @@ import { type DuelLifecycleEvent, GameClient } from "./game-client";
 
 import { Program } from "@coral-xyz/anchor";
 import { type FightOracle } from "../../../hyperbet-solana/anchor/target/types/fight_oracle";
-import { type GoldClobMarket } from "../../../hyperbet-solana/anchor/target/types/gold_clob_market";
+import { type DuelMarket } from "../../../hyperbet-solana/anchor/target/types/duel_market";
 import { type GoldPerpsMarket } from "../../../hyperbet-solana/anchor/target/types/gold_perps_market";
 import {
   updateRatings,
@@ -516,7 +516,7 @@ const botKeypair = readKeypair(
 const { connection, provider, fightOracle, goldClobMarket, goldPerpsMarket } =
   createPrograms(botKeypair);
 const fightProgram = fightOracle as Program<FightOracle>;
-const marketProgram = goldClobMarket as Program<GoldClobMarket>;
+const marketProgram = goldClobMarket as Program<DuelMarket>;
 const perpsProgram = goldPerpsMarket as Program<GoldPerpsMarket>;
 
 function hasProgramMethod(program: any, method: string): boolean {

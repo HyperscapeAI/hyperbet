@@ -254,7 +254,7 @@ function loadControl(): HarnessControl {
 }
 
 function consumePreparedRealEvmFixture(): PreparedRealEvmFixture | null {
-  if (preparedRealEvmFixtureConsumed || E2E_DUEL_SOURCE !== "real_hyperscapes") {
+  if (preparedRealEvmFixtureConsumed || E2E_DUEL_SOURCE !== "real_hyperia") {
     return null;
   }
   const state = loadState();
@@ -286,7 +286,7 @@ function consumePreparedRealEvmFixture(): PreparedRealEvmFixture | null {
 function runProcessControl(
   control: HarnessControl,
   action: "restart",
-  service: "keeper" | "anvil" | "hyperscapes" | "hyperscapesClient",
+  service: "keeper" | "anvil" | "hyperia" | "hyperiaClient",
 ): void {
   execFileSync(
     "bash",
@@ -486,7 +486,7 @@ async function publishEvmCycleState(
         agent1: {
           id: `${chainKey}-fresh-agent-a`,
           name: "Agent A",
-          provider: "Hyperscape",
+          provider: "Hyperia",
           model: "alpha-local",
           hp: 80,
           maxHp: 100,
@@ -709,7 +709,7 @@ async function createFreshEvmOpenMarket(
     throw new Error("Missing wallet client account for EVM market setup");
   }
 
-  if (E2E_DUEL_SOURCE === "real_hyperscapes") {
+  if (E2E_DUEL_SOURCE === "real_hyperia") {
     const liveMarket = await waitForPreparedOrFreshRealEvmMarket(
       request,
       publicClient,
@@ -986,7 +986,7 @@ async function gotoApp(
               .trim()
               .toUpperCase();
             if (
-              bodyText.includes("HYPERSCAPE DUEL ARENA") ||
+              bodyText.includes("HYPERIA DUEL ARENA") ||
               bodyText.includes("ULTRA SIMPLE FIGHT BET")
             ) {
               return bodyText;
@@ -1646,7 +1646,7 @@ async function waitForPreparedOrFreshRealEvmMarket(
   }
 
   throw new Error(
-    `Timed out waiting for a fresh open live Hyperscapes duel on ${chainKey}: ${liveError}`,
+    `Timed out waiting for a fresh open live Hyperia duel on ${chainKey}: ${liveError}`,
   );
 }
 
@@ -2238,13 +2238,13 @@ test.describe("market flows", () => {
     expect(finalPosition[1]).toBe(0n);
   });
 
-  test("avax prediction markets recover after Hyperscapes restarts", async ({
+  test("avax prediction markets recover after Hyperia restarts", async ({
     page,
     request,
   }) => {
     test.skip(
-      E2E_DUEL_SOURCE !== "real_hyperscapes",
-      "Hyperscapes restart recovery is only meaningful in real-duel mode",
+      E2E_DUEL_SOURCE !== "real_hyperia",
+      "Hyperia restart recovery is only meaningful in real-duel mode",
     );
     const state = loadState();
     const control = loadControl();
@@ -2323,7 +2323,7 @@ test.describe("market flows", () => {
     const evmPanel = page.getByTestId("evm-panel").first();
     await expect(evmPanel).toBeVisible({ timeout: 60_000 });
 
-    runProcessControl(control, "restart", "hyperscapes");
+    runProcessControl(control, "restart", "hyperia");
 
     await expect
       .poll(
@@ -2338,7 +2338,7 @@ test.describe("market flows", () => {
               typeof streamState.cycle?.duelKeyHex === "string"
                 ? normalizeHex32(
                     streamState.cycle.duelKeyHex,
-                    "stream duel key after Hyperscapes restart",
+                    "stream duel key after Hyperia restart",
                   )
                 : ZERO_HASH,
           };
@@ -2389,7 +2389,7 @@ test.describe("market flows", () => {
       page,
       "evm-last-order-tx",
       previousYesTx,
-      "Hyperscapes restart YES order",
+      "Hyperia restart YES order",
     );
     await waitForEvmReceipt(publicClient, yesTx as Hash);
 

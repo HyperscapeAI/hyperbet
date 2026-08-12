@@ -7,7 +7,6 @@ import {
 } from "../packages/simulation-dashboard/src/scenario-catalog.ts";
 import {
   findAvailablePort,
-  materializeCiSolanaWallet,
   resolveArtifactRoot,
   rootDir,
   runCommand,
@@ -15,8 +14,6 @@ import {
   waitForJsonEndpoint,
   writeJsonArtifact,
 } from "./ci-lib";
-
-type ScenarioTarget = "evm" | "solana";
 
 type ScenarioRunRecord = {
   runId: string;
@@ -38,16 +35,13 @@ type ScenarioServerContext = {
   scenarioArtifactRoot: string;
 };
 
-function parseArgs(): ScenarioTarget {
-  const targetArg =
-    process.argv
-      .slice(2)
-      .find((arg) => arg.startsWith("--target="))
-      ?.slice("--target=".length) ?? "evm";
-  if (targetArg !== "evm" && targetArg !== "solana") {
-    throw new Error(`unsupported scenario target ${targetArg}`);
+function validateArgs(): void {
+  for (const argument of process.argv.slice(2)) {
+    if (argument.startsWith("--scenario=")) continue;
+    if (argument !== "--target=solana") {
+      throw new Error(`unsupported SOL-only scenario argument ${argument}`);
+    }
   }
-  return targetArg;
 }
 
 function parseScenarioFilter(): string | null {
@@ -60,48 +54,22 @@ function parseScenarioFilter(): string | null {
   return scenarioArg.length > 0 ? scenarioArg : null;
 }
 
-const target = parseArgs();
+validateArgs();
 const scenarioFilter = parseScenarioFilter();
-const artifactRoot = resolveArtifactRoot(
-  target === "evm" ? "evm-exploit-gate" : "solana-exploit-gate",
-);
+const artifactRoot = resolveArtifactRoot("solana-exploit-gate");
 const bootstrapKeypairPath = path.join(
   artifactRoot,
   "solana-bootstrap-keypair.json",
 );
-const ciHome = path.join(artifactRoot, "home");
 const solanaAnchorRoot = path.join(rootDir, "packages/hyperbet-solana/anchor");
 const solanaDeployRoot = path.join(solanaAnchorRoot, "target", "deploy");
 const requiredSolanaDeployArtifacts = [
   "fight_oracle.so",
-  "gold_clob_market.so",
+  "duel_market.so",
 ] as const;
 const reservedPorts = new Set<number>();
 const MAX_SCENARIO_SERVER_STARTUP_RETRIES = 3;
-const preferredPorts =
-  target === "evm"
-    ? { http: 3401, ws: 3400, anvil: 18546 }
-    : { http: 3501, ws: 3500, anvil: 18547 };
-
-const evmCanonical = [
-  "stale-signal-sniping",
-  "stale-oracle-sniping",
-  "close-window-race",
-  "whale-impact",
-  "mev-extraction",
-  "sandwich-attack",
-  "wash-trading",
-  "arbitrage-hunt",
-  "cancel-replace-griefing",
-  "stress-test",
-  "claim-refund-abuse",
-];
-const evmMatrix = [
-  "sandwich-attack",
-  "stale-oracle-sniping",
-  "whale-impact",
-  "stress-test",
-];
+const preferredPorts = { http: 3501, ws: 3500 };
 const solanaCanonical = [
   "solana-stale-resolution-window",
   "solana-lock-race-attempt",
@@ -117,14 +85,9 @@ const solanaMatrix = [
 ];
 
 function scenarioEnv(): NodeJS.ProcessEnv {
-  if (target !== "solana") {
-    return {};
-  }
-
   return {
     ANCHOR_WALLET: bootstrapKeypairPath,
     E2E_SOLANA_BOOTSTRAP_KEYPAIR: bootstrapKeypairPath,
-    HOME: ciHome,
     SOLANA_BOOTSTRAP_KEYPAIR: bootstrapKeypairPath,
   };
 }
@@ -140,7 +103,7 @@ function sanitizeArtifactName(value: string): string {
 }
 
 function getScenarioPreset(scenarioId: string): ScenarioPreset {
-  const chainKey = target === "evm" ? "anvil" : "solana";
+  const chainKey = "solana";
   const preset =
     SCENARIO_PRESETS.find(
       (entry) => entry.id === scenarioId && entry.chainKey === chainKey,
@@ -174,10 +137,6 @@ function buildScenarioExecutions(
 }
 
 async function ensureBootstrapWallet(): Promise<void> {
-  if (target !== "solana") {
-    return;
-  }
-
   if (!existsSync(bootstrapKeypairPath)) {
     mkdirSync(path.dirname(bootstrapKeypairPath), { recursive: true });
     await runCommand(
@@ -196,8 +155,6 @@ async function ensureBootstrapWallet(): Promise<void> {
       },
     );
   }
-
-  materializeCiSolanaWallet(bootstrapKeypairPath, ciHome);
 }
 
 function getMissingSolanaDeployArtifacts(): string[] {
@@ -207,15 +164,8 @@ function getMissingSolanaDeployArtifacts(): string[] {
 }
 
 async function ensureSolanaDeployArtifacts(): Promise<void> {
-  if (target !== "solana") {
-    return;
-  }
-
-  const missingArtifacts = getMissingSolanaDeployArtifacts();
-  if (missingArtifacts.length === 0) {
-    return;
-  }
-
+  // Always rebuild before a Solana scenario run. Existence alone can select a
+  // stale .so from an older source revision and produce false launch evidence.
   const buildLogPath = path.join(artifactRoot, "solana-anchor-build.log");
   await runCommand("bun", ["run", "--cwd", solanaAnchorRoot, "build"], {
     stdoutFile: buildLogPath,
@@ -323,7 +273,10 @@ async function runScenarioViaApi(
     );
   }
 
-  const completedRun = await pollScenarioRun(context.apiBaseUrl, queuedRun.runId);
+  const completedRun = await pollScenarioRun(
+    context.apiBaseUrl,
+    queuedRun.runId,
+  );
   writeJsonArtifact(context.scenarioArtifactRoot, "result.json", completedRun);
   if (
     completedRun.status !== "succeeded" ||
@@ -376,9 +329,8 @@ async function withSimulationServer<T>(
     const httpPort = String(
       await allocateDistinctPort(preferredPorts.http, reservedPorts),
     );
-    const wsPort = String(await allocateDistinctPort(preferredPorts.ws, reservedPorts));
-    const anvilPort = String(
-      await allocateDistinctPort(preferredPorts.anvil, reservedPorts),
+    const wsPort = String(
+      await allocateDistinctPort(preferredPorts.ws, reservedPorts),
     );
     const apiBaseUrl = `http://127.0.0.1:${httpPort}`;
     const serverLog = path.join(
@@ -390,29 +342,28 @@ async function withSimulationServer<T>(
       `scenario-history${attempt > 1 ? `-retry-${attempt}` : ""}.json`,
     );
 
-    writeJsonArtifact(scenarioArtifactRoot, `server${attempt > 1 ? `-retry-${attempt}` : ""}.json`, {
-      apiBaseUrl,
-      anvilPort,
-      httpPort,
-      wsPort,
-      attempt,
-    });
-
-    const server = await spawnBackground(
-      "bun",
-      ["src/server.ts"],
+    writeJsonArtifact(
+      scenarioArtifactRoot,
+      `server${attempt > 1 ? `-retry-${attempt}` : ""}.json`,
       {
-        cwd: path.join(rootDir, "packages/simulation-dashboard"),
-        env: {
-          SIM_HTTP_PORT: httpPort,
-          SIM_WS_PORT: wsPort,
-          SIM_ANVIL_PORT: anvilPort,
-          SIM_SCENARIO_HISTORY_PATH: historyPath,
-          ...scenarioEnv(),
-        },
-        logFile: serverLog,
+        apiBaseUrl,
+        httpPort,
+        wsPort,
+        attempt,
       },
     );
+
+    const server = await spawnBackground("bun", ["src/server.ts"], {
+      cwd: path.join(rootDir, "packages/simulation-dashboard"),
+      env: {
+        SIM_HTTP_PORT: httpPort,
+        SIM_WS_PORT: wsPort,
+        SIM_RUNTIME_TARGET: "solana",
+        SIM_SCENARIO_HISTORY_PATH: historyPath,
+        ...scenarioEnv(),
+      },
+      logFile: serverLog,
+    });
     stopServer = () => server.stop({ timeoutMs: 15_000 });
 
     try {
@@ -465,31 +416,18 @@ try {
   await ensureBootstrapWallet();
   await ensureSolanaDeployArtifacts();
 
-  await runCommand(
-    "bun",
-    ["run", "--cwd", "packages/evm-contracts", "build:foundry:pm"],
-    {
-      stdoutFile: path.join(artifactRoot, "foundry-build.out.log"),
-      stderrFile: path.join(artifactRoot, "foundry-build.err.log"),
-    },
-  );
-
-  const canonical = target === "evm" ? evmCanonical : solanaCanonical;
-  const matrix = target === "evm" ? evmMatrix : solanaMatrix;
   const selectedCanonical = scenarioFilter
-    ? canonical.filter((scenarioId) => scenarioId === scenarioFilter)
-    : canonical;
+    ? solanaCanonical.filter((scenarioId) => scenarioId === scenarioFilter)
+    : solanaCanonical;
   const selectedMatrix = scenarioFilter
-    ? matrix.filter((scenarioId) => scenarioId === scenarioFilter)
-    : matrix;
+    ? solanaMatrix.filter((scenarioId) => scenarioId === scenarioFilter)
+    : solanaMatrix;
   if (
     scenarioFilter &&
     selectedCanonical.length === 0 &&
     selectedMatrix.length === 0
   ) {
-    throw new Error(
-      `unknown ${target} scenario filter ${scenarioFilter}`,
-    );
+    throw new Error(`unknown Solana scenario filter ${scenarioFilter}`);
   }
   const executions = [
     ...buildScenarioExecutions(selectedCanonical, "canonical"),

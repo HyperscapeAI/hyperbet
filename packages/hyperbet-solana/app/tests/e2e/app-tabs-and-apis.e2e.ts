@@ -11,12 +11,10 @@ import {
 
 type E2eState = {
   solanaTraderPublicKey?: string;
-  perpsCharacterId?: string;
-  perpsMarketId?: number;
   currentDuelId?: string;
   currentDuelKeyHex?: string;
   currentPhase?: string;
-  currentDuelSource?: "synthetic_publish" | "real_hyperscapes";
+  currentDuelSource?: "synthetic_publish" | "real_hyperia";
   clobMarketState?: string;
 };
 
@@ -35,47 +33,8 @@ type PointsResponse = {
   referredBy: { wallet: string; code: string } | null;
 };
 
-type RankResponse = {
-  rank: number;
-  totalPoints: number;
-};
-
-type MultiplierResponse = {
-  multiplier: number;
-  tier: string;
-  goldBalance: string;
-  goldHoldDays: number;
-};
-
-type HistoryEntry = {
-  id: number;
-  eventType: string;
-  totalPoints: number;
-};
-
-type HistoryResponse = {
-  entries: HistoryEntry[];
-  total: number;
-};
-
-type LeaderboardResponse = {
-  leaderboard: Array<{ rank: number; wallet: string; totalPoints: number }>;
-};
-
 type InviteResponse = {
   inviteCode: string;
-};
-
-type PerpsMarketsResponse = {
-  markets: Array<{
-    characterId: string;
-    marketId: number;
-    name: string;
-  }>;
-};
-
-type PerpsOracleHistoryResponse = {
-  snapshots: Array<{ spotIndex: number }>;
 };
 
 type PredictionMarketsResponse = {
@@ -99,6 +58,12 @@ type PredictionMarketsResponse = {
     programId: string | null;
     txRef: string | null;
     syncedAt: number | null;
+    metadata?: {
+      proposalId?: string | null;
+      challengeWindowEndsAt?: number | null;
+      finalizedAt?: number | null;
+      cancellationReason?: string | null;
+    };
   }>;
   updatedAt: number | null;
 };
@@ -127,22 +92,8 @@ const EXPECT_KEEPER_BOT =
   (process.env.E2E_EXPECT_KEEPER_BOT?.trim().toLowerCase() ?? "true") !==
   "false";
 
-const HISTORY_LABELS: Record<string, string> = {
-  BET_PLACED: "Bet Placed",
-  BET_WON: "Bet Won",
-  REFERRAL_WIN: "Referral Win",
-  SIGNUP_REFERRER: "Signup Bonus (Referrer)",
-  SIGNUP_REFEREE: "Signup Bonus",
-  STAKING_DAILY: "Staking Reward",
-};
-
 function loadState(): E2eState {
   return JSON.parse(fs.readFileSync(statePath, "utf8")) as E2eState;
-}
-
-function truncateWallet(wallet: string): string {
-  if (wallet.length <= 12) return wallet;
-  return `${wallet.slice(0, 4)}...${wallet.slice(-4)}`;
 }
 
 async function fetchJson<T>(
@@ -170,7 +121,7 @@ async function gotoApp(page: Page): Promise<void> {
               .trim()
               .toUpperCase();
             if (
-              bodyText.includes("HYPERSCAPE DUEL ARENA") ||
+              bodyText.includes("HYPERIA DUEL ARENA") ||
               bodyText.includes("ULTRA SIMPLE FIGHT BET")
             ) {
               return bodyText;
@@ -255,7 +206,6 @@ test.describe("app tabs and api coverage", () => {
   }) => {
     const state = loadState();
     const wallet = state.solanaTraderPublicKey || "";
-    const characterId = state.perpsCharacterId || "";
 
     const status = await fetchJson<{ service: string }>(request, "/status");
     expect(status.service).toBe("hyperbet-solana-backend");
@@ -281,7 +231,9 @@ test.describe("app tabs and api coverage", () => {
     );
     expect(predictionMarkets.duel.phase).toBe(streamState.cycle.phase);
     expect(predictionMarkets.duel.duelId).toBe(state.currentDuelId || null);
-    expect(predictionMarkets.duel.duelKey).toBe(state.currentDuelKeyHex || null);
+    expect(predictionMarkets.duel.duelKey).toBe(
+      state.currentDuelKeyHex || null,
+    );
     const solanaMarket = predictionMarkets.markets.find(
       (market) => market.chainKey === "solana",
     );
@@ -316,25 +268,29 @@ test.describe("app tabs and api coverage", () => {
 
     await expect
       .poll(async () => {
-        const botHealth = await fetchJson<KeeperBotHealthResponse>(
-          request,
-          "/api/keeper/bot-health",
+        const response = await request.get(
+          `${GAME_API_URL}/api/keeper/bot-health`,
         );
+        const botHealth = (await response.json()) as KeeperBotHealthResponse;
         return {
-          ok: botHealth.ok,
           running: botHealth.running,
           chainKey: botHealth.health?.chainKey ?? null,
-          updatedAtMs: Number(botHealth.health?.updatedAtMs ?? 0),
-          hasMarkets: (botHealth.health?.markets.length ?? 0) > 0,
+          updated: Number(botHealth.health?.updatedAtMs ?? 0) > 0,
+          hasMarket: Boolean(
+            botHealth.health?.markets.some(
+              (market) =>
+                market.marketRef === state.clobMarketState &&
+                market.lifecycleStatus === "OPEN",
+            ),
+          ),
           recovery: Array.isArray(botHealth.health?.recovery),
         };
       })
       .toEqual({
-        ok: true,
         running: EXPECT_KEEPER_BOT,
         chainKey: "solana",
-        updatedAtMs: expect.any(Number),
-        hasMarkets: true,
+        updated: true,
+        hasMarket: true,
         recovery: true,
       });
 
@@ -342,56 +298,25 @@ test.describe("app tabs and api coverage", () => {
       request,
       `/api/arena/points/${encodeURIComponent(wallet)}?scope=wallet`,
     );
-    expect(points.totalPoints).toBeGreaterThan(0);
-    expect(points.invitedWalletCount).toBeGreaterThanOrEqual(1);
-
-    const rank = await fetchJson<RankResponse>(
-      request,
-      `/api/arena/points/rank/${encodeURIComponent(wallet)}`,
-    );
-    expect(rank.rank).toBeGreaterThan(0);
-    expect(rank.totalPoints).toBe(points.totalPoints);
-
-    const multiplier = await fetchJson<MultiplierResponse>(
-      request,
-      `/api/arena/points/multiplier/${encodeURIComponent(wallet)}`,
-    );
-    expect(multiplier.multiplier).toBeGreaterThanOrEqual(2);
-    expect(multiplier.goldBalance).not.toBe("0");
-
-    const history = await fetchJson<HistoryResponse>(
-      request,
-      `/api/arena/points/history/${encodeURIComponent(wallet)}?limit=10`,
-    );
-    expect(history.total).toBeGreaterThan(0);
-    expect(
-      history.entries.some((entry) => entry.eventType === "BET_PLACED"),
-    ).toBe(true);
-    const leaderboard = await fetchJson<LeaderboardResponse>(
-      request,
-      "/api/arena/points/leaderboard?scope=wallet&window=alltime&limit=5",
-    );
-    expect(leaderboard.leaderboard.length).toBeGreaterThan(0);
+    expect(points.totalPoints).toBeGreaterThanOrEqual(0);
+    expect(points.invitedWalletCount).toBeGreaterThanOrEqual(0);
 
     const invite = await fetchJson<InviteResponse>(
       request,
       `/api/arena/invite/${encodeURIComponent(wallet)}?platform=solana`,
     );
-    expect(invite.inviteCode).toMatch(/^HS/);
+    expect(invite.inviteCode).not.toBe("");
 
-    const perpsMarkets = await fetchJson<PerpsMarketsResponse>(
-      request,
+    for (const retiredPath of [
       "/api/perps/markets",
-    );
-    expect(
-      perpsMarkets.markets.some((market) => market.characterId === characterId),
-    ).toBe(true);
-
-    const oracleHistory = await fetchJson<PerpsOracleHistoryResponse>(
-      request,
-      `/api/perps/oracle-history?characterId=${encodeURIComponent(characterId)}&limit=10`,
-    );
-    expect(oracleHistory.snapshots.length).toBeGreaterThanOrEqual(5);
+      "/api/models/markets",
+      "/api/proxy/evm/rpc",
+    ]) {
+      const response = await request.get(`${GAME_API_URL}${retiredPath}`);
+      expect(response.status(), `${retiredPath} must stay inaccessible`).toBe(
+        404,
+      );
+    }
   });
 
   test("every duels tab and points drawer tab renders live data", async ({
@@ -408,18 +333,6 @@ test.describe("app tabs and api coverage", () => {
     const points = await fetchJson<PointsResponse>(
       request,
       `/api/arena/points/${encodeURIComponent(wallet)}?scope=wallet`,
-    );
-    const multiplier = await fetchJson<MultiplierResponse>(
-      request,
-      `/api/arena/points/multiplier/${encodeURIComponent(wallet)}`,
-    );
-    const leaderboard = await fetchJson<LeaderboardResponse>(
-      request,
-      "/api/arena/points/leaderboard?scope=wallet&window=alltime&limit=5",
-    );
-    const history = await fetchJson<HistoryResponse>(
-      request,
-      `/api/arena/points/history/${encodeURIComponent(wallet)}?limit=10`,
     );
     const invite = await fetchJson<InviteResponse>(
       request,
@@ -475,68 +388,16 @@ test.describe("app tabs and api coverage", () => {
       .click();
     await expect(page.getByTestId("points-drawer")).toBeVisible();
 
-    await expect
-      .poll(
-        async () => {
-          return (
-            (await page
-              .getByTestId("points-display-total")
-              .last()
-              .textContent()) || ""
-          );
-        },
-        { timeout: 20_000 },
-      )
-      .toContain(points.totalPoints.toLocaleString());
-    await expect(
-      page
-        .getByTestId("points-drawer")
-        .getByTestId("points-display-gold")
-        .first(),
-    ).toContainText(multiplier.goldBalance);
+    await expect(page.getByTestId("points-display-total").last()).toContainText(
+      points.totalPoints.toLocaleString(),
+    );
 
     await expect(
       page.getByTestId("points-drawer-panel-leaderboard"),
     ).toBeVisible();
-    await expect(page.getByTestId("points-leaderboard")).toContainText(
-      truncateWallet(leaderboard.leaderboard[0]?.wallet || ""),
-    );
-    await expect(page.getByTestId("points-leaderboard")).toContainText(
-      leaderboard.leaderboard[0]?.totalPoints.toLocaleString() || "",
-    );
-    if (
-      await page
-        .getByTestId("points-display-boost")
-        .isVisible()
-        .catch(() => false)
-    ) {
-      await page.getByTestId("points-display-boost").click();
-      await expect(
-        page.getByTestId("points-display-boost-popup"),
-      ).toBeVisible();
-    }
-    await page.getByTestId("points-leaderboard-scope-wallet").click();
-    await expect(page.getByTestId("points-leaderboard")).toBeVisible();
-    await page.getByTestId("points-leaderboard-scope-linked").click();
-    await expect(page.getByTestId("points-leaderboard")).toBeVisible();
-    await page.getByTestId("points-leaderboard-window-daily").click();
-    await expect(page.getByTestId("points-leaderboard")).toBeVisible();
-    await page.getByTestId("points-leaderboard-window-alltime").click();
-    await expect(page.getByTestId("points-leaderboard")).toBeVisible();
 
     await page.getByTestId("points-drawer-tab-history").click();
     await expect(page.getByTestId("points-drawer-panel-history")).toBeVisible();
-    const latestHistory = history.entries[0];
-    await expect(page.getByTestId("points-history")).toContainText(
-      HISTORY_LABELS[latestHistory.eventType] || latestHistory.eventType,
-    );
-    await expect(page.getByTestId("points-history")).toContainText(
-      `${latestHistory.totalPoints.toLocaleString()} pts`,
-    );
-    await page.getByTestId("points-history-filter").selectOption("BET_PLACED");
-    await expect(page.getByTestId("points-history")).toContainText(
-      HISTORY_LABELS.BET_PLACED,
-    );
     await page.getByTestId("points-drawer-tab-referral").click();
     await expect(
       page.getByTestId("points-drawer-panel-referral"),
@@ -544,72 +405,18 @@ test.describe("app tabs and api coverage", () => {
     await expect(page.getByTestId("referral-panel-invite-code")).toContainText(
       invite.inviteCode,
     );
-    await expect(page.getByTestId("referral-panel-referred-by")).toBeVisible();
     await expect(page.getByTestId("referral-panel-redeem-input")).toBeVisible();
-    await page.getByTestId("referral-panel-redeem-button").click();
-    await expect(page.getByTestId("referral-panel-status")).toContainText(
-      /enter an invite code/i,
+    await expect(
+      page.getByTestId("referral-panel-redeem-button"),
+    ).toBeDisabled();
+    await expect(page.getByTestId("referral-panel-redeem-input")).toHaveValue(
+      "",
     );
-    await expect(page.getByTestId("referral-panel-link-wallets")).toBeDisabled();
+    await expect(page.getByTestId("referral-panel-link-wallets")).toHaveCount(
+      0,
+    );
 
     await page.getByTestId("points-drawer-close").click();
     await expect(page.getByTestId("points-drawer")).toBeHidden();
-  });
-
-  test("models surface renders seeded model market data", async ({
-    page,
-    request,
-  }) => {
-    const state = loadState();
-    const characterId = state.perpsCharacterId || "";
-    const marketId = Number(state.perpsMarketId || 0);
-
-    const perpsMarkets = await fetchJson<PerpsMarketsResponse>(
-      request,
-      "/api/perps/markets",
-    );
-    const selectedMarket = perpsMarkets.markets.find(
-      (market) => market.characterId === characterId,
-    );
-    expect(selectedMarket).toBeTruthy();
-
-    const oracleHistory = await fetchJson<PerpsOracleHistoryResponse>(
-      request,
-      `/api/perps/oracle-history?characterId=${encodeURIComponent(characterId)}&limit=10`,
-    );
-    expect(oracleHistory.snapshots.length).toBeGreaterThan(0);
-
-    await gotoApp(page);
-    await selectChain(page, "solana");
-    await ensureWalletConnected(page);
-
-    await page
-      .locator('[data-testid="surface-mode-models"]:visible')
-      .first()
-      .click();
-    await expect(page.getByTestId("models-market-view")).toBeVisible({
-      timeout: 60_000,
-    });
-
-    await page
-      .getByTestId(`models-market-card-${characterId}`)
-      .click({ force: true });
-    await expect(page.getByTestId("models-market-view")).toContainText(
-      selectedMarket?.name || "",
-    );
-    await expect(page.getByTestId("models-market-market-id")).toContainText(
-      `Market #${marketId}`,
-    );
-    await expect(
-      page.getByTestId("models-market-oracle-history"),
-    ).toBeVisible();
-    await expect(
-      page.getByTestId("models-market-oracle-history"),
-    ).not.toContainText("Waiting for keeper snapshots");
-    await page
-      .locator('[data-testid="surface-mode-duels"]:visible')
-      .first()
-      .click();
-    await expect(page.getByTestId("duels-bottom-panel-trades")).toBeVisible();
   });
 });

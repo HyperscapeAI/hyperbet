@@ -155,6 +155,42 @@ export type FightOracle = {
               }
             ]
           }
+        },
+        {
+          "name": "proposalRecord",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  114,
+                  111,
+                  112,
+                  111,
+                  115,
+                  97,
+                  108
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "duel_state.duel_key",
+                "account": "duelState"
+              },
+              {
+                "kind": "account",
+                "path": "duel_state.pending_result_hash",
+                "account": "duelState"
+              },
+              {
+                "kind": "account",
+                "path": "duel_state.pending_replay_hash",
+                "account": "duelState"
+              }
+            ]
+          }
         }
       ],
       "args": [
@@ -441,6 +477,43 @@ export type FightOracle = {
               }
             ]
           }
+        },
+        {
+          "name": "proposalRecord",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  114,
+                  111,
+                  112,
+                  111,
+                  115,
+                  97,
+                  108
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "duelKey"
+              },
+              {
+                "kind": "arg",
+                "path": "resultHash"
+              },
+              {
+                "kind": "arg",
+                "path": "replayHash"
+              }
+            ]
+          }
+        },
+        {
+          "name": "systemProgram",
+          "address": "11111111111111111111111111111111"
         }
       ],
       "args": [
@@ -556,6 +629,43 @@ export type FightOracle = {
               }
             ]
           }
+        },
+        {
+          "name": "proposalRecord",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  114,
+                  111,
+                  112,
+                  111,
+                  115,
+                  97,
+                  108
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "duelKey"
+              },
+              {
+                "kind": "arg",
+                "path": "resultHash"
+              },
+              {
+                "kind": "arg",
+                "path": "replayHash"
+              }
+            ]
+          }
+        },
+        {
+          "name": "systemProgram",
+          "address": "11111111111111111111111111111111"
         }
       ],
       "args": [
@@ -879,6 +989,19 @@ export type FightOracle = {
         145,
         254
       ]
+    },
+    {
+      "name": "proposalRecord",
+      "discriminator": [
+        154,
+        180,
+        211,
+        203,
+        232,
+        223,
+        142,
+        147
+      ]
     }
   ],
   "events": [
@@ -1056,31 +1179,46 @@ export type FightOracle = {
     },
     {
       "code": 6021,
+      "name": "invalidResultTime",
+      "msg": "Result timestamp must be at or after duel start and no later than chain time"
+    },
+    {
+      "code": 6022,
+      "name": "proposalExists",
+      "msg": "Proposal evidence identity has already been used"
+    },
+    {
+      "code": 6023,
+      "name": "proposalRecordMismatch",
+      "msg": "Proposal record does not match the duel's active proposal"
+    },
+    {
+      "code": 6024,
       "name": "participantHashImmutable",
       "msg": "Participant hashes are immutable after betting opens"
     },
     {
-      "code": 6022,
+      "code": 6025,
       "name": "timingImmutable",
       "msg": "Bet timing is immutable after betting opens"
     },
     {
-      "code": 6023,
+      "code": 6026,
       "name": "alreadyInitialized",
       "msg": "Config is already initialized"
     },
     {
-      "code": 6024,
+      "code": 6027,
       "name": "oraclePaused",
       "msg": "Oracle operations are paused"
     },
     {
-      "code": 6025,
+      "code": 6028,
       "name": "configFrozen",
       "msg": "Config is permanently frozen"
     },
     {
-      "code": 6026,
+      "code": 6029,
       "name": "metadataUriTooLong",
       "msg": "Metadata URI exceeds 200 byte limit"
     }
@@ -1437,6 +1575,78 @@ export type FightOracle = {
           },
           {
             "name": "configFrozen",
+            "type": "bool"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "proposalRecord",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "duelKey",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "proposalId",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "resultHash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "replayHash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "winner",
+            "type": {
+              "defined": {
+                "name": "marketSide"
+              }
+            }
+          },
+          {
+            "name": "seed",
+            "type": "u64"
+          },
+          {
+            "name": "duelEndTs",
+            "type": "i64"
+          },
+          {
+            "name": "proposedAt",
+            "type": "i64"
+          },
+          {
+            "name": "challenged",
             "type": "bool"
           },
           {

@@ -159,9 +159,9 @@ async function main(): Promise<void> {
           args: ["run", "market-maker:simulate:adversarial:ci"],
         },
         {
-          name: "hyperscapes-local-bootstrap",
+          name: "hyperia-local-bootstrap",
           command: "bash",
-          args: ["scripts/run-hyperscapes-pm-local.sh"],
+          args: ["scripts/run-hyperia-pm-local.sh"],
         },
         {
           name: "pm-soak-local",

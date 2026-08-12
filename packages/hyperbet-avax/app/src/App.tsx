@@ -88,22 +88,9 @@ function normalizeEvmAddress(value: string | null | undefined): string | null {
 
 const FOOTER_SOCIALS = [
   {
-    id: "twitch",
-    label: "Twitch",
-    href: "https://www.twitch.tv/hyperscapeai",
-    icon: (
-      <svg viewBox="0 0 24 24" aria-hidden="true">
-        <path
-          fill="currentColor"
-          d="M4 3h17v12l-4 4h-4l-3 3H7v-3H4V3zm15 11V5H6v12h3v2l2-2h5l3-3zm-8-6h2v5h-2V8zm5 0h2v5h-2V8z"
-        />
-      </svg>
-    ),
-  },
-  {
     id: "twitter",
-    label: "Twitter",
-    href: "https://x.com/hyperscapeai",
+    label: "X",
+    href: "https://x.com/playhyperia",
     icon: (
       <svg viewBox="0 0 24 24" aria-hidden="true">
         <path
@@ -116,7 +103,7 @@ const FOOTER_SOCIALS = [
   {
     id: "discord",
     label: "Discord",
-    href: "https://discord.gg/hyperscape",
+    href: "https://discord.gg/f4ZwhAbKye",
     icon: (
       <svg viewBox="0 0 24 24" aria-hidden="true">
         <path
@@ -176,7 +163,6 @@ function formatCountdown(seconds: number): string {
     .padStart(2, "0");
   return `${m}:${s}`;
 }
-
 
 function getAppCopy(locale: UiLocale) {
   if (locale === "zh") {
@@ -255,7 +241,8 @@ function getAppCopy(locale: UiLocale) {
       stable: "稳定",
       synthetic: "合成",
       phaseLive: "直播",
-      phaseStarting: (value: string | number | null) => `即将开始 ${value ?? ""}`,
+      phaseStarting: (value: string | number | null) =>
+        `即将开始 ${value ?? ""}`,
       phaseResolved: "已结算",
       phaseNextMatch: "下一场",
       phaseIdle: "空闲",
@@ -494,7 +481,8 @@ export function App() {
   const [_inviteCode, setInviteCode] = useState<string | null>(() =>
     getStoredInviteCode(),
   );
-  const [selectedAgentForStats, _setSelectedAgentForStats] = useState<any>(null); // For agent stats modal
+  const [selectedAgentForStats, _setSelectedAgentForStats] =
+    useState<any>(null); // For agent stats modal
   const [isShowingStats, setIsShowingStats] = useState(false);
   const [streamSourceIndex, setStreamSourceIndex] = useState(0);
   const [showPointsDrawer, setShowPointsDrawer] = useState(false);
@@ -541,11 +529,11 @@ export function App() {
     duel: lifecycleDuel,
     market: lifecycleMarket,
     refresh: refreshLifecycle,
-  } = usePredictionMarketLifecycle(
-    lifecycleChainKey,
-  );
+  } = usePredictionMarketLifecycle(lifecycleChainKey);
   const streamSources = STREAM_URLS;
-  const activeStreamUrl = isE2eMode ? "" : (streamSources[streamSourceIndex] ?? "");
+  const activeStreamUrl = isE2eMode
+    ? ""
+    : (streamSources[streamSourceIndex] ?? "");
 
   const handleLocaleChange = useCallback((nextLocale: UiLocale) => {
     setStoredUiLocale(nextLocale);
@@ -660,7 +648,9 @@ export function App() {
     }
 
     const parsedMatchId = Number.parseInt(liveCycle.duelId ?? "", 10);
-    const matchId = Number.isFinite(parsedMatchId) ? parsedMatchId : fixedMatchId;
+    const matchId = Number.isFinite(parsedMatchId)
+      ? parsedMatchId
+      : fixedMatchId;
     if (fixedMatchId && matchId && matchId !== fixedMatchId) {
       setCurrentMatch(null);
       return;
@@ -682,7 +672,8 @@ export function App() {
     const winner =
       liveCycle.winnerName && liveCycle.agent1?.name === liveCycle.winnerName
         ? "YES"
-        : liveCycle.winnerName && liveCycle.agent2?.name === liveCycle.winnerName
+        : liveCycle.winnerName &&
+            liveCycle.agent2?.name === liveCycle.winnerName
           ? "NO"
           : null;
 
@@ -727,13 +718,11 @@ export function App() {
         if (cancelled || !market.exists) return;
 
         const total = market.totalAShares + market.totalBShares;
-        const pct = total > 0n ? Number((market.totalAShares * 100n) / total) : 50;
+        const pct =
+          total > 0n ? Number((market.totalAShares * 100n) / total) : 50;
         const prev = lastSharesRef.current;
 
-        if (
-          market.totalAShares !== prev.a ||
-          market.totalBShares !== prev.b
-        ) {
+        if (market.totalAShares !== prev.a || market.totalBShares !== prev.b) {
           lastSharesRef.current = {
             a: market.totalAShares,
             b: market.totalBShares,
@@ -775,7 +764,14 @@ export function App() {
   const effAsks: { price: number; amount: number }[] = mockData
     ? mockData.asks.map((a) => ({ price: a.price, amount: a.size }))
     : [];
-  const effRecentTrades: { id: string; side: "YES" | "NO"; amount: number; price: number; time: number; trader?: string }[] = mockData
+  const effRecentTrades: {
+    id: string;
+    side: "YES" | "NO";
+    amount: number;
+    price: number;
+    time: number;
+    trader?: string;
+  }[] = mockData
     ? mockData.recentTrades.map((t, i) => ({
         id: `mock-${i}`,
         side: t.side === "buy" ? "YES" : "NO",
@@ -886,7 +882,7 @@ export function App() {
 
   // Sidebar bet state
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-const [hmBottomTab, setHmBottomTab] = useState<
+  const [hmBottomTab, setHmBottomTab] = useState<
     "positions" | "orders" | "trades" | "topTraders" | "holders" | "news"
   >("trades");
   const [hmMuted, setHmMuted] = useState(true);
@@ -1065,7 +1061,10 @@ const [hmBottomTab, setHmBottomTab] = useState<
             </div>
 
             <div style={{ marginBottom: 16, position: "relative", zIndex: 2 }}>
-              <PointsDisplay walletAddress={pointsWalletAddress} locale={locale} />
+              <PointsDisplay
+                walletAddress={pointsWalletAddress}
+                locale={locale}
+              />
             </div>
 
             {/* Tab Content */}
@@ -1086,12 +1085,19 @@ const [hmBottomTab, setHmBottomTab] = useState<
                 </Suspense>
               )}
               {pointsDrawerTab === "history" && (
-                <Suspense fallback={<PanelFallback label={copy.loadingHistory} />}>
-                  <PointsHistory walletAddress={pointsWalletAddress} locale={locale} />
+                <Suspense
+                  fallback={<PanelFallback label={copy.loadingHistory} />}
+                >
+                  <PointsHistory
+                    walletAddress={pointsWalletAddress}
+                    locale={locale}
+                  />
                 </Suspense>
               )}
               {pointsDrawerTab === "referral" && (
-                <Suspense fallback={<PanelFallback label={copy.loadingReferral} />}>
+                <Suspense
+                  fallback={<PanelFallback label={copy.loadingReferral} />}
+                >
                   <ReferralPanel
                     activeChain={activeChain}
                     evmWallet={effectiveEvmWalletAddress ?? null}
@@ -1212,7 +1218,10 @@ const [hmBottomTab, setHmBottomTab] = useState<
             <div style={{ position: "relative", zIndex: 1 }}>
               <Suspense
                 fallback={
-                  <PanelFallback label={copy.loadingAgentStats} minHeight={320} />
+                  <PanelFallback
+                    label={copy.loadingAgentStats}
+                    minHeight={320}
+                  />
                 }
               >
                 <AgentStats
@@ -1242,9 +1251,7 @@ const [hmBottomTab, setHmBottomTab] = useState<
             zIndex: 10,
           }}
         >
-          <h1 style={{ margin: 0, fontSize: "18px" }}>
-            {copy.debugTitle}
-          </h1>
+          <h1 style={{ margin: 0, fontSize: "18px" }}>{copy.debugTitle}</h1>
           <div
             style={{ display: "flex", alignItems: "center", gap: "8px" }}
             data-testid="e2e-chain-picker"
@@ -1254,9 +1261,7 @@ const [hmBottomTab, setHmBottomTab] = useState<
               data-testid="e2e-chain-select"
               value={activeChain}
               onChange={(event) =>
-                setActiveChain(
-                  event.target.value as typeof activeChain,
-                )
+                setActiveChain(event.target.value as typeof activeChain)
               }
             >
               {availableChains.map((chain) => (
@@ -1270,7 +1275,9 @@ const [hmBottomTab, setHmBottomTab] = useState<
           <div data-testid="current-match-id">
             {copy.currentMatch}: {currentMatch?.matchId ?? "-"}
           </div>
-          <div data-testid="market-status">{copy.market}: {marketStatusText}</div>
+          <div data-testid="market-status">
+            {copy.market}: {marketStatusText}
+          </div>
           <div data-testid="pool-totals">
             {copy.yesPool}: - GOLD | {copy.noPool}: - GOLD
           </div>
@@ -1406,8 +1413,16 @@ const [hmBottomTab, setHmBottomTab] = useState<
                 activeTab={surfaceMode}
                 onChange={(id) => setSurfaceMode(id as "DUELS" | "MODELS")}
                 tabs={[
-                  { id: "DUELS", label: copy.duels, testId: "surface-mode-duels" },
-                  { id: "MODELS", label: copy.models, testId: "surface-mode-models" },
+                  {
+                    id: "DUELS",
+                    label: copy.duels,
+                    testId: "surface-mode-duels",
+                  },
+                  {
+                    id: "MODELS",
+                    label: copy.models,
+                    testId: "surface-mode-models",
+                  },
                 ]}
               />
             </div>
@@ -1483,7 +1498,10 @@ const [hmBottomTab, setHmBottomTab] = useState<
           <div className="hm-models-main">
             <Suspense
               fallback={
-                <PanelFallback label={copy.loadingModelMarkets} minHeight={480} />
+                <PanelFallback
+                  label={copy.loadingModelMarkets}
+                  minHeight={480}
+                />
               }
             >
               <AvaxModelsMarketView
@@ -1523,7 +1541,9 @@ const [hmBottomTab, setHmBottomTab] = useState<
                           className="hm-stream-mute-btn"
                           onClick={() => setHmMuted((m) => !m)}
                           type="button"
-                          aria-label={hmMuted ? copy.unmuteStream : copy.muteStream}
+                          aria-label={
+                            hmMuted ? copy.unmuteStream : copy.muteStream
+                          }
                         >
                           {hmMuted ? (
                             <svg
@@ -1653,7 +1673,8 @@ const [hmBottomTab, setHmBottomTab] = useState<
                   >
                     <div className="hm-trades-summary">
                       <span>
-                        {copy.pool} <strong>{formatGold(effTotalPool, locale)}</strong>
+                        {copy.pool}{" "}
+                        <strong>{formatGold(effTotalPool, locale)}</strong>
                       </span>
                       <span>
                         {effA1.name} <strong>{effYesPercent}%</strong>
@@ -1701,7 +1722,10 @@ const [hmBottomTab, setHmBottomTab] = useState<
                                 {formatGold(trade.amount ?? 0, locale)}
                               </td>
                               <td className="hm-td-dim">
-                                {formatTimeAgo(trade.time ?? Date.now(), locale)}
+                                {formatTimeAgo(
+                                  trade.time ?? Date.now(),
+                                  locale,
+                                )}
                               </td>
                               <td className="hm-td-trader">
                                 <span className="hm-trader-addr">
@@ -1724,7 +1748,9 @@ const [hmBottomTab, setHmBottomTab] = useState<
                   >
                     <div className="hm-orderbook">
                       <div className="hm-ob-side hm-ob-side--bids">
-                        <div className="hm-ob-header">{copy.bids(effA1.name)}</div>
+                        <div className="hm-ob-header">
+                          {copy.bids(effA1.name)}
+                        </div>
                         {effBids.map((level, i) => (
                           <div
                             key={`bid-${i}`}
@@ -1746,10 +1772,14 @@ const [hmBottomTab, setHmBottomTab] = useState<
                         ))}
                       </div>
                       <div className="hm-ob-spread">
-                        <span>{copy.spread(Math.abs(effYesPercent - effNoPercent))}</span>
+                        <span>
+                          {copy.spread(Math.abs(effYesPercent - effNoPercent))}
+                        </span>
                       </div>
                       <div className="hm-ob-side hm-ob-side--asks">
-                        <div className="hm-ob-header">{copy.asks(effA2.name)}</div>
+                        <div className="hm-ob-header">
+                          {copy.asks(effA2.name)}
+                        </div>
                         {effAsks.map((level, i) => (
                           <div
                             key={`ask-${i}`}
@@ -1874,7 +1904,9 @@ const [hmBottomTab, setHmBottomTab] = useState<
                             </div>
                             <div className="hm-agent-stats-grid">
                               <div className="hm-agent-stat">
-                                <span className="hm-agent-stat-label">{copy.hp}</span>
+                                <span className="hm-agent-stat-label">
+                                  {copy.hp}
+                                </span>
                                 <span
                                   className={`hm-agent-stat-value ${agent.hp < 30 ? "hm-stat-value--negative" : "hm-stat-value--positive"}`}
                                 >
@@ -1882,13 +1914,17 @@ const [hmBottomTab, setHmBottomTab] = useState<
                                 </span>
                               </div>
                               <div className="hm-agent-stat">
-                                <span className="hm-agent-stat-label">{copy.wl}</span>
+                                <span className="hm-agent-stat-label">
+                                  {copy.wl}
+                                </span>
                                 <span className="hm-agent-stat-value">
                                   {copy.record(agent.wins, agent.losses)}
                                 </span>
                               </div>
                               <div className="hm-agent-stat">
-                                <span className="hm-agent-stat-label">{copy.dmg}</span>
+                                <span className="hm-agent-stat-label">
+                                  {copy.dmg}
+                                </span>
                                 <span className="hm-agent-stat-value">
                                   {agent.damageDealtThisFight}
                                 </span>
@@ -2058,7 +2094,9 @@ const [hmBottomTab, setHmBottomTab] = useState<
                       locale={locale}
                       lifecycleDuelOverride={lifecycleDuel}
                       lifecycleMarketOverride={lifecycleMarket}
-                      onLifecycleRefreshRequested={() => void refreshLifecycle()}
+                      onLifecycleRefreshRequested={() =>
+                        void refreshLifecycle()
+                      }
                     />
                   </Suspense>
                 </div>
@@ -2077,7 +2115,9 @@ const [hmBottomTab, setHmBottomTab] = useState<
                     href={social.href}
                     aria-label={social.label}
                     title={social.label}
-                    target={social.href.startsWith("http") ? "_blank" : undefined}
+                    target={
+                      social.href.startsWith("http") ? "_blank" : undefined
+                    }
                     rel={
                       social.href.startsWith("http")
                         ? "noreferrer noopener"
@@ -2132,7 +2172,6 @@ const [hmBottomTab, setHmBottomTab] = useState<
           )}
         </>
       )}
-
     </div>
   );
 }

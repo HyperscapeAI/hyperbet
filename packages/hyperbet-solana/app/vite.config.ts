@@ -44,9 +44,7 @@ function assertPublicBuildSecrets(
     mode === "production" || mode === "mainnet" || mode === "mainnet-beta";
   if (!isPublicBuild) return;
 
-  const publicRpcVars = [
-    "VITE_SOLANA_RPC_URL",
-  ] as const;
+  const publicRpcVars = ["VITE_SOLANA_RPC_URL"] as const;
   for (const name of publicRpcVars) {
     if (looksLikePublicSecretUrl(env[name]?.trim())) {
       throw new Error(
@@ -136,13 +134,25 @@ export default defineConfig(async ({ mode }) => {
   // workspace imports reliably, so we use a resolveId hook instead.
   const shimAliasMap: Record<string, string> = {
     "vite-plugin-node-polyfills/shims/buffer": path.join(
-      nodePolyfillsRoot, "shims", "buffer", "dist", "index.js",
+      nodePolyfillsRoot,
+      "shims",
+      "buffer",
+      "dist",
+      "index.js",
     ),
     "vite-plugin-node-polyfills/shims/global": path.join(
-      nodePolyfillsRoot, "shims", "global", "dist", "index.js",
+      nodePolyfillsRoot,
+      "shims",
+      "global",
+      "dist",
+      "index.js",
     ),
     "vite-plugin-node-polyfills/shims/process": path.join(
-      nodePolyfillsRoot, "shims", "process", "dist", "index.js",
+      nodePolyfillsRoot,
+      "shims",
+      "process",
+      "dist",
+      "index.js",
     ),
   };
   plugins.push({
@@ -373,7 +383,6 @@ export default defineConfig(async ({ mode }) => {
     },
     optimizeDeps: {
       include: [
-        "fetch-retry",
         "buffer",
         "process",
         "vite-plugin-node-polyfills/shims/buffer",

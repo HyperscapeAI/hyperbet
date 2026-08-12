@@ -4,18 +4,19 @@ import { cleanupRenderedTrees } from "./render";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 GlobalRegistrator.register();
 
-window.matchMedia = (query: string) => ({
-  matches: false,
-  media: query,
-  onchange: null,
-  addListener: () => { },
-  removeListener: () => { },
-  addEventListener: () => { },
-  removeEventListener: () => { },
-  dispatchEvent: () => false,
-} as any);
+window.matchMedia = (query: string) =>
+  ({
+    matches: false,
+    media: query,
+    onchange: null,
+    addListener: () => {},
+    removeListener: () => {},
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    dispatchEvent: () => false,
+  }) as any;
 
-window.HTMLElement.prototype.scrollIntoView = () => { };
+window.HTMLElement.prototype.scrollIntoView = () => {};
 
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 

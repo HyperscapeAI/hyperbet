@@ -78,8 +78,8 @@ crate-type = [
 path = "src/lib.rs"
 
 [dependencies.bincode]
-package = "hyperscape-bincode"
-path = "../hyperscape-bincode"
+package = "hyperia-bincode"
+path = "../hyperia-bincode"
 
 [dependencies.blake3]
 version = "1.5.5"

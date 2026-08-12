@@ -5,6 +5,7 @@ import { defineConfig, devices } from "@playwright/test";
 
 const IS_LINUX = process.platform === "linux";
 const PW_HEADLESS = (process.env.PW_HEADLESS ?? "1") !== "0";
+const RECORD_VIDEO = (process.env.E2E_RECORD_VIDEO ?? "0") === "1";
 const BROWSER_CHANNEL = process.env.PW_BROWSER_CHANNEL?.trim() || undefined;
 const DEFAULT_LINUX_WEBGPU_ARGS = [
   "--enable-unsafe-webgpu",
@@ -55,7 +56,9 @@ export default defineConfig({
     baseURL: process.env.E2E_BASE_URL || "http://127.0.0.1:4181",
     trace: "on-first-retry",
     screenshot: "only-on-failure",
-    video: "retain-on-failure",
+    video: RECORD_VIDEO
+      ? { mode: "on", size: { width: 1280, height: 720 } }
+      : "retain-on-failure",
     actionTimeout: 30_000,
     navigationTimeout: 60_000,
     headless: PW_HEADLESS,

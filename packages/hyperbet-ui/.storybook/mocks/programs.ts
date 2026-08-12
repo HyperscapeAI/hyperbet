@@ -1,13 +1,13 @@
 import { PublicKey } from "@solana/web3.js";
 
 const ORACLE_PROGRAM_ID = new PublicKey(
-  "6QWeT6FpJrm8AF1btu6WH2k2Xhq6t5vbheKVfQavmeoZ",
+  "GFdnu7kUnZGiXh4ejWiJSBCUxvq4UfdEeUv9jjFzr5EM",
 );
 const CLOB_PROGRAM_ID = new PublicKey(
-  "8opHzTAnfzRpPEx21XtnrVTX28YQuCpAjcn1PczScKh",
+  "3QUVoaKJqo1rg9eXe7vyFewJrY75NWdtH8JZfvTb79Uy",
 );
 const MARKET_STATE = new PublicKey(
-  "C9YqoB8G4mQDKg4VPtWwfvX2gYdExgkt1PyfuzMdudH8",
+  "3e8TxCCftPmKCML7rHZJM21ebFkzohnSEP7Z8mb7Cvzv",
 );
 const STORY_WALLET = new PublicKey(
   "9YQ6U3b1i3Qxb38nSxrdbidKdvUSsfx8bVsgcuyo6edS",
@@ -23,6 +23,11 @@ function createProgramFacade() {
     nextOrderId: 42n,
     bestBid: 482,
     bestAsk: 518,
+    treasury: STORY_WALLET,
+    marketMaker: STORY_WALLET,
+    tradeTreasuryFeeBpsSnapshot: 10,
+    tradeMarketMakerFeeBpsSnapshot: 15,
+    winningsMarketMakerFeeBpsSnapshot: 100,
   };
 
   return {
@@ -127,7 +132,7 @@ function createProgramFacade() {
 
 export function createReadonlyPrograms() {
   return {
-    goldClobMarket: createProgramFacade(),
+    duelMarket: createProgramFacade(),
     fightOracle: {
       programId: ORACLE_PROGRAM_ID,
       account: {

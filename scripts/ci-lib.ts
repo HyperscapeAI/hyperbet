@@ -85,7 +85,7 @@ export function materializeCiSolanaWallet(
   const payload = readFileSync(walletPath, "utf8");
   const targets = [
     path.join(homeDir, ".config", "solana", "id.json"),
-    path.join(homeDir, ".config", "solana", "hyperscape-keys", "deployer.json"),
+    path.join(homeDir, ".config", "solana", "hyperia-keys", "deployer.json"),
   ];
 
   for (const target of targets) {

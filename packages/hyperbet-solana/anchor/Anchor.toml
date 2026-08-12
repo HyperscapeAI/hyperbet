@@ -7,27 +7,19 @@ skip-lint = false
 
 [programs.devnet]
 fight_oracle = "GFdnu7kUnZGiXh4ejWiJSBCUxvq4UfdEeUv9jjFzr5EM"
-gold_clob_market = "3QUVoaKJqo1rg9eXe7vyFewJrY75NWdtH8JZfvTb79Uy"
-gold_perps_market = "BFbmQbSbf3R6fMDdXKMKQZCTyMhMs9MCcjAhGDBLETXS"
-lvr_amm = "12E8Lz5w8Qxyj8Fh6LgsCgPDQNJMCLMV1y43LhPrH66w"
+duel_market = "3QUVoaKJqo1rg9eXe7vyFewJrY75NWdtH8JZfvTb79Uy"
 
 [programs.localnet]
 fight_oracle = "GFdnu7kUnZGiXh4ejWiJSBCUxvq4UfdEeUv9jjFzr5EM"
-gold_clob_market = "3QUVoaKJqo1rg9eXe7vyFewJrY75NWdtH8JZfvTb79Uy"
-gold_perps_market = "BFbmQbSbf3R6fMDdXKMKQZCTyMhMs9MCcjAhGDBLETXS"
-lvr_amm = "12E8Lz5w8Qxyj8Fh6LgsCgPDQNJMCLMV1y43LhPrH66w"
+duel_market = "3QUVoaKJqo1rg9eXe7vyFewJrY75NWdtH8JZfvTb79Uy"
 
 [programs.testnet]
 fight_oracle = "GFdnu7kUnZGiXh4ejWiJSBCUxvq4UfdEeUv9jjFzr5EM"
-gold_clob_market = "3QUVoaKJqo1rg9eXe7vyFewJrY75NWdtH8JZfvTb79Uy"
-gold_perps_market = "BFbmQbSbf3R6fMDdXKMKQZCTyMhMs9MCcjAhGDBLETXS"
-lvr_amm = "12E8Lz5w8Qxyj8Fh6LgsCgPDQNJMCLMV1y43LhPrH66w"
+duel_market = "3QUVoaKJqo1rg9eXe7vyFewJrY75NWdtH8JZfvTb79Uy"
 
 [programs.mainnet]
 fight_oracle = "B5mRCRDJk9BrnH7regMWW5mpTQ8QG1CcCGSnDxMt8hmo"
-gold_clob_market = "DYtd7AoyTX2tbmZ8vpC3mxZgqTpyaDei4TFXZukWBJEf"
-gold_perps_market = "6YjWiway8kaSjwtAinJxqWPvV3DqBVapDWAsSEZjjmbP"
-lvr_amm = "BGmzj676aVzRaJ3Hb9BJRYrjtXuhzoc1YTFA6wcucUNF"
+duel_market = "DYtd7AoyTX2tbmZ8vpC3mxZgqTpyaDei4TFXZukWBJEf"
 
 [registry]
 url = "https://api.apr.dev"
@@ -39,10 +31,10 @@ startup_wait = 60000
 # Use localnet for testing (anchor test spins up a local validator)
 # For devnet/mainnet deployments, use: anchor deploy --provider.cluster devnet
 cluster = "localnet"
-wallet = "~/.config/solana/hyperscape-keys/deployer.json"
+wallet = "~/.config/solana/hyperia-keys/deployer.json"
 
 [workspace]
-members = ["programs/*"]
+members = ["programs/fight_oracle", "programs/duel_market"]
 types = "../app/src/idl"
 
 [scripts]

@@ -18,7 +18,7 @@ const missingScripts = requiredScripts.filter((name) => !scripts[name]);
 writeJsonArtifact(artifactRoot, "summary.json", {
   missingScripts,
   localPreflight: {
-    command: "bash scripts/run-hyperscapes-pm-local.sh",
+    command: "bash scripts/run-hyperia-pm-local.sh",
     monitorCommand: "bun run pm:soak -- --mode=local --follow --duration-min=25",
     harnessCommand: "bun run pm:soak:harness -- --duration-min=25",
     expectedArtifacts: [

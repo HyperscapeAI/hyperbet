@@ -39,7 +39,7 @@ const SOLANA_ROLES = [
 
 const SOLANA_PROGRAMS = [
   "fight_oracle",
-  "gold_clob_market",
+  "duel_market",
   "lvr_amm",
   "gold_perps_market",
 ] as const;

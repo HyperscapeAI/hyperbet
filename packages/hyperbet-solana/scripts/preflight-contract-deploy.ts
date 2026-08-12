@@ -1,71 +1,46 @@
 import fs from "node:fs";
-import { execFile as execFileCb } from "node:child_process";
 import path from "node:path";
-import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 
-import { PublicKey, clusterApiUrl } from "@solana/web3.js";
+import { Connection, PublicKey, clusterApiUrl } from "@solana/web3.js";
 
 import {
-  BETTING_DEPLOYMENTS,
-  type BettingSolanaCluster,
-} from "../deployments";
+  resolveSolanaV1Deployment,
+  type SolanaV1Cluster,
+} from "../deployments/v1";
+import { resolveExpectedUpgradeAuthority } from "../keeper/src/solanaProgramIdentity";
 import {
   readKeypairPubkey,
   resolveStageAProgramKeypairPath,
   resolveStageAWalletPath,
-  syncStageAProgramKeypairs,
 } from "./stage-a-identity";
+import { describeRpcEndpoint } from "./solana-deployment-evidence";
+import { fetchSolanaProgramDeploymentIdentity } from "./solana-deployment-identity";
 
 type Target = "testnet" | "mainnet";
-type ProgramKey =
-  | "fightOracle"
-  | "goldClobMarket"
-  | "goldAmmMarket"
-  | "goldPerpsMarket";
 
 interface SolanaProgramCheck {
-  key: ProgramKey;
-  binaryName:
-    | "fight_oracle"
-    | "gold_clob_market"
-    | "lvr_amm"
-    | "gold_perps_market";
-  manifestField:
-    | "fightOracleProgramId"
-    | "goldClobMarketProgramId"
-    | "goldAmmMarketProgramId"
-    | "goldPerpsMarketProgramId";
+  label: string;
+  binaryName: "fight_oracle" | "duel_market";
+  manifestField: "fightOracleProgramId" | "duelMarketProgramId";
 }
 
-const PROGRAMS: SolanaProgramCheck[] = [
+const PROGRAMS: readonly SolanaProgramCheck[] = [
   {
-    key: "fightOracle",
+    label: "fight oracle",
     binaryName: "fight_oracle",
     manifestField: "fightOracleProgramId",
   },
   {
-    key: "goldClobMarket",
-    binaryName: "gold_clob_market",
-    manifestField: "goldClobMarketProgramId",
-  },
-  {
-    key: "goldAmmMarket",
-    binaryName: "lvr_amm",
-    manifestField: "goldAmmMarketProgramId",
-  },
-  {
-    key: "goldPerpsMarket",
-    binaryName: "gold_perps_market",
-    manifestField: "goldPerpsMarketProgramId",
+    label: "duel market",
+    binaryName: "duel_market",
+    manifestField: "duelMarketProgramId",
   },
 ] as const;
 
-const execFile = promisify(execFileCb);
-
 function usage(): never {
   console.log(
-    "usage: bun run packages/hyperbet-solana/scripts/preflight-contract-deploy.ts [--target testnet|mainnet] [--cluster localnet|devnet|testnet|mainnet-beta] [--pm-only]",
+    "usage: bun run packages/hyperbet-solana/scripts/preflight-contract-deploy.ts [--target testnet|mainnet] [--cluster localnet|devnet|testnet|mainnet-beta] [--require-deployed]",
   );
   process.exit(0);
 }
@@ -79,7 +54,7 @@ function parseTarget(argv: string[]): Target {
   throw new Error(`Unsupported --target value '${value}'`);
 }
 
-function parseOptionalCluster(argv: string[]): BettingSolanaCluster | null {
+function parseOptionalCluster(argv: string[]): SolanaV1Cluster | null {
   const index = argv.findIndex((arg) => arg === "--cluster");
   if (index < 0) return null;
   const value = argv[index + 1];
@@ -97,15 +72,11 @@ function parseOptionalCluster(argv: string[]): BettingSolanaCluster | null {
   throw new Error(`Unsupported --cluster value '${value}'`);
 }
 
-function parsePmOnly(argv: string[]): boolean {
-  return argv.includes("--pm-only");
-}
-
-function resolveRpcUrl(cluster: BettingSolanaCluster): string {
+function resolveRpcUrl(cluster: SolanaV1Cluster): string {
   const explicit = process.env.SOLANA_RPC_URL?.trim();
   if (explicit) return explicit;
   if (cluster === "localnet") return "http://127.0.0.1:8899";
-  return clusterApiUrl(cluster === "mainnet-beta" ? "mainnet-beta" : cluster);
+  return clusterApiUrl(cluster);
 }
 
 function readJson(filepath: string): unknown {
@@ -128,67 +99,6 @@ function readIdlAddress(filepath: string): string | null {
   return metadata.length > 0 ? metadata : null;
 }
 
-function resolveExpectedUpgradeAuthority(walletPath: string): string | null {
-  const explicit = process.env.SOLANA_EXPECTED_UPGRADE_AUTHORITY?.trim() || null;
-  if (explicit) {
-    return new PublicKey(explicit).toBase58();
-  }
-  return readKeypairPubkey(walletPath);
-}
-
-async function readUpgradeAuthority(
-  programId: string,
-  cluster: BettingSolanaCluster,
-  walletPath: string | null,
-): Promise<string | null> {
-  try {
-    const args = ["program", "show", "--url", cluster];
-    if (walletPath) {
-      args.push("--keypair", walletPath);
-    }
-    args.push(programId);
-    const { stdout } = await execFile("solana", args, { env: process.env });
-    const match = stdout.match(/Authority:\s+([1-9A-HJ-NP-Za-km-z]+)/);
-    return match ? match[1] : null;
-  } catch {
-    return null;
-  }
-}
-
-async function readProgramInfo(
-  rpcUrl: string,
-  programId: string,
-): Promise<{ exists: boolean; executable: boolean }> {
-  const payload = JSON.stringify({
-    jsonrpc: "2.0",
-    id: 1,
-    method: "getAccountInfo",
-    params: [
-      programId,
-      {
-        encoding: "base64",
-        commitment: "confirmed",
-      },
-    ],
-  });
-  const response = await fetch(rpcUrl, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: payload,
-  });
-  if (!response.ok) {
-    throw new Error(`RPC request failed with status ${response.status}`);
-  }
-  const json = (await response.json()) as {
-    result?: { value?: { executable?: boolean } | null };
-  };
-  const value = json.result?.value ?? null;
-  return {
-    exists: value !== null,
-    executable: value?.executable === true,
-  };
-}
-
 function appendStatus(
   ok: boolean,
   message: string,
@@ -204,7 +114,7 @@ function appendStatus(
   }
 }
 
-function getTargetCluster(target: Target): BettingSolanaCluster {
+function getTargetCluster(target: Target): SolanaV1Cluster {
   return target === "mainnet" ? "mainnet-beta" : "testnet";
 }
 
@@ -212,8 +122,8 @@ async function main(): Promise<void> {
   const argv = process.argv.slice(2);
   if (argv.includes("--help")) usage();
   const target = parseTarget(argv);
-  const explicitCluster = parseOptionalCluster(argv);
-  const pmOnly = parsePmOnly(argv);
+  const cluster = parseOptionalCluster(argv) ?? getTargetCluster(target);
+  const requireDeployed = argv.includes("--require-deployed");
   const __dirname = path.dirname(fileURLToPath(import.meta.url));
   const bettingDir = path.resolve(__dirname, "..");
   const anchorDir = path.join(bettingDir, "anchor");
@@ -222,31 +132,42 @@ async function main(): Promise<void> {
 
   const failures: string[] = [];
   const warnings: string[] = [];
-  const cluster = explicitCluster ?? getTargetCluster(target);
-  const solanaDeployment = BETTING_DEPLOYMENTS.solana[cluster];
+  const deployment = resolveSolanaV1Deployment(cluster);
   const rpcUrl = resolveRpcUrl(cluster);
   const walletPath = resolveStageAWalletPath();
-  if (cluster !== "mainnet-beta") {
-    syncStageAProgramKeypairs(anchorDir);
-  }
-  const expectedUpgradeAuthority = resolveExpectedUpgradeAuthority(walletPath);
-  const programs = pmOnly
-    ? PROGRAMS.filter(
-        (program) =>
-          program.key !== "goldAmmMarket" && program.key !== "goldPerpsMarket",
-      )
-    : PROGRAMS;
+  const walletAddress = readKeypairPubkey(walletPath);
+  const configuredUpgradeAuthority =
+    process.env.SOLANA_EXPECTED_UPGRADE_AUTHORITY?.trim() ||
+    (cluster === "mainnet-beta" ? undefined : walletAddress);
+  const expectedUpgradeAuthority = resolveExpectedUpgradeAuthority({
+    value: configuredUpgradeAuthority,
+    required: cluster === "mainnet-beta",
+    label: "Solana v1 deployment",
+  });
+  const connection = new Connection(rpcUrl, {
+    commitment: "finalized",
+  });
 
   console.log(`[preflight] target=${target}`);
   console.log(`[preflight] solana cluster=${cluster}`);
-  console.log(`[preflight] scope=${pmOnly ? "pm-only" : "all"}`);
-  console.log(`[preflight] rpc=${rpcUrl}`);
-  if (walletPath) {
-    console.log(`[preflight] wallet=${walletPath}`);
-  }
+  console.log("[preflight] scope=solana-duel-v1");
+  console.log(
+    `[preflight] mode=${requireDeployed ? "post-deploy-verification" : "pre-deploy"}`,
+  );
+  console.log(`[preflight] rpc=${describeRpcEndpoint(rpcUrl)}`);
+  console.log(`[preflight] wallet=${walletPath}`);
+  console.log(`[preflight] walletAddress=${walletAddress}`);
+  console.log(
+    `[preflight] expectedUpgradeAuthority=${
+      expectedUpgradeAuthority === null
+        ? "immutable"
+        : (expectedUpgradeAuthority?.toBase58() ?? "unchecked")
+    }`,
+  );
 
-  for (const program of programs) {
-    const expected = solanaDeployment[program.manifestField];
+  for (const program of PROGRAMS) {
+    const expected = deployment[program.manifestField];
+    const programId = new PublicKey(expected);
     const keypairPath =
       cluster === "mainnet-beta"
         ? path.join(
@@ -274,18 +195,35 @@ async function main(): Promise<void> {
       "idl",
       `${program.binaryName}.json`,
     );
-    const programInfo = await readProgramInfo(rpcUrl, expected);
-    const deploymentMode = programInfo.exists ? "upgrade" : "fresh-deploy";
-    const upgradeAuthority = programInfo.exists
-      ? await readUpgradeAuthority(expected, cluster, walletPath)
-      : null;
 
-    appendStatus(
-      programInfo.exists ? programInfo.executable : true,
-      `${program.binaryName} ${deploymentMode} mode selected for ${expected}`,
-      failures,
-      warnings,
-    );
+    let deploymentMode: "fresh-deploy" | "upgrade" | null = null;
+    try {
+      const identity = await fetchSolanaProgramDeploymentIdentity({
+        connection,
+        label: program.label,
+        programId,
+        expectedUpgradeAuthority,
+        requireDeployed,
+      });
+      deploymentMode = identity.mode;
+      const identityDetail =
+        identity.mode === "upgrade"
+          ? `ProgramData=${identity.programDataAddress.toBase58()} slot=${identity.deployedSlot.toString()} authority=${identity.upgradeAuthority?.toBase58() ?? "immutable"}`
+          : `ProgramData=${identity.programDataAddress.toBase58()}`;
+      appendStatus(
+        true,
+        `${program.binaryName} ${identity.mode} identity accepted at ${expected}; ${identityDetail}`,
+        failures,
+        warnings,
+      );
+    } catch (error) {
+      appendStatus(
+        false,
+        `${program.binaryName} deployment identity rejected: ${error instanceof Error ? error.message : String(error)}`,
+        failures,
+        warnings,
+      );
+    }
 
     const keypairPubkey = fs.existsSync(keypairPath)
       ? readKeypairPubkey(keypairPath)
@@ -297,58 +235,29 @@ async function main(): Promise<void> {
         failures,
         warnings,
       );
-    } else {
+    } else if (deploymentMode === "upgrade") {
       appendStatus(
         keypairPubkey === expected,
-        `${program.binaryName} local keypair pubkey matches manifest (${expected})`,
+        `${program.binaryName} local program keypair matches manifest (${expected})`,
         failures,
         warnings,
         true,
       );
-      if (expectedUpgradeAuthority) {
-        appendStatus(
-          upgradeAuthority === expectedUpgradeAuthority,
-          `${program.binaryName} upgrade authority matches expected ${expectedUpgradeAuthority}`,
-          failures,
-          warnings,
-        );
-      } else {
-        appendStatus(
-          Boolean(upgradeAuthority),
-          `${program.binaryName} upgrade authority is ${upgradeAuthority ?? "unavailable"}`,
-          failures,
-          warnings,
-          true,
-        );
-      }
     }
 
-    const anchorIdlAddress = readIdlAddress(anchorIdlPath);
-    appendStatus(
-      anchorIdlAddress === expected,
-      `${program.binaryName} anchor IDL matches manifest (${expected})`,
-      failures,
-      warnings,
-      !anchorIdlAddress,
-    );
-
-    const appIdlAddress = readIdlAddress(appIdlPath);
-    appendStatus(
-      appIdlAddress === expected,
-      `${program.binaryName} app IDL matches manifest (${expected})`,
-      failures,
-      warnings,
-      !appIdlAddress,
-    );
-
-    const keeperIdlAddress = readIdlAddress(keeperIdlPath);
-    appendStatus(
-      keeperIdlAddress === expected,
-      `${program.binaryName} keeper IDL matches manifest (${expected})`,
-      failures,
-      warnings,
-      !keeperIdlAddress,
-    );
+    for (const [surface, idlPath] of [
+      ["anchor", anchorIdlPath],
+      ["app", appIdlPath],
+      ["keeper", keeperIdlPath],
+    ] as const) {
+      const idlAddress = readIdlAddress(idlPath);
+      appendStatus(
+        idlAddress === expected,
+        `${program.binaryName} ${surface} IDL matches manifest (${expected})`,
+        failures,
+        warnings,
+      );
+    }
   }
 
   if (warnings.length > 0) {
@@ -360,7 +269,7 @@ async function main(): Promise<void> {
     return;
   }
 
-  console.log("[preflight] all required Solana checks passed");
+  console.log("[preflight] all required Solana deployment checks passed");
 }
 
 void main().catch((error) => {

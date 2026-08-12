@@ -4,13 +4,18 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
+    "duel-bot": "bun --bun src/duelBot.ts",
     "service": "bun --bun src/service.ts",
-    "bot": "bun --bun src/bot.ts",
-    "resolve": "bun --bun src/resolve.ts"
+    "resolve": "bun --bun src/resolve.ts",
+    "terminal-ops": "bun --bun src/terminalOps.ts",
+    "lint": "bunx tsc --noEmit -p tsconfig.launch.json",
+    "typecheck": "bunx tsc --noEmit -p tsconfig.launch.json",
+    "test": "bun run test:launch",
+    "test:contract:hyperia": "bun test src/hyperia-schema-v3.contract.test.ts",
+    "test:launch": "bun test src/clobOrderSizing.test.ts src/duelTerminalPolicy.test.ts src/feedConfig.test.ts src/feePolicy.test.ts src/game-client.test.ts src/keeperRoles.test.ts src/launchCommon.test.ts src/launchHealth.test.ts src/marketRecovery.test.ts src/nativeAmount.test.ts src/readiness.test.ts src/retryBackoff.test.ts src/solanaBetAccounting.test.ts src/solanaBetReconciliation.test.ts src/solanaLifecycle.test.ts src/solanaLifecycleIndexer.test.ts src/solanaMarketMakerPolicy.test.ts src/solanaProgramIdentity.test.ts src/solanaRpcProxyPolicy.test.ts src/solanaTerminalSettlement.test.ts src/solanaWallet.test.ts src/streamStateSourceSse.test.ts src/terminalLedger.test.ts src/terminalOps.test.ts src/terminalProcessRecovery.test.ts"
   },
   "dependencies": {
     "@coral-xyz/anchor": "0.32.1",
-    "@hyperbet/mm-core": "workspace:*",
     "@solana/kit": "latest",
     "@solana/spl-token": "0.4.14",
     "@solana/web3-compat": "latest",

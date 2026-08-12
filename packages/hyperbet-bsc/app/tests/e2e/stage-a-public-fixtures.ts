@@ -30,7 +30,7 @@ import {
 import { privateKeyToAccount } from "viem/accounts";
 
 import fightOracleIdl from "../../../../hyperbet-solana/anchor/target/idl/fight_oracle.json";
-import goldClobIdl from "../../../../hyperbet-solana/anchor/target/idl/gold_clob_market.json";
+import goldClobIdl from "../../../../hyperbet-solana/anchor/target/idl/duel_market.json";
 import goldPerpsIdl from "../../../../hyperbet-solana/anchor/target/idl/gold_perps_market.json";
 import duelOutcomeOracleArtifact from "../../../../evm-contracts/out/DuelOutcomeOracle.sol/DuelOutcomeOracle.json";
 import goldClobArtifact from "../../../../evm-contracts/out/GoldClob.sol/GoldClob.json";
@@ -83,7 +83,7 @@ type SolanaFixtureState = {
   currentBetCloseTimeMs: number;
   currentFightStartTimeMs: number;
   currentPhase: "ANNOUNCEMENT" | "COUNTDOWN" | "RESOLUTION";
-  currentDuelSource: "synthetic_publish" | "real_hyperscapes";
+  currentDuelSource: "synthetic_publish" | "real_hyperia";
   clobConfig: string;
   clobMatchState: string;
   clobMarketState: string;
@@ -116,7 +116,7 @@ type EvmFixtureState = {
   evmMarketKey: string;
   evmBetCloseTimeMs: number | null;
   evmLifecycleStatus: string;
-  evmDuelSource: "synthetic_publish" | "real_hyperscapes";
+  evmDuelSource: "synthetic_publish" | "real_hyperia";
   evmOracleAddress: string;
   evmCanaryPrivateKey: string;
   evmMatcherPrivateKey: string;
@@ -134,7 +134,7 @@ type FixtureResult = {
   state: Record<string, unknown>;
   summary: Record<string, unknown>;
 };
-type LiveHyperscapesCycleResponse = {
+type LiveHyperiaCycleResponse = {
   cycle?: {
     cycleId?: string | null;
     duelId?: string | number | null;
@@ -344,7 +344,7 @@ async function resolveSharedEvmDuelContext(
   solanaState: SolanaFixtureState,
   env: EnvMap = process.env,
 ): Promise<SharedEvmDuelContext> {
-  if (resolveAcceptanceDuelSource(env) !== "real_hyperscapes") {
+  if (resolveAcceptanceDuelSource(env) !== "real_hyperia") {
     return {
       duelId: String(solanaState.currentMatchId),
       duelKeyHex: solanaState.currentDuelKeyHex,
@@ -360,9 +360,9 @@ async function resolveSharedEvmDuelContext(
     firstNonEmptyEnv(env, [
       "E2E_GAME_HTTP_URL",
       "GAME_HTTP_URL",
-      "HYPERSCAPES_GAME_HTTP_URL",
+      "HYPERIA_GAME_HTTP_URL",
     ]) ?? "http://127.0.0.1:5555",
-    "real Hyperscapes game HTTP URL",
+    "real Hyperia game HTTP URL",
   ).replace(/\/$/, "");
   const minimumWindowMs = resolveLiveDuelMinWindowMs(env);
   const deadline = Date.now() + Math.max(240_000, minimumWindowMs + 300_000);
@@ -374,7 +374,7 @@ async function resolveSharedEvmDuelContext(
       liveStateUrl.searchParams.set("_", String(Date.now()));
       const controller = new AbortController();
       const timeoutId = setTimeout(
-        () => controller.abort(new Error("live Hyperscapes duel fetch timed out")),
+        () => controller.abort(new Error("live Hyperia duel fetch timed out")),
         DEFAULT_LIVE_DUEL_FETCH_TIMEOUT_MS,
       );
       const response = await fetch(liveStateUrl, {
@@ -387,10 +387,10 @@ async function resolveSharedEvmDuelContext(
       }).finally(() => clearTimeout(timeoutId));
       if (!response.ok) {
         throw new Error(
-          `Failed to load live Hyperscapes cycle from ${gameHttpUrl}: ${response.status} ${response.statusText}`,
+          `Failed to load live Hyperia cycle from ${gameHttpUrl}: ${response.status} ${response.statusText}`,
         );
       }
-      const payload = (await response.json()) as LiveHyperscapesCycleResponse;
+      const payload = (await response.json()) as LiveHyperiaCycleResponse;
       const cycle = payload.cycle;
       const duelId =
         cycle?.duelId != null && String(cycle.duelId).trim()
@@ -401,7 +401,7 @@ async function resolveSharedEvmDuelContext(
       const betCloseTimeMs = normalizeOptionalTimestamp(cycle?.betCloseTime);
       const fightStartTimeMs = normalizeOptionalTimestamp(cycle?.fightStartTime);
       if (!duelId) {
-        lastError = "live Hyperscapes cycle is missing a duelId";
+        lastError = "live Hyperia cycle is missing a duelId";
         if (lastError !== lastLoggedError) {
           console.log(`[stage-a-fixture][evm] waiting for live duel: ${lastError}`);
           lastLoggedError = lastError;
@@ -443,7 +443,7 @@ async function resolveSharedEvmDuelContext(
     }
   }
   throw new Error(
-    `Timed out waiting for an open live Hyperscapes duel from ${gameHttpUrl}: ${lastError}`,
+    `Timed out waiting for an open live Hyperia duel from ${gameHttpUrl}: ${lastError}`,
   );
 }
 
@@ -695,7 +695,7 @@ async function buildLightweightSolanaSeedFixture(
     `VITE_E2E_MODEL_CHARACTER_ID=${perpsCharacterId}`,
     `VITE_E2E_MODEL_MARKET_ID=${perpsMarketId}`,
     `VITE_E2E_MODEL_NAME=${perpsModelName}`,
-    "VITE_E2E_MODEL_PROVIDER=Hyperscape",
+    "VITE_E2E_MODEL_PROVIDER=Hyperia",
     "VITE_E2E_MODEL_SLUG=stage-a-model-alpha",
     "VITE_E2E_MODEL_WINS=12",
     "VITE_E2E_MODEL_LOSSES=4",
@@ -913,7 +913,7 @@ async function buildStageASolanaPublicFixture(
   let betOpenTs = now - 60;
   let betCloseTs = now + DEFAULT_SOLANA_BET_WINDOW_SECONDS;
   let duelStartTs = betCloseTs + 60;
-  if (duelSource === "real_hyperscapes") {
+  if (duelSource === "real_hyperia") {
     const liveDuel = await resolveSharedEvmDuelContext(
       {
         currentMatchId,
@@ -958,7 +958,7 @@ async function buildStageASolanaPublicFixture(
       betCloseTs,
       duelStartTs,
       metadataUri:
-        duelSource === "real_hyperscapes"
+        duelSource === "real_hyperia"
           ? `https://hyperbet.win/live/${currentDuelId}`
           : `https://hyperbet.win/e2e/${currentMatchId}`,
     },
@@ -1082,7 +1082,7 @@ async function buildStageASolanaPublicFixture(
     `VITE_E2E_MODEL_CHARACTER_ID=${perpsCharacterId}`,
     `VITE_E2E_MODEL_MARKET_ID=${perpsMarketId}`,
     `VITE_E2E_MODEL_NAME=${perpsModelName}`,
-    "VITE_E2E_MODEL_PROVIDER=Hyperscape",
+    "VITE_E2E_MODEL_PROVIDER=Hyperia",
     "VITE_E2E_MODEL_SLUG=stage-a-model-alpha",
     "VITE_E2E_MODEL_WINS=12",
     "VITE_E2E_MODEL_LOSSES=4",
@@ -1278,7 +1278,7 @@ async function buildStageAEvmPublicFixture(
     args: [duelKey, MARKET_KIND_DUEL_WINNER],
   })) as { exists?: boolean };
   const lifecycleStatus =
-    duelSource === "real_hyperscapes"
+    duelSource === "real_hyperia"
       ? existingMarket?.exists
         ? "OPEN"
         : "PENDING"
@@ -1286,7 +1286,7 @@ async function buildStageAEvmPublicFixture(
   console.log(
     `[stage-a-fixture][${chain}] existing market=${existingMarket?.exists === true ? "yes" : "no"} duelKey=${duelKey}`,
   );
-  if (duelSource === "real_hyperscapes") {
+  if (duelSource === "real_hyperia") {
     console.log(
       `[stage-a-fixture][${chain}] prepared live duel source=${duelSource} oracle=${hasExistingOracleDuel ? "yes" : "no"} market=${existingMarket?.exists === true ? "yes" : "no"}`,
     );
@@ -1344,7 +1344,7 @@ async function buildStageAEvmPublicFixture(
   const seedNoFee = seedNoCost / 100n;
   const seedYesFee = seedYesCost / 100n;
 
-  if (duelSource !== "real_hyperscapes") {
+  if (duelSource !== "real_hyperia") {
     const seedNoTransaction = await matcherWalletClient.writeContract({
       address: runtime.goldClobAddress as Address,
       abi: goldClobArtifact.abi,
@@ -1453,7 +1453,7 @@ export async function writeStageAPublicFixture(options: {
   const env = options.env ?? process.env;
   const useLightweightSolanaFixture =
     options.evmChain !== null &&
-    resolveAcceptanceDuelSource(env) === "real_hyperscapes" &&
+    resolveAcceptanceDuelSource(env) === "real_hyperia" &&
     resolvePublicSetupScope(env) === "evm_write";
   console.log(
     `[stage-a-fixture] building ${useLightweightSolanaFixture ? "lightweight" : "full"} Solana public fixture`,

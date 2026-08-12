@@ -14,8 +14,8 @@ export const CHALLENGE_RESULT_DISCRIMINATOR: ReadonlyUint8Array = new Uint8Array
 
 export function getChallengeResultDiscriminatorBytes(): ReadonlyUint8Array { return fixEncoderSize(getBytesEncoder(), 8).encode(CHALLENGE_RESULT_DISCRIMINATOR); }
 
-export type ChallengeResultInstruction<TProgram extends string = typeof FIGHT_ORACLE_PROGRAM_ADDRESS, TAccountChallenger extends string | AccountMeta<string> = string, TAccountOracleConfig extends string | AccountMeta<string> = string, TAccountDuelState extends string | AccountMeta<string> = string, TRemainingAccounts extends readonly AccountMeta<string>[] = []> =
-Instruction<TProgram> & InstructionWithData<ReadonlyUint8Array> & InstructionWithAccounts<[TAccountChallenger extends string ? ReadonlySignerAccount<TAccountChallenger> & AccountSignerMeta<TAccountChallenger> : TAccountChallenger, TAccountOracleConfig extends string ? ReadonlyAccount<TAccountOracleConfig> : TAccountOracleConfig, TAccountDuelState extends string ? WritableAccount<TAccountDuelState> : TAccountDuelState, ...TRemainingAccounts]>;
+export type ChallengeResultInstruction<TProgram extends string = typeof FIGHT_ORACLE_PROGRAM_ADDRESS, TAccountChallenger extends string | AccountMeta<string> = string, TAccountOracleConfig extends string | AccountMeta<string> = string, TAccountDuelState extends string | AccountMeta<string> = string, TAccountProposalRecord extends string | AccountMeta<string> = string, TRemainingAccounts extends readonly AccountMeta<string>[] = []> =
+Instruction<TProgram> & InstructionWithData<ReadonlyUint8Array> & InstructionWithAccounts<[TAccountChallenger extends string ? ReadonlySignerAccount<TAccountChallenger> & AccountSignerMeta<TAccountChallenger> : TAccountChallenger, TAccountOracleConfig extends string ? ReadonlyAccount<TAccountOracleConfig> : TAccountOracleConfig, TAccountDuelState extends string ? WritableAccount<TAccountDuelState> : TAccountDuelState, TAccountProposalRecord extends string ? WritableAccount<TAccountProposalRecord> : TAccountProposalRecord, ...TRemainingAccounts]>;
 
 export type ChallengeResultInstructionData = { discriminator: ReadonlyUint8Array; duelKey: Array<number>; metadataUri: string;  };
 
@@ -33,20 +33,21 @@ export function getChallengeResultInstructionDataCodec(): Codec<ChallengeResultI
     return combineCodec(getChallengeResultInstructionDataEncoder(), getChallengeResultInstructionDataDecoder());
 }
 
-export type ChallengeResultAsyncInput<TAccountChallenger extends string = string, TAccountOracleConfig extends string = string, TAccountDuelState extends string = string> =  {
+export type ChallengeResultAsyncInput<TAccountChallenger extends string = string, TAccountOracleConfig extends string = string, TAccountDuelState extends string = string, TAccountProposalRecord extends string = string> =  {
   challenger: TransactionSigner<TAccountChallenger>;
 oracleConfig?: Address<TAccountOracleConfig>;
 duelState?: Address<TAccountDuelState>;
+proposalRecord: Address<TAccountProposalRecord>;
 duelKey: ChallengeResultInstructionDataArgs["duelKey"];
 metadataUri: ChallengeResultInstructionDataArgs["metadataUri"];
 }
 
-export async function getChallengeResultInstructionAsync<TAccountChallenger extends string, TAccountOracleConfig extends string, TAccountDuelState extends string, TProgramAddress extends Address = typeof FIGHT_ORACLE_PROGRAM_ADDRESS>(input: ChallengeResultAsyncInput<TAccountChallenger, TAccountOracleConfig, TAccountDuelState>, config?: { programAddress?: TProgramAddress } ): Promise<ChallengeResultInstruction<TProgramAddress, TAccountChallenger, TAccountOracleConfig, TAccountDuelState>> {
+export async function getChallengeResultInstructionAsync<TAccountChallenger extends string, TAccountOracleConfig extends string, TAccountDuelState extends string, TAccountProposalRecord extends string, TProgramAddress extends Address = typeof FIGHT_ORACLE_PROGRAM_ADDRESS>(input: ChallengeResultAsyncInput<TAccountChallenger, TAccountOracleConfig, TAccountDuelState, TAccountProposalRecord>, config?: { programAddress?: TProgramAddress } ): Promise<ChallengeResultInstruction<TProgramAddress, TAccountChallenger, TAccountOracleConfig, TAccountDuelState, TAccountProposalRecord>> {
   // Program address.
 const programAddress = config?.programAddress ?? FIGHT_ORACLE_PROGRAM_ADDRESS;
 
  // Original accounts.
-const originalAccounts = { challenger: { value: input.challenger ?? null, isWritable: false }, oracleConfig: { value: input.oracleConfig ?? null, isWritable: false }, duelState: { value: input.duelState ?? null, isWritable: true } }
+const originalAccounts = { challenger: { value: input.challenger ?? null, isWritable: false }, oracleConfig: { value: input.oracleConfig ?? null, isWritable: false }, duelState: { value: input.duelState ?? null, isWritable: true }, proposalRecord: { value: input.proposalRecord ?? null, isWritable: true } }
 const accounts = originalAccounts as Record<keyof typeof originalAccounts, ResolvedAccount>;
 
 
@@ -63,23 +64,24 @@ accounts.duelState.value = await getProgramDerivedAddress({ programAddress, seed
 }
 
 const getAccountMeta = getAccountMetaFactory(programAddress, 'programId');
-return Object.freeze({ accounts: [getAccountMeta(accounts.challenger), getAccountMeta(accounts.oracleConfig), getAccountMeta(accounts.duelState)], data: getChallengeResultInstructionDataEncoder().encode(args as ChallengeResultInstructionDataArgs), programAddress } as ChallengeResultInstruction<TProgramAddress, TAccountChallenger, TAccountOracleConfig, TAccountDuelState>);
+return Object.freeze({ accounts: [getAccountMeta(accounts.challenger), getAccountMeta(accounts.oracleConfig), getAccountMeta(accounts.duelState), getAccountMeta(accounts.proposalRecord)], data: getChallengeResultInstructionDataEncoder().encode(args as ChallengeResultInstructionDataArgs), programAddress } as ChallengeResultInstruction<TProgramAddress, TAccountChallenger, TAccountOracleConfig, TAccountDuelState, TAccountProposalRecord>);
 }
 
-export type ChallengeResultInput<TAccountChallenger extends string = string, TAccountOracleConfig extends string = string, TAccountDuelState extends string = string> =  {
+export type ChallengeResultInput<TAccountChallenger extends string = string, TAccountOracleConfig extends string = string, TAccountDuelState extends string = string, TAccountProposalRecord extends string = string> =  {
   challenger: TransactionSigner<TAccountChallenger>;
 oracleConfig: Address<TAccountOracleConfig>;
 duelState: Address<TAccountDuelState>;
+proposalRecord: Address<TAccountProposalRecord>;
 duelKey: ChallengeResultInstructionDataArgs["duelKey"];
 metadataUri: ChallengeResultInstructionDataArgs["metadataUri"];
 }
 
-export function getChallengeResultInstruction<TAccountChallenger extends string, TAccountOracleConfig extends string, TAccountDuelState extends string, TProgramAddress extends Address = typeof FIGHT_ORACLE_PROGRAM_ADDRESS>(input: ChallengeResultInput<TAccountChallenger, TAccountOracleConfig, TAccountDuelState>, config?: { programAddress?: TProgramAddress } ): ChallengeResultInstruction<TProgramAddress, TAccountChallenger, TAccountOracleConfig, TAccountDuelState> {
+export function getChallengeResultInstruction<TAccountChallenger extends string, TAccountOracleConfig extends string, TAccountDuelState extends string, TAccountProposalRecord extends string, TProgramAddress extends Address = typeof FIGHT_ORACLE_PROGRAM_ADDRESS>(input: ChallengeResultInput<TAccountChallenger, TAccountOracleConfig, TAccountDuelState, TAccountProposalRecord>, config?: { programAddress?: TProgramAddress } ): ChallengeResultInstruction<TProgramAddress, TAccountChallenger, TAccountOracleConfig, TAccountDuelState, TAccountProposalRecord> {
   // Program address.
 const programAddress = config?.programAddress ?? FIGHT_ORACLE_PROGRAM_ADDRESS;
 
  // Original accounts.
-const originalAccounts = { challenger: { value: input.challenger ?? null, isWritable: false }, oracleConfig: { value: input.oracleConfig ?? null, isWritable: false }, duelState: { value: input.duelState ?? null, isWritable: true } }
+const originalAccounts = { challenger: { value: input.challenger ?? null, isWritable: false }, oracleConfig: { value: input.oracleConfig ?? null, isWritable: false }, duelState: { value: input.duelState ?? null, isWritable: true }, proposalRecord: { value: input.proposalRecord ?? null, isWritable: true } }
 const accounts = originalAccounts as Record<keyof typeof originalAccounts, ResolvedAccount>;
 
 
@@ -90,7 +92,7 @@ const args = { ...input,  };
 
 
 const getAccountMeta = getAccountMetaFactory(programAddress, 'programId');
-return Object.freeze({ accounts: [getAccountMeta(accounts.challenger), getAccountMeta(accounts.oracleConfig), getAccountMeta(accounts.duelState)], data: getChallengeResultInstructionDataEncoder().encode(args as ChallengeResultInstructionDataArgs), programAddress } as ChallengeResultInstruction<TProgramAddress, TAccountChallenger, TAccountOracleConfig, TAccountDuelState>);
+return Object.freeze({ accounts: [getAccountMeta(accounts.challenger), getAccountMeta(accounts.oracleConfig), getAccountMeta(accounts.duelState), getAccountMeta(accounts.proposalRecord)], data: getChallengeResultInstructionDataEncoder().encode(args as ChallengeResultInstructionDataArgs), programAddress } as ChallengeResultInstruction<TProgramAddress, TAccountChallenger, TAccountOracleConfig, TAccountDuelState, TAccountProposalRecord>);
 }
 
 export type ParsedChallengeResultInstruction<TProgram extends string = typeof FIGHT_ORACLE_PROGRAM_ADDRESS, TAccountMetas extends readonly AccountMeta[] = readonly AccountMeta[]> = { programAddress: Address<TProgram>;
@@ -98,11 +100,12 @@ accounts: {
 challenger: TAccountMetas[0];
 oracleConfig: TAccountMetas[1];
 duelState: TAccountMetas[2];
+proposalRecord: TAccountMetas[3];
 };
 data: ChallengeResultInstructionData; };
 
 export function parseChallengeResultInstruction<TProgram extends string, TAccountMetas extends readonly AccountMeta[]>(instruction: Instruction<TProgram> & InstructionWithAccounts<TAccountMetas> & InstructionWithData<ReadonlyUint8Array>): ParsedChallengeResultInstruction<TProgram, TAccountMetas> {
-  if (instruction.accounts.length < 3) {
+  if (instruction.accounts.length < 4) {
   // TODO: Coded error.
   throw new Error('Not enough accounts');
 }
@@ -112,5 +115,5 @@ const getNextAccount = () => {
   accountIndex += 1;
   return accountMeta;
 }
-  return { programAddress: instruction.programAddress, accounts: { challenger: getNextAccount(), oracleConfig: getNextAccount(), duelState: getNextAccount() }, data: getChallengeResultInstructionDataDecoder().decode(instruction.data) };
+  return { programAddress: instruction.programAddress, accounts: { challenger: getNextAccount(), oracleConfig: getNextAccount(), duelState: getNextAccount(), proposalRecord: getNextAccount() }, data: getChallengeResultInstructionDataDecoder().decode(instruction.data) };
 }

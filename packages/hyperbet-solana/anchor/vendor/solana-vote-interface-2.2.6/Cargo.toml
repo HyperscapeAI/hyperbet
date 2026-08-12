@@ -71,8 +71,8 @@ features = ["derive"]
 optional = true
 
 [dependencies.bincode]
-package = "hyperscape-bincode"
-path = "../hyperscape-bincode"
+package = "hyperia-bincode"
+path = "../hyperia-bincode"
 optional = true
 [dependencies.num-derive]
 version = "0.4"

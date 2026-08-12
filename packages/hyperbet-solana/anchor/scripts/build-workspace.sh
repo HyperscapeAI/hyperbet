@@ -4,109 +4,119 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TOOLS_VERSION="${ANCHOR_SBF_TOOLS_VERSION:-v1.52}"
 BINARIES_ONLY="${HYPERBET_SOLANA_BUILD_BINARIES_ONLY:-0}"
+ALLOW_IDL_ONLY="${HYPERBET_SOLANA_ALLOW_IDL_ONLY:-0}"
+ANCHOR_CLI_VERSION="0.32.1"
 BASE_RUST_LOG="${RUST_LOG:-}"
-ANCHOR_RUST_LOG="${BASE_RUST_LOG:+${BASE_RUST_LOG},}cargo_build_sbf=error"
+ANCHOR_RUST_LOG="${BASE_RUST_LOG:+${BASE_RUST_LOG},}cargo_build_sbf=warn"
 export RUST_LOG="${ANCHOR_RUST_LOG}"
 PROGRAMS=(
   "fight_oracle"
-  "gold_clob_market"
-  "gold_perps_market"
-  "lvr_amm"
+  "duel_market"
 )
+SBF_AUDIT_LOG="$(mktemp "${TMPDIR:-/tmp}/hyperbet-sbf-build.XXXXXX")"
+trap 'rm -f -- "${SBF_AUDIT_LOG}"' EXIT
 
-extract_marker_json() {
-  local marker="$1"
-  sed -n "/--- IDL begin ${marker} ---/,/--- IDL end ${marker} ---/p" | sed '1d;$d'
-}
+# Anchor discovers Anchor.toml from the process working directory. Keep this
+# entrypoint deterministic for every caller, including repository-root CI.
+cd "${ROOT_DIR}"
 
-generate_idl() {
-  local program="$1"
-  local program_output
-  local address_output
-  local program_json
-  local address_json
-  local address
+run_audited_sbf_command() {
+  local expected_programs_csv="$1"
+  shift
+  local command_status
+  local tee_status
+  local pipeline_statuses
+  local expected_programs
 
-  echo "[anchor-build] idl ${program}"
-
-  program_output="$(
-    cargo test -p "${program}" --lib __anchor_private_print_idl_program --features idl-build -- --nocapture --test-threads=1 2>/dev/null
-  )"
-  program_json="$(printf '%s' "${program_output}" | extract_marker_json "program")"
-  if [[ -z "${program_json}" ]]; then
-    echo "[anchor-build] failed to extract program IDL JSON for ${program}" >&2
-    exit 1
+  : >"${SBF_AUDIT_LOG}"
+  set +e
+  "$@" 2>&1 | tee "${SBF_AUDIT_LOG}"
+  pipeline_statuses=("${PIPESTATUS[@]}")
+  set -e
+  command_status="${pipeline_statuses[0]}"
+  tee_status="${pipeline_statuses[1]}"
+  if [[ "${command_status}" != "0" ]]; then
+    return "${command_status}"
+  fi
+  if [[ "${tee_status}" != "0" ]]; then
+    return "${tee_status}"
   fi
 
-  address_output="$(
-    cargo test -p "${program}" --lib __anchor_private_print_idl_address --features idl-build -- --nocapture --test-threads=1 2>/dev/null
-  )"
-  address_json="$(printf '%s' "${address_output}" | extract_marker_json "address")"
-  if [[ -z "${address_json}" ]]; then
-    echo "[anchor-build] failed to extract program address for ${program}" >&2
-    exit 1
-  fi
-
-  address="$(printf '%s' "${address_json}" | jq -r 'fromjson')"
-  if [[ -z "${address}" || "${address}" == "null" ]]; then
-    echo "[anchor-build] extracted invalid address for ${program}" >&2
-    exit 1
-  fi
-
-  printf '%s' "${program_json}" | jq --arg addr "${address}" '
-    def strip_ns:
-      if type == "string" then (split("::") | last) else . end;
-
-    .address = $addr
-    | (.accounts //= [])
-    | (.types //= [])
-    | .accounts |= map(.name |= strip_ns)
-    | .types |= map(.name |= strip_ns)
-    | walk(
-        if type == "object" and has("defined") then
-          if (.defined | type) == "object" and (.defined | has("name")) then
-            .defined.name |= strip_ns
-          elif (.defined | type) == "string" then
-            .defined |= strip_ns
-          else
-            .
-          end
-        else
-          .
-        end
-      )
-  ' >"${ROOT_DIR}/target/idl/${program}.json"
+  IFS=',' read -r -a expected_programs <<<"${expected_programs_csv}"
+  bun "${ROOT_DIR}/scripts/audit-sbf-build-log.ts" \
+    "${SBF_AUDIT_LOG}" \
+    "${expected_programs[@]}"
 }
 
 mkdir -p "${ROOT_DIR}/target/idl"
+mkdir -p "${ROOT_DIR}/target/types"
 
-if command -v anchor >/dev/null 2>&1 && [[ "$BINARIES_ONLY" != "1" ]]; then
-  echo "[anchor-build] anchor build"
-  anchor build
+HAS_CARGO_BUILD_SBF=0
+if cargo --list | grep -q "build-sbf"; then
+  HAS_CARGO_BUILD_SBF=1
+fi
+
+require_canonical_anchor_cli() {
+  local actual_anchor_cli_version
+  if ! command -v anchor >/dev/null 2>&1; then
+    echo "[anchor-build] Anchor CLI ${ANCHOR_CLI_VERSION} is required for canonical artifact generation; host-only fallback is disabled" >&2
+    exit 1
+  fi
+
+  actual_anchor_cli_version="$(anchor --version | awk '{print $2}')"
+  if [[ "$actual_anchor_cli_version" != "$ANCHOR_CLI_VERSION" ]]; then
+    echo "[anchor-build] Anchor CLI version mismatch: expected ${ANCHOR_CLI_VERSION}, found ${actual_anchor_cli_version:-unknown}" >&2
+    exit 1
+  fi
+}
+
+generate_canonical_idls() {
+  local program
+  for program in "${PROGRAMS[@]}"; do
+    echo "[anchor-build] canonical idl ${program}"
+    anchor idl build \
+      --program-name "${program}" \
+      --out "${ROOT_DIR}/target/idl/${program}.json" \
+      --out-ts "${ROOT_DIR}/target/types/${program}.ts"
+  done
+}
+
+if [[ "$BINARIES_ONLY" == "1" ]]; then
+  if [[ "$HAS_CARGO_BUILD_SBF" != "1" ]]; then
+    echo "[anchor-build] cargo-build-sbf is required for binaries-only mode" >&2
+    exit 1
+  fi
+  require_canonical_anchor_cli
+  echo "[anchor-build] canonical SBF binaries (tools=${TOOLS_VERSION})"
+  run_audited_sbf_command \
+    "fight_oracle,duel_market" \
+    anchor build --no-idl -- --tools-version "${TOOLS_VERSION}" -- --locked
+  echo "[anchor-build] skipped canonical IDL generation (binaries only)"
+  echo "[anchor-build] complete"
+  exit 0
+fi
+
+require_canonical_anchor_cli
+
+if [[ "$HAS_CARGO_BUILD_SBF" == "1" ]]; then
+  echo "[anchor-build] canonical SBF binaries (tools=${TOOLS_VERSION})"
+  run_audited_sbf_command \
+    "fight_oracle,duel_market" \
+    anchor build --no-idl -- --tools-version "${TOOLS_VERSION}" -- --locked
+  generate_canonical_idls
   node "${ROOT_DIR}/../scripts/sync-anchor-artifacts.mjs"
   echo "[anchor-build] complete"
   exit 0
 fi
 
-if ! cargo --list | grep -q "build-sbf"; then
-  echo "[anchor-build] cargo-build-sbf not found, skipping sbf build"
-else
-  for program in "${PROGRAMS[@]}"; do
-    echo "[anchor-build] sbf ${program} (tools=${TOOLS_VERSION})"
-    cargo build-sbf --tools-version "${TOOLS_VERSION}" --manifest-path "${ROOT_DIR}/programs/${program}/Cargo.toml"
-  done
+if [[ "$ALLOW_IDL_ONLY" != "1" ]]; then
+  echo "[anchor-build] cargo-build-sbf is required; refusing to reuse stale deploy binaries" >&2
+  echo "[anchor-build] set HYPERBET_SOLANA_ALLOW_IDL_ONLY=1 only for an explicit non-release canonical IDL refresh" >&2
+  exit 1
 fi
+echo "[anchor-build] cargo-build-sbf not found; explicit canonical IDL-only mode enabled"
 
-if [[ "$BINARIES_ONLY" == "1" ]]; then
-  echo "[anchor-build] skipped idl generation (binaries only)"
-  echo "[anchor-build] complete"
-  exit 0
-fi
-
-for program in "${PROGRAMS[@]}"; do
-  generate_idl "${program}"
-done
-
+generate_canonical_idls
 node "${ROOT_DIR}/../scripts/sync-anchor-artifacts.mjs"
 
 echo "[anchor-build] complete"

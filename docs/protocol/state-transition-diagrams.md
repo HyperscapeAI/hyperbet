@@ -1,54 +1,49 @@
-# Oracle + Market State Transition Diagrams
+# Solana Duel and Market State Transitions
 
-## Oracle Duel Lifecycle
-
-```mermaid
-stateDiagram-v2
-    [*] --> SCHEDULED: upsert_duel / upsertDuel
-    [*] --> BETTING_OPEN: upsert_duel / upsertDuel
-    [*] --> LOCKED: upsert_duel / upsertDuel
-
-    SCHEDULED --> BETTING_OPEN: upsert (forward only)
-    SCHEDULED --> LOCKED: upsert (forward only)
-    SCHEDULED --> CANCELLED: cancel_duel / cancelDuel
-
-    BETTING_OPEN --> LOCKED: upsert (forward only)
-    BETTING_OPEN --> CANCELLED: cancel_duel / cancelDuel
-
-    LOCKED --> RESOLVED: report_result / reportResult
-    LOCKED --> CANCELLED: cancel_duel / cancelDuel
-
-    RESOLVED --> [*]
-    CANCELLED --> [*]
-```
-
-## Market Lifecycle (synced from oracle)
+## Oracle
 
 ```mermaid
 stateDiagram-v2
-    [*] --> OPEN: initialize_market/createMarket + oracle BETTING_OPEN
-    [*] --> LOCKED: initialize_market/createMarket + oracle LOCKED
-
-    OPEN --> LOCKED: sync_market_from_duel / syncMarketFromOracle
-    OPEN --> RESOLVED: sync + oracle RESOLVED
-    OPEN --> CANCELLED: sync + oracle CANCELLED
-
-    LOCKED --> RESOLVED: sync + oracle RESOLVED
-    LOCKED --> CANCELLED: sync + oracle CANCELLED
-
-    RESOLVED --> [*]: claim (winner payouts)
-    CANCELLED --> [*]: claim (refund payouts)
+    [*] --> Scheduled
+    [*] --> BettingOpen
+    [*] --> Locked
+    Scheduled --> BettingOpen
+    Scheduled --> Locked
+    Scheduled --> Cancelled
+    BettingOpen --> Locked
+    BettingOpen --> Cancelled
+    Locked --> Proposed
+    Locked --> Cancelled
+    Proposed --> Challenged: before dispute deadline
+    Proposed --> Resolved: unchallenged and window elapsed
+    Challenged --> Proposed: replacement proposal
+    Resolved --> [*]
+    Cancelled --> [*]
 ```
 
-## Settlement Branching
+## Market projection
+
+```mermaid
+stateDiagram-v2
+    [*] --> Open: canonical betting-open duel
+    [*] --> Locked: canonical locked duel
+    Open --> Locked
+    Open --> Resolved
+    Open --> Cancelled
+    Locked --> Resolved
+    Locked --> Cancelled
+    Resolved --> [*]: claim or loser cleanup
+    Cancelled --> [*]: full refund
+```
+
+## Fee custody
 
 ```mermaid
 flowchart TD
-    A[claim] --> B{market status}
-    B -->|RESOLVED| C[winning side shares]
-    B -->|CANCELLED| D[a_locked + b_locked refund]
-    B -->|else| E[reject: not settled]
-    C --> F[winnings fee to market maker]
-    C --> G[payout = winning_shares - fee]
-    D --> H[payout = full locked stake]
+    A[Executed taker value] --> B[Vault fee escrow]
+    B --> C{Terminal market}
+    C -->|Cancelled| D[Return user collateral and escrowed fees]
+    C -->|Resolved| E[Pay winner minus winnings fee]
+    C -->|Resolved| F[Release execution fees to snapshotted recipients]
+    C -->|Not terminal| G[No fee withdrawal]
 ```

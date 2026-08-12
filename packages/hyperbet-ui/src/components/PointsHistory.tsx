@@ -1,10 +1,10 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   getLocaleTag,
   resolveUiLocale,
   type UiLocale,
 } from "@hyperbet/ui/i18n";
-import { GAME_API_URL } from "../lib/config";
+import { GAME_API_URL } from "../lib/solanaConfig";
 
 interface HistoryEntry {
   id: number;
@@ -22,27 +22,27 @@ interface HistoryResponse {
   total: number;
 }
 
-function getEventLabels(locale: UiLocale): Record<string, { label: string; icon: string }> {
+function getEventLabels(
+  locale: UiLocale,
+): Record<string, { label: string; icon: string }> {
   if (locale === "zh") {
     return {
       BET_PLACED: { label: "已下注", icon: "🎲" },
-      BET_WON: { label: "下注获胜", icon: "🏆" },
+      BET_FILL: { label: "下注成交", icon: "⚔️" },
       REFERRAL_WIN: { label: "邀请奖励", icon: "👥" },
+      REFERRAL_FILL: { label: "邀请成交奖励", icon: "🤝" },
       SIGNUP_REFERRER: { label: "邀请注册奖励", icon: "🎁" },
       SIGNUP_REFEREE: { label: "注册奖励", icon: "🎉" },
-      STAKING_DAILY: { label: "质押奖励", icon: "💎" },
-      WALLET_LINK: { label: "钱包关联奖励", icon: "🔗" },
     };
   }
 
   return {
     BET_PLACED: { label: "Bet Placed", icon: "🎲" },
-    BET_WON: { label: "Bet Won", icon: "🏆" },
+    BET_FILL: { label: "Bet Filled", icon: "⚔️" },
     REFERRAL_WIN: { label: "Referral Win", icon: "👥" },
+    REFERRAL_FILL: { label: "Referral Fill", icon: "🤝" },
     SIGNUP_REFERRER: { label: "Signup Bonus (Referrer)", icon: "🎁" },
     SIGNUP_REFEREE: { label: "Signup Bonus", icon: "🎉" },
-    STAKING_DAILY: { label: "Staking Reward", icon: "💎" },
-    WALLET_LINK: { label: "Wallet Link Bonus", icon: "🔗" },
   };
 }
 
@@ -51,18 +51,20 @@ function getEventFilters(locale: UiLocale) {
     ? [
         { value: "", label: "全部事件" },
         { value: "BET_PLACED", label: "下注" },
-        { value: "BET_WON", label: "获胜" },
+        { value: "BET_FILL", label: "成交" },
         { value: "REFERRAL_WIN", label: "邀请奖励" },
-        { value: "STAKING_DAILY", label: "质押" },
-        { value: "WALLET_LINK", label: "钱包关联" },
+        { value: "REFERRAL_FILL", label: "邀请成交" },
+        { value: "SIGNUP_REFERRER", label: "邀请注册" },
+        { value: "SIGNUP_REFEREE", label: "注册" },
       ]
     : [
         { value: "", label: "All Events" },
-        { value: "BET_PLACED", label: "Bets" },
-        { value: "BET_WON", label: "Wins" },
+        { value: "BET_PLACED", label: "Bets Placed" },
+        { value: "BET_FILL", label: "Bets Filled" },
         { value: "REFERRAL_WIN", label: "Referral Wins" },
-        { value: "STAKING_DAILY", label: "Staking" },
-        { value: "WALLET_LINK", label: "Wallet Link" },
+        { value: "REFERRAL_FILL", label: "Referral Fills" },
+        { value: "SIGNUP_REFERRER", label: "Referral Signups" },
+        { value: "SIGNUP_REFEREE", label: "Signup Bonuses" },
       ];
 }
 
@@ -144,9 +146,15 @@ export function PointsHistory({
   locale?: UiLocale;
 }) {
   const resolvedLocale = resolveUiLocale(locale);
-  const copy = getHistoryCopy(resolvedLocale);
-  const eventLabels = getEventLabels(resolvedLocale);
-  const eventFilters = getEventFilters(resolvedLocale);
+  const copy = useMemo(() => getHistoryCopy(resolvedLocale), [resolvedLocale]);
+  const eventLabels = useMemo(
+    () => getEventLabels(resolvedLocale),
+    [resolvedLocale],
+  );
+  const eventFilters = useMemo(
+    () => getEventFilters(resolvedLocale),
+    [resolvedLocale],
+  );
   const [entries, setEntries] = useState<HistoryEntry[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -333,7 +341,8 @@ export function PointsHistory({
                   transition: "background 0.15s",
                 }}
                 onMouseEnter={(event) => {
-                  event.currentTarget.style.background = "rgba(255,255,255,0.03)";
+                  event.currentTarget.style.background =
+                    "rgba(255,255,255,0.03)";
                 }}
                 onMouseLeave={(event) => {
                   event.currentTarget.style.background = "transparent";
@@ -361,9 +370,13 @@ export function PointsHistory({
                       gap: 6,
                     }}
                   >
-                    <span>{formatTimestamp(entry.createdAt, resolvedLocale)}</span>
+                    <span>
+                      {formatTimestamp(entry.createdAt, resolvedLocale)}
+                    </span>
                     {entry.relatedWallet ? (
-                      <span>&middot; {truncateWallet(entry.relatedWallet)}</span>
+                      <span>
+                        &middot; {truncateWallet(entry.relatedWallet)}
+                      </span>
                     ) : null}
                     {entry.status !== "CONFIRMED" ? (
                       <span
@@ -372,7 +385,8 @@ export function PointsHistory({
                             entry.status === "PENDING" ? "#facc15" : "#fca5a5",
                         }}
                       >
-                        &middot; {formatEntryStatus(entry.status, resolvedLocale)}
+                        &middot;{" "}
+                        {formatEntryStatus(entry.status, resolvedLocale)}
                       </span>
                     ) : null}
                   </div>
@@ -387,7 +401,9 @@ export function PointsHistory({
                   }}
                 >
                   {isPositive ? "+" : ""}
-                  {entry.totalPoints.toLocaleString(getLocaleTag(resolvedLocale))}{" "}
+                  {entry.totalPoints.toLocaleString(
+                    getLocaleTag(resolvedLocale),
+                  )}{" "}
                   {copy.pts}
                 </div>
               </div>

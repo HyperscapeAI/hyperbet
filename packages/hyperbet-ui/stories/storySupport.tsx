@@ -1,15 +1,7 @@
 import React from "react";
 import { PublicKey } from "@solana/web3.js";
-import type { HyperbetThemeId } from "../src/lib/theme";
 
-export const STORY_TIME = new Date("2026-03-09T18:20:00.000Z").getTime();
-export const HYPERBET_THEME_IDS: HyperbetThemeId[] = [
-  "evm",
-  "avax",
-  "bsc",
-  "base",
-  "solana",
-];
+export const STORY_TIME = Date.now();
 
 export function StorySurface({
   children,
@@ -27,41 +19,6 @@ export function StorySurface({
       }}
     >
       {children}
-    </div>
-  );
-}
-
-export function ThemeMatrix({
-  children,
-  columns = "repeat(auto-fit, minmax(240px, 1fr))",
-}: {
-  children: (theme: HyperbetThemeId) => React.ReactNode;
-  columns?: string;
-}) {
-  return (
-    <div
-      style={{
-        display: "grid",
-        gridTemplateColumns: columns,
-        gap: 16,
-      }}
-    >
-      {HYPERBET_THEME_IDS.map((themeId) => (
-        <section key={themeId}>
-          <p
-            style={{
-              margin: "0 0 10px",
-              fontSize: 12,
-              letterSpacing: "0.12em",
-              textTransform: "uppercase",
-              color: "rgba(255,255,255,0.65)",
-            }}
-          >
-            {themeId}
-          </p>
-          {children(themeId)}
-        </section>
-      ))}
     </div>
   );
 }
@@ -94,7 +51,7 @@ export const sampleTrades = [
     amount: 3.25,
     price: 0.49,
     time: STORY_TIME - 28_000,
-    trader: "0xA11CE000000000000000000000000000000001",
+    trader: "9YQ6U3b1i3Qxb38nSxrdbidKdvUSsfx8bVsgcuyo6edS",
   },
   {
     id: "trade-2",
@@ -102,7 +59,7 @@ export const sampleTrades = [
     amount: 1.1,
     price: 0.51,
     time: STORY_TIME - 62_000,
-    trader: "0xB0B000000000000000000000000000000000002",
+    trader: "6F6ePKprCddjcLm9uAwXpi4eCV7H7fLS1c1zFqaHkJn4",
   },
   {
     id: "trade-3",
@@ -110,7 +67,7 @@ export const sampleTrades = [
     amount: 0.68,
     price: 0.56,
     time: STORY_TIME - 94_000,
-    trader: "0xC4R010000000000000000000000000000000003",
+    trader: "8YDEsxBTFGKgWdGZRE7BMb6yJ5rXKc12QE8RrJGEJJJr",
   },
 ];
 
@@ -181,5 +138,3 @@ export const sampleFightAgent2 = {
 export const sampleSolanaWallet = new PublicKey(
   "9YQ6U3b1i3Qxb38nSxrdbidKdvUSsfx8bVsgcuyo6edS",
 ).toBase58();
-
-export const sampleEvmWallet = "0x1234567890abcdef1234567890abcdef12345678";

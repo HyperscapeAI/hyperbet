@@ -10,6 +10,42 @@ interface StreamPlayerProps {
   style?: React.CSSProperties;
   onStreamUnavailable?: () => void;
   onStreamReady?: () => void;
+  onPlaybackDateChange?: (playbackDateMs: number | null) => void;
+  unavailableAfterManifestFailures?: number;
+  manifestRetryDelayMs?: number;
+}
+
+const DEFAULT_UNAVAILABLE_AFTER_MANIFEST_FAILURES = 3;
+const DEFAULT_MANIFEST_RETRY_DELAY_MS = 1_000;
+
+export function resolveStreamPlaybackMode(
+  hlsJsSupported: boolean,
+  nativeHlsSupport: string,
+): "hls.js" | "native" | "unsupported" {
+  if (hlsJsSupported) return "hls.js";
+  if (nativeHlsSupport) return "native";
+  return "unsupported";
+}
+
+export function isExpectedNonFatalHlsRecovery(
+  fatal: boolean,
+  details: string,
+): boolean {
+  return !fatal && details === Hls.ErrorDetails.BUFFER_SEEK_OVER_HOLE;
+}
+
+export function isHlsStreamUrl(streamUrl: string): boolean {
+  return /\.m3u8(?:$|[?#])/i.test(streamUrl.trim());
+}
+
+export function shouldMarkStreamUnavailable(
+  consecutiveFailures: number,
+  failureLimit = DEFAULT_UNAVAILABLE_AFTER_MANIFEST_FAILURES,
+): boolean {
+  return (
+    Math.max(0, Math.floor(consecutiveFailures)) >=
+    Math.max(1, Math.floor(failureLimit))
+  );
 }
 
 export const StreamPlayer: React.FC<StreamPlayerProps> = ({
@@ -21,6 +57,9 @@ export const StreamPlayer: React.FC<StreamPlayerProps> = ({
   style,
   onStreamUnavailable,
   onStreamReady,
+  onPlaybackDateChange,
+  unavailableAfterManifestFailures = DEFAULT_UNAVAILABLE_AFTER_MANIFEST_FAILURES,
+  manifestRetryDelayMs = DEFAULT_MANIFEST_RETRY_DELAY_MS,
 }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const embedUrl = useMemo(
@@ -28,21 +67,38 @@ export const StreamPlayer: React.FC<StreamPlayerProps> = ({
     [autoPlay, muted, streamUrl],
   );
   const unavailableNotifiedRef = useRef(false);
+  const readyNotifiedRef = useRef(false);
+  const onStreamUnavailableRef = useRef(onStreamUnavailable);
+  const onStreamReadyRef = useRef(onStreamReady);
+  const onPlaybackDateChangeRef = useRef(onPlaybackDateChange);
+  onStreamUnavailableRef.current = onStreamUnavailable;
+  onStreamReadyRef.current = onStreamReady;
+  onPlaybackDateChangeRef.current = onPlaybackDateChange;
 
   const markUnavailable = useCallback(() => {
+    readyNotifiedRef.current = false;
     if (unavailableNotifiedRef.current) return;
     unavailableNotifiedRef.current = true;
-    onStreamUnavailable?.();
-  }, [onStreamUnavailable]);
+    onStreamUnavailableRef.current?.();
+  }, []);
+
+  const markReady = useCallback(() => {
+    if (readyNotifiedRef.current) return;
+    readyNotifiedRef.current = true;
+    unavailableNotifiedRef.current = false;
+    onStreamReadyRef.current?.();
+  }, []);
 
   useEffect(() => {
     unavailableNotifiedRef.current = false;
+    readyNotifiedRef.current = false;
+    onPlaybackDateChangeRef.current?.(null);
   }, [streamUrl]);
 
   useEffect(() => {
-    if (embedUrl) return;
+    if (embedUrl || isHlsStreamUrl(streamUrl)) return;
     markUnavailable();
-  }, [embedUrl, markUnavailable]);
+  }, [embedUrl, markUnavailable, streamUrl]);
 
   useEffect(() => {
     // External embeddable URLs render through iframe mode below.
@@ -57,7 +113,42 @@ export const StreamPlayer: React.FC<StreamPlayerProps> = ({
     let lastPlaybackTime = 0;
     let lastPlaylistUpdateAt = Date.now();
     let stallCount = 0;
+    let manifestFailureCount = 0;
     let disposed = false;
+    let lastReportedPlaybackDateMs: number | null = null;
+
+    const readPlaybackDateMs = (): number | null => {
+      const hlsDateMs = hls?.playingDate?.getTime();
+      if (typeof hlsDateMs === "number" && Number.isFinite(hlsDateMs)) {
+        return hlsDateMs;
+      }
+
+      const nativeStartDate = (
+        video as HTMLVideoElement & { getStartDate?: () => Date }
+      ).getStartDate?.();
+      const nativeStartDateMs = nativeStartDate?.getTime();
+      return typeof nativeStartDateMs === "number" &&
+        Number.isFinite(nativeStartDateMs)
+        ? nativeStartDateMs + video.currentTime * 1_000
+        : null;
+    };
+
+    const reportPlaybackDate = () => {
+      const playbackDateMs = readPlaybackDateMs();
+      if (
+        playbackDateMs === null ||
+        lastReportedPlaybackDateMs === null ||
+        Math.abs(playbackDateMs - lastReportedPlaybackDateMs) >= 100
+      ) {
+        lastReportedPlaybackDateMs = playbackDateMs;
+        if (playbackDateMs === null) {
+          delete video.dataset.streamPlaybackDateMs;
+        } else {
+          video.dataset.streamPlaybackDateMs = String(playbackDateMs);
+        }
+        onPlaybackDateChangeRef.current?.(playbackDateMs);
+      }
+    };
 
     const clearTimers = () => {
       if (retryTimeout) {
@@ -136,6 +227,7 @@ export const StreamPlayer: React.FC<StreamPlayerProps> = ({
           );
 
           if (stallCount >= 3) {
+            markUnavailable();
             scheduleRebuild("playback stalled repeatedly");
             return;
           }
@@ -151,6 +243,7 @@ export const StreamPlayer: React.FC<StreamPlayerProps> = ({
         }
 
         if (hls && now - lastPlaylistUpdateAt > 8000) {
+          markUnavailable();
           console.warn(
             "[StreamPlayer] Playlist stalled; forcing manifest/fragment reload",
           );
@@ -160,6 +253,7 @@ export const StreamPlayer: React.FC<StreamPlayerProps> = ({
         }
 
         lastPlaybackTime = video.currentTime;
+        reportPlaybackDate();
       }, 2000);
     };
 
@@ -173,17 +267,37 @@ export const StreamPlayer: React.FC<StreamPlayerProps> = ({
       lastPlaylistUpdateAt = Date.now();
 
       const manifestReady = await probeManifest();
+      // React Strict Mode intentionally mounts, cleans up, and remounts effects
+      // in development. Never let the stale probe from the cleaned-up effect
+      // attach a second HLS instance to the current video element.
+      if (disposed) return;
       if (!manifestReady) {
-        scheduleRebuild("manifest not ready", 1000);
+        manifestFailureCount += 1;
+        if (
+          shouldMarkStreamUnavailable(
+            manifestFailureCount,
+            unavailableAfterManifestFailures,
+          )
+        ) {
+          markUnavailable();
+        }
+        scheduleRebuild(
+          "manifest not ready",
+          Math.max(0, manifestRetryDelayMs),
+        );
         return;
       }
+      manifestFailureCount = 0;
 
-      // Check if browser supports HLS natively (Safari)
-      if (video.canPlayType("application/vnd.apple.mpegurl")) {
-        video.src = sourceUrl();
-        void video.play().catch(() => {});
-        startHealthWatchdog();
-      } else if (Hls.isSupported()) {
+      // Prefer hls.js whenever Media Source Extensions are available. Chromium
+      // can advertise native HLS support while still rejecting FFmpeg MPEG-TS
+      // live playlists in its native demuxer; hls.js performs the required
+      // transmuxing. Native HLS remains the fallback for Safari-class clients.
+      const playbackMode = resolveStreamPlaybackMode(
+        Hls.isSupported(),
+        video.canPlayType("application/vnd.apple.mpegurl"),
+      );
+      if (playbackMode === "hls.js") {
         hls = new Hls({
           enableWorker: true,
           // FFmpeg emits standard live HLS, not LL-HLS parts.
@@ -216,16 +330,24 @@ export const StreamPlayer: React.FC<StreamPlayerProps> = ({
 
         hls.on(Hls.Events.FRAG_LOADED, () => {
           lastPlaylistUpdateAt = Date.now();
+          markReady();
+          reportPlaybackDate();
         });
 
         hls.on(Hls.Events.MANIFEST_PARSED, () => {
           console.log("[StreamPlayer] Manifest parsed, starting playback");
-          onStreamReady?.();
+          markReady();
           void video.play().catch(() => {});
         });
 
         hls.on(Hls.Events.ERROR, (_event, data) => {
-          console.warn(
+          const logHlsError = isExpectedNonFatalHlsRecovery(
+            data.fatal,
+            data.details,
+          )
+            ? console.debug
+            : console.warn;
+          logHlsError(
             "[StreamPlayer] HLS error:",
             data.type,
             data.details,
@@ -233,6 +355,7 @@ export const StreamPlayer: React.FC<StreamPlayerProps> = ({
           );
 
           if (data.fatal) {
+            markUnavailable();
             switch (data.type) {
               case Hls.ErrorTypes.NETWORK_ERROR:
                 console.log("[StreamPlayer] Network error, retrying load...");
@@ -262,19 +385,36 @@ export const StreamPlayer: React.FC<StreamPlayerProps> = ({
         });
 
         startHealthWatchdog();
+      } else if (playbackMode === "native") {
+        video.src = sourceUrl();
+        void video.play().catch(() => {});
+        startHealthWatchdog();
       } else {
         console.error("[StreamPlayer] HLS is not supported in this browser");
+        markUnavailable();
       }
     };
 
     const onWaiting = () => nudgeToLiveEdge();
     const onStalled = () => nudgeToLiveEdge();
-    const onLoadedMetadata = () => onStreamReady?.();
-    const onVideoError = () => scheduleRebuild("video element error", 1000);
+    const onLoadedMetadata = () => {
+      markReady();
+      reportPlaybackDate();
+    };
+    const onTimeUpdate = () => reportPlaybackDate();
+    const onVideoError = () => {
+      markUnavailable();
+      const mediaError = video.error;
+      const detail = mediaError
+        ? `code=${mediaError.code}${mediaError.message ? ` message=${mediaError.message}` : ""}`
+        : "no MediaError detail";
+      scheduleRebuild(`video element error (${detail})`, 1000);
+    };
 
     video.addEventListener("waiting", onWaiting);
     video.addEventListener("stalled", onStalled);
     video.addEventListener("loadedmetadata", onLoadedMetadata);
+    video.addEventListener("timeupdate", onTimeUpdate);
     video.addEventListener("error", onVideoError);
 
     if (autoPlay) {
@@ -288,6 +428,7 @@ export const StreamPlayer: React.FC<StreamPlayerProps> = ({
       video.removeEventListener("waiting", onWaiting);
       video.removeEventListener("stalled", onStalled);
       video.removeEventListener("loadedmetadata", onLoadedMetadata);
+      video.removeEventListener("timeupdate", onTimeUpdate);
       video.removeEventListener("error", onVideoError);
       clearTimers();
       disposed = true;
@@ -295,8 +436,19 @@ export const StreamPlayer: React.FC<StreamPlayerProps> = ({
         hls.destroy();
         hls = null;
       }
+      delete video.dataset.streamPlaybackDateMs;
+      onPlaybackDateChangeRef.current?.(null);
     };
-  }, [embedUrl, streamUrl, autoPlay, muted]);
+  }, [
+    autoPlay,
+    embedUrl,
+    manifestRetryDelayMs,
+    markReady,
+    markUnavailable,
+    muted,
+    streamUrl,
+    unavailableAfterManifestFailures,
+  ]);
 
   if (!embedUrl) {
     return (
@@ -311,6 +463,7 @@ export const StreamPlayer: React.FC<StreamPlayerProps> = ({
       >
         <video
           ref={videoRef}
+          data-stream-source={streamUrl}
           poster={poster}
           autoPlay={autoPlay}
           muted={muted}
@@ -350,7 +503,7 @@ export const StreamPlayer: React.FC<StreamPlayerProps> = ({
         allow="autoplay; encrypted-media; picture-in-picture; clipboard-write"
         allowFullScreen
         loading="eager"
-        onLoad={onStreamReady}
+        onLoad={markReady}
         referrerPolicy="strict-origin-when-cross-origin"
         onError={markUnavailable}
         style={{

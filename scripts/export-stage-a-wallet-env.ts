@@ -165,8 +165,8 @@ function main(): void {
       options.format,
     ),
     emit(
-      "STAGE_A_GOLD_CLOB_MARKET_PROGRAM_KEYPAIR",
-      path.join(solanaProgramsDir, "gold_clob_market-keypair.json"),
+      "STAGE_A_DUEL_MARKET_PROGRAM_KEYPAIR",
+      path.join(solanaProgramsDir, "duel_market-keypair.json"),
       options.format,
     ),
     emit(
@@ -185,8 +185,8 @@ function main(): void {
       options.format,
     ),
     emit(
-      "STAGE_A_GOLD_CLOB_MARKET_PROGRAM_ID",
-      readSolanaProgramAddress(options.walletDir, "gold_clob_market"),
+      "STAGE_A_DUEL_MARKET_PROGRAM_ID",
+      readSolanaProgramAddress(options.walletDir, "duel_market"),
       options.format,
     ),
     emit(

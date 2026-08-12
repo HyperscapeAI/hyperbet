@@ -16,12 +16,12 @@ interface OrderBookProps {
   yesPot: number;
   noPot: number;
   totalPot: number;
-  goldPriceUsd: number | null;
+  assetPriceUsd: number | null;
   locale?: UiLocale;
   assetSymbol?: string;
   bids?: OrderLevel[];
   asks?: OrderLevel[];
-  midPrice?: number;
+  midPrice?: number | null;
   spread?: number;
 }
 
@@ -54,9 +54,10 @@ function LevelRow({
   }, [level.amount]);
 
   const color = type === "bid" ? "var(--hm-buy)" : "var(--hm-sell)";
-  const bg = type === "bid"
-    ? "var(--hm-orderbook-bid-bg, rgba(34,197,94,0.15))"
-    : "var(--hm-orderbook-ask-bg, rgba(232,65,66,0.15))";
+  const bg =
+    type === "bid"
+      ? "var(--hm-orderbook-bid-bg, rgba(34,197,94,0.15))"
+      : "var(--hm-orderbook-ask-bg, rgba(232,65,66,0.15))";
   const borderColor =
     type === "bid"
       ? "var(--hm-orderbook-bid-border, rgba(34,197,94,0.4))"
@@ -145,9 +146,9 @@ export function OrderBook({
   yesPot,
   noPot,
   totalPot,
-  goldPriceUsd,
+  assetPriceUsd,
   locale,
-  assetSymbol = "GOLD",
+  assetSymbol = "SOL",
   bids = [],
   asks = [],
   midPrice,
@@ -155,7 +156,10 @@ export function OrderBook({
 }: OrderBookProps) {
   const resolvedLocale = resolveUiLocale(locale);
   const copy = getUiCopy(resolvedLocale);
-  const displayMid = midPrice ?? (totalPot > 0 ? yesPot / totalPot : 0.5);
+  const displayMid =
+    midPrice === null
+      ? null
+      : (midPrice ?? (totalPot > 0 ? yesPot / totalPot : null));
   const displaySpread = spread ?? 0;
   const orderBookLabel = copy.orderBook ?? "Order book";
 
@@ -169,7 +173,8 @@ export function OrderBook({
           display: "flex",
           justifyContent: "space-between",
           alignItems: "center",
-          borderBottom: "1px solid var(--hm-border-subtle, rgba(255,255,255,0.05))",
+          borderBottom:
+            "1px solid var(--hm-border-subtle, rgba(255,255,255,0.05))",
           paddingBottom: 4,
         }}
       >
@@ -187,7 +192,7 @@ export function OrderBook({
         >
           {orderBookLabel}
         </div>
-        {goldPriceUsd !== null && false /* Shown in chart area instead */}
+        {assetPriceUsd !== null && false /* Shown in chart area instead */}
       </div>
 
       {/* Header */}
@@ -269,10 +274,11 @@ export function OrderBook({
               fontWeight: 900,
               color: "var(--hm-accent-gold)",
               fontFamily: "var(--hm-font-mono)",
-              textShadow: "0 0 8px var(--hm-chip-highlight, rgba(232,65,66,0.3))",
+              textShadow:
+                "0 0 8px var(--hm-chip-highlight, rgba(232,65,66,0.3))",
             }}
           >
-            {displayMid.toFixed(3)}
+            {displayMid === null ? "—" : displayMid.toFixed(3)}
           </div>
           <div
             style={{
@@ -281,7 +287,8 @@ export function OrderBook({
               fontFamily: "var(--hm-font-body)",
             }}
           >
-            {copy.spread}: {displaySpread.toFixed(3)}
+            {copy.spread}:{" "}
+            {displayMid === null ? "—" : displaySpread.toFixed(3)}
           </div>
         </div>
       </div>
@@ -313,8 +320,6 @@ export function OrderBook({
           />
         ))}
       </div>
-
-
     </>
   );
 }

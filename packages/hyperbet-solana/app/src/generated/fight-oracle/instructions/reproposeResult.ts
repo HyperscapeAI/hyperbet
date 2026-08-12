@@ -15,8 +15,8 @@ export const REPROPOSE_RESULT_DISCRIMINATOR: ReadonlyUint8Array = new Uint8Array
 
 export function getReproposeResultDiscriminatorBytes(): ReadonlyUint8Array { return fixEncoderSize(getBytesEncoder(), 8).encode(REPROPOSE_RESULT_DISCRIMINATOR); }
 
-export type ReproposeResultInstruction<TProgram extends string = typeof FIGHT_ORACLE_PROGRAM_ADDRESS, TAccountReporter extends string | AccountMeta<string> = string, TAccountOracleConfig extends string | AccountMeta<string> = string, TAccountDuelState extends string | AccountMeta<string> = string, TRemainingAccounts extends readonly AccountMeta<string>[] = []> =
-Instruction<TProgram> & InstructionWithData<ReadonlyUint8Array> & InstructionWithAccounts<[TAccountReporter extends string ? WritableSignerAccount<TAccountReporter> & AccountSignerMeta<TAccountReporter> : TAccountReporter, TAccountOracleConfig extends string ? ReadonlyAccount<TAccountOracleConfig> : TAccountOracleConfig, TAccountDuelState extends string ? WritableAccount<TAccountDuelState> : TAccountDuelState, ...TRemainingAccounts]>;
+export type ReproposeResultInstruction<TProgram extends string = typeof FIGHT_ORACLE_PROGRAM_ADDRESS, TAccountReporter extends string | AccountMeta<string> = string, TAccountOracleConfig extends string | AccountMeta<string> = string, TAccountDuelState extends string | AccountMeta<string> = string, TAccountProposalRecord extends string | AccountMeta<string> = string, TAccountSystemProgram extends string | AccountMeta<string> = "11111111111111111111111111111111", TRemainingAccounts extends readonly AccountMeta<string>[] = []> =
+Instruction<TProgram> & InstructionWithData<ReadonlyUint8Array> & InstructionWithAccounts<[TAccountReporter extends string ? WritableSignerAccount<TAccountReporter> & AccountSignerMeta<TAccountReporter> : TAccountReporter, TAccountOracleConfig extends string ? ReadonlyAccount<TAccountOracleConfig> : TAccountOracleConfig, TAccountDuelState extends string ? WritableAccount<TAccountDuelState> : TAccountDuelState, TAccountProposalRecord extends string ? WritableAccount<TAccountProposalRecord> : TAccountProposalRecord, TAccountSystemProgram extends string ? ReadonlyAccount<TAccountSystemProgram> : TAccountSystemProgram, ...TRemainingAccounts]>;
 
 export type ReproposeResultInstructionData = { discriminator: ReadonlyUint8Array; duelKey: Array<number>; winner: MarketSide; seed: bigint; replayHash: Array<number>; resultHash: Array<number>; duelEndTs: bigint; metadataUri: string;  };
 
@@ -34,10 +34,12 @@ export function getReproposeResultInstructionDataCodec(): Codec<ReproposeResultI
     return combineCodec(getReproposeResultInstructionDataEncoder(), getReproposeResultInstructionDataDecoder());
 }
 
-export type ReproposeResultAsyncInput<TAccountReporter extends string = string, TAccountOracleConfig extends string = string, TAccountDuelState extends string = string> =  {
+export type ReproposeResultAsyncInput<TAccountReporter extends string = string, TAccountOracleConfig extends string = string, TAccountDuelState extends string = string, TAccountProposalRecord extends string = string, TAccountSystemProgram extends string = string> =  {
   reporter: TransactionSigner<TAccountReporter>;
 oracleConfig?: Address<TAccountOracleConfig>;
 duelState?: Address<TAccountDuelState>;
+proposalRecord?: Address<TAccountProposalRecord>;
+systemProgram?: Address<TAccountSystemProgram>;
 duelKey: ReproposeResultInstructionDataArgs["duelKey"];
 winner: ReproposeResultInstructionDataArgs["winner"];
 seed: ReproposeResultInstructionDataArgs["seed"];
@@ -47,12 +49,12 @@ duelEndTs: ReproposeResultInstructionDataArgs["duelEndTs"];
 metadataUri: ReproposeResultInstructionDataArgs["metadataUri"];
 }
 
-export async function getReproposeResultInstructionAsync<TAccountReporter extends string, TAccountOracleConfig extends string, TAccountDuelState extends string, TProgramAddress extends Address = typeof FIGHT_ORACLE_PROGRAM_ADDRESS>(input: ReproposeResultAsyncInput<TAccountReporter, TAccountOracleConfig, TAccountDuelState>, config?: { programAddress?: TProgramAddress } ): Promise<ReproposeResultInstruction<TProgramAddress, TAccountReporter, TAccountOracleConfig, TAccountDuelState>> {
+export async function getReproposeResultInstructionAsync<TAccountReporter extends string, TAccountOracleConfig extends string, TAccountDuelState extends string, TAccountProposalRecord extends string, TAccountSystemProgram extends string, TProgramAddress extends Address = typeof FIGHT_ORACLE_PROGRAM_ADDRESS>(input: ReproposeResultAsyncInput<TAccountReporter, TAccountOracleConfig, TAccountDuelState, TAccountProposalRecord, TAccountSystemProgram>, config?: { programAddress?: TProgramAddress } ): Promise<ReproposeResultInstruction<TProgramAddress, TAccountReporter, TAccountOracleConfig, TAccountDuelState, TAccountProposalRecord, TAccountSystemProgram>> {
   // Program address.
 const programAddress = config?.programAddress ?? FIGHT_ORACLE_PROGRAM_ADDRESS;
 
  // Original accounts.
-const originalAccounts = { reporter: { value: input.reporter ?? null, isWritable: true }, oracleConfig: { value: input.oracleConfig ?? null, isWritable: false }, duelState: { value: input.duelState ?? null, isWritable: true } }
+const originalAccounts = { reporter: { value: input.reporter ?? null, isWritable: true }, oracleConfig: { value: input.oracleConfig ?? null, isWritable: false }, duelState: { value: input.duelState ?? null, isWritable: true }, proposalRecord: { value: input.proposalRecord ?? null, isWritable: true }, systemProgram: { value: input.systemProgram ?? null, isWritable: false } }
 const accounts = originalAccounts as Record<keyof typeof originalAccounts, ResolvedAccount>;
 
 
@@ -67,15 +69,23 @@ accounts.oracleConfig.value = await getProgramDerivedAddress({ programAddress, s
 if (!accounts.duelState.value) {
 accounts.duelState.value = await getProgramDerivedAddress({ programAddress, seeds: [getBytesEncoder().encode(new Uint8Array([100, 117, 101, 108])), getArrayEncoder(getU8Encoder(), { size: 32 }).encode(expectSome(args.duelKey))] });
 }
-
-const getAccountMeta = getAccountMetaFactory(programAddress, 'programId');
-return Object.freeze({ accounts: [getAccountMeta(accounts.reporter), getAccountMeta(accounts.oracleConfig), getAccountMeta(accounts.duelState)], data: getReproposeResultInstructionDataEncoder().encode(args as ReproposeResultInstructionDataArgs), programAddress } as ReproposeResultInstruction<TProgramAddress, TAccountReporter, TAccountOracleConfig, TAccountDuelState>);
+if (!accounts.proposalRecord.value) {
+accounts.proposalRecord.value = await getProgramDerivedAddress({ programAddress, seeds: [getBytesEncoder().encode(new Uint8Array([112, 114, 111, 112, 111, 115, 97, 108])), getArrayEncoder(getU8Encoder(), { size: 32 }).encode(expectSome(args.duelKey)), getArrayEncoder(getU8Encoder(), { size: 32 }).encode(expectSome(args.resultHash)), getArrayEncoder(getU8Encoder(), { size: 32 }).encode(expectSome(args.replayHash))] });
+}
+if (!accounts.systemProgram.value) {
+accounts.systemProgram.value = '11111111111111111111111111111111' as Address<'11111111111111111111111111111111'>;
 }
 
-export type ReproposeResultInput<TAccountReporter extends string = string, TAccountOracleConfig extends string = string, TAccountDuelState extends string = string> =  {
+const getAccountMeta = getAccountMetaFactory(programAddress, 'programId');
+return Object.freeze({ accounts: [getAccountMeta(accounts.reporter), getAccountMeta(accounts.oracleConfig), getAccountMeta(accounts.duelState), getAccountMeta(accounts.proposalRecord), getAccountMeta(accounts.systemProgram)], data: getReproposeResultInstructionDataEncoder().encode(args as ReproposeResultInstructionDataArgs), programAddress } as ReproposeResultInstruction<TProgramAddress, TAccountReporter, TAccountOracleConfig, TAccountDuelState, TAccountProposalRecord, TAccountSystemProgram>);
+}
+
+export type ReproposeResultInput<TAccountReporter extends string = string, TAccountOracleConfig extends string = string, TAccountDuelState extends string = string, TAccountProposalRecord extends string = string, TAccountSystemProgram extends string = string> =  {
   reporter: TransactionSigner<TAccountReporter>;
 oracleConfig: Address<TAccountOracleConfig>;
 duelState: Address<TAccountDuelState>;
+proposalRecord: Address<TAccountProposalRecord>;
+systemProgram?: Address<TAccountSystemProgram>;
 duelKey: ReproposeResultInstructionDataArgs["duelKey"];
 winner: ReproposeResultInstructionDataArgs["winner"];
 seed: ReproposeResultInstructionDataArgs["seed"];
@@ -85,12 +95,12 @@ duelEndTs: ReproposeResultInstructionDataArgs["duelEndTs"];
 metadataUri: ReproposeResultInstructionDataArgs["metadataUri"];
 }
 
-export function getReproposeResultInstruction<TAccountReporter extends string, TAccountOracleConfig extends string, TAccountDuelState extends string, TProgramAddress extends Address = typeof FIGHT_ORACLE_PROGRAM_ADDRESS>(input: ReproposeResultInput<TAccountReporter, TAccountOracleConfig, TAccountDuelState>, config?: { programAddress?: TProgramAddress } ): ReproposeResultInstruction<TProgramAddress, TAccountReporter, TAccountOracleConfig, TAccountDuelState> {
+export function getReproposeResultInstruction<TAccountReporter extends string, TAccountOracleConfig extends string, TAccountDuelState extends string, TAccountProposalRecord extends string, TAccountSystemProgram extends string, TProgramAddress extends Address = typeof FIGHT_ORACLE_PROGRAM_ADDRESS>(input: ReproposeResultInput<TAccountReporter, TAccountOracleConfig, TAccountDuelState, TAccountProposalRecord, TAccountSystemProgram>, config?: { programAddress?: TProgramAddress } ): ReproposeResultInstruction<TProgramAddress, TAccountReporter, TAccountOracleConfig, TAccountDuelState, TAccountProposalRecord, TAccountSystemProgram> {
   // Program address.
 const programAddress = config?.programAddress ?? FIGHT_ORACLE_PROGRAM_ADDRESS;
 
  // Original accounts.
-const originalAccounts = { reporter: { value: input.reporter ?? null, isWritable: true }, oracleConfig: { value: input.oracleConfig ?? null, isWritable: false }, duelState: { value: input.duelState ?? null, isWritable: true } }
+const originalAccounts = { reporter: { value: input.reporter ?? null, isWritable: true }, oracleConfig: { value: input.oracleConfig ?? null, isWritable: false }, duelState: { value: input.duelState ?? null, isWritable: true }, proposalRecord: { value: input.proposalRecord ?? null, isWritable: true }, systemProgram: { value: input.systemProgram ?? null, isWritable: false } }
 const accounts = originalAccounts as Record<keyof typeof originalAccounts, ResolvedAccount>;
 
 
@@ -98,10 +108,13 @@ const accounts = originalAccounts as Record<keyof typeof originalAccounts, Resol
 const args = { ...input,  };
 
 
-
+// Resolve default values.
+if (!accounts.systemProgram.value) {
+accounts.systemProgram.value = '11111111111111111111111111111111' as Address<'11111111111111111111111111111111'>;
+}
 
 const getAccountMeta = getAccountMetaFactory(programAddress, 'programId');
-return Object.freeze({ accounts: [getAccountMeta(accounts.reporter), getAccountMeta(accounts.oracleConfig), getAccountMeta(accounts.duelState)], data: getReproposeResultInstructionDataEncoder().encode(args as ReproposeResultInstructionDataArgs), programAddress } as ReproposeResultInstruction<TProgramAddress, TAccountReporter, TAccountOracleConfig, TAccountDuelState>);
+return Object.freeze({ accounts: [getAccountMeta(accounts.reporter), getAccountMeta(accounts.oracleConfig), getAccountMeta(accounts.duelState), getAccountMeta(accounts.proposalRecord), getAccountMeta(accounts.systemProgram)], data: getReproposeResultInstructionDataEncoder().encode(args as ReproposeResultInstructionDataArgs), programAddress } as ReproposeResultInstruction<TProgramAddress, TAccountReporter, TAccountOracleConfig, TAccountDuelState, TAccountProposalRecord, TAccountSystemProgram>);
 }
 
 export type ParsedReproposeResultInstruction<TProgram extends string = typeof FIGHT_ORACLE_PROGRAM_ADDRESS, TAccountMetas extends readonly AccountMeta[] = readonly AccountMeta[]> = { programAddress: Address<TProgram>;
@@ -109,11 +122,13 @@ accounts: {
 reporter: TAccountMetas[0];
 oracleConfig: TAccountMetas[1];
 duelState: TAccountMetas[2];
+proposalRecord: TAccountMetas[3];
+systemProgram: TAccountMetas[4];
 };
 data: ReproposeResultInstructionData; };
 
 export function parseReproposeResultInstruction<TProgram extends string, TAccountMetas extends readonly AccountMeta[]>(instruction: Instruction<TProgram> & InstructionWithAccounts<TAccountMetas> & InstructionWithData<ReadonlyUint8Array>): ParsedReproposeResultInstruction<TProgram, TAccountMetas> {
-  if (instruction.accounts.length < 3) {
+  if (instruction.accounts.length < 5) {
   // TODO: Coded error.
   throw new Error('Not enough accounts');
 }
@@ -123,5 +138,5 @@ const getNextAccount = () => {
   accountIndex += 1;
   return accountMeta;
 }
-  return { programAddress: instruction.programAddress, accounts: { reporter: getNextAccount(), oracleConfig: getNextAccount(), duelState: getNextAccount() }, data: getReproposeResultInstructionDataDecoder().decode(instruction.data) };
+  return { programAddress: instruction.programAddress, accounts: { reporter: getNextAccount(), oracleConfig: getNextAccount(), duelState: getNextAccount(), proposalRecord: getNextAccount(), systemProgram: getNextAccount() }, data: getReproposeResultInstructionDataDecoder().decode(instruction.data) };
 }

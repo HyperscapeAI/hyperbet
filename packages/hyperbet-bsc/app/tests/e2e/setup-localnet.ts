@@ -17,7 +17,7 @@ import {
 } from "@solana/web3.js";
 
 import fightOracleIdl from "../../../../hyperbet-solana/anchor/target/idl/fight_oracle.json";
-import goldClobIdl from "../../../../hyperbet-solana/anchor/target/idl/gold_clob_market.json";
+import goldClobIdl from "../../../../hyperbet-solana/anchor/target/idl/duel_market.json";
 import goldPerpsIdl from "../../../../hyperbet-solana/anchor/target/idl/gold_perps_market.json";
 import { modelMarketIdFromCharacterId } from "../../../../hyperbet-ui/src/lib/modelMarkets";
 
@@ -176,7 +176,7 @@ async function loadBootstrapAuthority(): Promise<Keypair> {
     process.env.E2E_SOLANA_BOOTSTRAP_KEYPAIR,
     path.join(
       process.env.HOME ?? "",
-      ".config/solana/hyperscape-keys/deployer.json",
+      ".config/solana/hyperia-keys/deployer.json",
     ),
     path.join(process.env.HOME ?? "", ".config/solana/id.json"),
   ].filter((value): value is string => Boolean(value?.trim()));
@@ -523,7 +523,7 @@ async function main(): Promise<void> {
     process.env.E2E_BROWSER_SOLANA_WS_URL || solanaWsUrl;
   const clobProgramId = resolveIdlAddress(
     goldClobIdl as unknown as IdlWithAddress,
-    "gold_clob_market",
+    "duel_market",
   );
   const connection = new Connection(solanaRpcUrl, {
     commitment: "confirmed",
@@ -565,7 +565,7 @@ async function main(): Promise<void> {
   const goldMint = new PublicKey("So11111111111111111111111111111111111111112");
   const e2eModelCharacterId = "e2e-model-alpha";
   const e2eModelName = "E2E Model Alpha";
-  const e2eModelProvider = "Hyperscape";
+  const e2eModelProvider = "Hyperia";
   const e2eModelSlug = "alpha-local";
   const e2eModelWins = 12;
   const e2eModelLosses = 4;

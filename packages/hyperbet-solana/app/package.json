@@ -9,10 +9,11 @@
     "preview": "vite preview",
     "lint": "bunx eslint src tests --ext .ts,.tsx --max-warnings=0",
     "typecheck": "bunx tsc --noEmit",
+    "test": "bun test tests/unit",
     "test:e2e": "bun run test:e2e:local",
     "test:e2e:local": "bash scripts/run-e2e-local.sh",
-    "test:e2e:testnet": "E2E_CLUSTER=testnet bash scripts/run-e2e-public.sh",
-    "test:e2e:mainnet": "E2E_CLUSTER=mainnet-beta bash scripts/run-e2e-public.sh"
+    "test:e2e:devnet": "E2E_CLUSTER=devnet bash scripts/run-e2e-public.sh",
+    "test:e2e:testnet": "E2E_CLUSTER=testnet bash scripts/run-e2e-public.sh"
   },
   "dependencies": {
     "@coral-xyz/anchor": "0.32.1",

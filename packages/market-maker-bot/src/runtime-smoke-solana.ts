@@ -5,7 +5,7 @@ import type { Program } from "@coral-xyz/anchor";
 import { Keypair } from "@solana/web3.js";
 
 import fightOracleIdl from "../../hyperbet-solana/anchor/target/idl/fight_oracle.json" with { type: "json" };
-import goldClobMarketIdl from "../../hyperbet-solana/anchor/target/idl/gold_clob_market.json" with { type: "json" };
+import duelMarketIdl from "../../hyperbet-solana/anchor/target/idl/duel_market.json" with { type: "json" };
 import {
   airdrop,
   createOpenMarketFixture,
@@ -55,7 +55,7 @@ async function main() {
     provider,
   ) as Program<any>;
   const clobProgram = new anchor.Program(
-    goldClobMarketIdl as anchor.Idl,
+    duelMarketIdl as anchor.Idl,
     provider,
   ) as Program<any>;
   await ensureOracleReady(fightProgram as never, authority);
@@ -98,7 +98,7 @@ async function main() {
   process.env.SOLANA_RPC_URL = process.env.ANCHOR_PROVIDER_URL || "http://127.0.0.1:8899";
   process.env.SOLANA_PRIVATE_KEY = JSON.stringify(Array.from(authority.secretKey));
   process.env.FIGHT_ORACLE_PROGRAM_ID = fightProgram.programId.toBase58();
-  process.env.GOLD_CLOB_MARKET_PROGRAM_ID = clobProgram.programId.toBase58();
+  process.env.DUEL_MARKET_PROGRAM_ID = clobProgram.programId.toBase58();
 
   globalThis.fetch = (async (url: string | URL | Request) => {
     const resolved = String(url);

@@ -76,7 +76,7 @@ async function main(): Promise<void> {
     marketId,
     rank: 1,
     name: modelName,
-    provider: "Hyperscape",
+    provider: "Hyperia",
     model: "alpha-local",
     wins: 12,
     losses: 4,

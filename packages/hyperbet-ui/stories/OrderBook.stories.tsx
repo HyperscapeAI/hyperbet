@@ -23,11 +23,11 @@ const meta = {
     yesPot: 145.2,
     noPot: 112.4,
     totalPot: 257.6,
-    goldPriceUsd: 0.0712,
+    assetPriceUsd: 0.0712,
     bids: sampleBids,
     asks: sampleAsks,
     locale: "en",
-    assetSymbol: "GOLD",
+    assetSymbol: "SOL",
   },
 } satisfies Meta<typeof OrderBook>;
 

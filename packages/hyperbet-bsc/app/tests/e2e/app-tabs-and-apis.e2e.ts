@@ -178,7 +178,7 @@ async function gotoApp(page: Page): Promise<void> {
               .trim()
               .toUpperCase();
             if (
-              bodyText.includes("HYPERSCAPE DUEL ARENA") ||
+              bodyText.includes("HYPERIA DUEL ARENA") ||
               bodyText.includes("ULTRA SIMPLE FIGHT BET")
             ) {
               return bodyText;

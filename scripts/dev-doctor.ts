@@ -19,10 +19,15 @@ type DoctorResult = {
   versionMismatches: string[];
 };
 
-const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const rootDir = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "..",
+);
 
 function readRootPackageJson(): { packageManager?: string } {
-  return JSON.parse(readFileSync(path.join(rootDir, "package.json"), "utf8")) as {
+  return JSON.parse(
+    readFileSync(path.join(rootDir, "package.json"), "utf8"),
+  ) as {
     packageManager?: string;
   };
 }
@@ -68,8 +73,7 @@ function standaloneInstallDirs(): string[] {
   return [
     "packages/hyperbet-solana/anchor",
     "packages/hyperbet-solana/app",
-    "packages/hyperbet-bsc/app",
-    "packages/hyperbet-avax/app",
+    "packages/hyperbet-solana/keeper",
   ].filter((dir) => existsSync(path.join(rootDir, dir, "package.json")));
 }
 
@@ -102,23 +106,19 @@ export function runDoctor(): DoctorResult {
       versionArgs: ["--version"],
       required: true,
     },
-    { name: "rustc", command: "rustc", versionArgs: ["--version"], required: true },
-    { name: "cargo", command: "cargo", versionArgs: ["--version"], required: true },
+    {
+      name: "rustc",
+      command: "rustc",
+      versionArgs: ["--version"],
+      required: true,
+    },
+    {
+      name: "cargo",
+      command: "cargo",
+      versionArgs: ["--version"],
+      required: true,
+    },
     { name: "jq", command: "jq", versionArgs: ["--version"], required: true },
-    {
-      name: "anvil",
-      command: "anvil",
-      versionArgs: ["--version"],
-      required: true,
-      notes: "required for the AVAX local demo and EVM contract smoke flows",
-    },
-    {
-      name: "forge",
-      command: "forge",
-      versionArgs: ["--version"],
-      required: true,
-      notes: "required for AVAX/BSC contract compile and deployment scripts",
-    },
   ];
 
   const messages: string[] = [];
@@ -134,7 +134,9 @@ export function runDoctor(): DoctorResult {
       continue;
     }
 
-    const installedVersion = extractVersion(runVersion(check.command, check.versionArgs));
+    const installedVersion = extractVersion(
+      runVersion(check.command, check.versionArgs),
+    );
     if (check.expectedVersion && installedVersion !== check.expectedVersion) {
       versionMismatches.push(
         `${check.name}: expected ${check.expectedVersion}, found ${installedVersion ?? "unknown"}`,

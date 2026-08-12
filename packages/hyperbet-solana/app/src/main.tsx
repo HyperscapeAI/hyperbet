@@ -1,5 +1,5 @@
 import "@hyperbet/ui/lib/solanaCompat";
-import { mountHyperbetApp } from "@hyperbet/ui";
+import { mountHyperbetApp } from "@hyperbet/ui/mount";
 
 import "./styles.css";
 import AppRoot from "./AppRoot";

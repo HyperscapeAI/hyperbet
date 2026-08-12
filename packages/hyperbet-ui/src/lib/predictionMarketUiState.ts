@@ -1,8 +1,8 @@
 import type {
-  PredictionMarketLifecycleRecord,
-  PredictionMarketLifecycleStatus,
-  PredictionMarketWinner,
-} from "@hyperbet/chain-registry";
+  SolanaPredictionMarketLifecycleRecord,
+  SolanaPredictionMarketLifecycleStatus,
+  SolanaPredictionMarketWinner,
+} from "./solanaLifecycle";
 
 export type PredictionMarketWalletSnapshot = {
   aShares: bigint;
@@ -13,8 +13,8 @@ export type PredictionMarketWalletSnapshot = {
 };
 
 export type PredictionMarketUiFallbackState = {
-  lifecycleStatus: PredictionMarketLifecycleStatus;
-  winner: PredictionMarketWinner;
+  lifecycleStatus: SolanaPredictionMarketLifecycleStatus;
+  winner: SolanaPredictionMarketWinner;
 };
 
 export type PredictionMarketClaimKind =
@@ -26,8 +26,8 @@ export type PredictionMarketClaimKind =
 
 export type PredictionMarketUiState = {
   hasCanonicalLifecycle: boolean;
-  lifecycleStatus: PredictionMarketLifecycleStatus;
-  winner: PredictionMarketWinner;
+  lifecycleStatus: SolanaPredictionMarketLifecycleStatus;
+  winner: SolanaPredictionMarketWinner;
   canTrade: boolean;
   canClaim: boolean;
   claimableAmount: bigint;
@@ -44,7 +44,7 @@ export const EMPTY_PREDICTION_MARKET_WALLET_SNAPSHOT: PredictionMarketWalletSnap
   };
 
 export function derivePredictionMarketUiState(
-  record: PredictionMarketLifecycleRecord | null,
+  record: SolanaPredictionMarketLifecycleRecord | null,
   wallet: PredictionMarketWalletSnapshot,
   fallback: PredictionMarketUiFallbackState | null = null,
 ): PredictionMarketUiState {

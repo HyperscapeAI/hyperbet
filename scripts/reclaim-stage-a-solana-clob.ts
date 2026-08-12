@@ -1,7 +1,7 @@
 import fs from "node:fs";
 
 import fightOracleIdl from "../packages/hyperbet-solana/anchor/target/idl/fight_oracle.json";
-import goldClobIdl from "../packages/hyperbet-solana/anchor/target/idl/gold_clob_market.json";
+import duelMarketIdl from "../packages/hyperbet-solana/anchor/target/idl/duel_market.json";
 import {
   cancelDuel,
   claimClobWinnings,
@@ -257,7 +257,7 @@ async function main(): Promise<void> {
   });
   const provider = createPollingProvider(connection, authority);
   const fightProgram = new Program(fightOracleIdl as any, provider);
-  const clobProgram = new Program(goldClobIdl as any, provider);
+  const clobProgram = new Program(duelMarketIdl as any, provider);
   const config = deriveMarketConfigPda(clobProgram.programId);
 
   const beforeBalances = await Promise.all(

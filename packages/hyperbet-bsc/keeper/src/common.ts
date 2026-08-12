@@ -17,7 +17,7 @@ import dotenv from "dotenv";
 
 import { resolveBettingSolanaDeployment } from "../../deployments";
 import fightOracleIdl from "./idl/fight_oracle.json";
-import goldClobMarketIdl from "./idl/gold_clob_market.json";
+import goldClobMarketIdl from "./idl/duel_market.json";
 import goldPerpsMarketIdl from "./idl/gold_perps_market.json";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));

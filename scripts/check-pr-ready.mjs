@@ -1,130 +1,77 @@
 #!/usr/bin/env node
-import { existsSync, readdirSync } from "node:fs";
-import path from "node:path";
 import { spawnSync } from "node:child_process";
+import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(scriptDir, "..");
 
-function runStep(label, args, options = {}) {
+function runStep(label, args) {
   console.log(`\n=== ${label} ===`);
   const result = spawnSync("bun", args, {
     stdio: "inherit",
     cwd: repoRoot,
-    env: { ...process.env, ...(options.env || {}) },
+    env: { ...process.env },
   });
   if (result.status !== 0) {
     throw new Error(`step failed: ${label}`);
   }
 }
 
-const chains = ["hyperbet-solana", "hyperbet-bsc", "hyperbet-avax"];
-const mmChains = ["solana", "bsc", "avax"];
-
-runStep("root frozen install", ["install", "--frozen-lockfile"]);
-
-for (const pkg of chains) {
-  runStep(`${pkg} app frozen install`, [
-    "install",
-    "--cwd",
-    `packages/${pkg}/app`,
-    "--frozen-lockfile",
-  ]);
-  runStep(`${pkg} keeper frozen install`, [
-    "install",
-    "--cwd",
-    `packages/${pkg}/keeper`,
-    "--frozen-lockfile",
-  ]);
-  runStep(`${pkg} app typecheck`, [
-    "x",
-    "tsc",
-    "--noEmit",
-    "-p",
-    `packages/${pkg}/app/tsconfig.json`,
-  ]);
-  runStep(`${pkg} app lint`, ["run", "--cwd", `packages/${pkg}/app`, "lint"]);
-
-  const unitDir = path.join(repoRoot, "packages", pkg, "app", "tests", "unit");
-  const hasUnitTests =
-    existsSync(unitDir) && readdirSync(unitDir).some((file) => file.endsWith(".test.ts"));
-  if (hasUnitTests) {
-    runStep(`${pkg} app unit tests`, ["test", `packages/${pkg}/app/tests/unit`]);
-  } else {
-    console.log(`\n=== ${pkg} app unit tests ===\nNo app unit tests found, skipping`);
-  }
-
-  runStep(`${pkg} keeper tests`, [
-    "test",
-    `packages/${pkg}/keeper/src/walletKeys.test.ts`,
-    `packages/${pkg}/keeper/src/modelMarkets.test.ts`,
-    `packages/${pkg}/keeper/src/db.test.ts`,
-    `packages/${pkg}/keeper/src/perpsMath.test.ts`,
-  ]);
-}
-
-runStep("market-maker frozen install", [
+runStep("frozen install", ["install", "--frozen-lockfile"]);
+runStep("Solana application install", [
   "install",
   "--cwd",
-  "packages/market-maker-bot",
+  "packages/hyperbet-solana/app",
   "--frozen-lockfile",
 ]);
-runStep("market-maker tests", ["run", "--cwd", "packages/market-maker-bot", "test"]);
-runStep("market-maker regression seed corpus", [
+runStep("Solana keeper install", [
+  "install",
+  "--cwd",
+  "packages/hyperbet-solana/keeper",
+  "--frozen-lockfile",
+]);
+runStep("SOL-only environment audit", ["run", "ci:env"]);
+runStep("SOL-only source and bundle scope", ["run", "ci:scope:solana"]);
+runStep("launch registry and artifact policy", [
+  "run",
+  "ci:gate:registry:launch",
+]);
+runStep("launch keeper tests", [
   "run",
   "--cwd",
-  "packages/market-maker-bot",
-  "simulate:adversarial:seed-corpus",
+  "packages/hyperbet-solana/keeper",
+  "test:launch",
 ]);
-runStep("market-maker historical replay corpus", [
+runStep("launch keeper typecheck", [
+  "x",
+  "tsc",
+  "--noEmit",
+  "--project",
+  "packages/hyperbet-solana/keeper/tsconfig.launch.json",
+]);
+runStep("Solana application typecheck", [
   "run",
   "--cwd",
-  "packages/market-maker-bot",
-  "simulate:adversarial:replay-corpus",
+  "packages/hyperbet-solana/app",
+  "typecheck",
 ]);
-for (const chain of mmChains) {
-  runStep(`market-maker regression seed corpus (${chain})`, [
-    "run",
-    "--cwd",
-    "packages/market-maker-bot",
-    "simulate:adversarial:seed-corpus",
-  ], {
-    env: {
-      MM_ADVERSARIAL_CHAIN: chain,
-    },
-  });
-  runStep(`market-maker historical replay corpus (${chain})`, [
-    "run",
-    "--cwd",
-    "packages/market-maker-bot",
-    "simulate:adversarial:replay-corpus",
-  ], {
-    env: {
-      MM_ADVERSARIAL_CHAIN: chain,
-    },
-  });
-}
-runStep("market-maker fork harness (optional)", [
+runStep("Solana application lint", [
   "run",
   "--cwd",
-  "packages/market-maker-bot",
-  "verify:forks",
+  "packages/hyperbet-solana/app",
+  "lint",
 ]);
+runStep("shared UI tests", ["run", "--cwd", "packages/hyperbet-ui", "test"]);
+runStep("simulation policy tests", [
+  "run",
+  "--cwd",
+  "packages/simulation-dashboard",
+  "test",
+]);
+runStep("SDK build", ["run", "--cwd", "packages/hyperbet-sdk", "build"]);
+runStep("SDK tests", ["run", "--cwd", "packages/hyperbet-sdk", "test"]);
+runStep("production application build", ["run", "build:solana"]);
+runStep("post-build SOL-only bundle scope", ["run", "ci:scope:solana"]);
 
-for (const chain of mmChains) {
-  runStep(`market-maker adversarial gate (${chain})`, [
-    "run",
-    "--cwd",
-    "packages/market-maker-bot",
-    "simulate:adversarial:ci",
-  ], {
-    env: {
-      MM_ADVERSARIAL_CHAIN: chain,
-      MM_ADVERSARIAL_MIN_PASSES: "13",
-      MM_ADVERSARIAL_OUTPUT_DIR: `simulations/ci-${chain}`,
-    },
-  });
-}
-
-console.log("\nAll pre-PR checks passed.");
+console.log("\nAll Solana duel v1 pre-PR checks passed.");

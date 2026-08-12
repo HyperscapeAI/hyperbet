@@ -16,10 +16,10 @@ import dotenv from "dotenv";
 
 import { resolveBettingSolanaDeployment } from "../../deployments";
 import fightOracleIdl from "./idl/fight_oracle.json";
-import goldClobMarketIdl from "./idl/gold_clob_market.json";
+import goldClobMarketIdl from "./idl/duel_market.json";
 import goldPerpsMarketIdl from "./idl/gold_perps_market.json";
 import { type FightOracle } from "../../../hyperbet-solana/anchor/target/types/fight_oracle";
-import { type GoldClobMarket } from "../../../hyperbet-solana/anchor/target/types/gold_clob_market";
+import { type DuelMarket } from "../../../hyperbet-solana/anchor/target/types/duel_market";
 import { type GoldPerpsMarket } from "../../../hyperbet-solana/anchor/target/types/gold_perps_market";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -197,7 +197,7 @@ export function createPrograms(signer: Keypair): {
   connection: Connection;
   provider: AnchorProvider;
   fightOracle: Program<FightOracle>;
-  goldClobMarket: Program<GoldClobMarket>;
+  goldClobMarket: Program<DuelMarket>;
   goldPerpsMarket: Program<GoldPerpsMarket>;
   /** @deprecated Binary market removed. Returns null. */
   goldBinaryMarket: null;
@@ -215,7 +215,7 @@ export function createPrograms(signer: Keypair): {
     FIGHT_ORACLE_IDL,
     provider,
   );
-  const goldClobMarket: Program<GoldClobMarket> = new Program(
+  const goldClobMarket: Program<DuelMarket> = new Program(
     GOLD_CLOB_MARKET_IDL,
     provider,
   );

@@ -59,6 +59,29 @@ type AppWalletContextValue = {
 
 const AppWalletContext = createContext<AppWalletContextValue | null>(null);
 
+const SPECTATOR_WALLET: AppWallet = {
+  address: null,
+  connect: async () => {},
+  connected: false,
+  connecting: false,
+  disconnect: async () => {},
+  publicKey: null,
+  session: null,
+  select: () => {},
+  signAllTransactions: undefined,
+  signTransaction: undefined,
+  wallet: null,
+  wallets: [],
+};
+
+const SPECTATOR_CONTEXT: AppWalletContextValue = {
+  modal: {
+    setVisible: () => {},
+    visible: false,
+  },
+  wallet: SPECTATOR_WALLET,
+};
+
 const connectionCache = new Map<string, Connection>();
 
 function getSharedConnection(rpcUrl: string, wsUrl: string): Connection {
@@ -110,7 +133,9 @@ function createAppWallet(
   const signTransaction = session?.signTransaction
     ? async <T extends Transaction | VersionedTransaction>(tx: T): Promise<T> =>
         (await session.signTransaction!(
-          tx as unknown as Parameters<NonNullable<WalletSession["signTransaction"]>>[0],
+          tx as unknown as Parameters<
+            NonNullable<WalletSession["signTransaction"]>
+          >[0],
         )) as unknown as T
     : undefined;
 
@@ -160,7 +185,10 @@ function WalletSelectionModal({
   return (
     <div className="wallet-modal-overlay" onClick={state.close}>
       <div className="wallet-modal-container">
-        <div className="wallet-modal-wrapper" onClick={(event) => event.stopPropagation()}>
+        <div
+          className="wallet-modal-wrapper"
+          onClick={(event) => event.stopPropagation()}
+        >
           <button
             aria-label="Close wallet selector"
             className="wallet-modal-button-close"
@@ -190,7 +218,9 @@ function WalletSelectionModal({
                         <img alt="" src={connector.icon} />
                       </span>
                     ) : null}
-                    <span className="wallet-button-label">{connector.name}</span>
+                    <span className="wallet-button-label">
+                      {connector.name}
+                    </span>
                   </button>
                 </li>
               );
@@ -252,6 +282,18 @@ export function AppWalletProvider({
     <AppWalletContext.Provider value={value}>
       {children}
       <WalletSelectionModal state={modalState} />
+    </AppWalletContext.Provider>
+  );
+}
+
+export function SpectatorAppWalletProvider({
+  children,
+}: {
+  children: ReactNode;
+}) {
+  return (
+    <AppWalletContext.Provider value={SPECTATOR_CONTEXT}>
+      {children}
     </AppWalletContext.Provider>
   );
 }

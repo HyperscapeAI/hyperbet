@@ -323,7 +323,6 @@ export function StreamUIApp() {
           {!isPanelCollapsed && (
             <div style={{ marginTop: 12 }}>
               <PredictionMarketPanel
-                isEvm={false}
                 yesPercent={mock.yesPercent}
                 noPercent={mock.noPercent}
                 yesPool={mock.yesPot}

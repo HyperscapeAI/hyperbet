@@ -4,7 +4,10 @@ import { spawnSync } from "node:child_process";
 
 import { runDoctor } from "./dev-doctor";
 
-const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const rootDir = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "..",
+);
 
 function run(command: string, args: string[], cwd = rootDir): void {
   const result = spawnSync(command, args, {
@@ -18,7 +21,9 @@ function run(command: string, args: string[], cwd = rootDir): void {
 
 const doctor = runDoctor();
 if (doctor.missingTools.length > 0 || doctor.versionMismatches.length > 0) {
-  console.error("Refusing to bootstrap until required tools and pinned versions match.");
+  console.error(
+    "Refusing to bootstrap until required tools and pinned versions match.",
+  );
   process.exit(1);
 }
 
@@ -30,8 +35,4 @@ run("bash", [
   "hyperbet-solana-anchor",
   "hyperbet-solana-app",
   "hyperbet-solana-keeper",
-  "hyperbet-bsc-app",
-  "hyperbet-bsc-keeper",
-  "hyperbet-avax-app",
-  "hyperbet-avax-keeper",
 ]);

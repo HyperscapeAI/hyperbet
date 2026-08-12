@@ -3,28 +3,14 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TARGET_CLUSTER="${1:-${SOLANA_DEPLOY_CLUSTER:-}}"
-PROGRAM_SCOPE="${HYPERBET_SOLANA_PROGRAM_SCOPE:-all}"
 SOLANA_CLUSTER_URL="${SOLANA_RPC_URL:-}"
 DEPLOY_TRANSPORT="${SOLANA_DEPLOY_TRANSPORT:-}"
 DEPLOY_TRANSPORT_ARGS=()
 
-if [[ "${2:-}" == "--pm-only" ]]; then
-  PROGRAM_SCOPE="pm"
-fi
-
-if [[ "$PROGRAM_SCOPE" == "pm" ]]; then
-  PROGRAMS=(
-    "fight_oracle"
-    "gold_clob_market"
-  )
-else
-  PROGRAMS=(
-    "fight_oracle"
-    "gold_clob_market"
-    "lvr_amm"
-    "gold_perps_market"
-  )
-fi
+PROGRAMS=(
+  "fight_oracle"
+  "duel_market"
+)
 
 resolve_wallet_path() {
   local candidates=()
@@ -266,12 +252,10 @@ if [[ -n "${SOLANA_EXPECTED_AUTHORITY:-}" && "$WALLET_ADDRESS" != "${SOLANA_EXPE
 fi
 echo "[deploy] cluster: $TARGET_CLUSTER"
 echo "[deploy] rpc url:  $SOLANA_CLUSTER_URL"
-echo "[deploy] scope:   $PROGRAM_SCOPE"
+echo "[deploy] scope:   solana-duel-v1"
 echo "[deploy] wallet:  $WALLET_PATH"
 echo "[deploy] address: $WALLET_ADDRESS"
 echo "[deploy] balance: $(solana balance --url "$SOLANA_CLUSTER_URL" --keypair "$WALLET_PATH")"
-cleanup_stale_buffers "before deployment"
-echo "[deploy] balance after cleanup: $(solana balance --url "$SOLANA_CLUSTER_URL" --keypair "$WALLET_PATH")"
 
 if [[ "$TARGET_CLUSTER" != "mainnet-beta" ]]; then
   echo "[deploy] syncing durable Stage-A program keypairs into anchor/target/deploy"
@@ -282,6 +266,15 @@ if [[ "${SKIP_BUILD:-0}" != "1" ]]; then
   echo "[deploy] building anchor workspace"
   HYPERBET_SOLANA_BUILD_BINARIES_ONLY=1 bun run --cwd "$ROOT_DIR" build
 fi
+
+echo "[deploy] running read-only program identity preflight"
+SOLANA_STAGE_A_WALLET_PATH="$WALLET_PATH" \
+SOLANA_RPC_URL="$SOLANA_CLUSTER_URL" \
+  bun run "$ROOT_DIR/../scripts/preflight-contract-deploy.ts" \
+  --cluster "$TARGET_CLUSTER"
+
+cleanup_stale_buffers "before deployment"
+echo "[deploy] balance after cleanup: $(solana balance --url "$SOLANA_CLUSTER_URL" --keypair "$WALLET_PATH")"
 
 for program in "${PROGRAMS[@]}"; do
   keypair_path="$ROOT_DIR/target/deploy/${program}-keypair.json"
@@ -323,5 +316,12 @@ for program in "${PROGRAMS[@]}"; do
   echo "[deploy] verifying $program ($program_id)"
   solana program show --url "$SOLANA_CLUSTER_URL" --keypair "$WALLET_PATH" "$program_id"
 done
+
+echo "[deploy] running mandatory post-deploy program identity verification"
+SOLANA_STAGE_A_WALLET_PATH="$WALLET_PATH" \
+SOLANA_RPC_URL="$SOLANA_CLUSTER_URL" \
+  bun run "$ROOT_DIR/../scripts/preflight-contract-deploy.ts" \
+  --cluster "$TARGET_CLUSTER" \
+  --require-deployed
 
 echo "[deploy] complete"

@@ -1423,7 +1423,7 @@ export function App() {
             <div className="hm-header-mob-row1">
               <div className="hm-logo">
                 <span className="hm-logo-text hm-logo-text--stacked">
-                  HYPERSCAPE
+                  HYPERIA
                   <br />
                   DUEL ARENA
                 </span>
@@ -1521,7 +1521,7 @@ export function App() {
           <>
             <div className="hm-header-left">
               <div className="hm-logo">
-                <span className="hm-logo-text">HYPERSCAPE DUEL ARENA</span>
+                <span className="hm-logo-text">HYPERIA DUEL ARENA</span>
               </div>
               <div className="hm-view-tabs hm-view-tabs--header">
                 <button

@@ -328,7 +328,7 @@ async function publishState(keeps, duelId, duelKeyHex) {
       agent1: {
         id: `stage-avax-${duelId}-a`,
         name: "Stage Agent A",
-        provider: "Hyperscape",
+        provider: "Hyperia",
         model: "alpha",
         hp: 90,
         maxHp: 100,

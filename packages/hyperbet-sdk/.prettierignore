@@ -1,0 +1,4 @@
+# Canonical Anchor artifacts are synchronized byte-for-byte and validated by
+# the Solana artifact contract tests. Formatting copies independently would
+# break that integrity guarantee.
+src/solana/idl/*.json

@@ -11,7 +11,7 @@
   --betting-dock-height: 300px;
   --betting-dock-gap: 24px;
 
-  /* Hyperscape Market theme — gold/steel/stone palette (from website) */
+  /* Hyperia Market theme — gold/steel/stone palette (from website) */
   --hm-bg: #0b0c0e;
   --hm-surface: #12141a;
   --hm-surface-raised: #1a1d24;
@@ -57,8 +57,16 @@
   --hm-font-body: "Inter", system-ui, -apple-system, sans-serif;
   --hm-font-mono: "IBM Plex Mono", "Menlo", monospace;
   --hm-font-display: "Orbitron", "Inter", system-ui, sans-serif;
-  --hm-header-control-bg: linear-gradient(180deg, rgba(28, 29, 33, 0.94) 0%, rgba(14, 14, 16, 0.99) 100%);
-  --hm-header-control-hover-bg: linear-gradient(180deg, rgba(38, 39, 44, 0.98) 0%, rgba(18, 18, 21, 1) 100%);
+  --hm-header-control-bg: linear-gradient(
+    180deg,
+    rgba(28, 29, 33, 0.94) 0%,
+    rgba(14, 14, 16, 0.99) 100%
+  );
+  --hm-header-control-hover-bg: linear-gradient(
+    180deg,
+    rgba(38, 39, 44, 0.98) 0%,
+    rgba(18, 18, 21, 1) 100%
+  );
   --hm-header-control-border: rgba(255, 255, 255, 0.1);
   --hm-header-control-border-strong: rgba(229, 184, 74, 0.34);
   --hm-header-control-text: #eceef2;
@@ -173,7 +181,8 @@ body {
   padding: 0 20px;
   height: 52px;
   background: var(--hm-bg, #0b0c0e);
-  border-bottom: 1px solid var(--hm-gold-border-subtle, rgba(229, 184, 74, 0.12));
+  border-bottom: 1px solid
+    var(--hm-gold-border-subtle, rgba(229, 184, 74, 0.12));
   pointer-events: auto;
   flex-shrink: 0;
   position: relative;
@@ -186,12 +195,14 @@ body {
   left: 0;
   right: 0;
   height: 1px;
-  background: linear-gradient(90deg,
-      transparent 0%,
-      var(--hm-gold-shimmer-fade, rgba(229, 184, 74, 0.35)) 30%,
-      var(--hm-gold-shimmer, rgba(229, 184, 74, 0.5)) 50%,
-      var(--hm-gold-shimmer-fade, rgba(229, 184, 74, 0.35)) 70%,
-      transparent 100%);
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    var(--hm-gold-shimmer-fade, rgba(229, 184, 74, 0.35)) 30%,
+    var(--hm-gold-shimmer, rgba(229, 184, 74, 0.5)) 50%,
+    var(--hm-gold-shimmer-fade, rgba(229, 184, 74, 0.35)) 70%,
+    transparent 100%
+  );
   pointer-events: none;
 }
 
@@ -224,7 +235,7 @@ body {
   justify-content: flex-end;
 }
 
-.top-bar-wallets>* {
+.top-bar-wallets > * {
   min-width: 0;
 }
 
@@ -247,9 +258,11 @@ body {
   align-items: center;
   justify-content: center;
   height: 100%;
-  background: radial-gradient(ellipse at 50% 50%,
-      rgba(229, 184, 74, 0.04) 0%,
-      transparent 70%);
+  background: radial-gradient(
+    ellipse at 50% 50%,
+    rgba(229, 184, 74, 0.04) 0%,
+    transparent 70%
+  );
 }
 
 /* ============================================================
@@ -474,9 +487,11 @@ body {
 .betting-side-btn {
   border-radius: var(--hm-radius-sm, 2px);
   border: 1px solid var(--hm-stone-mid);
-  background: linear-gradient(180deg,
-      var(--hm-stone-dark) 0%,
-      var(--hm-surface) 100%);
+  background: linear-gradient(
+    180deg,
+    var(--hm-stone-dark) 0%,
+    var(--hm-surface) 100%
+  );
   color: var(--hm-text-dim);
   cursor: pointer;
   padding: 10px 12px;
@@ -499,17 +514,21 @@ body {
 
 .betting-side-btn.is-yes {
   border-color: rgba(34, 197, 94, 0.5);
-  background: linear-gradient(180deg,
-      rgba(34, 197, 94, 0.12) 0%,
-      rgba(34, 197, 94, 0.06) 100%);
+  background: linear-gradient(
+    180deg,
+    rgba(34, 197, 94, 0.12) 0%,
+    rgba(34, 197, 94, 0.06) 100%
+  );
   color: #86efac;
 }
 
 .betting-side-btn.is-no {
   border-color: rgba(239, 68, 68, 0.5);
-  background: linear-gradient(180deg,
-      rgba(239, 68, 68, 0.12) 0%,
-      rgba(239, 68, 68, 0.06) 100%);
+  background: linear-gradient(
+    180deg,
+    rgba(239, 68, 68, 0.12) 0%,
+    rgba(239, 68, 68, 0.06) 100%
+  );
   color: #fca5a5;
 }
 
@@ -592,10 +611,12 @@ body {
    ============================================================ */
 .section-divider {
   height: 1px;
-  background: linear-gradient(90deg,
-      transparent,
-      var(--hm-gold-border-subtle),
-      transparent);
+  background: linear-gradient(
+    90deg,
+    transparent,
+    var(--hm-gold-border-subtle),
+    transparent
+  );
   margin: 16px 0;
 }
 
@@ -605,10 +626,12 @@ body {
 .place-order-btn {
   width: 100%;
   padding: 16px;
-  background: linear-gradient(180deg,
-      var(--hm-accent-gold-bright, #f0d060) 0%,
-      var(--hm-accent-gold-dim, #d4a84b) 35%,
-      var(--hm-accent-gold-ember, #b8860b) 100%);
+  background: linear-gradient(
+    180deg,
+    var(--hm-accent-gold-bright, #f0d060) 0%,
+    var(--hm-accent-gold-dim, #d4a84b) 35%,
+    var(--hm-accent-gold-ember, #b8860b) 100%
+  );
   color: #1a1200;
   border: 1px solid var(--hm-accent-gold-ember);
   border-radius: var(--hm-radius-sm, 2px);
@@ -642,9 +665,11 @@ body {
   height: 34px;
   border-radius: var(--hm-radius-sm, 2px);
   border: 1px solid var(--hm-stone-mid, #3d4149);
-  background: linear-gradient(180deg,
-      var(--hm-stone-dark, #2a2d34) 0%,
-      var(--hm-surface, #12141a) 100%);
+  background: linear-gradient(
+    180deg,
+    var(--hm-stone-dark, #2a2d34) 0%,
+    var(--hm-surface, #12141a) 100%
+  );
   color: var(--hm-text-dim, #b8b5ad);
   padding: 0 12px;
   font-size: 11px;
@@ -665,9 +690,11 @@ body {
 .wallet-connect-btn:hover {
   border-color: var(--hm-gold-border-light);
   color: var(--hm-accent-gold);
-  background: linear-gradient(180deg,
-      var(--hm-stone-mid) 0%,
-      var(--hm-stone-dark) 100%);
+  background: linear-gradient(
+    180deg,
+    var(--hm-stone-mid) 0%,
+    var(--hm-stone-dark) 100%
+  );
 }
 
 .sol-connect-btn.is-linked,
@@ -682,9 +709,11 @@ body {
    ============================================================ */
 .wallet-button {
   appearance: none !important;
-  background: linear-gradient(180deg,
-      var(--hm-stone-dark) 0%,
-      var(--hm-surface) 100%) !important;
+  background: linear-gradient(
+    180deg,
+    var(--hm-stone-dark) 0%,
+    var(--hm-surface) 100%
+  ) !important;
   display: inline-flex !important;
   align-items: center !important;
   justify-content: center !important;
@@ -769,9 +798,11 @@ select:focus-visible {
 
 .wallet-modal-wrapper {
   position: relative !important;
-  background: linear-gradient(180deg,
-      rgba(20, 22, 30, 0.98) 0%,
-      rgba(14, 16, 24, 0.99) 100%) !important;
+  background: linear-gradient(
+    180deg,
+    rgba(20, 22, 30, 0.98) 0%,
+    rgba(14, 16, 24, 0.99) 100%
+  ) !important;
   backdrop-filter: blur(var(--glass-blur)) saturate(1.4) !important;
   -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(1.4) !important;
   border: 1px solid var(--hm-gold-border-subtle) !important;
@@ -1135,9 +1166,11 @@ select:focus-visible {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(180deg,
-      var(--hm-stone-dark) 0%,
-      var(--hm-surface) 100%);
+  background: linear-gradient(
+    180deg,
+    var(--hm-stone-dark) 0%,
+    var(--hm-surface) 100%
+  );
   border: 1px solid var(--hm-stone-mid);
   border-radius: var(--hm-radius-sm);
   color: var(--hm-text-muted);
@@ -1153,7 +1186,6 @@ select:focus-visible {
 }
 
 @keyframes statusPulse {
-
   0%,
   100% {
     opacity: 1;
@@ -1167,7 +1199,6 @@ select:focus-visible {
 }
 
 @keyframes glowPulseRing {
-
   0%,
   100% {
     box-shadow:
@@ -1196,7 +1227,6 @@ select:focus-visible {
 }
 
 @keyframes accentBarPulse {
-
   0%,
   100% {
     opacity: 1;
@@ -1226,7 +1256,7 @@ select:focus-visible {
    ============================================================ */
 
 /* ============================================================
-   Perpetuals Panel — Hyperscape theme
+   Perpetuals Panel — Hyperia theme
    ============================================================ */
 
 .perp-wrap {
@@ -1247,9 +1277,11 @@ select:focus-visible {
 
 .perp-agent-btn {
   padding: 9px 4px;
-  background: linear-gradient(180deg,
-      var(--hm-stone-dark) 0%,
-      var(--hm-surface) 100%);
+  background: linear-gradient(
+    180deg,
+    var(--hm-stone-dark) 0%,
+    var(--hm-surface) 100%
+  );
   border: none;
   border-right: 1px solid var(--hm-gold-border-subtle);
   color: var(--hm-text-dim);
@@ -1269,17 +1301,21 @@ select:focus-visible {
 }
 
 .perp-agent-btn--active {
-  background: linear-gradient(180deg,
-      rgba(229, 184, 74, 0.2) 0%,
-      rgba(229, 184, 74, 0.06) 100%);
+  background: linear-gradient(
+    180deg,
+    rgba(229, 184, 74, 0.2) 0%,
+    rgba(229, 184, 74, 0.06) 100%
+  );
   color: var(--hm-accent-gold);
   box-shadow: inset 0 -2px 0 var(--hm-accent-gold);
 }
 
 .perp-agent-btn:hover:not(.perp-agent-btn--active) {
-  background: linear-gradient(180deg,
-      var(--hm-stone-mid) 0%,
-      var(--hm-stone-dark) 100%);
+  background: linear-gradient(
+    180deg,
+    var(--hm-stone-mid) 0%,
+    var(--hm-stone-dark) 100%
+  );
   color: var(--hm-text-primary);
 }
 
@@ -1362,9 +1398,11 @@ select:focus-visible {
 .perp-pos-close-btn {
   margin-left: auto;
   padding: 3px 8px;
-  background: linear-gradient(180deg,
-      var(--hm-stone-dark) 0%,
-      var(--hm-surface) 100%);
+  background: linear-gradient(
+    180deg,
+    var(--hm-stone-dark) 0%,
+    var(--hm-surface) 100%
+  );
   border: 1px solid var(--hm-stone-mid);
   border-radius: 2px;
   color: var(--hm-text-dim);
@@ -1449,9 +1487,11 @@ select:focus-visible {
 
 .perp-lev-btn {
   padding: 6px 4px;
-  background: linear-gradient(180deg,
-      var(--hm-stone-dark) 0%,
-      var(--hm-surface) 100%);
+  background: linear-gradient(
+    180deg,
+    var(--hm-stone-dark) 0%,
+    var(--hm-surface) 100%
+  );
   border: 1px solid var(--hm-stone-mid);
   border-radius: 2px;
   color: var(--hm-text-dim);
@@ -1466,18 +1506,22 @@ select:focus-visible {
 }
 
 .perp-lev-btn--active {
-  background: linear-gradient(180deg,
-      rgba(229, 184, 74, 0.22) 0%,
-      rgba(229, 184, 74, 0.07) 100%);
+  background: linear-gradient(
+    180deg,
+    rgba(229, 184, 74, 0.22) 0%,
+    rgba(229, 184, 74, 0.07) 100%
+  );
   border-color: var(--hm-gold-border-light);
   color: var(--hm-accent-gold);
   box-shadow: inset 0 1px 0 rgba(229, 184, 74, 0.15);
 }
 
 .perp-lev-btn:hover:not(.perp-lev-btn--active) {
-  background: linear-gradient(180deg,
-      var(--hm-stone-mid) 0%,
-      var(--hm-stone-dark) 100%);
+  background: linear-gradient(
+    180deg,
+    var(--hm-stone-mid) 0%,
+    var(--hm-stone-dark) 100%
+  );
   color: var(--hm-text-primary);
 }
 
@@ -1643,17 +1687,22 @@ select:focus-visible {
   gap: 6px;
   height: 28px;
   padding: 0 10px;
-  background: var(--hm-header-control-bg, linear-gradient(180deg,
-      var(--hm-stone-dark) 0%,
-      var(--hm-surface) 100%));
-  border: 1px solid var(--hm-header-control-border, var(--hm-gold-border-subtle));
+  background: var(
+    --hm-header-control-bg,
+    linear-gradient(180deg, var(--hm-stone-dark) 0%, var(--hm-surface) 100%)
+  );
+  border: 1px solid
+    var(--hm-header-control-border, var(--hm-gold-border-subtle));
   border-radius: 2px;
   color: var(--hm-header-control-text, var(--hm-text-dim));
   font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.5px;
   font-family: var(--hm-font-mono);
-  box-shadow: var(--hm-header-control-shadow, inset 0 1px 0 rgba(255, 255, 255, 0.04));
+  box-shadow: var(
+    --hm-header-control-shadow,
+    inset 0 1px 0 rgba(255, 255, 255, 0.04)
+  );
 }
 
 .chain-badge-icon {
@@ -1675,10 +1724,12 @@ select:focus-visible {
   height: 28px;
   min-width: 80px;
   padding: 0 28px 0 10px;
-  background: var(--hm-header-control-bg, linear-gradient(180deg,
-      var(--hm-stone-dark) 0%,
-      var(--hm-surface) 100%));
-  border: 1px solid var(--hm-header-control-border, var(--hm-gold-border-subtle));
+  background: var(
+    --hm-header-control-bg,
+    linear-gradient(180deg, var(--hm-stone-dark) 0%, var(--hm-surface) 100%)
+  );
+  border: 1px solid
+    var(--hm-header-control-border, var(--hm-gold-border-subtle));
   border-radius: 2px;
   color: var(--hm-header-control-text, var(--hm-accent-gold-dim));
   font-size: 12px;
@@ -1688,13 +1739,19 @@ select:focus-visible {
   outline: none;
   appearance: none;
   box-shadow: var(--hm-header-control-shadow, none);
-  transition: border-color 0.15s, background 0.15s, color 0.15s;
+  transition:
+    border-color 0.15s,
+    background 0.15s,
+    color 0.15s;
 }
 
 .chain-select:hover,
 .chain-select:focus {
   background: var(--hm-header-control-hover-bg, var(--hm-surface-raised));
-  border-color: var(--hm-header-control-border-strong, var(--hm-gold-border-light));
+  border-color: var(
+    --hm-header-control-border-strong,
+    var(--hm-gold-border-light)
+  );
   color: var(--hm-header-control-text, var(--hm-accent-gold));
 }
 
@@ -1774,7 +1831,7 @@ select:focus-visible {
 }
 
 /* ============================================================
-   HYPERSCAPE MARKET — Stream UI Layout
+   HYPERIA MARKET — Stream UI Layout
    Gold/Steel/Stone aesthetic, WCAG AA compliant
    Matches website design language
    ============================================================ */
@@ -1830,10 +1887,12 @@ select:focus-visible {
   left: 10%;
   right: 10%;
   height: 1px;
-  background: linear-gradient(90deg,
-      transparent,
-      var(--hm-gold-shimmer-fade),
-      transparent);
+  background: linear-gradient(
+    90deg,
+    transparent,
+    var(--hm-gold-shimmer-fade),
+    transparent
+  );
   pointer-events: none;
 }
 
@@ -1851,16 +1910,72 @@ select:focus-visible {
   flex-shrink: 0;
 }
 
+.hm-live-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--hm-border);
+  border-radius: var(--hm-radius);
+  background: rgba(255, 255, 255, 0.025);
+  color: var(--hm-text-dim);
+  font-family: var(--hm-font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.hm-live-state-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--hm-text-muted);
+}
+
+.hm-live-state-dot--connected {
+  background: var(--hm-accent-green);
+  box-shadow: 0 0 8px rgba(34, 197, 94, 0.5);
+}
+
+.hm-local-test-state {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--hm-gold-border-subtle);
+  border-radius: var(--hm-radius);
+  background: rgba(229, 184, 74, 0.06);
+  color: var(--hm-accent-gold-dim);
+  font-family: var(--hm-font-mono);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.hm-header .dock-collapse-btn {
+  width: auto;
+  min-width: 54px;
+  padding: 0 11px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
 .hm-logo {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 9px;
   flex-shrink: 0;
 }
 
 .hm-logo-text {
   font-family: var(--hm-font-display);
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 800;
   letter-spacing: 2px;
   color: var(--hm-accent-gold);
@@ -1869,13 +1984,28 @@ select:focus-visible {
   text-shadow: 0 0 12px var(--hm-gold-glow-medium);
 }
 
+.hm-logo-context {
+  padding-left: 9px;
+  border-left: 1px solid var(--hm-border);
+  color: var(--hm-text-muted);
+  font-family: var(--hm-font-mono);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  line-height: 1.2;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
 .hm-chain-badge {
   display: inline-flex;
   align-items: center;
   padding: 3px 10px;
-  background: linear-gradient(180deg,
-      rgba(42, 45, 52, 0.8) 0%,
-      rgba(26, 29, 36, 0.9) 100%);
+  background: linear-gradient(
+    180deg,
+    rgba(42, 45, 52, 0.8) 0%,
+    rgba(26, 29, 36, 0.9) 100%
+  );
   border: 1px solid var(--hm-stone-dark);
   border-radius: var(--hm-radius);
   font-size: 11px;
@@ -1974,18 +2104,22 @@ select:focus-visible {
 }
 
 .hm-side-chip--active.hm-side-chip--yes {
-  background: linear-gradient(180deg,
-      rgba(26, 122, 58, 0.35) 0%,
-      rgba(20, 94, 44, 0.25) 100%);
+  background: linear-gradient(
+    180deg,
+    rgba(26, 122, 58, 0.35) 0%,
+    rgba(20, 94, 44, 0.25) 100%
+  );
   border-color: rgba(34, 197, 94, 0.45);
   color: #a8f0c0;
   box-shadow: inset 0 -1px 0 rgba(0, 0, 0, 0.2);
 }
 
 .hm-side-chip--active.hm-side-chip--no {
-  background: linear-gradient(180deg,
-      rgba(122, 26, 26, 0.35) 0%,
-      rgba(94, 20, 20, 0.25) 100%);
+  background: linear-gradient(
+    180deg,
+    rgba(122, 26, 26, 0.35) 0%,
+    rgba(94, 20, 20, 0.25) 100%
+  );
   border-color: rgba(239, 68, 68, 0.45);
   color: #f0a8a8;
   box-shadow: inset 0 -1px 0 rgba(0, 0, 0, 0.2);
@@ -2040,9 +2174,11 @@ select:focus-visible {
   gap: 6px;
   height: 32px;
   padding: 0 14px;
-  background: linear-gradient(180deg,
-      rgba(42, 45, 52, 0.95) 0%,
-      rgba(26, 29, 36, 0.98) 100%);
+  background: linear-gradient(
+    180deg,
+    rgba(42, 45, 52, 0.95) 0%,
+    rgba(26, 29, 36, 0.98) 100%
+  );
   border: 1px solid var(--hm-stone-dark);
   border-radius: var(--hm-radius);
   color: var(--hm-text-dim);
@@ -2096,13 +2232,17 @@ select:focus-visible {
 .hm-main--models {
   overflow: auto;
   background:
-    radial-gradient(circle at top left,
+    radial-gradient(
+      circle at top left,
       rgba(229, 184, 74, 0.1),
-      transparent 32%),
-    linear-gradient(180deg,
+      transparent 32%
+    ),
+    linear-gradient(
+      180deg,
       rgba(8, 10, 14, 0.96) 0%,
       rgba(11, 12, 14, 1) 48%,
-      rgba(7, 8, 10, 1) 100%);
+      rgba(7, 8, 10, 1) 100%
+    );
 }
 
 .hm-models-main {
@@ -2167,9 +2307,11 @@ select:focus-visible {
 
 .hm-view-tab--active {
   color: #0e1015;
-  background: linear-gradient(180deg,
-      rgba(240, 208, 96, 0.95) 0%,
-      rgba(212, 168, 75, 0.95) 100%);
+  background: linear-gradient(
+    180deg,
+    rgba(240, 208, 96, 0.95) 0%,
+    rgba(212, 168, 75, 0.95) 100%
+  );
   box-shadow: 0 6px 20px rgba(229, 184, 74, 0.18);
 }
 
@@ -2207,10 +2349,12 @@ select:focus-visible {
   gap: 16px;
   padding: 20px 22px;
   border: 1px solid var(--hm-gold-border-subtle);
-  background: linear-gradient(135deg,
-      rgba(229, 184, 74, 0.08) 0%,
-      rgba(229, 184, 74, 0.02) 30%,
-      rgba(18, 20, 26, 0.96) 100%);
+  background: linear-gradient(
+    135deg,
+    rgba(229, 184, 74, 0.08) 0%,
+    rgba(229, 184, 74, 0.02) 30%,
+    rgba(18, 20, 26, 0.96) 100%
+  );
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
 }
 
@@ -2285,7 +2429,7 @@ select:focus-visible {
   background: rgba(59, 130, 246, 0.08);
 }
 
-.models-market-banner>div {
+.models-market-banner > div {
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -2301,9 +2445,11 @@ select:focus-visible {
 .models-market-leverage-row button,
 .models-market-actions button {
   border: 1px solid var(--hm-gold-border-subtle);
-  background: linear-gradient(180deg,
-      rgba(36, 39, 48, 0.98) 0%,
-      rgba(20, 22, 28, 0.98) 100%);
+  background: linear-gradient(
+    180deg,
+    rgba(36, 39, 48, 0.98) 0%,
+    rgba(20, 22, 28, 0.98) 100%
+  );
   color: var(--hm-text);
   cursor: pointer;
   transition:
@@ -2445,9 +2591,11 @@ select:focus-visible {
 }
 
 .models-market-table tbody tr.is-selected {
-  background: linear-gradient(90deg,
-      rgba(229, 184, 74, 0.14),
-      rgba(229, 184, 74, 0.03));
+  background: linear-gradient(
+    90deg,
+    rgba(229, 184, 74, 0.14),
+    rgba(229, 184, 74, 0.03)
+  );
 }
 
 .models-market-table td span {
@@ -2525,8 +2673,8 @@ select:focus-visible {
   padding: 18px;
 }
 
-.models-market-detail-grid>div,
-.models-market-summary>div {
+.models-market-detail-grid > div,
+.models-market-summary > div {
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -2601,13 +2749,13 @@ select:focus-visible {
   padding: 14px;
 }
 
-.models-market-active-position>div {
+.models-market-active-position > div {
   display: flex;
   flex-direction: column;
   gap: 6px;
 }
 
-.models-market-active-position>div:last-child {
+.models-market-active-position > div:last-child {
   align-items: flex-end;
 }
 
@@ -2626,7 +2774,7 @@ select:focus-visible {
   padding: 14px;
 }
 
-.models-market-field+.models-market-field {
+.models-market-field + .models-market-field {
   border-top: 1px solid rgba(255, 255, 255, 0.04);
 }
 
@@ -2678,16 +2826,20 @@ select:focus-visible {
 
 .models-market-actions .is-long {
   border-color: rgba(34, 197, 94, 0.25);
-  background: linear-gradient(180deg,
-      rgba(34, 197, 94, 0.14) 0%,
-      rgba(34, 197, 94, 0.05) 100%);
+  background: linear-gradient(
+    180deg,
+    rgba(34, 197, 94, 0.14) 0%,
+    rgba(34, 197, 94, 0.05) 100%
+  );
 }
 
 .models-market-actions .is-short {
   border-color: rgba(239, 68, 68, 0.25);
-  background: linear-gradient(180deg,
-      rgba(239, 68, 68, 0.14) 0%,
-      rgba(239, 68, 68, 0.05) 100%);
+  background: linear-gradient(
+    180deg,
+    rgba(239, 68, 68, 0.14) 0%,
+    rgba(239, 68, 68, 0.05) 100%
+  );
 }
 
 .models-market-empty,
@@ -2700,7 +2852,6 @@ select:focus-visible {
 }
 
 @media (max-width: 1200px) {
-
   .models-market-hero,
   .models-market-grid {
     grid-template-columns: 1fr;
@@ -2818,11 +2969,13 @@ select:focus-visible {
   transform: translate(-50%, -50%);
   width: 2px;
   height: 32px;
-  background: repeating-linear-gradient(to bottom,
-      rgba(255, 255, 255, 0.25) 0px,
-      rgba(255, 255, 255, 0.25) 2px,
-      transparent 2px,
-      transparent 5px);
+  background: repeating-linear-gradient(
+    to bottom,
+    rgba(255, 255, 255, 0.25) 0px,
+    rgba(255, 255, 255, 0.25) 2px,
+    transparent 2px,
+    transparent 5px
+  );
   border-radius: 1px;
   pointer-events: none;
 }
@@ -2840,17 +2993,19 @@ select:focus-visible {
   transform: translate(-50%, -50%);
   height: 2px;
   width: 32px;
-  background: repeating-linear-gradient(to right,
-      rgba(255, 255, 255, 0.25) 0px,
-      rgba(255, 255, 255, 0.25) 2px,
-      transparent 2px,
-      transparent 5px);
+  background: repeating-linear-gradient(
+    to right,
+    rgba(255, 255, 255, 0.25) 0px,
+    rgba(255, 255, 255, 0.25) 2px,
+    transparent 2px,
+    transparent 5px
+  );
   border-radius: 1px;
   pointer-events: none;
 }
 
 /* Hide resize handles once the desktop split layout is no longer active */
-@media (max-width: 1360px) {
+@media (max-width: 1024px) {
   .resize-handle {
     display: none;
   }
@@ -2866,17 +3021,28 @@ select:focus-visible {
   background: var(--hm-bg);
 }
 
+.hm-viewport-row--spectator {
+  justify-content: center;
+}
+
 .hm-game-viewport {
-  flex: none;
+  flex: 1;
   position: relative;
   width: 100%;
   min-width: 0;
-  min-height: 240px;
-  aspect-ratio: 16 / 9;
-  max-height: min(44vh, 560px);
+  min-height: 320px;
+  max-height: none;
   overflow: hidden;
-  background: var(--hm-bg);
+  background: #050608;
   border-bottom: 1px solid var(--hm-border);
+}
+
+.hm-game-viewport video {
+  object-fit: contain !important;
+}
+
+.hm-viewport-row--market .hm-game-viewport {
+  min-height: 300px;
 }
 
 .hm-game-placeholder {
@@ -2889,9 +3055,11 @@ select:focus-visible {
   width: 100%;
   height: 100%;
   background:
-    radial-gradient(ellipse 60% 50% at 50% 60%,
+    radial-gradient(
+      ellipse 60% 50% at 50% 60%,
       var(--hm-gold-glow-subtle) 0%,
-      transparent 70%),
+      transparent 70%
+    ),
     linear-gradient(180deg, #0b0c0e 0%, #12141a 50%, #0b0c0e 100%);
 }
 
@@ -2909,6 +3077,68 @@ select:focus-visible {
   pointer-events: none;
   user-select: none;
   text-shadow: 0 0 16px var(--hm-gold-glow-subtle);
+}
+
+.hm-stream-recovery {
+  position: absolute;
+  inset: 0;
+  z-index: 8;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 24px;
+  text-align: center;
+  background:
+    radial-gradient(
+      circle at 50% 46%,
+      rgba(71, 99, 138, 0.18),
+      transparent 34%
+    ),
+    rgba(5, 6, 8, 0.86);
+  color: var(--hm-text);
+  pointer-events: none;
+}
+
+.hm-stream-recovery strong {
+  font-family: var(--hm-font-display);
+  font-size: clamp(12px, 1.3vw, 15px);
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.hm-stream-recovery small {
+  max-width: 440px;
+  color: var(--hm-text-dim);
+  font-family: var(--hm-font-mono);
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.hm-stream-recovery-pulse {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--hm-accent-gold);
+  box-shadow: 0 0 0 0 rgba(229, 184, 74, 0.45);
+  animation: hm-stream-recovery-pulse 1.6s ease-out infinite;
+}
+
+@keyframes hm-stream-recovery-pulse {
+  70% {
+    box-shadow: 0 0 0 10px rgba(229, 184, 74, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(229, 184, 74, 0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hm-stream-recovery-pulse {
+    animation: none;
+  }
 }
 
 .hm-stream-controls {
@@ -2966,11 +3196,11 @@ select:focus-visible {
 
 /* ---- Chart Panel ---- */
 .hm-chart-panel {
-  flex: 1;
+  flex: 0 0 156px;
   display: flex;
   flex-direction: column;
   min-width: 0;
-  min-height: 220px;
+  min-height: 156px;
   position: relative;
   background: var(--hm-surface);
   border-bottom: 1px solid var(--hm-border);
@@ -3013,9 +3243,11 @@ select:focus-visible {
   top: 50%;
   transform: translateY(-50%);
   z-index: 4;
-  background: linear-gradient(180deg,
-      var(--hm-accent-gold) 0%,
-      var(--hm-accent-gold-ember) 100%);
+  background: linear-gradient(
+    180deg,
+    var(--hm-accent-gold) 0%,
+    var(--hm-accent-gold-ember) 100%
+  );
   color: #1a1408;
   padding: 3px 12px;
   font-size: 12px;
@@ -3054,14 +3286,20 @@ select:focus-visible {
   background: var(--hm-surface);
   /* Height set by JS via inline style; border replaced by ResizeHandle */
   overflow: hidden;
+  border-top: 1px solid var(--hm-border);
 }
 
 .hm-bottom-tabs {
   display: flex;
   gap: 0;
   border-bottom: 1px solid var(--hm-border);
-  padding: 0 16px;
+  padding: 0 12px;
   flex-shrink: 0;
+  background: linear-gradient(
+    180deg,
+    rgba(24, 26, 32, 0.96) 0%,
+    rgba(15, 17, 22, 0.98) 100%
+  );
 }
 
 .hm-bottom-tab {
@@ -3088,6 +3326,7 @@ select:focus-visible {
   color: var(--hm-accent-gold);
   border-bottom-color: var(--hm-accent-gold);
   font-weight: 600;
+  background: rgba(229, 184, 74, 0.04);
 }
 
 /* ---- Trades Panel ---- */
@@ -3338,10 +3577,12 @@ select:focus-visible {
   left: 15%;
   right: 15%;
   height: 1px;
-  background: linear-gradient(90deg,
-      transparent,
-      var(--hm-gold-shimmer-fade),
-      transparent);
+  background: linear-gradient(
+    90deg,
+    transparent,
+    var(--hm-gold-shimmer-fade),
+    transparent
+  );
   z-index: 1;
   pointer-events: none;
 }
@@ -3587,9 +3828,11 @@ select:focus-visible {
   appearance: none;
   width: 100%;
   height: 4px;
-  background: linear-gradient(to right,
-      var(--hm-accent-gold) 0%,
-      var(--hm-stone-dark) 0%);
+  background: linear-gradient(
+    to right,
+    var(--hm-accent-gold) 0%,
+    var(--hm-stone-dark) 0%
+  );
   border-radius: 2px;
   outline: none;
   cursor: pointer;
@@ -3650,11 +3893,13 @@ select:focus-visible {
 /* Sidebar dividers — gold shimmer */
 .hm-sidebar-divider {
   height: 1px;
-  background: linear-gradient(90deg,
-      transparent,
-      var(--hm-panel-card-border, var(--hm-border)) 30%,
-      var(--hm-panel-card-border, var(--hm-border)) 70%,
-      transparent);
+  background: linear-gradient(
+    90deg,
+    transparent,
+    var(--hm-panel-card-border, var(--hm-border)) 30%,
+    var(--hm-panel-card-border, var(--hm-border)) 70%,
+    transparent
+  );
   margin: 14px 0;
 }
 
@@ -3701,7 +3946,7 @@ select:focus-visible {
   padding: 10px 12px;
 }
 
-.hm-order-summary+.hm-trade-btn {
+.hm-order-summary + .hm-trade-btn {
   margin-top: 12px;
 }
 
@@ -3750,10 +3995,12 @@ select:focus-visible {
   left: -100%;
   width: 60%;
   height: 200%;
-  background: linear-gradient(90deg,
-      transparent,
-      rgba(255, 255, 255, 0.12),
-      transparent);
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 255, 255, 0.12),
+    transparent
+  );
   transform: skewX(-25deg);
   animation: hmBtnSweep 4s ease-in-out infinite;
   pointer-events: none;
@@ -3892,7 +4139,6 @@ select:focus-visible {
 }
 
 @keyframes hmPhasePulse {
-
   0%,
   100% {
     box-shadow: 0 0 4px rgba(34, 197, 94, 0.2);
@@ -4106,9 +4352,11 @@ select:focus-visible {
 .hm-agent-card {
   flex: 1;
   min-width: 240px;
-  background: linear-gradient(180deg,
-      rgba(26, 29, 36, 0.9) 0%,
-      rgba(18, 20, 26, 0.95) 100%);
+  background: linear-gradient(
+    180deg,
+    rgba(26, 29, 36, 0.9) 0%,
+    rgba(18, 20, 26, 0.95) 100%
+  );
   border: 1px solid var(--hm-stone-dark);
   border-radius: var(--hm-radius);
   padding: 12px;
@@ -4126,10 +4374,12 @@ select:focus-visible {
   left: 15%;
   right: 15%;
   height: 1px;
-  background: linear-gradient(90deg,
-      transparent,
-      var(--hm-gold-shimmer-fade),
-      transparent);
+  background: linear-gradient(
+    90deg,
+    transparent,
+    var(--hm-gold-shimmer-fade),
+    transparent
+  );
   pointer-events: none;
 }
 
@@ -4204,6 +4454,48 @@ select:focus-visible {
     width 0.4s ease,
     background 0.3s ease;
   box-shadow: 0 0 4px currentColor;
+}
+
+.hm-agent-loadout {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  border-top: 1px solid var(--hm-border-subtle);
+  padding-top: 7px;
+}
+
+.hm-agent-loadout-label {
+  flex-shrink: 0;
+  color: var(--hm-text-muted);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.hm-agent-loadout-items {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.hm-agent-loadout-items::-webkit-scrollbar {
+  display: none;
+}
+
+.hm-agent-loadout-item {
+  flex-shrink: 0;
+  padding: 3px 7px;
+  border: 1px solid var(--hm-border);
+  border-radius: var(--hm-radius);
+  background: rgba(255, 255, 255, 0.025);
+  color: var(--hm-text-dim);
+  font-size: 9px;
+  font-family: var(--hm-font-mono);
 }
 
 .hm-agent-monologues {
@@ -4459,6 +4751,199 @@ select:focus-visible {
   overflow: visible;
 }
 
+.hm-spectator-rail {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px 16px 20px;
+}
+
+.hm-spectator-fighters {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.hm-spectator-unavailable {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 18px;
+  border: 1px solid rgba(229, 184, 74, 0.2);
+  border-left: 2px solid rgba(229, 184, 74, 0.65);
+  border-radius: var(--hm-radius);
+  background: linear-gradient(
+    180deg,
+    rgba(28, 31, 38, 0.96) 0%,
+    rgba(18, 20, 26, 0.98) 100%
+  );
+}
+
+.hm-spectator-unavailable > strong {
+  color: var(--hm-text);
+  font-size: 14px;
+}
+
+.hm-spectator-unavailable > span {
+  color: var(--hm-text-dim);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.hm-spectator-fighter {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--hm-border);
+  border-radius: var(--hm-radius);
+  background: linear-gradient(
+    180deg,
+    rgba(28, 31, 38, 0.96) 0%,
+    rgba(18, 20, 26, 0.98) 100%
+  );
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+}
+
+.hm-spectator-fighter:first-child {
+  border-left: 2px solid rgba(229, 184, 74, 0.65);
+}
+
+.hm-spectator-fighter:last-child {
+  border-left: 2px solid rgba(110, 231, 183, 0.5);
+}
+
+.hm-spectator-fighter-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.hm-spectator-fighter-heading > span {
+  color: var(--hm-text-muted);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.hm-spectator-fighter-heading > strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--hm-text);
+  font-size: 16px;
+  letter-spacing: -0.01em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hm-spectator-hp-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  color: var(--hm-text-dim);
+  font-family: var(--hm-font-mono);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.hm-spectator-hp-track {
+  height: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.hm-spectator-hp-fill {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #1d9f4d 0%, #4ade80 100%);
+  box-shadow: 0 0 8px rgba(34, 197, 94, 0.3);
+  transition: width 0.35s ease;
+}
+
+.hm-spectator-fighter-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--hm-text-muted);
+  font-family: var(--hm-font-mono);
+  font-size: 10px;
+}
+
+.hm-spectator-loadout {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.hm-spectator-loadout > span {
+  padding: 4px 7px;
+  border: 1px solid var(--hm-gold-border-subtle);
+  border-radius: var(--hm-radius);
+  background: rgba(229, 184, 74, 0.045);
+  color: var(--hm-accent-gold-dim);
+  font-size: 10px;
+}
+
+.hm-spectator-cycle {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--hm-border);
+  border-radius: var(--hm-radius);
+  background: rgba(255, 255, 255, 0.025);
+  color: var(--hm-text-dim);
+  font-family: var(--hm-font-mono);
+  font-size: 11px;
+}
+
+.hm-spectator-cycle-label {
+  color: var(--hm-text-muted);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.hm-spectator-cycle strong {
+  color: var(--hm-accent-gold);
+  font-size: 11px;
+}
+
+.hm-spectator-cycle-time {
+  color: var(--hm-text);
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+}
+
+.hm-market-notice {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px;
+  border-left: 2px solid var(--hm-gold-border-medium);
+  background: rgba(229, 184, 74, 0.035);
+}
+
+.hm-market-notice strong {
+  color: var(--hm-text);
+  font-size: 12px;
+}
+
+.hm-market-notice span {
+  color: var(--hm-text-muted);
+  font-size: 10px;
+  line-height: 1.5;
+}
+
 .sol-clob-shell {
   gap: 12px !important;
 }
@@ -4469,9 +4954,11 @@ select:focus-visible {
   justify-content: space-between;
   gap: 12px;
   padding: 10px 12px;
-  background: linear-gradient(180deg,
-      rgba(24, 26, 32, 0.9) 0%,
-      rgba(14, 16, 21, 0.96) 100%);
+  background: linear-gradient(
+    180deg,
+    rgba(24, 26, 32, 0.9) 0%,
+    rgba(14, 16, 21, 0.96) 100%
+  );
   border: 1px solid var(--hm-border);
   border-radius: 2px;
   box-shadow:
@@ -4508,9 +4995,11 @@ select:focus-visible {
   padding: 0 14px;
   border: 1px solid var(--hm-gold-border-medium);
   border-radius: 2px;
-  background: linear-gradient(180deg,
-      rgba(229, 184, 74, 0.12) 0%,
-      rgba(107, 90, 32, 0.18) 100%);
+  background: linear-gradient(
+    180deg,
+    rgba(229, 184, 74, 0.12) 0%,
+    rgba(107, 90, 32, 0.18) 100%
+  );
   color: var(--hm-accent-gold);
   font-family: var(--hm-font-display);
   font-size: 12px;
@@ -4536,9 +5025,11 @@ select:focus-visible {
   display: grid;
   gap: 12px;
   padding: 14px;
-  background: linear-gradient(180deg,
-      rgba(17, 19, 24, 0.96) 0%,
-      rgba(10, 12, 16, 0.98) 100%);
+  background: linear-gradient(
+    180deg,
+    rgba(17, 19, 24, 0.96) 0%,
+    rgba(10, 12, 16, 0.98) 100%
+  );
   border: 1px solid var(--hm-border);
   border-radius: 2px;
   box-shadow:
@@ -4580,9 +5071,11 @@ select:focus-visible {
   padding: 0 12px;
   border: 1px solid var(--hm-stone-mid);
   border-radius: 2px;
-  background: linear-gradient(180deg,
-      rgba(61, 65, 73, 0.65) 0%,
-      rgba(26, 29, 36, 0.95) 100%);
+  background: linear-gradient(
+    180deg,
+    rgba(61, 65, 73, 0.65) 0%,
+    rgba(26, 29, 36, 0.95) 100%
+  );
   color: var(--hm-text);
   font-size: 11px;
   font-weight: 700;
@@ -4692,6 +5185,17 @@ select:focus-visible {
     0 4px 12px rgba(0, 0, 0, 0.6);
 }
 
+.hm-bet-fab:disabled,
+.hm-bet-fab:disabled:hover {
+  transform: none;
+  background: var(--hm-surface-raised);
+  color: var(--hm-text-muted);
+  border-color: var(--hm-stone-dark);
+  box-shadow: none;
+  cursor: not-allowed;
+  filter: saturate(0.25);
+}
+
 .hm-sidebar-close {
   display: none;
   /* shown only on mobile via media query */
@@ -4742,9 +5246,12 @@ select:focus-visible {
 
 /* ── ≤1100px: hide logo text to free up header space (desktop only) ── */
 @media (max-width: 1100px) {
-
   /* Only hide it inside the desktop header — mobile header has its own row */
-  .hm-header>.hm-logo .hm-logo-text {
+  .hm-header > .hm-logo .hm-logo-text {
+    display: none;
+  }
+
+  .hm-header-left .hm-logo-context {
     display: none;
   }
 }
@@ -4770,8 +5277,9 @@ select:focus-visible {
 
 .hm-header-mob-row1 .hm-logo {
   display: flex;
-  align-items: center;
-  gap: 5px;
+  align-items: flex-start;
+  flex-direction: column;
+  gap: 2px;
   flex-shrink: 0;
 }
 
@@ -4795,6 +5303,13 @@ select:focus-visible {
   letter-spacing: 1.5px;
 }
 
+.hm-header-mob-row1 .hm-logo-context {
+  padding: 0;
+  border: 0;
+  font-size: 7px;
+  letter-spacing: 0.09em;
+}
+
 .hm-logo-text--stacked br {
   display: block;
   content: "";
@@ -4811,7 +5326,8 @@ select:focus-visible {
 
 /* Icon-only button (🏆) */
 .hm-header-mob-icon-btn {
-  width: 30px;
+  width: auto;
+  min-width: 48px;
   height: 30px;
   display: flex;
   align-items: center;
@@ -4819,7 +5335,10 @@ select:focus-visible {
   background: transparent;
   border: 1px solid var(--hm-stone-dark);
   border-radius: var(--hm-radius);
-  font-size: 14px;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
   cursor: pointer;
   color: var(--hm-text-dim);
   padding: 0;
@@ -4836,9 +5355,11 @@ select:focus-visible {
 .hm-header-mob-wallet-btn {
   height: 30px;
   padding: 0 9px;
-  background: linear-gradient(180deg,
-      var(--hm-stone-dark) 0%,
-      var(--hm-surface) 100%);
+  background: linear-gradient(
+    180deg,
+    var(--hm-stone-dark) 0%,
+    var(--hm-surface) 100%
+  );
   border: 1px solid var(--hm-stone-dark);
   border-radius: var(--hm-radius);
   color: var(--hm-text-dim);
@@ -4856,9 +5377,11 @@ select:focus-visible {
 .hm-header-mob-wallet-btn--linked {
   border-color: var(--hm-gold-border-subtle);
   color: var(--hm-accent-gold-dim);
-  background: linear-gradient(180deg,
-      rgba(229, 184, 74, 0.08) 0%,
-      rgba(229, 184, 74, 0.04) 100%);
+  background: linear-gradient(
+    180deg,
+    rgba(229, 184, 74, 0.08) 0%,
+    rgba(229, 184, 74, 0.04) 100%
+  );
 }
 
 /* Row 2: Match strip */
@@ -4923,15 +5446,17 @@ select:focus-visible {
   left: 10%;
   right: 10%;
   height: 1px;
-  background: linear-gradient(90deg,
-      transparent,
-      var(--hm-gold-shimmer-fade),
-      transparent);
+  background: linear-gradient(
+    90deg,
+    transparent,
+    var(--hm-gold-shimmer-fade),
+    transparent
+  );
   pointer-events: none;
 }
 
-/* ── ≤1360px: mid desktop/tablet landscape — stack content above sidebar ── */
-@media (max-width: 1360px) {
+/* ── ≤1024px: tablet landscape — stack content above sidebar ── */
+@media (max-width: 1024px) {
   .hm-main {
     flex-direction: column;
     overflow: hidden;
@@ -4952,15 +5477,15 @@ select:focus-visible {
   .hm-game-viewport {
     width: 100% !important;
     min-height: 220px;
-    max-height: min(40vh, 480px);
+    max-height: none;
     border-right: none;
     border-bottom: 1px solid var(--hm-border);
   }
 
   .hm-chart-panel {
-    flex: 1;
+    flex: 0 0 140px;
     min-width: 0;
-    min-height: 180px;
+    min-height: 140px;
   }
 
   .hm-bottom-panel {
@@ -4994,7 +5519,6 @@ select:focus-visible {
 
 /* ── ≤768px: tablet portrait — chart hidden, sidebar as slide-up sheet ── */
 @media (max-width: 768px) {
-
   /* Keep root contained — layout self-fits within 100dvh */
   .hm-root {
     overflow: hidden;
@@ -5289,9 +5813,9 @@ select:focus-visible {
   }
 
   .hm-header-mob-icon-btn {
-    width: 28px;
+    min-width: 46px;
     height: 28px;
-    font-size: 13px;
+    font-size: 8px;
     flex-shrink: 0;
   }
 
@@ -5308,19 +5832,19 @@ select:focus-visible {
 
   .hm-bottom-tabs {
     padding: 0 6px;
-    flex-wrap: wrap;
-    gap: 0 4px;
-    overflow-x: visible;
+    flex-wrap: nowrap;
+    gap: 0;
+    overflow-x: auto;
   }
 
   .hm-bottom-tab {
-    flex: 1 1 calc(33.333% - 4px);
-    min-width: 0;
-    padding: 8px 6px;
+    flex: 0 0 auto;
+    min-width: 76px;
+    padding: 8px 10px;
     font-size: 10px;
     line-height: 1.2;
     min-height: 36px;
-    white-space: normal;
+    white-space: nowrap;
     text-align: center;
   }
 
@@ -5407,12 +5931,6 @@ select:focus-visible {
     font-size: 14px;
   }
 
-  /* Perps panel tighter */
-  .perp-wrap {
-    padding: 12px 12px 14px;
-    gap: 8px;
-  }
-
   /* Leaderboard table */
   .hm-trades-table th,
   .hm-trades-table td {
@@ -5422,50 +5940,10 @@ select:focus-visible {
 
 /* ── Touch input safety: prevent iOS zoom on inputs ── */
 @media (max-width: 768px) {
-
   input[type="number"],
   input[type="text"],
   input[type="search"],
   select {
     font-size: max(16px, 1em);
   }
-}
-
-/* ====== EVM SPECIFIC FALLBACKS ====== */
-.evm-connect-btn {
-  height: 48px;
-  padding: 0 16px;
-  border-radius: 12px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  background: rgba(255, 255, 255, 0.05);
-  backdrop-filter: blur(10px);
-  color: #fff;
-  font-family: inherit;
-  font-weight: 600;
-  font-size: 14px;
-  cursor: pointer;
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  min-width: 140px;
-}
-
-.evm-connect-btn.is-linked {
-  background: rgba(22, 163, 74, 0.15);
-  border-color: rgba(22, 163, 74, 0.3);
-  color: #4ade80;
-  cursor: default;
-}
-
-.evm-connect-btn.is-linked:hover {
-  background: rgba(22, 163, 74, 0.15);
-  border-color: rgba(22, 163, 74, 0.3);
-}
-
-.evm-connect-btn:hover {
-  background: rgba(255, 255, 255, 0.1);
-  border-color: rgba(255, 255, 255, 0.2);
-  transform: translateY(-1px);
 }

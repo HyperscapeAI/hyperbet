@@ -9,5 +9,8 @@ export function findClobVaultPda(
   programId: PublicKey,
   marketState: PublicKey,
 ): PublicKey {
-  return findProgramAddressSync([Buffer.from("vault"), marketState.toBuffer()], programId)[0];
+  return findProgramAddressSync(
+    [Buffer.from("vault"), marketState.toBuffer()],
+    programId,
+  )[0];
 }

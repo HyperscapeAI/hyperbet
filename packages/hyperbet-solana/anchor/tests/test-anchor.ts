@@ -12,7 +12,7 @@ function expandHome(filePath: string): string {
 function resolveAnchorWalletPath(): string {
   const candidates = [
     process.env.ANCHOR_WALLET,
-    "~/.config/solana/hyperscape-keys/deployer.json",
+    "~/.config/solana/hyperia-keys/deployer.json",
     "~/.config/solana/id.json",
   ]
     .filter((value): value is string => typeof value === "string")
@@ -29,9 +29,36 @@ function resolveAnchorWalletPath(): string {
 
 const DEFAULT_COMMITMENT: anchor.web3.Commitment = "confirmed";
 const CONFIRM_TIMEOUT_MS = 120_000;
+const RPC_CALL_TIMEOUT_MS = 15_000;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function withRpcCallTimeout<T>(
+  operation: string,
+  promise: Promise<T>,
+  timeoutMs = RPC_CALL_TIMEOUT_MS,
+): Promise<T> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        timeout = setTimeout(
+          () =>
+            reject(
+              new Error(`${operation} did not return within ${timeoutMs}ms`),
+            ),
+          timeoutMs,
+        );
+      }),
+    ]);
+  } finally {
+    if (timeout) {
+      clearTimeout(timeout);
+    }
+  }
 }
 
 function resolveAnchorWsUrl(providerUrl: string): string {
@@ -54,7 +81,10 @@ export async function getLatestBlockhashWithRetries(
 
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     try {
-      return await connection.getLatestBlockhash(commitment);
+      return await withRpcCallTimeout(
+        "getLatestBlockhash",
+        connection.getLatestBlockhash(commitment),
+      );
     } catch (error) {
       lastError = error;
       if (attempt < maxAttempts) {
@@ -81,9 +111,12 @@ export async function confirmSignatureByPolling(
   while (Date.now() < deadline) {
     pollCount += 1;
     try {
-      const statuses = await connection.getSignatureStatuses([signature], {
-        searchTransactionHistory: true,
-      });
+      const statuses = await withRpcCallTimeout(
+        "getSignatureStatuses",
+        connection.getSignatureStatuses([signature], {
+          searchTransactionHistory: true,
+        }),
+      );
       const status = statuses.value[0];
 
       if (status?.err) {
@@ -101,8 +134,10 @@ export async function confirmSignatureByPolling(
       }
 
       if (lastValidBlockHeight && pollCount % 8 === 0) {
-        const currentBlockHeight =
-          await connection.getBlockHeight(DEFAULT_COMMITMENT);
+        const currentBlockHeight = await withRpcCallTimeout(
+          "getBlockHeight",
+          connection.getBlockHeight(DEFAULT_COMMITMENT),
+        );
         if (currentBlockHeight > lastValidBlockHeight) {
           throw new Error(
             `transaction ${signature} expired at block height ${lastValidBlockHeight}`,
@@ -169,13 +204,13 @@ async function sendAndConfirmWithPolling(
       }
 
       const signedTx = await provider.wallet.signTransaction(tx);
-      const signature = await provider.connection.sendRawTransaction(
-        signedTx.serialize(),
-        {
+      const signature = await withRpcCallTimeout(
+        "sendRawTransaction",
+        provider.connection.sendRawTransaction(signedTx.serialize(), {
           maxRetries: 8,
           preflightCommitment: commitment,
           skipPreflight: opts.skipPreflight ?? false,
-        },
+        }),
       );
 
       await confirmSignatureByPolling(
@@ -232,7 +267,9 @@ export async function sendVersionedTransactionWithLookupTable(
     payer?: anchor.web3.Keypair;
   };
   if (!wallet.payer) {
-    throw new Error("Anchor wallet does not expose a payer for v0 transactions");
+    throw new Error(
+      "Anchor wallet does not expose a payer for v0 transactions",
+    );
   }
 
   const lookupTableAddresses = uniquePubkeys(
@@ -243,7 +280,10 @@ export async function sendVersionedTransactionWithLookupTable(
     ),
   ).filter((pubkey) => !pubkey.equals(wallet.publicKey));
 
-  const recentSlot = await provider.connection.getSlot(DEFAULT_COMMITMENT);
+  const recentSlot = await withRpcCallTimeout(
+    "getSlot for lookup-table creation",
+    provider.connection.getSlot(DEFAULT_COMMITMENT),
+  );
   let lastLookupMutationSlot = recentSlot;
   const [createLookupTableIx, lookupTableAddress] =
     anchor.web3.AddressLookupTableProgram.createLookupTable({
@@ -275,15 +315,19 @@ export async function sendVersionedTransactionWithLookupTable(
       [],
       options,
     );
-    lastLookupMutationSlot = await provider.connection.getSlot(
-      DEFAULT_COMMITMENT,
+    lastLookupMutationSlot = await withRpcCallTimeout(
+      "getSlot after lookup-table extension",
+      provider.connection.getSlot(DEFAULT_COMMITMENT),
     );
   }
 
   // Newly extended lookup table entries only become usable in a later bank slot.
   const waitForSlot = async (minimumSlotExclusive: number): Promise<void> => {
     for (let attempt = 0; attempt < 40; attempt += 1) {
-      const currentSlot = await provider.connection.getSlot(DEFAULT_COMMITMENT);
+      const currentSlot = await withRpcCallTimeout(
+        "getSlot while activating lookup table",
+        provider.connection.getSlot(DEFAULT_COMMITMENT),
+      );
       if (currentSlot > minimumSlotExclusive) {
         return;
       }
@@ -296,7 +340,10 @@ export async function sendVersionedTransactionWithLookupTable(
   await waitForSlot(lastLookupMutationSlot);
 
   const lookupTableAccount = (
-    await provider.connection.getAddressLookupTable(lookupTableAddress)
+    await withRpcCallTimeout(
+      "getAddressLookupTable",
+      provider.connection.getAddressLookupTable(lookupTableAddress),
+    )
   ).value;
   if (!lookupTableAccount) {
     throw new Error(
@@ -336,13 +383,13 @@ export async function sendVersionedTransactionWithLookupTable(
       const transaction = new anchor.web3.VersionedTransaction(message);
       transaction.sign(allSigners);
 
-      const signature = await provider.connection.sendRawTransaction(
-        transaction.serialize(),
-        {
+      const signature = await withRpcCallTimeout(
+        "sendRawTransaction for lookup-table transaction",
+        provider.connection.sendRawTransaction(transaction.serialize(), {
           maxRetries: 32,
           preflightCommitment: commitment,
           skipPreflight: opts.skipPreflight ?? false,
-        },
+        }),
       );
       await confirmSignatureByPolling(
         provider.connection,
@@ -381,13 +428,13 @@ async function sendVersionedTransactionWithPolling(
         transaction.sign(signers);
       }
       const signedTx = await provider.wallet.signTransaction(transaction);
-      const signature = await provider.connection.sendRawTransaction(
-        signedTx.serialize(),
-        {
+      const signature = await withRpcCallTimeout(
+        "sendRawVersionedTransaction",
+        provider.connection.sendRawTransaction(signedTx.serialize(), {
           maxRetries: 8,
           preflightCommitment: commitment,
           skipPreflight: opts.skipPreflight ?? false,
-        },
+        }),
       );
       await confirmSignatureByPolling(provider.connection, signature);
       return signature;

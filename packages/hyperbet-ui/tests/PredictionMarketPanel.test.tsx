@@ -29,7 +29,6 @@ function renderPanel(
       programsReady
       agent1Name="Alpha"
       agent2Name="Bravo"
-      isEvm={false}
       compact
       {...overrides}
     />,
@@ -72,6 +71,27 @@ describe("PredictionMarketPanel", () => {
     expect((submit as HTMLButtonElement).disabled).toBe(true);
   });
 
+  it("renders public matchup data without transaction controls in spectator mode", () => {
+    const state = renderPanel({ readOnly: true });
+    const { container } = state;
+
+    expect(container.textContent).toContain(
+      "Spectator mode · transaction controls disabled",
+    );
+    expect(container.querySelector('[data-testid="prediction-tab-buy"]')).toBe(
+      null,
+    );
+    expect(
+      container.querySelector('[data-testid="prediction-amount-input"]'),
+    ).toBe(null);
+    expect(container.querySelector('[data-testid="prediction-submit"]')).toBe(
+      null,
+    );
+    expect(container.textContent).toContain("Alpha");
+    expect(container.textContent).toContain("Bravo");
+    expect(state.placedBets).toBe(0);
+  });
+
   it("shows sell-side content only when selling is supported", () => {
     const { container } = renderPanel({
       supportsSell: true,
@@ -86,10 +106,10 @@ describe("PredictionMarketPanel", () => {
     expect(container.textContent).toContain("Sell controls");
   });
 
-  it("renders localized Chinese action labels and AVAX denomination text", () => {
+  it("renders localized Chinese action labels and SOL denomination text", () => {
     const { container } = renderPanel({
       locale: "zh",
-      currencySymbol: "AVAX",
+      currencySymbol: "SOL",
     });
 
     expect(getByTestId(container, "prediction-tab-buy").textContent).toContain(
@@ -102,9 +122,20 @@ describe("PredictionMarketPanel", () => {
       getByTestId(container, "prediction-amount-input").getAttribute(
         "aria-label",
       ),
-    ).toBe("下注金额（AVAX）");
+    ).toBe("下注金额（SOL）");
     expect(getByTestId(container, "prediction-submit").textContent).toContain(
       "买入 YES",
     );
+  });
+
+  it("does not invent probability percentages when a CLOB quote is unavailable", () => {
+    const { container } = renderPanel({ yesPercent: null, noPercent: null });
+    const yesSelection = getByTestId(container, "prediction-select-yes");
+    const noSelection = getByTestId(container, "prediction-select-no");
+
+    expect(yesSelection.textContent).toContain("—");
+    expect(noSelection.textContent).toContain("—");
+    expect(yesSelection.textContent).not.toContain("50%");
+    expect(noSelection.textContent).not.toContain("null%");
   });
 });

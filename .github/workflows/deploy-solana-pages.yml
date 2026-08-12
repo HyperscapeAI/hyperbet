@@ -6,8 +6,10 @@ on:
     paths:
       - "packages/hyperbet-solana/app/**"
       - "packages/hyperbet-ui/**"
-      - "packages/hyperbet-chain-registry/**"
-      - "scripts/**"
+      - "packages/hyperbet-solana/deployments/**"
+      - "scripts/ci-env-audit-solana-v1.ts"
+      - "scripts/ci-solana-v1-scope.ts"
+      - "scripts/check-legacy-branding.mjs"
       - ".github/actions/setup-hyperbet/**"
       - ".github/workflows/deploy-solana-pages.yml"
       - "docs/hyperbet-production-deploy.md"
@@ -34,8 +36,6 @@ concurrency:
 
 env:
   CLOUDFLARE_ACCOUNT_ID: ${{ vars.HYPERBET_CLOUDFLARE_ACCOUNT_ID != '' && vars.HYPERBET_CLOUDFLARE_ACCOUNT_ID || '50ad2052bbc6ca528d6993a689b419a4' }}
-  HYPERBET_BSC_GOLD_CLOB_ADDRESS: ${{ vars.HYPERBET_BSC_GOLD_CLOB_ADDRESS != '' && vars.HYPERBET_BSC_GOLD_CLOB_ADDRESS || '0x443C09B1E7bb7bA3392b02500772B185654A6F33' }}
-  HYPERBET_BASE_GOLD_CLOB_ADDRESS: ${{ vars.HYPERBET_BASE_GOLD_CLOB_ADDRESS != '' && vars.HYPERBET_BASE_GOLD_CLOB_ADDRESS || '0xb8c66D6895Bafd1B0027F2c0865865043064437C' }}
 
 jobs:
   deploy:
@@ -49,14 +49,10 @@ jobs:
       - name: Resolve deployment target
         run: |
           deploy_target="production"
-          pages_project_name="${{ vars.HYPERBET_SOLANA_PAGES_PROJECT_NAME != '' && vars.HYPERBET_SOLANA_PAGES_PROJECT_NAME || 'hyperscape-betting' }}"
+          pages_project_name="${{ vars.HYPERBET_SOLANA_PAGES_PROJECT_NAME != '' && vars.HYPERBET_SOLANA_PAGES_PROJECT_NAME || 'hyperia-betting' }}"
           pages_expected_url="${{ vars.HYPERBET_SOLANA_PAGES_PRODUCTION_URL != '' && vars.HYPERBET_SOLANA_PAGES_PRODUCTION_URL || 'https://hyperbet.win' }}"
           api_url="${{ vars.HYPERBET_SOLANA_KEEPER_URL != '' && vars.HYPERBET_SOLANA_KEEPER_URL || 'https://api.hyperbet.win' }}"
           ws_url="${{ vars.HYPERBET_SOLANA_KEEPER_WS_URL != '' && vars.HYPERBET_SOLANA_KEEPER_WS_URL || 'wss://api.hyperbet.win/ws' }}"
-          bsc_clob_address="${{ vars.HYPERBET_BSC_GOLD_CLOB_ADDRESS != '' && vars.HYPERBET_BSC_GOLD_CLOB_ADDRESS || '0x443C09B1E7bb7bA3392b02500772B185654A6F33' }}"
-          base_clob_address="${{ vars.HYPERBET_BASE_GOLD_CLOB_ADDRESS != '' && vars.HYPERBET_BASE_GOLD_CLOB_ADDRESS || '0xb8c66D6895Bafd1B0027F2c0865865043064437C' }}"
-          bsc_chain_id="56"
-          base_chain_id="8453"
 
           if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.environment }}" = "staging" ]; then
             deploy_target="staging"
@@ -64,10 +60,6 @@ jobs:
             pages_expected_url="${{ vars.HYPERBET_SOLANA_PAGES_STAGING_URL }}"
             api_url="${{ vars.HYPERBET_SOLANA_KEEPER_STAGING_URL }}"
             ws_url="${{ vars.HYPERBET_SOLANA_KEEPER_STAGING_WS_URL }}"
-            bsc_clob_address="${{ vars.HYPERBET_BSC_STAGING_GOLD_CLOB_ADDRESS }}"
-            base_clob_address="${{ vars.HYPERBET_BASE_STAGING_GOLD_CLOB_ADDRESS }}"
-            bsc_chain_id="${{ vars.HYPERBET_BSC_STAGING_CHAIN_ID }}"
-            base_chain_id="${{ vars.HYPERBET_BASE_STAGING_CHAIN_ID }}"
           fi
 
           if [ -z "${pages_project_name}" ]; then
@@ -82,22 +74,11 @@ jobs:
             fi
           fi
 
-          if [ "${deploy_target}" = "staging" ]; then
-            if [ -z "${bsc_clob_address}" ] || [ -z "${base_clob_address}" ] || [ -z "${bsc_chain_id}" ] || [ -z "${base_chain_id}" ]; then
-              echo "Missing Solana Pages staging chain configuration" >&2
-              exit 1
-            fi
-          fi
-
           echo "DEPLOY_TARGET=${deploy_target}" >> "${GITHUB_ENV}"
           echo "PAGES_PROJECT_NAME=${pages_project_name}" >> "${GITHUB_ENV}"
           echo "PAGES_EXPECTED_URL=${pages_expected_url}" >> "${GITHUB_ENV}"
           echo "HYPERBET_API_URL=${api_url}" >> "${GITHUB_ENV}"
           echo "HYPERBET_WS_URL=${ws_url}" >> "${GITHUB_ENV}"
-          echo "HYPERBET_BSC_GOLD_CLOB_ADDRESS=${bsc_clob_address}" >> "${GITHUB_ENV}"
-          echo "HYPERBET_BASE_GOLD_CLOB_ADDRESS=${base_clob_address}" >> "${GITHUB_ENV}"
-          echo "HYPERBET_BSC_CHAIN_ID=${bsc_chain_id}" >> "${GITHUB_ENV}"
-          echo "HYPERBET_BASE_CHAIN_ID=${base_chain_id}" >> "${GITHUB_ENV}"
 
       - name: Configure Wrangler auth
         env:
@@ -125,17 +106,12 @@ jobs:
           bash scripts/ci-install-verified.sh root hyperbet-solana-app
 
       - name: Audit deploy env
-        run: node --import tsx scripts/ci-env-audit.ts --target=pages:solana --deployment=${DEPLOY_TARGET}
+        run: node --import tsx scripts/ci-env-audit-solana-v1.ts --target=pages:solana --deployment=${DEPLOY_TARGET}
         env:
           VITE_GAME_API_URL: ${{ env.HYPERBET_API_URL }}
           VITE_GAME_WS_URL: ${{ env.HYPERBET_WS_URL }}
           VITE_SOLANA_CLUSTER: mainnet-beta
           VITE_USE_GAME_RPC_PROXY: "true"
-          VITE_USE_GAME_EVM_RPC_PROXY: "true"
-          VITE_BSC_CHAIN_ID: ${{ env.HYPERBET_BSC_CHAIN_ID }}
-          VITE_BSC_GOLD_CLOB_ADDRESS: ${{ env.HYPERBET_BSC_GOLD_CLOB_ADDRESS }}
-          VITE_BASE_CHAIN_ID: ${{ env.HYPERBET_BASE_CHAIN_ID }}
-          VITE_BASE_GOLD_CLOB_ADDRESS: ${{ env.HYPERBET_BASE_GOLD_CLOB_ADDRESS }}
 
       - name: Build production app
         run: bun run --cwd packages/hyperbet-solana/app build --mode mainnet-beta
@@ -145,11 +121,9 @@ jobs:
           VITE_GAME_WS_URL: ${{ env.HYPERBET_WS_URL }}
           VITE_SOLANA_CLUSTER: mainnet-beta
           VITE_USE_GAME_RPC_PROXY: "true"
-          VITE_USE_GAME_EVM_RPC_PROXY: "true"
-          VITE_BSC_CHAIN_ID: ${{ env.HYPERBET_BSC_CHAIN_ID }}
-          VITE_BASE_CHAIN_ID: ${{ env.HYPERBET_BASE_CHAIN_ID }}
-          VITE_BSC_GOLD_CLOB_ADDRESS: ${{ env.HYPERBET_BSC_GOLD_CLOB_ADDRESS }}
-          VITE_BASE_GOLD_CLOB_ADDRESS: ${{ env.HYPERBET_BASE_GOLD_CLOB_ADDRESS }}
+
+      - name: Verify SOL-only production bundle
+        run: bun run ci:scope:solana
 
       - name: Verify dist hygiene
         run: |

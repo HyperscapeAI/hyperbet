@@ -27,7 +27,12 @@ import {
   type MarketMakerConfig,
   type MarketSnapshot,
 } from "@hyperbet/mm-core";
-import { AnchorProvider, Program, type Idl, type Wallet } from "@coral-xyz/anchor";
+import {
+  AnchorProvider,
+  Program,
+  type Idl,
+  type Wallet,
+} from "@coral-xyz/anchor";
 import BN from "bn.js";
 import {
   Connection,
@@ -41,7 +46,7 @@ import bs58 from "bs58";
 import dotenv from "dotenv";
 import { ethers } from "ethers";
 
-import goldClobMarketIdl from "./idl/gold_clob_market.json" with { type: "json" };
+import duelMarketIdl from "./idl/duel_market.json" with { type: "json" };
 import lvrAmmIdl from "./idl/lvr_amm.json" with { type: "json" };
 import {
   duelKeyHexToBytes,
@@ -59,7 +64,11 @@ import {
   findAmmMintYesPda,
   findAmmMintNoPda,
 } from "./solana-helpers.ts";
-import { calcAmmPrice, calcDynamicLiquidity, estimateSlippage } from "./amm-math.ts";
+import {
+  calcAmmPrice,
+  calcDynamicLiquidity,
+  estimateSlippage,
+} from "./amm-math.ts";
 import {
   createDefaultMarketMakerStateStore,
   type ClaimBacklogInput,
@@ -78,7 +87,9 @@ const SHARE_UNIT_SIZE = 1_000n;
 const EVM_ORDER_FLAG_GTC = 0x01;
 const OUTBOX_LEASE_MS = 60_000;
 const CLAIM_BACKLOG_LEASE_MS = 60_000;
-const TOKEN_PROGRAM_ID = new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
+const TOKEN_PROGRAM_ID = new PublicKey(
+  "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+);
 const ASSOCIATED_TOKEN_PROGRAM_ID = new PublicKey(
   "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",
 );
@@ -137,7 +148,10 @@ type EvmRuntime = {
   goldClobAddress: string;
 };
 
-type EvmNonceRuntime = Pick<EvmRuntime, "chainKey" | "provider" | "walletAddress">;
+type EvmNonceRuntime = Pick<
+  EvmRuntime,
+  "chainKey" | "provider" | "walletAddress"
+>;
 
 type SignableTx = Transaction | VersionedTransaction;
 type AnchorLikeWallet = Wallet & {
@@ -266,7 +280,10 @@ function readEnvNumber(name: string, fallback: number): number {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
-function findAssociatedTokenAddress(mint: PublicKey, owner: PublicKey): PublicKey {
+function findAssociatedTokenAddress(
+  mint: PublicKey,
+  owner: PublicKey,
+): PublicKey {
   return PublicKey.findProgramAddressSync(
     [owner.toBuffer(), TOKEN_PROGRAM_ID.toBuffer(), mint.toBuffer()],
     ASSOCIATED_TOKEN_PROGRAM_ID,
@@ -306,7 +323,9 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 function normalizePredictionMarketDuelKeyHex(
   value: string | null | undefined,
 ): string | null {
-  return normalizePredictionMarketDuelKeyHexFromRegistry(value, { prefix: true });
+  return normalizePredictionMarketDuelKeyHexFromRegistry(value, {
+    prefix: true,
+  });
 }
 
 function normalizePredictionMarketsResponse(
@@ -322,7 +341,9 @@ function normalizePredictionMarketsResponse(
     .map((entry) =>
       normalizePredictionMarketLifecycleRecord(entry, { duelKeyPrefix: true }),
     )
-    .filter((record): record is PredictionMarketLifecycleRecord => record != null);
+    .filter(
+      (record): record is PredictionMarketLifecycleRecord => record != null,
+    );
 
   return {
     duel: {
@@ -359,8 +380,13 @@ function defaultPredictionMarketsApiUrl(): string {
   );
 }
 
-const TARGET_ENV = parseEnvironment(process.env.MM_ENV || process.env.BETTING_APP_ENV);
-const RELOAD_DELAY_MIN_MS = Math.max(100, readEnvNumber("RELOAD_DELAY_MIN_MS", 500));
+const TARGET_ENV = parseEnvironment(
+  process.env.MM_ENV || process.env.BETTING_APP_ENV,
+);
+const RELOAD_DELAY_MIN_MS = Math.max(
+  100,
+  readEnvNumber("RELOAD_DELAY_MIN_MS", 500),
+);
 const RELOAD_DELAY_MAX_MS = Math.max(
   RELOAD_DELAY_MIN_MS,
   readEnvNumber("RELOAD_DELAY_MAX_MS", 2000),
@@ -418,13 +444,19 @@ function buildMarketMakerConfig(): MarketMakerConfig {
     minQuoteUnits: Math.max(
       1,
       Math.floor(
-        readEnvNumber("ORDER_SIZE_MIN", DEFAULT_MARKET_MAKER_CONFIG.minQuoteUnits),
+        readEnvNumber(
+          "ORDER_SIZE_MIN",
+          DEFAULT_MARKET_MAKER_CONFIG.minQuoteUnits,
+        ),
       ),
     ),
     maxQuoteUnits: Math.max(
       1,
       Math.floor(
-        readEnvNumber("ORDER_SIZE_MAX", DEFAULT_MARKET_MAKER_CONFIG.maxQuoteUnits),
+        readEnvNumber(
+          "ORDER_SIZE_MAX",
+          DEFAULT_MARKET_MAKER_CONFIG.maxQuoteUnits,
+        ),
       ),
     ),
     maxInventoryPerSide: Math.max(
@@ -540,9 +572,7 @@ function toAnchorWallet(signer: Keypair): AnchorLikeWallet {
     signTransaction: async <T extends SignableTx>(tx: T): Promise<T> => {
       return signTx(tx, signer) as T;
     },
-    signAllTransactions: async <T extends SignableTx[]>(
-      txs: T,
-    ): Promise<T> => {
+    signAllTransactions: async <T extends SignableTx[]>(txs: T): Promise<T> => {
       txs.forEach((tx) => signTx(tx, signer));
       return txs;
     },
@@ -587,9 +617,7 @@ function asPublicKey(value: unknown): PublicKey {
     return value;
   }
   if (value && typeof value === "object" && "toBase58" in value) {
-    return new PublicKey(
-      (value as { toBase58: () => string }).toBase58(),
-    );
+    return new PublicKey((value as { toBase58: () => string }).toBase58());
   }
   return new PublicKey(String(value));
 }
@@ -599,14 +627,16 @@ async function fetchAnchorAccount(
   accountName: string,
   address: PublicKey,
 ): Promise<Record<string, unknown> | null> {
-  const namespace = (program.account as Record<
-    string,
-    {
-      fetchNullable: (
-        target: PublicKey,
-      ) => Promise<Record<string, unknown> | null>;
-    }
-  >)[accountName];
+  const namespace = (
+    program.account as Record<
+      string,
+      {
+        fetchNullable: (
+          target: PublicKey,
+        ) => Promise<Record<string, unknown> | null>;
+      }
+    >
+  )[accountName];
   if (!namespace?.fetchNullable) {
     throw new Error(`missing account namespace '${accountName}'`);
   }
@@ -706,7 +736,10 @@ export class CrossChainMarketMaker {
   private readonly solanaRuntime: SolanaRuntime | null;
   private readonly stateStore: MarketMakerStateStore;
   private readonly activeOrders: TrackedOrder[] = [];
-  private readonly exposureByChain = new Map<BettingChainKey, { yes: number; no: number }>();
+  private readonly exposureByChain = new Map<
+    BettingChainKey,
+    { yes: number; no: number }
+  >();
   private readonly nextNonceByChain = new Map<BettingEvmChain, number>();
   private startupValidated = false;
   private storageReady = false;
@@ -750,17 +783,32 @@ export class CrossChainMarketMaker {
     // AMM runtimes
     this.ammConfig = {
       ...DEFAULT_AMM_MARKET_MAKER_CONFIG,
-      deviationThresholdBps: readEnvNumber("MM_AMM_DEVIATION_THRESHOLD_BPS", DEFAULT_AMM_MARKET_MAKER_CONFIG.deviationThresholdBps),
-      maxTradeSize: readEnvNumber("MM_AMM_MAX_TRADE_SIZE", DEFAULT_AMM_MARKET_MAKER_CONFIG.maxTradeSize),
-      minTradeSize: readEnvNumber("MM_AMM_MIN_TRADE_SIZE", DEFAULT_AMM_MARKET_MAKER_CONFIG.minTradeSize),
-      maxPositionSize: readEnvNumber("MM_AMM_MAX_POSITION_SIZE", DEFAULT_AMM_MARKET_MAKER_CONFIG.maxPositionSize),
+      deviationThresholdBps: readEnvNumber(
+        "MM_AMM_DEVIATION_THRESHOLD_BPS",
+        DEFAULT_AMM_MARKET_MAKER_CONFIG.deviationThresholdBps,
+      ),
+      maxTradeSize: readEnvNumber(
+        "MM_AMM_MAX_TRADE_SIZE",
+        DEFAULT_AMM_MARKET_MAKER_CONFIG.maxTradeSize,
+      ),
+      minTradeSize: readEnvNumber(
+        "MM_AMM_MIN_TRADE_SIZE",
+        DEFAULT_AMM_MARKET_MAKER_CONFIG.minTradeSize,
+      ),
+      maxPositionSize: readEnvNumber(
+        "MM_AMM_MAX_POSITION_SIZE",
+        DEFAULT_AMM_MARKET_MAKER_CONFIG.maxPositionSize,
+      ),
     };
     this.evmAmmRuntimes = this.ammEnabled
-      ? BETTING_EVM_CHAIN_ORDER.map((chainKey) => this.createEvmAmmRuntime(chainKey))
+      ? BETTING_EVM_CHAIN_ORDER.map((chainKey) =>
+          this.createEvmAmmRuntime(chainKey),
+        )
       : [];
-    this.solanaAmmRuntime = this.ammEnabled && this.ammSolanaEnabled
-      ? this.createSolanaAmmRuntime()
-      : null;
+    this.solanaAmmRuntime =
+      this.ammEnabled && this.ammSolanaEnabled
+        ? this.createSolanaAmmRuntime()
+        : null;
   }
 
   private async ensureStateStoreReady() {
@@ -888,7 +936,11 @@ export class CrossChainMarketMaker {
       price?: number;
     } = {},
   ) {
-    await this.stateStore.markOrderStatus(this.orderHash(order), status, updates);
+    await this.stateStore.markOrderStatus(
+      this.orderHash(order),
+      status,
+      updates,
+    );
     await this.stateStore.appendOrderEvent(this.orderHash(order), eventType, {
       status,
       ...updates.metadata,
@@ -933,7 +985,7 @@ export class CrossChainMarketMaker {
         deployment.fightOracleProgramId,
     );
     const marketProgramId = new PublicKey(
-      (process.env.GOLD_CLOB_MARKET_PROGRAM_ID || "").trim() ||
+      (process.env.DUEL_MARKET_PROGRAM_ID || "").trim() ||
         (process.env.SOLANA_ARENA_MARKET_PROGRAM_ID || "").trim() ||
         deployment.goldClobMarketProgramId,
     );
@@ -945,16 +997,12 @@ export class CrossChainMarketMaker {
           ? Keypair.fromSeed(keyBytes)
           : Keypair.fromSecretKey(keyBytes);
       const connection = new Connection(rpcUrl, "confirmed");
-      const provider = new AnchorProvider(
-        connection,
-        toAnchorWallet(wallet),
-        {
-          commitment: "confirmed",
-          preflightCommitment: "confirmed",
-        },
-      );
+      const provider = new AnchorProvider(connection, toAnchorWallet(wallet), {
+        commitment: "confirmed",
+        preflightCommitment: "confirmed",
+      });
       const marketProgram = new Program(
-        ensureIdlAddress(goldClobMarketIdl, marketProgramId),
+        ensureIdlAddress(duelMarketIdl, marketProgramId),
         provider,
       ) as Program<any>;
       return {
@@ -981,7 +1029,11 @@ export class CrossChainMarketMaker {
   }
 
   private createEvmRuntime(chainKey: BettingEvmChain): EvmRuntime {
-    const runtimeEnv = resolveBettingEvmRuntimeEnv(chainKey, TARGET_ENV, process.env);
+    const runtimeEnv = resolveBettingEvmRuntimeEnv(
+      chainKey,
+      TARGET_ENV,
+      process.env,
+    );
     const chainUpper = chainKey.toUpperCase();
     const enabled = readEnvBoolean(`MM_ENABLE_${chainUpper}`, true);
     const sharedKey = process.env.EVM_PRIVATE_KEY || "";
@@ -1011,7 +1063,9 @@ export class CrossChainMarketMaker {
     const baseWallet = new ethers.Wallet(privateKey, provider);
     const goldClobAddressRaw = runtimeEnv.goldClobAddress;
     const goldClobAddress =
-      goldClobAddressRaw.trim().length > 0 ? normalizeAddress(goldClobAddressRaw) : "";
+      goldClobAddressRaw.trim().length > 0
+        ? normalizeAddress(goldClobAddressRaw)
+        : "";
     const clob = new ethers.Contract(
       goldClobAddress || ethers.ZeroAddress,
       GOLD_CLOB_ABI,
@@ -1038,9 +1092,7 @@ export class CrossChainMarketMaker {
       try {
         await this.marketMakeCycle();
       } catch (error) {
-        console.error(
-          `[cycle:${this.cycleCount}] ${(error as Error).message}`,
-        );
+        console.error(`[cycle:${this.cycleCount}] ${(error as Error).message}`);
       }
       const jitter =
         RELOAD_DELAY_MIN_MS +
@@ -1114,18 +1166,26 @@ export class CrossChainMarketMaker {
     }
 
     try {
-      const [version, fightOracleAccount, marketProgramAccount, marketConfig, lamports] =
-        await Promise.all([
-          runtime.connection.getVersion(),
-          runtime.connection.getAccountInfo(runtime.fightOracleProgramId, "confirmed"),
-          runtime.connection.getAccountInfo(runtime.marketProgramId, "confirmed"),
-          fetchAnchorAccount(
-            runtime.marketProgram,
-            "marketConfig",
-            runtime.marketConfigPda,
-          ),
-          runtime.connection.getBalance(runtime.wallet.publicKey, "confirmed"),
-        ]);
+      const [
+        version,
+        fightOracleAccount,
+        marketProgramAccount,
+        marketConfig,
+        lamports,
+      ] = await Promise.all([
+        runtime.connection.getVersion(),
+        runtime.connection.getAccountInfo(
+          runtime.fightOracleProgramId,
+          "confirmed",
+        ),
+        runtime.connection.getAccountInfo(runtime.marketProgramId, "confirmed"),
+        fetchAnchorAccount(
+          runtime.marketProgram,
+          "marketConfig",
+          runtime.marketConfigPda,
+        ),
+        runtime.connection.getBalance(runtime.wallet.publicKey, "confirmed"),
+      ]);
       this.markSolanaRpcSuccess();
 
       if (!fightOracleAccount?.executable) {
@@ -1253,7 +1313,11 @@ export class CrossChainMarketMaker {
     await this.validateSolanaReadiness(true);
   }
 
-  private backlogKey(chainKey: BettingChainKey, duelKey: string, marketKey: string) {
+  private backlogKey(
+    chainKey: BettingChainKey,
+    duelKey: string,
+    marketKey: string,
+  ) {
     return `${chainKey}:${duelKey}:${marketKey}`;
   }
 
@@ -1298,23 +1362,39 @@ export class CrossChainMarketMaker {
     predictionMarkets: PredictionMarketsResponse | null,
   ) {
     const lifecycleRecord =
-      predictionMarkets?.markets.find((market) => market.chainKey === order.chainKey) ??
-      null;
+      predictionMarkets?.markets.find(
+        (market) => market.chainKey === order.chainKey,
+      ) ?? null;
     const now = Date.now();
-    if (!lifecycleRecord?.duelKey || lifecycleRecord.duelKey !== order.duelKey) {
-      await this.markTrackedOrderStatus(order, "QUARANTINED", "recovered_missing_market", {
-        quarantineReason: "missing-market",
-        lastReconciledAt: now,
-      });
+    if (
+      !lifecycleRecord?.duelKey ||
+      lifecycleRecord.duelKey !== order.duelKey
+    ) {
+      await this.markTrackedOrderStatus(
+        order,
+        "QUARANTINED",
+        "recovered_missing_market",
+        {
+          quarantineReason: "missing-market",
+          lastReconciledAt: now,
+        },
+      );
       return;
     }
 
     if (order.chainKey === "solana") {
-      const activeOrder = await this.getManagedSolanaOrder(order).catch(() => null);
+      const activeOrder = await this.getManagedSolanaOrder(order).catch(
+        () => null,
+      );
       if (!activeOrder) {
-        await this.markTrackedOrderStatus(order, "FILLED", "recovered_missing_order", {
-          lastReconciledAt: now,
-        });
+        await this.markTrackedOrderStatus(
+          order,
+          "FILLED",
+          "recovered_missing_order",
+          {
+            lastReconciledAt: now,
+          },
+        );
         return;
       }
       if (!isPredictionMarketQuotableStatus(lifecycleRecord.lifecycleStatus)) {
@@ -1345,18 +1425,30 @@ export class CrossChainMarketMaker {
       (candidate) => candidate.chainKey === order.chainKey,
     );
     if (!runtime || !runtime.enabled) {
-      await this.markTrackedOrderStatus(order, "QUARANTINED", "recovered_runtime_disabled", {
-        quarantineReason: "runtime-disabled",
-        lastReconciledAt: now,
-      });
+      await this.markTrackedOrderStatus(
+        order,
+        "QUARANTINED",
+        "recovered_runtime_disabled",
+        {
+          quarantineReason: "runtime-disabled",
+          lastReconciledAt: now,
+        },
+      );
       return;
     }
 
-    const onChain = await this.inspectEvmTrackedOrder(runtime, order).catch(() => null);
+    const onChain = await this.inspectEvmTrackedOrder(runtime, order).catch(
+      () => null,
+    );
     if (!onChain?.active) {
-      await this.markTrackedOrderStatus(order, "FILLED", "recovered_missing_order", {
-        lastReconciledAt: now,
-      });
+      await this.markTrackedOrderStatus(
+        order,
+        "FILLED",
+        "recovered_missing_order",
+        {
+          lastReconciledAt: now,
+        },
+      );
       return;
     }
 
@@ -1410,7 +1502,10 @@ export class CrossChainMarketMaker {
     for (let orderId = start; orderId < end; orderId += 1) {
       const onChain = await runtime.clob.orders(marketKey, orderId);
       if (!Boolean(onChain.active)) continue;
-      if (String(onChain.maker).toLowerCase() !== runtime.walletAddress.toLowerCase()) {
+      if (
+        String(onChain.maker).toLowerCase() !==
+        runtime.walletAddress.toLowerCase()
+      ) {
         continue;
       }
       const tracked = this.activeOrders.find(
@@ -1428,7 +1523,9 @@ export class CrossChainMarketMaker {
         marketKey,
         side: Number(onChain.side) as typeof BUY_SIDE | typeof SELL_SIDE,
         price: Number(onChain.price),
-        amount: rawAmountToUnits(BigInt(onChain.amount) - BigInt(onChain.filled)),
+        amount: rawAmountToUnits(
+          BigInt(onChain.amount) - BigInt(onChain.filled),
+        ),
         placedAt: now,
       };
       const outboxId = await this.stateStore.enqueueOutbox({
@@ -1454,7 +1551,11 @@ export class CrossChainMarketMaker {
       });
     }
 
-    await this.stateStore.setCursor(cursorKey, String(Math.max(end, start)), now);
+    await this.stateStore.setCursor(
+      cursorKey,
+      String(Math.max(end, start)),
+      now,
+    );
   }
 
   private async sweepSolanaOrphans(
@@ -1470,8 +1571,16 @@ export class CrossChainMarketMaker {
     const now = Date.now();
 
     for (let orderId = start; orderId < nextOrderId; orderId += 1n) {
-      const orderPda = findOrderPda(runtime.marketProgramId, marketStatePda, orderId);
-      const orderAccount = await fetchAnchorAccount(runtime.marketProgram, "order", orderPda);
+      const orderPda = findOrderPda(
+        runtime.marketProgramId,
+        marketStatePda,
+        orderId,
+      );
+      const orderAccount = await fetchAnchorAccount(
+        runtime.marketProgram,
+        "order",
+        orderPda,
+      );
       if (!orderAccount || !Boolean(orderAccount.active)) continue;
       const maker = asPublicKey(orderAccount.maker).toBase58();
       if (maker !== runtime.walletAddress) continue;
@@ -1490,7 +1599,9 @@ export class CrossChainMarketMaker {
         marketKey: marketStatePda.toBase58(),
         side: asNumber(orderAccount.side) as typeof BUY_SIDE | typeof SELL_SIDE,
         price: asNumber(orderAccount.price),
-        amount: rawAmountToUnits(asBigInt(orderAccount.amount) - asBigInt(orderAccount.filled)),
+        amount: rawAmountToUnits(
+          asBigInt(orderAccount.amount) - asBigInt(orderAccount.filled),
+        ),
         placedAt: now,
       };
       const outboxId = await this.stateStore.enqueueOutbox({
@@ -1529,7 +1640,11 @@ export class CrossChainMarketMaker {
     );
     for (const item of items) {
       try {
-        if (item.topic === "cancel_orphan_evm_order" && item.chainKey && item.orderKey) {
+        if (
+          item.topic === "cancel_orphan_evm_order" &&
+          item.chainKey &&
+          item.orderKey
+        ) {
           const runtime = this.evmRuntimes.find(
             (candidate) => candidate.chainKey === item.chainKey,
           );
@@ -1556,7 +1671,9 @@ export class CrossChainMarketMaker {
     }
   }
 
-  private async sweepClaimBacklog(predictionMarkets: PredictionMarketsResponse | null) {
+  private async sweepClaimBacklog(
+    predictionMarkets: PredictionMarketsResponse | null,
+  ) {
     const items = await this.stateStore.leaseClaimBacklog(
       Date.now(),
       20,
@@ -1581,7 +1698,10 @@ export class CrossChainMarketMaker {
             marketStatePda,
             runtime.wallet.publicKey,
           );
-          const vaultPda = findClobVaultPda(runtime.marketProgramId, marketStatePda);
+          const vaultPda = findClobVaultPda(
+            runtime.marketProgramId,
+            marketStatePda,
+          );
           const claimed = await this.claimSolanaMarket(
             item.duelKey,
             duelState,
@@ -1600,8 +1720,9 @@ export class CrossChainMarketMaker {
             throw new Error("evm-runtime-unavailable");
           }
           const lifecycleRecord =
-            predictionMarkets?.markets.find((market) => market.chainKey === item.chainKey) ??
-            null;
+            predictionMarkets?.markets.find(
+              (market) => market.chainKey === item.chainKey,
+            ) ?? null;
           if (
             lifecycleRecord?.lifecycleStatus !== "RESOLVED" &&
             lifecycleRecord?.lifecycleStatus !== "CANCELLED"
@@ -1609,11 +1730,9 @@ export class CrossChainMarketMaker {
             throw new Error("claim-not-ready");
           }
           const { tx } = await this.sendEvmTransaction(runtime, (nonce) =>
-            runtime.clob.claim(
-              item.duelKey,
-              EVM_MARKET_KIND_DUEL_WINNER,
-              { nonce },
-            ),
+            runtime.clob.claim(item.duelKey, EVM_MARKET_KIND_DUEL_WINNER, {
+              nonce,
+            }),
           );
           await tx.wait();
         }
@@ -1657,13 +1776,19 @@ export class CrossChainMarketMaker {
     }
   }
 
-  private async sweepOrphans(predictionMarkets: PredictionMarketsResponse | null) {
+  private async sweepOrphans(
+    predictionMarkets: PredictionMarketsResponse | null,
+  ) {
     for (const runtime of this.evmRuntimes) {
       if (!runtime.enabled) continue;
       const lifecycleRecord =
-        predictionMarkets?.markets.find((market) => market.chainKey === runtime.chainKey) ??
-        null;
-      if (!lifecycleRecord?.duelKey || !isPredictionMarketQuotableStatus(lifecycleRecord.lifecycleStatus)) {
+        predictionMarkets?.markets.find(
+          (market) => market.chainKey === runtime.chainKey,
+        ) ?? null;
+      if (
+        !lifecycleRecord?.duelKey ||
+        !isPredictionMarketQuotableStatus(lifecycleRecord.lifecycleStatus)
+      ) {
         continue;
       }
       const duelKey = lifecycleRecord.duelKey;
@@ -1675,12 +1800,19 @@ export class CrossChainMarketMaker {
         duelKey,
         EVM_MARKET_KIND_DUEL_WINNER,
       );
-      await this.sweepEvmOrphans(runtime, duelKey, marketKey, BigInt(market.nextOrderId));
+      await this.sweepEvmOrphans(
+        runtime,
+        duelKey,
+        marketKey,
+        BigInt(market.nextOrderId),
+      );
     }
 
     const runtime = this.solanaRuntime;
     const lifecycleRecord =
-      predictionMarkets?.markets.find((market) => market.chainKey === "solana") ?? null;
+      predictionMarkets?.markets.find(
+        (market) => market.chainKey === "solana",
+      ) ?? null;
     if (
       !this.solanaEnabled ||
       !runtime ||
@@ -1694,7 +1826,11 @@ export class CrossChainMarketMaker {
       duelKeyHexToBytes(lifecycleRecord.duelKey),
     );
     const marketStatePda = findMarketPda(runtime.marketProgramId, duelState);
-    const marketState = await fetchAnchorAccount(runtime.marketProgram, "marketState", marketStatePda);
+    const marketState = await fetchAnchorAccount(
+      runtime.marketProgram,
+      "marketState",
+      marketStatePda,
+    );
     if (!marketState) return;
     await this.sweepSolanaOrphans(
       lifecycleRecord.duelKey,
@@ -1745,8 +1881,9 @@ export class CrossChainMarketMaker {
     duelSignal: DuelSignal | null,
   ) {
     const lifecycleRecord =
-      predictionMarkets?.markets.find((market) => market.chainKey === runtime.chainKey) ??
-      null;
+      predictionMarkets?.markets.find(
+        (market) => market.chainKey === runtime.chainKey,
+      ) ?? null;
     if (!lifecycleRecord?.duelKey) {
       await this.cancelOrdersForChain(runtime.chainKey, "missing-duel");
       return;
@@ -1763,9 +1900,14 @@ export class CrossChainMarketMaker {
         lifecycleRecord.lifecycleStatus === "RESOLVED" ||
         lifecycleRecord.lifecycleStatus === "CANCELLED"
       ) {
-        await this.enqueueClaimBacklogForMarket(runtime.chainKey, duelKey, marketKey, {
-          source: "lifecycle-transition",
-        });
+        await this.enqueueClaimBacklogForMarket(
+          runtime.chainKey,
+          duelKey,
+          marketKey,
+          {
+            source: "lifecycle-transition",
+          },
+        );
       }
       return;
     }
@@ -1773,9 +1915,13 @@ export class CrossChainMarketMaker {
       duelKey,
       EVM_MARKET_KIND_DUEL_WINNER,
     );
-    const position = await runtime.clob.positions(marketKey, runtime.walletAddress);
+    const position = await runtime.clob.positions(
+      marketKey,
+      runtime.walletAddress,
+    );
     const openOrders = this.activeOrders.filter(
-      (order) => order.chainKey === runtime.chainKey && order.duelKey === duelKey,
+      (order) =>
+        order.chainKey === runtime.chainKey && order.duelKey === duelKey,
     );
     const openYes = openOrders
       .filter((order) => order.side === BUY_SIDE)
@@ -1794,9 +1940,12 @@ export class CrossChainMarketMaker {
       duelKey,
       marketRef: marketKey,
       bestBid: Number(market.bestBid),
-      bestAsk: Number(market.bestAsk) >= MAX_PRICE ? null : Number(market.bestAsk),
-      betCloseTimeMs: predictionMarkets?.duel.betCloseTime ?? lifecycleRecord.betCloseTime,
-      lastStreamAtMs: predictionMarkets?.updatedAt ?? duelSignal?.updatedAt ?? null,
+      bestAsk:
+        Number(market.bestAsk) >= MAX_PRICE ? null : Number(market.bestAsk),
+      betCloseTimeMs:
+        predictionMarkets?.duel.betCloseTime ?? lifecycleRecord.betCloseTime,
+      lastStreamAtMs:
+        predictionMarkets?.updatedAt ?? duelSignal?.updatedAt ?? null,
       lastOracleAtMs:
         lifecycleRecord.syncedAt ??
         predictionMarkets?.updatedAt ??
@@ -1957,7 +2106,9 @@ export class CrossChainMarketMaker {
     );
   }
 
-  private orderHash(order: Pick<TrackedOrder, "chainKey" | "duelKey" | "side" | "orderId">): string {
+  private orderHash(
+    order: Pick<TrackedOrder, "chainKey" | "duelKey" | "side" | "orderId">,
+  ): string {
     return createHash("sha256")
       .update(order.chainKey)
       .update("\n")
@@ -1969,14 +2120,18 @@ export class CrossChainMarketMaker {
       .digest("hex");
   }
 
-  private extractOrderId(logs: readonly unknown[], marketKey: string): number | null {
+  private extractOrderId(
+    logs: readonly unknown[],
+    marketKey: string,
+  ): number | null {
     const iface = new ethers.Interface(GOLD_CLOB_ABI);
     for (const log of logs as Array<{ topics: string[]; data: string }>) {
       try {
         const parsed = iface.parseLog(log);
         if (
           parsed?.name === "OrderPlaced" &&
-          String(parsed.args.marketKey).toLowerCase() === marketKey.toLowerCase()
+          String(parsed.args.marketKey).toLowerCase() ===
+            marketKey.toLowerCase()
         ) {
           return Number(parsed.args.orderId);
         }
@@ -2058,15 +2213,23 @@ export class CrossChainMarketMaker {
           `[${runtime.chainKey.toUpperCase()}] cancel failed for order ${order.orderId}: ${message}`,
         );
       }
-      if (message.includes("order inactive") || message.includes("already filled")) {
+      if (
+        message.includes("order inactive") ||
+        message.includes("already filled")
+      ) {
         terminalStatus = "FILLED";
       }
     }
-    await this.markTrackedOrderStatus(order, terminalStatus, "order_cancelled", {
-      txSignature,
-      lastReconciledAt: Date.now(),
-      metadata: lastError ? { cancelError: lastError } : undefined,
-    });
+    await this.markTrackedOrderStatus(
+      order,
+      terminalStatus,
+      "order_cancelled",
+      {
+        txSignature,
+        lastReconciledAt: Date.now(),
+        metadata: lastError ? { cancelError: lastError } : undefined,
+      },
+    );
   }
 
   private removeTrackedOrder(order: TrackedOrder) {
@@ -2082,15 +2245,24 @@ export class CrossChainMarketMaker {
     }
   }
 
-  private async cancelOrdersForChain(chainKey: BettingEvmChain, reason: string) {
-    const runtime = this.evmRuntimes.find((candidate) => candidate.chainKey === chainKey);
+  private async cancelOrdersForChain(
+    chainKey: BettingEvmChain,
+    reason: string,
+  ) {
+    const runtime = this.evmRuntimes.find(
+      (candidate) => candidate.chainKey === chainKey,
+    );
     if (!runtime) return;
-    const orders = this.activeOrders.filter((order) => order.chainKey === chainKey);
+    const orders = this.activeOrders.filter(
+      (order) => order.chainKey === chainKey,
+    );
     for (const order of orders) {
       await this.cancelTrackedOrder(runtime, order);
     }
     if (orders.length > 0) {
-      console.log(`[${chainKey.toUpperCase()}] cancelled ${orders.length} orders (${reason})`);
+      console.log(
+        `[${chainKey.toUpperCase()}] cancelled ${orders.length} orders (${reason})`,
+      );
     }
   }
 
@@ -2099,7 +2271,9 @@ export class CrossChainMarketMaker {
     duelKey: string,
     reason: string,
   ) {
-    const runtime = this.evmRuntimes.find((candidate) => candidate.chainKey === chainKey);
+    const runtime = this.evmRuntimes.find(
+      (candidate) => candidate.chainKey === chainKey,
+    );
     if (!runtime) return;
     const orders = this.activeOrders.filter(
       (order) => order.chainKey === chainKey && order.duelKey === duelKey,
@@ -2174,7 +2348,12 @@ export class CrossChainMarketMaker {
     order: TrackedOrder | null | undefined,
   ): Promise<SolanaManagedOrder | null> {
     const runtime = this.solanaRuntime;
-    if (!this.solanaEnabled || !runtime || !order || order.chainKey !== "solana") {
+    if (
+      !this.solanaEnabled ||
+      !runtime ||
+      !order ||
+      order.chainKey !== "solana"
+    ) {
       return null;
     }
 
@@ -2201,7 +2380,8 @@ export class CrossChainMarketMaker {
       return null;
     }
 
-    const remainingRawAmount = asBigInt(orderAccount.amount) - asBigInt(orderAccount.filled);
+    const remainingRawAmount =
+      asBigInt(orderAccount.amount) - asBigInt(orderAccount.filled);
     if (remainingRawAmount <= 0n) {
       return null;
     }
@@ -2267,9 +2447,14 @@ export class CrossChainMarketMaker {
       );
     } catch (error) {
       if (isSolanaIgnorableRaceError(error)) {
-        await this.markTrackedOrderStatus(order, "FILLED", "order_disappeared", {
-          lastReconciledAt: Date.now(),
-        });
+        await this.markTrackedOrderStatus(
+          order,
+          "FILLED",
+          "order_disappeared",
+          {
+            lastReconciledAt: Date.now(),
+          },
+        );
         return;
       }
       if (this.handleSolanaOperationalError(error, "cancel order")) {
@@ -2280,7 +2465,9 @@ export class CrossChainMarketMaker {
   }
 
   private async cancelSolanaOrdersForChain(reason: string) {
-    const orders = this.activeOrders.filter((order) => order.chainKey === "solana");
+    const orders = this.activeOrders.filter(
+      (order) => order.chainKey === "solana",
+    );
     for (const order of orders) {
       await this.cancelTrackedSolanaOrder(order, reason);
     }
@@ -2474,9 +2661,14 @@ export class CrossChainMarketMaker {
         ? await this.getManagedSolanaOrder(primaryOrder)
         : null;
     if (primaryOrder && !activeOrder) {
-      await this.markTrackedOrderStatus(primaryOrder, "FILLED", "order_disappeared", {
-        lastReconciledAt: Date.now(),
-      });
+      await this.markTrackedOrderStatus(
+        primaryOrder,
+        "FILLED",
+        "order_disappeared",
+        {
+          lastReconciledAt: Date.now(),
+        },
+      );
     }
 
     const now = Date.now();
@@ -2545,8 +2737,9 @@ export class CrossChainMarketMaker {
     }
 
     const lifecycleRecord =
-      predictionMarkets?.markets.find((market) => market.chainKey === "solana") ??
-      null;
+      predictionMarkets?.markets.find(
+        (market) => market.chainKey === "solana",
+      ) ?? null;
     if (!lifecycleRecord?.duelKey) {
       await this.cancelSolanaOrdersForChain("missing-duel");
       return;
@@ -2625,7 +2818,8 @@ export class CrossChainMarketMaker {
     );
     const quoteAgeMs =
       openOrders.length > 0
-        ? now - Math.min(...openOrders.map((order) => order.trackedOrder.placedAt))
+        ? now -
+          Math.min(...openOrders.map((order) => order.trackedOrder.placedAt))
         : null;
     const openYes = openOrders
       .filter((order) => order.trackedOrder.side === BUY_SIDE)
@@ -2646,7 +2840,8 @@ export class CrossChainMarketMaker {
       })(),
       betCloseTimeMs:
         predictionMarkets?.duel.betCloseTime ?? lifecycleRecord.betCloseTime,
-      lastStreamAtMs: predictionMarkets?.updatedAt ?? duelSignal?.updatedAt ?? null,
+      lastStreamAtMs:
+        predictionMarkets?.updatedAt ?? duelSignal?.updatedAt ?? null,
       lastOracleAtMs:
         lifecycleRecord.syncedAt ??
         predictionMarkets?.updatedAt ??
@@ -2740,7 +2935,10 @@ export class CrossChainMarketMaker {
     }
 
     const now = Date.now();
-    if (this.lastDuelSignal && now - this.lastDuelSignalAt < MM_DUEL_SIGNAL_CACHE_MS) {
+    if (
+      this.lastDuelSignal &&
+      now - this.lastDuelSignalAt < MM_DUEL_SIGNAL_CACHE_MS
+    ) {
       return this.lastDuelSignal;
     }
 
@@ -2756,7 +2954,9 @@ export class CrossChainMarketMaker {
         signal: controller.signal,
       });
       if (!response.ok) return this.lastDuelSignal;
-      const payload = (await response.json()) as { cycle?: Record<string, unknown> };
+      const payload = (await response.json()) as {
+        cycle?: Record<string, unknown>;
+      };
       const cycle = payload.cycle ?? null;
       if (!cycle) return this.lastDuelSignal;
       const phase = String(cycle.phase ?? cycle.state ?? "").toUpperCase();
@@ -2776,17 +2976,25 @@ export class CrossChainMarketMaker {
       const readAgentId = (agent: Record<string, unknown> | null): string =>
         String(agent?.id ?? agent?.characterId ?? "");
       const readAgentName = (agent: Record<string, unknown> | null): string =>
-        String(agent?.name ?? "").trim().toLowerCase();
+        String(agent?.name ?? "")
+          .trim()
+          .toLowerCase();
 
       let implied = 500;
       let signalWeight = 0;
 
       if (phase === "RESOLUTION") {
         const winnerId = String(cycle.winnerId || "");
-        const winnerName = String(cycle.winnerName || "").trim().toLowerCase();
+        const winnerName = String(cycle.winnerName || "")
+          .trim()
+          .toLowerCase();
         const agent1Id = readAgentId(agent1);
         const agent1Name = readAgentName(agent1);
-        if (winnerId && agent1Id && winnerId.toLowerCase() === agent1Id.toLowerCase()) {
+        if (
+          winnerId &&
+          agent1Id &&
+          winnerId.toLowerCase() === agent1Id.toLowerCase()
+        ) {
           implied = 985;
           signalWeight = MM_DUEL_SIGNAL_WEIGHT;
         } else if (winnerId && agent1Id) {
@@ -2797,10 +3005,26 @@ export class CrossChainMarketMaker {
           signalWeight = MM_DUEL_SIGNAL_WEIGHT;
         }
       } else if (phase === "FIGHTING") {
-        const hp1 = readFiniteNumber(agent1?.hp, agent1?.currentHp, agent1?.health);
-        const max1 = readFiniteNumber(agent1?.maxHp, agent1?.maxHealth, agent1?.startingHp);
-        const hp2 = readFiniteNumber(agent2?.hp, agent2?.currentHp, agent2?.health);
-        const max2 = readFiniteNumber(agent2?.maxHp, agent2?.maxHealth, agent2?.startingHp);
+        const hp1 = readFiniteNumber(
+          agent1?.hp,
+          agent1?.currentHp,
+          agent1?.health,
+        );
+        const max1 = readFiniteNumber(
+          agent1?.maxHp,
+          agent1?.maxHealth,
+          agent1?.startingHp,
+        );
+        const hp2 = readFiniteNumber(
+          agent2?.hp,
+          agent2?.currentHp,
+          agent2?.health,
+        );
+        const max2 = readFiniteNumber(
+          agent2?.maxHp,
+          agent2?.maxHealth,
+          agent2?.startingHp,
+        );
         if (
           Number.isFinite(hp1) &&
           Number.isFinite(max1) &&
@@ -2810,7 +3034,9 @@ export class CrossChainMarketMaker {
           max2 > 0
         ) {
           const edge = clamp(hp1 / max1 - hp2 / max2, -1, 1);
-          implied = Math.round(clamp(0.5 + edge * MM_DUEL_HP_EDGE_MULTIPLIER, 0.02, 0.98) * 1000);
+          implied = Math.round(
+            clamp(0.5 + edge * MM_DUEL_HP_EDGE_MULTIPLIER, 0.02, 0.98) * 1000,
+          );
           signalWeight = MM_DUEL_SIGNAL_WEIGHT;
         }
       }
@@ -2859,7 +3085,11 @@ export class CrossChainMarketMaker {
       if (!privateKey) return disabled;
       const provider = new ethers.JsonRpcProvider(rpcUrl);
       const wallet = new ethers.Wallet(privateKey, provider);
-      const router = new ethers.Contract(routerAddress, GOLD_AMM_ROUTER_ABI, wallet);
+      const router = new ethers.Contract(
+        routerAddress,
+        GOLD_AMM_ROUTER_ABI,
+        wallet,
+      );
       const mUsd = mUsdAddress
         ? new ethers.Contract(mUsdAddress, ERC20_ABI, wallet)
         : (null as any);
@@ -2875,7 +3105,10 @@ export class CrossChainMarketMaker {
         rpcUrl,
       };
     } catch (err) {
-      console.warn(`[AMM] Failed to create EVM AMM runtime for ${chainKey}:`, err);
+      console.warn(
+        `[AMM] Failed to create EVM AMM runtime for ${chainKey}:`,
+        err,
+      );
       return disabled;
     }
   }
@@ -2888,9 +3121,9 @@ export class CrossChainMarketMaker {
       const deployment = resolveBettingSolanaDeployment(
         normalizeSolanaCluster(TARGET_ENV) as any,
       );
-      const ammProgramIdStr = (
-        process.env.GOLD_AMM_MARKET_PROGRAM_ID || ""
-      ).trim() || deployment.goldAmmMarketProgramId;
+      const ammProgramIdStr =
+        (process.env.GOLD_AMM_MARKET_PROGRAM_ID || "").trim() ||
+        deployment.goldAmmMarketProgramId;
       if (!ammProgramIdStr) return null;
       const ammProgramId = new PublicKey(ammProgramIdStr);
       const rpcUrl =
@@ -2902,11 +3135,10 @@ export class CrossChainMarketMaker {
           ? Keypair.fromSeed(keyBytes)
           : Keypair.fromSecretKey(keyBytes);
       const connection = new Connection(rpcUrl, "confirmed");
-      const provider = new AnchorProvider(
-        connection,
-        toAnchorWallet(wallet),
-        { commitment: "confirmed", preflightCommitment: "confirmed" },
-      );
+      const provider = new AnchorProvider(connection, toAnchorWallet(wallet), {
+        commitment: "confirmed",
+        preflightCommitment: "confirmed",
+      });
       const fightOracleProgramId = new PublicKey(
         (process.env.FIGHT_ORACLE_PROGRAM_ID || "").trim() ||
           deployment.fightOracleProgramId,
@@ -2948,9 +3180,9 @@ export class CrossChainMarketMaker {
     // Fetch ammConfig on first cycle
     if (!runtime.ammConfig) {
       try {
-        const configAccount = await (runtime.ammProgram.account as any).ammConfig.fetchNullable(
-          runtime.ammConfigPda,
-        );
+        const configAccount = await (
+          runtime.ammProgram.account as any
+        ).ammConfig.fetchNullable(runtime.ammConfigPda);
         if (!configAccount) return;
         runtime.ammConfig = {
           authority: configAccount.authority,
@@ -2996,7 +3228,9 @@ export class CrossChainMarketMaker {
     const betPda = findAmmBetPda(runtime.ammProgramId, betId, creator);
 
     // Fetch bet state
-    const betAccount = await (runtime.ammProgram.account as any).bet.fetchNullable(betPda);
+    const betAccount = await (
+      runtime.ammProgram.account as any
+    ).bet.fetchNullable(betPda);
     if (!betAccount || !betAccount.isInitialized) return;
 
     // Check if settled
@@ -3010,7 +3244,11 @@ export class CrossChainMarketMaker {
     const reserveNo = BigInt(betAccount.reserves[1].toString());
     const currentTime = BigInt(Math.floor(Date.now() / 1000));
     const liq = betAccount.isDynamic
-      ? calcDynamicLiquidity(BigInt(betAccount.initialLiq.toString()), BigInt(betAccount.expirationAt.toString()), currentTime)
+      ? calcDynamicLiquidity(
+          BigInt(betAccount.initialLiq.toString()),
+          BigInt(betAccount.expirationAt.toString()),
+          currentTime,
+        )
       : BigInt(betAccount.initialLiq.toString());
     const ammPrice = calcAmmPrice(reserveYes, reserveNo, liq);
 
@@ -3047,12 +3285,19 @@ export class CrossChainMarketMaker {
 
     if (decision.action === "hold") return;
 
-    const outcome = decision.action === "buy_yes" || decision.action === "sell_yes" ? 0 : 1;
+    const outcome =
+      decision.action === "buy_yes" || decision.action === "sell_yes" ? 0 : 1;
     const amountIn = new BN(decision.amount);
     const mintYes = findAmmMintYesPda(runtime.ammProgramId, betId, creator);
     const mintNo = findAmmMintNoPda(runtime.ammProgramId, betId, creator);
-    const destinationYes = findAssociatedTokenAddress(mintYes, runtime.wallet.publicKey);
-    const destinationNo = findAssociatedTokenAddress(mintNo, runtime.wallet.publicKey);
+    const destinationYes = findAssociatedTokenAddress(
+      mintYes,
+      runtime.wallet.publicKey,
+    );
+    const destinationNo = findAssociatedTokenAddress(
+      mintNo,
+      runtime.wallet.publicKey,
+    );
     const treasuryYesAta = findAssociatedTokenAddress(
       mintYes,
       runtime.ammConfig!.treasury,
@@ -3173,8 +3418,10 @@ export class CrossChainMarketMaker {
       const withdrawals: Array<{ outcome: number; balance: bigint }> = [];
 
       if (sideWon === 2) {
-        if (yesBalance > 0n) withdrawals.push({ outcome: 0, balance: yesBalance });
-        if (noBalance > 0n) withdrawals.push({ outcome: 1, balance: noBalance });
+        if (yesBalance > 0n)
+          withdrawals.push({ outcome: 0, balance: yesBalance });
+        if (noBalance > 0n)
+          withdrawals.push({ outcome: 1, balance: noBalance });
       } else if (sideWon === 0 && yesBalance > 0n) {
         withdrawals.push({ outcome: 0, balance: yesBalance });
       } else if (sideWon === 1 && noBalance > 0n) {
@@ -3246,7 +3493,11 @@ export class CrossChainMarketMaker {
     const marketAddress = market.contractAddress ?? market.marketRef;
     if (!marketAddress) return;
 
-    const lvrMarket = new ethers.Contract(marketAddress, LVR_MARKET_ABI, runtime.provider);
+    const lvrMarket = new ethers.Contract(
+      marketAddress,
+      LVR_MARKET_ABI,
+      runtime.provider,
+    );
     const [stateRaw, deadlineRaw, , liqRaw, reserveYesRaw, reserveNoRaw] =
       await lvrMarket.getMarketDetails();
 
@@ -3302,15 +3553,21 @@ export class CrossChainMarketMaker {
     const amountBn = ethers.parseUnits(decision.amount.toString(), 18); // mUSD WAD (18 decimals)
 
     // Compute slippage-protected minAmountOut (2% tolerance)
-    const isBuyAction = decision.action === "buy_yes" || decision.action === "buy_no";
-    const isBuyYesAction = decision.action === "buy_yes" || decision.action === "sell_no";
+    const isBuyAction =
+      decision.action === "buy_yes" || decision.action === "buy_no";
+    const isBuyYesAction =
+      decision.action === "buy_yes" || decision.action === "sell_no";
     const { amountOut: expectedOut } = estimateSlippage(
-      isBuyYesAction, BigInt(ry.toString()), BigInt(rn.toString()), BigInt(l.toString()),
+      isBuyYesAction,
+      BigInt(ry.toString()),
+      BigInt(rn.toString()),
+      BigInt(l.toString()),
       BigInt(amountBn.toString()) / 1_000_000_000_000n, // scale WAD to u64 1e6
     );
     const slippageBps = BigInt(this.ammConfig.maxSlippageBps ?? 200);
     // Scale minAmountOut back to WAD for the router
-    const minAmountOut = (expectedOut * (10000n - slippageBps) / 10000n) * 1_000_000_000_000n;
+    const minAmountOut =
+      ((expectedOut * (10000n - slippageBps)) / 10000n) * 1_000_000_000_000n;
 
     try {
       if (isBuyAction) {
@@ -3322,17 +3579,23 @@ export class CrossChainMarketMaker {
           );
           if (BigInt(allowance.toString()) < BigInt(amountBn.toString())) {
             await this.sendEvmTransaction(runtime, (nonce) =>
-              runtime.mUsd!.approve(runtime.routerAddress, ethers.MaxUint256, { nonce }),
+              runtime.mUsd!.approve(runtime.routerAddress, ethers.MaxUint256, {
+                nonce,
+              }),
             );
           }
         }
         if (decision.action === "buy_yes") {
           await this.sendEvmTransaction(runtime, (nonce) =>
-            runtime.router.buyYes(marketAddress, amountBn, minAmountOut, { nonce }),
+            runtime.router.buyYes(marketAddress, amountBn, minAmountOut, {
+              nonce,
+            }),
           );
         } else {
           await this.sendEvmTransaction(runtime, (nonce) =>
-            runtime.router.buyNo(marketAddress, amountBn, minAmountOut, { nonce }),
+            runtime.router.buyNo(marketAddress, amountBn, minAmountOut, {
+              nonce,
+            }),
           );
         }
       } else {
@@ -3341,9 +3604,13 @@ export class CrossChainMarketMaker {
           lvrMarket.yesToken(),
           lvrMarket.noToken(),
         ]);
-        const tokenAddr = decision.action === "sell_yes" ? yesTokenAddr : noTokenAddr;
+        const tokenAddr =
+          decision.action === "sell_yes" ? yesTokenAddr : noTokenAddr;
         const token = new ethers.Contract(tokenAddr, ERC20_ABI, runtime.wallet);
-        const allowance = await token.allowance(runtime.walletAddress, runtime.routerAddress);
+        const allowance = await token.allowance(
+          runtime.walletAddress,
+          runtime.routerAddress,
+        );
         if (BigInt(allowance.toString()) < BigInt(amountBn.toString())) {
           await this.sendEvmTransaction(runtime, (nonce) =>
             token.approve(runtime.routerAddress, ethers.MaxUint256, { nonce }),
@@ -3351,11 +3618,15 @@ export class CrossChainMarketMaker {
         }
         if (decision.action === "sell_yes") {
           await this.sendEvmTransaction(runtime, (nonce) =>
-            runtime.router.sellYes(marketAddress, amountBn, minAmountOut, { nonce }),
+            runtime.router.sellYes(marketAddress, amountBn, minAmountOut, {
+              nonce,
+            }),
           );
         } else {
           await this.sendEvmTransaction(runtime, (nonce) =>
-            runtime.router.sellNo(marketAddress, amountBn, minAmountOut, { nonce }),
+            runtime.router.sellNo(marketAddress, amountBn, minAmountOut, {
+              nonce,
+            }),
           );
         }
       }
@@ -3365,8 +3636,16 @@ export class CrossChainMarketMaker {
         lvrMarket.yesToken(),
         lvrMarket.noToken(),
       ]);
-      const yesToken = new ethers.Contract(yesTokenAddr, ERC20_ABI, runtime.provider);
-      const noToken = new ethers.Contract(noTokenAddr, ERC20_ABI, runtime.provider);
+      const yesToken = new ethers.Contract(
+        yesTokenAddr,
+        ERC20_ABI,
+        runtime.provider,
+      );
+      const noToken = new ethers.Contract(
+        noTokenAddr,
+        ERC20_ABI,
+        runtime.provider,
+      );
       const [yesBal, noBal] = await Promise.all([
         yesToken.balanceOf(runtime.walletAddress),
         noToken.balanceOf(runtime.walletAddress),
@@ -3404,7 +3683,11 @@ export class CrossChainMarketMaker {
       return;
     }
     try {
-      const lvrMarket = new ethers.Contract(marketAddress, LVR_MARKET_ABI, runtime.provider);
+      const lvrMarket = new ethers.Contract(
+        marketAddress,
+        LVR_MARKET_ABI,
+        runtime.provider,
+      );
       const [yesTokenAddr, noTokenAddr] = await Promise.all([
         lvrMarket.yesToken(),
         lvrMarket.noToken(),
@@ -3412,14 +3695,19 @@ export class CrossChainMarketMaker {
       // Approve both tokens
       for (const addr of [yesTokenAddr, noTokenAddr]) {
         const token = new ethers.Contract(addr, ERC20_ABI, runtime.wallet);
-        const allowance = await token.allowance(runtime.walletAddress, runtime.routerAddress);
+        const allowance = await token.allowance(
+          runtime.walletAddress,
+          runtime.routerAddress,
+        );
         if (BigInt(allowance.toString()) < ethers.MaxUint256 / 2n) {
           await token.approve(runtime.routerAddress, ethers.MaxUint256);
         }
       }
       await runtime.router.redeem(marketAddress, pos.yesBalance, pos.noBalance);
       pos.settled = true;
-      console.log(`[AMM-${runtime.chainKey.toUpperCase()}] redeemed from ${marketAddress}`);
+      console.log(
+        `[AMM-${runtime.chainKey.toUpperCase()}] redeemed from ${marketAddress}`,
+      );
     } catch (error) {
       console.warn(
         `[AMM-${runtime.chainKey.toUpperCase()}] redeem failed: ${error instanceof Error ? error.message : String(error)}`,
@@ -3476,7 +3764,8 @@ export class CrossChainMarketMaker {
       cancelStaleAgeMs: this.config.maxQuoteAgeMs,
       solanaDisableReason: this.solanaDisableReason,
       solanaWalletPublicKey: runtime?.wallet.publicKey.toBase58() ?? null,
-      solanaFightOracleProgramId: runtime?.fightOracleProgramId.toBase58() ?? null,
+      solanaFightOracleProgramId:
+        runtime?.fightOracleProgramId.toBase58() ?? null,
       solanaGoldClobProgramId: runtime?.marketProgramId.toBase58() ?? null,
       solanaProgramId: runtime?.marketProgramId.toBase58() ?? null,
       solanaMarketConfigPda: runtime?.marketConfigPda.toBase58() ?? null,
@@ -3485,7 +3774,8 @@ export class CrossChainMarketMaker {
       solanaLastTxSignature: this.lastSolanaTxSignature,
       ammEnabled: this.ammEnabled,
       ammSolanaEnabled: this.ammSolanaEnabled,
-      ammSolanaProgramId: this.solanaAmmRuntime?.ammProgramId.toBase58() ?? null,
+      ammSolanaProgramId:
+        this.solanaAmmRuntime?.ammProgramId.toBase58() ?? null,
       ammEvmChains: Object.fromEntries(
         this.evmAmmRuntimes.map((r) => [r.chainKey, r.enabled]),
       ),

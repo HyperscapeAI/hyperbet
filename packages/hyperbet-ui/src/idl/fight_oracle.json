@@ -149,6 +149,42 @@
               }
             ]
           }
+        },
+        {
+          "name": "proposal_record",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  114,
+                  111,
+                  112,
+                  111,
+                  115,
+                  97,
+                  108
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "duel_state.duel_key",
+                "account": "DuelState"
+              },
+              {
+                "kind": "account",
+                "path": "duel_state.pending_result_hash",
+                "account": "DuelState"
+              },
+              {
+                "kind": "account",
+                "path": "duel_state.pending_replay_hash",
+                "account": "DuelState"
+              }
+            ]
+          }
         }
       ],
       "args": [
@@ -435,6 +471,43 @@
               }
             ]
           }
+        },
+        {
+          "name": "proposal_record",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  114,
+                  111,
+                  112,
+                  111,
+                  115,
+                  97,
+                  108
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "duel_key"
+              },
+              {
+                "kind": "arg",
+                "path": "result_hash"
+              },
+              {
+                "kind": "arg",
+                "path": "replay_hash"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
         }
       ],
       "args": [
@@ -550,6 +623,43 @@
               }
             ]
           }
+        },
+        {
+          "name": "proposal_record",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  114,
+                  111,
+                  112,
+                  111,
+                  115,
+                  97,
+                  108
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "duel_key"
+              },
+              {
+                "kind": "arg",
+                "path": "result_hash"
+              },
+              {
+                "kind": "arg",
+                "path": "replay_hash"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
         }
       ],
       "args": [
@@ -873,6 +983,19 @@
         145,
         254
       ]
+    },
+    {
+      "name": "ProposalRecord",
+      "discriminator": [
+        154,
+        180,
+        211,
+        203,
+        232,
+        223,
+        142,
+        147
+      ]
     }
   ],
   "events": [
@@ -1050,31 +1173,46 @@
     },
     {
       "code": 6021,
+      "name": "InvalidResultTime",
+      "msg": "Result timestamp must be at or after duel start and no later than chain time"
+    },
+    {
+      "code": 6022,
+      "name": "ProposalExists",
+      "msg": "Proposal evidence identity has already been used"
+    },
+    {
+      "code": 6023,
+      "name": "ProposalRecordMismatch",
+      "msg": "Proposal record does not match the duel's active proposal"
+    },
+    {
+      "code": 6024,
       "name": "ParticipantHashImmutable",
       "msg": "Participant hashes are immutable after betting opens"
     },
     {
-      "code": 6022,
+      "code": 6025,
       "name": "TimingImmutable",
       "msg": "Bet timing is immutable after betting opens"
     },
     {
-      "code": 6023,
+      "code": 6026,
       "name": "AlreadyInitialized",
       "msg": "Config is already initialized"
     },
     {
-      "code": 6024,
+      "code": 6027,
       "name": "OraclePaused",
       "msg": "Oracle operations are paused"
     },
     {
-      "code": 6025,
+      "code": 6028,
       "name": "ConfigFrozen",
       "msg": "Config is permanently frozen"
     },
     {
-      "code": 6026,
+      "code": 6029,
       "name": "MetadataUriTooLong",
       "msg": "Metadata URI exceeds 200 byte limit"
     }
@@ -1431,6 +1569,78 @@
           },
           {
             "name": "config_frozen",
+            "type": "bool"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ProposalRecord",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "duel_key",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "proposal_id",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "result_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "replay_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "winner",
+            "type": {
+              "defined": {
+                "name": "MarketSide"
+              }
+            }
+          },
+          {
+            "name": "seed",
+            "type": "u64"
+          },
+          {
+            "name": "duel_end_ts",
+            "type": "i64"
+          },
+          {
+            "name": "proposed_at",
+            "type": "i64"
+          },
+          {
+            "name": "challenged",
             "type": "bool"
           },
           {

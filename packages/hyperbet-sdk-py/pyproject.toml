@@ -1,23 +1,30 @@
 [tool.poetry]
 name = "hyperbet-sdk"
 version = "0.1.0"
-description = "Hyperbet Python SDK for EVM and Solana interactions"
+description = "SOL-only Hyperbet Python SDK for the Hyperia duel market"
 authors = ["Hyperbet <info@hyperbet.gg>"]
 readme = "README.md"
 packages = [{include = "hyperbet_sdk"}]
 
 [tool.poetry.dependencies]
 python = "^3.10"
-web3 = "^7.5.0"
 solana = "^0.34.3"
 anchorpy = "^0.20.1"
 websockets = "*"
 base58 = "^2.1.1"
+pydantic = "^2.9.2"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.3.3"
 pytest-asyncio = "^0.24.0"
-pytest-xprocess = "^1.0.2"
+ruff = "^0.6.9"
+
+[tool.ruff]
+target-version = "py310"
+line-length = 88
+
+[tool.ruff.lint]
+select = ["B", "E", "F", "I", "UP"]
 
 [build-system]
 requires = ["poetry-core"]

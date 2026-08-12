@@ -1,191 +1,68 @@
-# Canonical Prediction Market Protocol Spec (EVM + SVM)
+# Canonical Solana Duel-Market Specification
 
 ## Scope
 
-This specification defines the canonical behaviors for the duel-winner CLOB market implemented by:
+The launch protocol consists of `fight_oracle` and `duel_market`. All value is represented as integer lamports of native SOL.
 
-- EVM: `DuelOutcomeOracle` + `GoldClob`
-- SVM (Solana): `fight_oracle` + `gold_clob_market`
+## Duel identity and timing
 
-The spec covers:
+- `duel_key` is the canonical 32-byte identity shared by stream, oracle, market, keeper, API, and UI.
+- participant hashes are non-zero and distinct.
+- open time is positive, close time is after open time, and duel start is not before close.
+- participant identity and open/close timing become immutable once betting opens.
+- chain time, never browser or keeper wall-clock time, enforces lifecycle boundaries.
 
-1. lifecycle transitions
-2. order semantics
-3. settlement and fee math
-4. cancellation and refund behavior
+## Oracle lifecycle
 
-## 1) Lifecycle Transitions
+Valid statuses are `Scheduled`, `BettingOpen`, `Locked`, `Proposed`, `Challenged`, `Resolved`, and `Cancelled`.
 
-### 1.1 Oracle duel lifecycle
+- only forward lifecycle transitions are valid
+- a result can be proposed only from `Locked`, after the betting close, with a valid A/B winner and bounded result time
+- each proposal binds duel key, result hash, replay hash, winner, seed, and duel-end timestamp to a unique proposal record
+- the configured challenger can challenge only before the dispute deadline
+- a challenged result must be replaced by a new proposal
+- the configured finalizer can finalize an unchallenged proposal only after the dispute window
+- resolved and cancelled states are terminal
 
-Canonical duel states:
+## Market lifecycle
 
-- `SCHEDULED`
-- `BETTING_OPEN`
-- `LOCKED`
-- `RESOLVED`
-- `CANCELLED`
+A duel-winner market can be created only for a canonical `BettingOpen` or `Locked` duel by the configured authority/operator. It snapshots treasury, liquidity recipient, and all fee rates. Sync maps oracle state to `Open`, `Locked`, `Resolved`, or `Cancelled`; sync and user cleanup remain available during an emergency trading pause.
 
-Valid transitions:
+## Orders
 
-- `NULL -> {SCHEDULED|BETTING_OPEN|LOCKED}` (first upsert)
-- `SCHEDULED -> BETTING_OPEN|LOCKED`
-- `BETTING_OPEN -> LOCKED`
-- `LOCKED -> RESOLVED|CANCELLED`
-- `SCHEDULED|BETTING_OPEN -> CANCELLED`
+- side is bid or ask
+- price is an integer tick strictly between 0 and 1000
+- amount is positive and divisible by 1000
+- the order ID must equal the market's next canonical order ID
+- matching is price-time priority with explicit linked price levels and bounded remaining accounts
+- self-trade policy, post-only, immediate-or-cancel, and good-until-cancelled behavior are explicit
+- only the maker can cancel an active open-market order
+- unmatched locked value is refunded on cancellation/reclaim
+- terminal resting orders are reclaimed through the dedicated terminal-safe instruction
 
-Forbidden transitions:
+For price `P` and share amount `A`:
 
-- any transition out of `RESOLVED`
-- any transition out of `CANCELLED`
-- backward transitions (e.g., `LOCKED -> BETTING_OPEN`)
+- bid lock: `A × P / 1000`
+- ask lock: `A × (1000 - P) / 1000`
 
-Required guards:
+All arithmetic must be exact, checked, and non-zero.
 
-- participants must be present and distinct
-- `bet_open_ts > 0`
-- `bet_close_ts > bet_open_ts`
-- `duel_start_ts >= bet_close_ts`
-- `duel_end_ts >= bet_close_ts` for resolution
-- `winner ∈ {A, B}` for resolution
+## Fees and custody
 
-### 1.2 Market lifecycle
+Trade fees apply only to executed taker cost. They accrue inside the market vault and in the user's fee ledger; they do not leave custody while cancellation remains possible.
 
-Canonical market statuses:
+- on cancellation, the user's locked collateral and accrued execution fees are refunded and market fee accrual is reduced by the exact same amount
+- on resolution, winning shares pay the snapshotted winnings fee and the net payout goes to the user
+- only after resolution may anyone trigger execution-fee withdrawal, and recipients are the immutable snapshotted treasury/liquidity accounts
+- fee basis points are bounded and configuration is explicit/frozen for launch
 
-- `OPEN`
-- `LOCKED`
-- `RESOLVED`
-- `CANCELLED`
+## Terminal cleanup
 
-Oracle-to-market mapping:
+- winner claim clears the complete user balance and closes the account
+- cancelled-market claim refunds all locked collateral plus escrowed execution fees, then closes the account
+- a resolved loser can close only a balance with no winning entitlement; the instruction transfers no market funds and returns account rent only
+- order, price-level, balance, and settlement cleanup is idempotent and must not create value
 
-- `BETTING_OPEN -> OPEN`
-- `LOCKED -> LOCKED`
-- `RESOLVED -> RESOLVED`
-- `CANCELLED -> CANCELLED`
-- `SCHEDULED -> LOCKED` on SVM (fail-closed pre-open behavior)
+## Off-chain acceptance
 
-Market creation is allowed only when duel lifecycle is marketable:
-
-- EVM: `BETTING_OPEN` or `LOCKED`
-- SVM: `BettingOpen` or `Locked`
-
-## 2) Order Semantics
-
-### 2.1 Market kind and side model
-
-Canonical market kind:
-
-- duel winner only (`market_kind = 0` on EVM, `market_kind = 1` on SVM instruction surface)
-
-Canonical side encoding:
-
-- Bid / Buy side (`BUY_SIDE` / `SIDE_BID`) = 1
-- Ask / Sell side (`SELL_SIDE` / `SIDE_ASK`) = 2
-
-### 2.2 Price and amount domain
-
-Canonical price domain:
-
-- integer ticks in `(0, 1000)`
-
-Canonical amount domain:
-
-- share quantity represented in integer units
-- EVM requires `amount % 1000 == 0`
-- SVM enforces exact divisibility through `quote_cost` precision check (`amount * price_component` must divide by `1000`)
-
-### 2.3 Matching and resting
-
-- Orders may cross and match immediately against the opposite side FIFO queue at each price level.
-- Remaining unmatched quantity rests on-book at the submitted limit price.
-- Best bid / best ask are derived from side bitmaps.
-- Matching is bounded per transaction:
-  - EVM loop safety bound: 100 iterations
-  - SVM loop safety bound: 50 matches per instruction
-
-### 2.4 Order cancellation
-
-- Only maker may cancel an active order.
-- Filled or inactive orders cannot be cancelled.
-- Remaining notional is refunded from escrow/vault.
-
-## 3) Settlement + Fee Math
-
-## 3.1 Quote cost
-
-Let:
-
-- `P = price` in ticks
-- `A = amount` in shares
-- `MAX_PRICE = 1000`
-
-Then:
-
-- Bid-side lock/cost: `cost_bid = A * P / 1000`
-- Ask-side lock/cost: `cost_ask = A * (1000 - P) / 1000`
-
-Both chains enforce:
-
-- non-zero cost (`CostTooLow` equivalent)
-- exact integer arithmetic over 1000-tick domain
-
-## 3.2 Trade-time fees
-
-Trade fees are charged only on executed taker cost:
-
-- treasury fee = `executed_cost * trade_treasury_fee_bps / 10_000`
-- market-maker fee = `executed_cost * trade_market_maker_fee_bps / 10_000`
-
-Funding semantics:
-
-- resting GTC size leaves only quote cost locked in the book;
-- IOC remainders, post-only rejections, and cancel-taker STP remainders refund unused value immediately;
-- user-initiated cancels refund the full unfilled quote cost with no execution fee on the cancelled size.
-
-Fee cap invariants:
-
-- `trade_treasury_fee_bps + trade_market_maker_fee_bps <= 10_000`
-- `winnings_market_maker_fee_bps <= 10_000`
-
-## 3.3 Claim settlement
-
-When market is `RESOLVED`:
-
-- payout base = winning shares only
-- winnings fee = `winning_shares * winnings_market_maker_fee_bps / 10_000`
-- net payout = `winning_shares - winnings_fee`
-
-When market is `CANCELLED`:
-
-- payout = locked stake on both sides (`a_stake + b_stake` / `a_locked + b_locked`)
-
-No payout is allowed in non-final states.
-
-## 4) Cancellation Behavior
-
-### 4.1 Duel cancellation
-
-Oracle reporter role/authority can cancel a duel unless finalized.
-
-Effects:
-
-- duel state transitions to `CANCELLED`
-- metadata URI may be updated
-- market sync maps duel to `CANCELLED`
-- winner is reset to `NONE`
-
-### 4.2 Market-level implications of cancellation
-
-- Trading is blocked by non-`OPEN` status.
-- Claim path switches from winner-takes-all to refund mode.
-- Refund amount equals locked user stake; shares and lock accounting are zeroed after claim.
-
-## 5) Protocol Invariants
-
-- Finalized duel states (`RESOLVED`, `CANCELLED`) are immutable.
-- Settlement cannot occur before lock close semantics (`duel_end_ts >= bet_close_ts`).
-- Claim is idempotent after first successful payout (position/balance cleared).
-- Market winner can only be `A/B` when resolved, otherwise `NONE`.
-- All fee paths and refunds are arithmetic-safe and bounded by basis points limits.
+The keeper and API must rebuild truth from finalized on-chain instructions/events and canonical accounts. Any identity mismatch, incomplete history, unsupported invocation, fee inconsistency, source discontinuity, contradictory terminal input, or recovery drift fails readiness closed.

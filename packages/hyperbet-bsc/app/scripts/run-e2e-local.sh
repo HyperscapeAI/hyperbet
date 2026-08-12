@@ -206,7 +206,7 @@ resolve_wallet_path() {
     candidates+=("${ANCHOR_WALLET}")
   fi
   candidates+=(
-    "$HOME/.config/solana/hyperscape-keys/deployer.json"
+    "$HOME/.config/solana/hyperia-keys/deployer.json"
     "$HOME/.config/solana/id.json"
   )
 
@@ -483,7 +483,7 @@ fi
 
 IDL_ORACLE_ID="$(jq -r '.address // .metadata.address // empty' "$ANCHOR_DIR/target/idl/fight_oracle.json" 2>/dev/null || true)"
 IDL_MARKET_ID="$(jq -r '.address // .metadata.address // empty' "$ANCHOR_DIR/target/idl/gold_perps_market.json" 2>/dev/null || true)"
-IDL_CLOB_ID="$(jq -r '.address // .metadata.address // empty' "$ANCHOR_DIR/target/idl/gold_clob_market.json" 2>/dev/null || true)"
+IDL_CLOB_ID="$(jq -r '.address // .metadata.address // empty' "$ANCHOR_DIR/target/idl/duel_market.json" 2>/dev/null || true)"
 if [[ -n "$IDL_ORACLE_ID" && "$IDL_ORACLE_ID" != "null" ]]; then
   PROGRAM_ORACLE_ID="$IDL_ORACLE_ID"
 fi
@@ -508,7 +508,7 @@ solana-test-validator \
   --ledger "$LEDGER_DIR" \
   --upgradeable-program "$PROGRAM_ORACLE_ID" "$ANCHOR_DIR/target/deploy/fight_oracle.so" "$SOLANA_BOOTSTRAP_KEYPAIR" \
   --upgradeable-program "$PROGRAM_MARKET_ID" "$ANCHOR_DIR/target/deploy/gold_perps_market.so" "$SOLANA_BOOTSTRAP_KEYPAIR" \
-  --upgradeable-program "$PROGRAM_CLOB_ID" "$ANCHOR_DIR/target/deploy/gold_clob_market.so" "$SOLANA_BOOTSTRAP_KEYPAIR" \
+  --upgradeable-program "$PROGRAM_CLOB_ID" "$ANCHOR_DIR/target/deploy/duel_market.so" "$SOLANA_BOOTSTRAP_KEYPAIR" \
   >"$VALIDATOR_LOG" 2>&1 &
 VALIDATOR_PID="$!"
 write_pid_file "$VALIDATOR_PID_FILE" "$VALIDATOR_PID"

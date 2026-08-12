@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { CONFIG } from "../lib/config";
+import { GAME_API_URL, UI_SYNC_DELAY_MS } from "../lib/solanaConfig";
 
 export type DuelInventoryItem = {
   slot: number;
@@ -53,7 +53,7 @@ export type DuelContextState = {
 };
 
 const POLL_INTERVAL_MS = 3000;
-const API_URL = CONFIG.gameApiUrl.replace(/\/$/, "");
+const API_URL = GAME_API_URL.replace(/\/$/, "");
 const DUEL_CONTEXT_URL = `${API_URL}/api/streaming/duel-context`;
 
 function normalizeDuelAgent(raw: unknown): DuelAgentContext | null {
@@ -142,14 +142,21 @@ export function useDuelContext(options: { disabled?: boolean } = {}) {
   const [context, setContext] = useState<DuelContextState | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const delayedUpdatesRef = useRef<Set<ReturnType<typeof setTimeout>>>(
+    new Set(),
+  );
+  const closedRef = useRef(false);
 
   useEffect(() => {
+    closedRef.current = disabled;
     if (disabled) {
       if (timerRef.current) {
         clearInterval(timerRef.current);
         timerRef.current = null;
       }
       abortRef.current?.abort();
+      for (const timer of delayedUpdatesRef.current) clearTimeout(timer);
+      delayedUpdatesRef.current.clear();
       return;
     }
 
@@ -164,7 +171,17 @@ export function useDuelContext(options: { disabled?: boolean } = {}) {
         });
         if (res.ok) {
           const data = normalizeDuelContext(await res.json());
-          if (data) setContext(data);
+          if (data) {
+            if (UI_SYNC_DELAY_MS <= 0) {
+              setContext(data);
+            } else {
+              const delayedUpdate = setTimeout(() => {
+                delayedUpdatesRef.current.delete(delayedUpdate);
+                if (!closedRef.current) setContext(data);
+              }, UI_SYNC_DELAY_MS);
+              delayedUpdatesRef.current.add(delayedUpdate);
+            }
+          }
         }
       } catch {
         // unavailable — streaming mode not active, silently ignore
@@ -175,11 +192,14 @@ export function useDuelContext(options: { disabled?: boolean } = {}) {
     timerRef.current = setInterval(() => void doFetch(), POLL_INTERVAL_MS);
 
     return () => {
+      closedRef.current = true;
       if (timerRef.current) {
         clearInterval(timerRef.current);
         timerRef.current = null;
       }
       abortRef.current?.abort();
+      for (const timer of delayedUpdatesRef.current) clearTimeout(timer);
+      delayedUpdatesRef.current.clear();
     };
   }, [disabled]);
 

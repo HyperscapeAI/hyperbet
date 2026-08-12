@@ -11,12 +11,13 @@ import { parseCancelDuelInstruction, parseChallengeResultInstruction, parseFinal
 
 export const FIGHT_ORACLE_PROGRAM_ADDRESS = 'GFdnu7kUnZGiXh4ejWiJSBCUxvq4UfdEeUv9jjFzr5EM' as Address<'GFdnu7kUnZGiXh4ejWiJSBCUxvq4UfdEeUv9jjFzr5EM'>;
 
-export enum FightOracleAccount { DuelState, OracleConfig }
+export enum FightOracleAccount { DuelState, OracleConfig, ProposalRecord }
 
 export function identifyFightOracleAccount(account: { data: ReadonlyUint8Array } | ReadonlyUint8Array): FightOracleAccount {
 const data = 'data' in account ? account.data : account;
 if (containsBytes(data, fixEncoderSize(getBytesEncoder(), 8).encode(new Uint8Array([149, 213, 59, 165, 124, 116, 145, 120])), 0)) { return FightOracleAccount.DuelState; }
 if (containsBytes(data, fixEncoderSize(getBytesEncoder(), 8).encode(new Uint8Array([133, 196, 152, 50, 27, 21, 145, 254])), 0)) { return FightOracleAccount.OracleConfig; }
+if (containsBytes(data, fixEncoderSize(getBytesEncoder(), 8).encode(new Uint8Array([154, 180, 211, 203, 232, 223, 142, 147])), 0)) { return FightOracleAccount.ProposalRecord; }
 throw new Error("The provided account could not be identified as a fightOracle account.")
 }
 

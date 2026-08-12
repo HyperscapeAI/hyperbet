@@ -1,10 +1,10 @@
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   getLocaleTag,
   resolveUiLocale,
   type UiLocale,
 } from "@hyperbet/ui/i18n";
-import { GAME_API_URL } from "../lib/config";
+import { GAME_API_URL } from "../lib/solanaConfig";
 
 interface LeaderboardEntry {
   rank: number;
@@ -13,7 +13,6 @@ interface LeaderboardEntry {
 }
 
 type TimeWindow = "alltime" | "daily" | "weekly" | "monthly";
-type Scope = "linked" | "wallet";
 
 function getLeaderboardCopy(locale: UiLocale) {
   if (locale === "zh") {
@@ -33,10 +32,6 @@ function getLeaderboardCopy(locale: UiLocale) {
         daily: "今日",
         weekly: "本周",
         monthly: "本月",
-      },
-      scopes: {
-        linked: "已关联",
-        wallet: "单钱包",
       },
     };
   }
@@ -58,10 +53,6 @@ function getLeaderboardCopy(locale: UiLocale) {
       weekly: "This Week",
       monthly: "This Month",
     },
-    scopes: {
-      linked: "Linked",
-      wallet: "Wallet",
-    },
   };
 }
 
@@ -72,13 +63,15 @@ function truncateWallet(wallet: string): string {
 
 export function PointsLeaderboard({ locale }: { locale?: UiLocale } = {}) {
   const resolvedLocale = resolveUiLocale(locale);
-  const copy = getLeaderboardCopy(resolvedLocale);
+  const copy = useMemo(
+    () => getLeaderboardCopy(resolvedLocale),
+    [resolvedLocale],
+  );
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [page, setPage] = useState(0);
   const [timeWindow, setTimeWindow] = useState<TimeWindow>("alltime");
-  const [scope, setScope] = useState<Scope>("linked");
   const pageSize = 20;
 
   const fetchLeaderboard = useCallback(async () => {
@@ -87,7 +80,6 @@ export function PointsLeaderboard({ locale }: { locale?: UiLocale } = {}) {
       const params = new URLSearchParams({
         limit: String(pageSize),
         offset: String(page * pageSize),
-        scope,
         window: timeWindow,
       });
       const response = await fetch(
@@ -107,7 +99,7 @@ export function PointsLeaderboard({ locale }: { locale?: UiLocale } = {}) {
     } finally {
       setLoading(false);
     }
-  }, [copy, page, scope, timeWindow]);
+  }, [copy, page, timeWindow]);
 
   useEffect(() => {
     void fetchLeaderboard();
@@ -117,7 +109,7 @@ export function PointsLeaderboard({ locale }: { locale?: UiLocale } = {}) {
 
   useEffect(() => {
     setPage(0);
-  }, [timeWindow, scope]);
+  }, [timeWindow]);
 
   const filterBtnStyle = (isActive: boolean): React.CSSProperties => ({
     padding: "4px 10px",
@@ -161,20 +153,6 @@ export function PointsLeaderboard({ locale }: { locale?: UiLocale } = {}) {
           }}
         >
           {copy.title}
-        </div>
-
-        <div style={{ display: "flex", gap: 4 }}>
-          {(["linked", "wallet"] as const).map((option) => (
-            <button
-              key={option}
-              type="button"
-              data-testid={`points-leaderboard-scope-${option}`}
-              onClick={() => setScope(option)}
-              style={filterBtnStyle(scope === option)}
-            >
-              {copy.scopes[option]}
-            </button>
-          ))}
         </div>
       </div>
 

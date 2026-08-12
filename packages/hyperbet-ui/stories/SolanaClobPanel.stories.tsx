@@ -20,6 +20,10 @@ const meta = {
     compact: false,
     connectionOverride: new Connection("https://api.devnet.solana.com"),
     walletOverride: { publicKey: null },
+    programAddresses: {
+      fightOracleProgramId: "GFdnu7kUnZGiXh4ejWiJSBCUxvq4UfdEeUv9jjFzr5EM",
+      duelMarketProgramId: "3QUVoaKJqo1rg9eXe7vyFewJrY75NWdtH8JZfvTb79Uy",
+    },
   },
 } satisfies Meta<typeof SolanaClobPanel>;
 

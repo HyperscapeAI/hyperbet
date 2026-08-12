@@ -1,6 +1,3 @@
-export { AgentCard } from "./AgentCard";
-export { Leaderboard } from "./Leaderboard";
-export { SpectatorPanel } from "./SpectatorPanel";
 export { useDuelContext } from "./useDuelContext";
 export type {
   DuelContextState,

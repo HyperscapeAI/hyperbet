@@ -7,12 +7,12 @@ export PATH="/Users/mac/.bun/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
 BUN_BIN="${BUN_BIN:-/Users/mac/.bun/bin/bun}"
 LOCAL_ENV_FILE="${LOCAL_ENV_FILE:-$ROOT/.env.stage-a.testnet.local}"
 STAGE_A_ENV_FILE="${STAGE_A_ENV_FILE:-$ROOT/keys/stage-a/export-stage-a.sh}"
-E2E_HYPERSCAPES_ROOT_OVERRIDE="${E2E_HYPERSCAPES_ROOT:-${ACCEPTANCE_HYPERSCAPES_ROOT:-}}"
+E2E_HYPERIA_ROOT_OVERRIDE="${E2E_HYPERIA_ROOT:-${ACCEPTANCE_HYPERIA_ROOT:-}}"
 CLUSTER="${E2E_CLUSTER:-devnet}"
 DUEL_SOURCE="${E2E_DUEL_SOURCE:-${ACCEPTANCE_DUEL_SOURCE:-synthetic_publish}}"
 if [[ -n "${E2E_APP_PORT:-}" ]]; then
   APP_PORT="$E2E_APP_PORT"
-elif [[ "$DUEL_SOURCE" == "real_hyperscapes" ]]; then
+elif [[ "$DUEL_SOURCE" == "real_hyperia" ]]; then
   APP_PORT="${E2E_REAL_DUEL_APP_PORT:-4191}"
 else
   APP_PORT="4181"
@@ -20,7 +20,7 @@ fi
 APP_LOG="$APP_DIR/.e2e-app-${CLUSTER}-${APP_PORT}.log"
 FUNDING_PROFILE="${E2E_STAGE_A_FUNDING_PROFILE:-default}"
 ACCEPTANCE_CHAINS="${E2E_ACCEPTANCE_CHAINS:-avax}"
-if [[ "$DUEL_SOURCE" == "real_hyperscapes" ]]; then
+if [[ "$DUEL_SOURCE" == "real_hyperia" ]]; then
   LIVE_DUEL_TRADE_WINDOW_MS="${E2E_LIVE_DUEL_TRADE_WINDOW_MS:-240000}"
   LIVE_DUEL_MIN_WINDOW_MS="${E2E_LIVE_DUEL_MIN_WINDOW_MS:-300000}"
 else
@@ -42,12 +42,12 @@ ACCEPTANCE_SERVICE_DIR="$ROOT/.ci-artifacts/stage-a/acceptance-services"
 EVM_PID_FILE="$ACCEPTANCE_SERVICE_DIR/evm-keeper.pid"
 EVM_LOG_FILE="$ACCEPTANCE_SERVICE_DIR/evm-keeper.log"
 EVM_KEEPER_DB_PATH="$ACCEPTANCE_SERVICE_DIR/evm-keeper-${APP_PORT}-${KEEPER_PORT}.sqlite"
-HYPERSCAPES_DUEL_PID_FILE="$ACCEPTANCE_SERVICE_DIR/hyperscapes.pid"
-HYPERSCAPES_DUEL_LOG_FILE="$ACCEPTANCE_SERVICE_DIR/hyperscapes.log"
-HYPERSCAPES_DUEL_ENV_FILE="$ACCEPTANCE_SERVICE_DIR/hyperscapes.env"
-HYPERSCAPES_CLIENT_PID_FILE="$ACCEPTANCE_SERVICE_DIR/hyperscapes-client.pid"
-HYPERSCAPES_CLIENT_LOG_FILE="$ACCEPTANCE_SERVICE_DIR/hyperscapes-client.log"
-HYPERSCAPES_CLIENT_ENV_FILE="$ACCEPTANCE_SERVICE_DIR/hyperscapes-client.env"
+HYPERIA_DUEL_PID_FILE="$ACCEPTANCE_SERVICE_DIR/hyperia.pid"
+HYPERIA_DUEL_LOG_FILE="$ACCEPTANCE_SERVICE_DIR/hyperia.log"
+HYPERIA_DUEL_ENV_FILE="$ACCEPTANCE_SERVICE_DIR/hyperia.env"
+HYPERIA_CLIENT_PID_FILE="$ACCEPTANCE_SERVICE_DIR/hyperia-client.pid"
+HYPERIA_CLIENT_LOG_FILE="$ACCEPTANCE_SERVICE_DIR/hyperia-client.log"
+HYPERIA_CLIENT_ENV_FILE="$ACCEPTANCE_SERVICE_DIR/hyperia-client.env"
 PROCESS_CONTROL_SCRIPT="$ROOT/scripts/e2e-process-control.sh"
 
 APP_PID=""
@@ -69,27 +69,27 @@ else
   WORKSPACE_ROOT="$(cd "$ROOT/.." && pwd)"
 fi
 
-resolve_hyperscapes_root() {
+resolve_hyperia_root() {
   local -a candidates=()
-  if [[ -n "$E2E_HYPERSCAPES_ROOT_OVERRIDE" ]]; then
-    candidates+=("$E2E_HYPERSCAPES_ROOT_OVERRIDE")
+  if [[ -n "$E2E_HYPERIA_ROOT_OVERRIDE" ]]; then
+    candidates+=("$E2E_HYPERIA_ROOT_OVERRIDE")
   fi
   candidates+=(
-    "$WORKSPACE_ROOT/.worktrees/hyperscapes-main-latest-e2e"
-    "$WORKSPACE_ROOT/.worktrees/hyperscapes-main-acceptance"
-    "$WORKSPACE_ROOT/.worktrees/hyperscapes-main-sync"
-    "$WORKSPACE_ROOT/.worktrees/hyperscapes-stream-bet-sync"
-    "$WORKSPACE_ROOT/hyperscapes-stream-bet-sync"
-    "$WORKSPACE_ROOT/hyperscapes-mono"
-    "$ROOT/../.worktrees/hyperscapes-main-latest-e2e"
-    "$ROOT/../.worktrees/hyperscapes-main-acceptance"
-    "$ROOT/../.worktrees/hyperscapes-main-sync"
-    "$ROOT/../.worktrees/hyperscapes-stream-bet-sync"
-    "$ROOT/../hyperscapes-stream-bet-sync"
-    "$ROOT/../hyperscapes-mono"
+    "$WORKSPACE_ROOT/.worktrees/hyperia-main-latest-e2e"
+    "$WORKSPACE_ROOT/.worktrees/hyperia-main-acceptance"
+    "$WORKSPACE_ROOT/.worktrees/hyperia-main-sync"
+    "$WORKSPACE_ROOT/.worktrees/hyperia-stream-bet-sync"
+    "$WORKSPACE_ROOT/hyperia-stream-bet-sync"
+    "$WORKSPACE_ROOT/hyperia-mono"
+    "$ROOT/../.worktrees/hyperia-main-latest-e2e"
+    "$ROOT/../.worktrees/hyperia-main-acceptance"
+    "$ROOT/../.worktrees/hyperia-main-sync"
+    "$ROOT/../.worktrees/hyperia-stream-bet-sync"
+    "$ROOT/../hyperia-stream-bet-sync"
+    "$ROOT/../hyperia-mono"
   )
-  if [[ -n "${HYPERSCAPES_ROOT:-}" ]]; then
-    candidates+=("${HYPERSCAPES_ROOT}")
+  if [[ -n "${HYPERIA_ROOT:-}" ]]; then
+    candidates+=("${HYPERIA_ROOT}")
   fi
 
   local candidate=""
@@ -174,7 +174,7 @@ require_node_major() {
   version="$("$bin" -p 'process.versions.node' 2>/dev/null || true)"
   major="${version%%.*}"
   if [[ -z "$version" || "$major" != "$expected_major" ]]; then
-    echo "[e2e] ${label} must use Node ${expected_major}.x for local Hyperscapes validation (got ${version:-unknown} via ${bin})" >&2
+    echo "[e2e] ${label} must use Node ${expected_major}.x for local Hyperia validation (got ${version:-unknown} via ${bin})" >&2
     exit 1
   fi
 }
@@ -211,7 +211,7 @@ cleanup() {
     bash "$PROCESS_CONTROL_SCRIPT" stop "$CONTROL_PATH" keeper >/dev/null 2>&1 || true
   fi
   if [[ "$REAL_DUEL_SERVICES_MANAGED" == "true" ]]; then
-    bash "$PROCESS_CONTROL_SCRIPT" stop "$CONTROL_PATH" hyperscapes >/dev/null 2>&1 || true
+    bash "$PROCESS_CONTROL_SCRIPT" stop "$CONTROL_PATH" hyperia >/dev/null 2>&1 || true
   fi
   if [[ -n "$APP_PID" ]] && kill -0 "$APP_PID" >/dev/null 2>&1; then
     kill "$APP_PID" >/dev/null 2>&1 || true
@@ -256,32 +256,32 @@ write_shell_env_file() {
   done
 }
 
-write_hyperscapes_service_envs() {
-  local resolved_root="$(resolve_hyperscapes_root 2>/dev/null || true)"
+write_hyperia_service_envs() {
+  local resolved_root="$(resolve_hyperia_root 2>/dev/null || true)"
   local resolved_node="${NODE_BIN:-$(resolve_node_bin "${NODE_BIN:-}" 2>/dev/null || true)}"
   local resolved_client_node="${DUEL_CLIENT_NODE_BIN:-${resolved_node}}"
   local game_port="${GAME_PORT:-$(port_from_url_or_default "$GAME_HTTP_URL" "5555")}"
   local client_port="${GAME_CLIENT_PORT:-$(port_from_url_or_default "$GAME_CLIENT_URL" "3333")}"
   local default_cdn_url="${GAME_HTTP_URL%/}/game-assets"
-  local duel_fresh="${HYPERSCAPES_DUEL_FRESH:-true}"
+  local duel_fresh="${HYPERIA_DUEL_FRESH:-true}"
   local streaming_announcement_ms="${STREAMING_ANNOUNCEMENT_MS:-}"
-  local hyperscapes_local_postgres_user="${HYPERSCAPES_LOCAL_POSTGRES_USER:-${LOCAL_POSTGRES_USER:-${USER:-postgres}}}"
-  local hyperscapes_local_postgres_port="${HYPERSCAPES_LOCAL_POSTGRES_PORT:-${LOCAL_POSTGRES_PORT:-5432}}"
-  local hyperscapes_local_postgres_db="${HYPERSCAPES_LOCAL_POSTGRES_DB:-${POSTGRES_DB:-hyperscape}}"
-  local hyperscapes_duel_database_url="${HYPERSCAPES_DUEL_DATABASE_URL:-postgresql://${hyperscapes_local_postgres_user}@127.0.0.1:${hyperscapes_local_postgres_port}/${hyperscapes_local_postgres_db}}"
-  local hyperscapes_public_cdn_url="${HYPERSCAPES_PUBLIC_CDN_URL:-${PUBLIC_CDN_URL:-$default_cdn_url}}"
+  local hyperia_local_postgres_user="${HYPERIA_LOCAL_POSTGRES_USER:-${LOCAL_POSTGRES_USER:-${USER:-postgres}}}"
+  local hyperia_local_postgres_port="${HYPERIA_LOCAL_POSTGRES_PORT:-${LOCAL_POSTGRES_PORT:-5432}}"
+  local hyperia_local_postgres_db="${HYPERIA_LOCAL_POSTGRES_DB:-${POSTGRES_DB:-hyperia}}"
+  local hyperia_duel_database_url="${HYPERIA_DUEL_DATABASE_URL:-postgresql://${hyperia_local_postgres_user}@127.0.0.1:${hyperia_local_postgres_port}/${hyperia_local_postgres_db}}"
+  local hyperia_public_cdn_url="${HYPERIA_PUBLIC_CDN_URL:-${PUBLIC_CDN_URL:-$default_cdn_url}}"
 
   if [[ -z "$resolved_root" || ! -d "$resolved_root" ]]; then
-    echo "[e2e] unable to resolve HYPERSCAPES_ROOT for real_hyperscapes restart control" >&2
+    echo "[e2e] unable to resolve HYPERIA_ROOT for real_hyperia restart control" >&2
     exit 1
   fi
-  echo "[e2e] using Hyperscapes root: $resolved_root"
+  echo "[e2e] using Hyperia root: $resolved_root"
   if [[ -z "$resolved_node" || ! -x "$resolved_node" ]]; then
-    echo "[e2e] unable to resolve NODE_BIN for real_hyperscapes restart control" >&2
+    echo "[e2e] unable to resolve NODE_BIN for real_hyperia restart control" >&2
     exit 1
   fi
   if [[ -z "$resolved_client_node" || ! -x "$resolved_client_node" ]]; then
-    echo "[e2e] unable to resolve DUEL_CLIENT_NODE_BIN for real_hyperscapes restart control" >&2
+    echo "[e2e] unable to resolve DUEL_CLIENT_NODE_BIN for real_hyperia restart control" >&2
     exit 1
   fi
 
@@ -299,8 +299,8 @@ write_hyperscapes_service_envs() {
   mkdir -p "$ACCEPTANCE_SERVICE_DIR"
 
   write_shell_env_file \
-    "$HYPERSCAPES_DUEL_ENV_FILE" \
-    HYPERSCAPES_ROOT "$resolved_root" \
+    "$HYPERIA_DUEL_ENV_FILE" \
+    HYPERIA_ROOT "$resolved_root" \
     BUN_BIN "$BUN_BIN" \
     NODE_BIN "$resolved_node" \
     DUEL_CLIENT_NODE_BIN "$resolved_client_node" \
@@ -309,15 +309,15 @@ write_hyperscapes_service_envs() {
     GAME_CLIENT_URL "$GAME_CLIENT_URL" \
     GAME_PORT "$game_port" \
     DUEL_BOTS "${DUEL_BOTS:-4}" \
-    HYPERSCAPES_SKIP_CHAIN_SETUP "${HYPERSCAPES_SKIP_CHAIN_SETUP:-true}" \
-    HYPERSCAPES_DUEL_NODE_ENV "${HYPERSCAPES_DUEL_NODE_ENV:-development}" \
-    HYPERSCAPES_USE_PRODUCTION_CLIENT "${HYPERSCAPES_USE_PRODUCTION_CLIENT:-true}" \
-    HYPERSCAPES_REUSE_EXISTING_CLIENT "${HYPERSCAPES_REUSE_EXISTING_CLIENT:-false}" \
-    HYPERSCAPES_DUEL_FRESH "$duel_fresh" \
-    HYPERSCAPES_DUEL_DATABASE_URL "$hyperscapes_duel_database_url" \
+    HYPERIA_SKIP_CHAIN_SETUP "${HYPERIA_SKIP_CHAIN_SETUP:-true}" \
+    HYPERIA_DUEL_NODE_ENV "${HYPERIA_DUEL_NODE_ENV:-development}" \
+    HYPERIA_USE_PRODUCTION_CLIENT "${HYPERIA_USE_PRODUCTION_CLIENT:-true}" \
+    HYPERIA_REUSE_EXISTING_CLIENT "${HYPERIA_REUSE_EXISTING_CLIENT:-false}" \
+    HYPERIA_DUEL_FRESH "$duel_fresh" \
+    HYPERIA_DUEL_DATABASE_URL "$hyperia_duel_database_url" \
     DUEL_ALLOW_FRAME_EMBED "${DUEL_ALLOW_FRAME_EMBED:-true}" \
-    HYPERSCAPES_JWT_SECRET "${HYPERSCAPES_JWT_SECRET:-local-dev-secret}" \
-    HYPERSCAPES_PUBLIC_CDN_URL "$hyperscapes_public_cdn_url" \
+    HYPERIA_JWT_SECRET "${HYPERIA_JWT_SECRET:-local-dev-secret}" \
+    HYPERIA_PUBLIC_CDN_URL "$hyperia_public_cdn_url" \
     STREAMING_ANNOUNCEMENT_MS "$streaming_announcement_ms" \
     STREAMING_FIGHTING_MS "${STREAMING_FIGHTING_MS:-60000}" \
     STREAMING_END_WARNING_MS "${STREAMING_END_WARNING_MS:-5000}" \
@@ -331,18 +331,18 @@ write_hyperscapes_service_envs() {
     STREAM_CAPTURE_HEIGHT "${STREAM_CAPTURE_HEIGHT:-720}"
 
   write_shell_env_file \
-    "$HYPERSCAPES_CLIENT_ENV_FILE" \
-    HYPERSCAPES_ROOT "$resolved_root" \
+    "$HYPERIA_CLIENT_ENV_FILE" \
+    HYPERIA_ROOT "$resolved_root" \
     GAME_HTTP_URL "$GAME_HTTP_URL" \
     GAME_WS_URL "$GAME_WS_URL" \
-    HYPERSCAPES_PUBLIC_CDN_URL "$hyperscapes_public_cdn_url" \
+    HYPERIA_PUBLIC_CDN_URL "$hyperia_public_cdn_url" \
     GAME_CLIENT_PORT "$client_port" \
     NODE_BIN "$resolved_node" \
     DUEL_CLIENT_NODE_BIN "$resolved_client_node"
 }
 
-seed_hyperscapes_agents() {
-  if [[ "$DUEL_SOURCE" != "real_hyperscapes" ]]; then
+seed_hyperia_agents() {
+  if [[ "$DUEL_SOURCE" != "real_hyperia" ]]; then
     return 0
   fi
 
@@ -355,7 +355,7 @@ seed_hyperscapes_agents() {
   local current_agents=""
 
   if [[ -z "$node_bin" || ! -x "$node_bin" ]]; then
-    echo "[e2e] unable to resolve NODE_BIN for Hyperscapes embedded-agent seeding" >&2
+    echo "[e2e] unable to resolve NODE_BIN for Hyperia embedded-agent seeding" >&2
     exit 1
   fi
 
@@ -372,11 +372,11 @@ seed_hyperscapes_agents() {
   local agent_id=""
   for agent_id in "${desired_agents[@]}"; do
     if printf '%s\n' "$current_agents" | grep -q -- "\"$agent_id\""; then
-      echo "[e2e] Hyperscapes embedded agent present: $agent_id"
+      echo "[e2e] Hyperia embedded agent present: $agent_id"
       continue
     fi
 
-    echo "[e2e] creating Hyperscapes embedded agent $agent_id"
+    echo "[e2e] creating Hyperia embedded agent $agent_id"
     curl -fsSL \
       -X POST \
       -H 'content-type: application/json' \
@@ -392,13 +392,13 @@ seed_hyperscapes_agents() {
     phase="$(printf '%s' "$stream_state" | jq -r '.cycle.phase // ""' 2>/dev/null || true)"
     duel_key="$(printf '%s' "$stream_state" | jq -r '.cycle.duelKeyHex // ""' 2>/dev/null || true)"
     if [[ "$phase" != "IDLE" && -n "$duel_key" ]]; then
-      echo "[e2e] Hyperscapes duel seeded: phase=${phase} duelKey=${duel_key}"
+      echo "[e2e] Hyperia duel seeded: phase=${phase} duelKey=${duel_key}"
       return 0
     fi
     sleep 1
   done
 
-  echo "[e2e] timed out waiting for Hyperscapes duel to leave IDLE" >&2
+  echo "[e2e] timed out waiting for Hyperia duel to leave IDLE" >&2
   return 1
 }
 
@@ -415,22 +415,22 @@ write_control_files() {
   local extra_services=""
   bsc_clob="$(jq -r '.goldClobAddress' "$ROOT/packages/evm-contracts/deployments/bscTestnet.json")"
   avax_clob="$(jq -r '.goldClobAddress' "$ROOT/packages/evm-contracts/deployments/avaxFuji.json")"
-  if [[ "$DUEL_SOURCE" == "real_hyperscapes" ]]; then
+  if [[ "$DUEL_SOURCE" == "real_hyperia" ]]; then
     enable_stream_publish="false"
     enable_keeper_bot="true"
     enable_evm_keeper_lifecycle_writes="false"
     stream_state_source_url="${GAME_HTTP_URL%/}/api/streaming/state"
-    write_hyperscapes_service_envs
+    write_hyperia_service_envs
     extra_services=$(cat <<EOF
 ,
-    "hyperscapes": {
-      "pidFile": "$HYPERSCAPES_DUEL_PID_FILE",
-      "envFile": "$HYPERSCAPES_DUEL_ENV_FILE",
-      "logPath": "$HYPERSCAPES_DUEL_LOG_FILE",
+    "hyperia": {
+      "pidFile": "$HYPERIA_DUEL_PID_FILE",
+      "envFile": "$HYPERIA_DUEL_ENV_FILE",
+      "logPath": "$HYPERIA_DUEL_LOG_FILE",
       "cwd": "$ROOT",
       "healthUrl": "${GAME_HTTP_URL%/}/api/streaming/state",
       "streamStateUrl": "${GAME_HTTP_URL%/}/api/streaming/state",
-      "startCommand": "bash '$ROOT/scripts/start-hyperscapes-duel-service.sh'"
+      "startCommand": "bash '$ROOT/scripts/start-hyperia-duel-service.sh'"
     }
 EOF
 )
@@ -484,12 +484,12 @@ start_keeper() {
 }
 
 start_real_duel_services() {
-  if [[ "$DUEL_SOURCE" != "real_hyperscapes" ]]; then
+  if [[ "$DUEL_SOURCE" != "real_hyperia" ]]; then
     return 0
   fi
-  echo "[e2e] starting real Hyperscapes duel services"
-  bash "$PROCESS_CONTROL_SCRIPT" start "$CONTROL_PATH" hyperscapes
-  seed_hyperscapes_agents
+  echo "[e2e] starting real Hyperia duel services"
+  bash "$PROCESS_CONTROL_SCRIPT" start "$CONTROL_PATH" hyperia
+  seed_hyperia_agents
   REAL_DUEL_SERVICES_MANAGED="true"
 }
 
@@ -502,14 +502,14 @@ case "$CLUSTER" in
 esac
 
 case "$DUEL_SOURCE" in
-  synthetic_publish|real_hyperscapes) ;;
+  synthetic_publish|real_hyperia) ;;
   *)
-    echo "[e2e] unsupported E2E_DUEL_SOURCE=$DUEL_SOURCE (expected synthetic_publish or real_hyperscapes)"
+    echo "[e2e] unsupported E2E_DUEL_SOURCE=$DUEL_SOURCE (expected synthetic_publish or real_hyperia)"
     exit 1
     ;;
 esac
 
-if [[ "$PUBLIC_SETUP_SCOPE" == "default" ]] && [[ "$DUEL_SOURCE" == "real_hyperscapes" ]]; then
+if [[ "$PUBLIC_SETUP_SCOPE" == "default" ]] && [[ "$DUEL_SOURCE" == "real_hyperia" ]]; then
   case " $* " in
     *"market-flows.e2e.ts"*)
       PUBLIC_SETUP_SCOPE="evm_write"
@@ -529,7 +529,7 @@ export E2E_GAME_API_URL="$EVM_KEEPER_URL"
 export E2E_GAME_HTTP_URL="$GAME_HTTP_URL"
 export E2E_GAME_WS_URL="$GAME_WS_URL"
 export E2E_ARENA_WRITE_KEY="${ACCEPTANCE_STREAM_PUBLISH_KEY:-hyperbet-stage-a-local-write-key}"
-export E2E_EXPECT_KEEPER_BOT="${E2E_EXPECT_KEEPER_BOT:-$([[ "$DUEL_SOURCE" == "real_hyperscapes" ]] && echo true || echo false)}"
+export E2E_EXPECT_KEEPER_BOT="${E2E_EXPECT_KEEPER_BOT:-$([[ "$DUEL_SOURCE" == "real_hyperia" ]] && echo true || echo false)}"
 export E2E_KEEPER_DB_PATH="$EVM_KEEPER_DB_PATH"
 export ARENA_EXTERNAL_BET_WRITE_KEY="$E2E_ARENA_WRITE_KEY"
 

@@ -20,27 +20,27 @@ export interface ChartDataPoint {
 }
 
 interface PredictionMarketPanelProps {
-  yesPercent: number;
-  noPercent: number;
+  yesPercent: number | null;
+  noPercent: number | null;
   yesPool: string | number;
   noPool: string | number;
   side: BetSide;
   setSide: (side: BetSide) => void;
   amountInput: string;
   setAmountInput: (val: string) => void;
+  amountLabel?: string;
   onPlaceBet: () => void;
   isWalletReady: boolean;
   programsReady: boolean;
   isSubmitting?: boolean;
   agent1Name: string;
   agent2Name: string;
-  isEvm: boolean;
   supportsSell?: boolean;
   chartData?: ChartDataPoint[];
   bids?: OrderLevel[];
   asks?: OrderLevel[];
   recentTrades?: Trade[];
-  goldPriceUsd?: number | null;
+  assetPriceUsd?: number | null;
   children?: ReactNode;
   pointsDisplay?: ReactNode;
   currencySymbol?: string;
@@ -49,7 +49,8 @@ interface PredictionMarketPanelProps {
   onViewAgent1?: () => void;
   onViewAgent2?: () => void;
   compactHeader?: ReactNode;
-  /** Sidebar compact mode: single-column layout, hm-* gold theme, hides chart/orderbook/trades cols */
+  readOnly?: boolean;
+  /** Sidebar compact mode: single-column layout, hides chart/orderbook/trades columns. */
   compact?: boolean;
 }
 
@@ -62,27 +63,28 @@ export function PredictionMarketPanel({
   setSide,
   amountInput,
   setAmountInput,
+  amountLabel,
   onPlaceBet,
   isWalletReady,
   programsReady,
   isSubmitting = false,
   agent1Name,
   agent2Name,
-  isEvm,
   supportsSell = false,
   chartData = [],
   bids = [],
   asks = [],
   recentTrades = [],
-  goldPriceUsd = null,
+  assetPriceUsd = null,
   children,
   pointsDisplay,
   currencySymbol = "SOL",
   locale,
-  marketAssetSymbol = "GOLD",
+  marketAssetSymbol = currencySymbol,
   onViewAgent1,
   onViewAgent2,
   compactHeader,
+  readOnly = false,
   compact = false,
 }: PredictionMarketPanelProps) {
   const resolvedLocale = resolveUiLocale(locale);
@@ -91,8 +93,8 @@ export function PredictionMarketPanel({
 
   const yesSelected = side === "YES";
   const noSelected = side === "NO";
-  const canBet = isWalletReady && programsReady && !isSubmitting;
-  const sellSupported = isEvm || supportsSell;
+  const canBet = !readOnly && isWalletReady && programsReady && !isSubmitting;
+  const sellSupported = supportsSell;
   const selectedAccent = side === "YES" ? "var(--hm-buy)" : "var(--hm-sell)";
   const selectedGlow =
     side === "YES"
@@ -102,6 +104,8 @@ export function PredictionMarketPanel({
     side === "YES"
       ? "linear-gradient(180deg, var(--hm-buy-soft, rgba(34,197,94,0.18)) 0%, var(--hm-buy-soft-fade, rgba(34,197,94,0.05)) 100%)"
       : "linear-gradient(180deg, var(--hm-sell-soft, rgba(232,65,66,0.18)) 0%, var(--hm-sell-soft-fade, rgba(232,65,66,0.05)) 100%)";
+  const yesPercentLabel = yesPercent === null ? "—" : `${yesPercent}%`;
+  const noPercentLabel = noPercent === null ? "—" : `${noPercent}%`;
 
   // Compact mode colour tokens (hm-* theme)
   const C_YES_ACTIVE_BG = compact
@@ -133,9 +137,7 @@ export function PredictionMarketPanel({
   return (
     <>
       {/* Layout: 4-column wide OR single-column compact sidebar */}
-      <div
-        className={compact ? "pm-compact" : "pm-grid"}
-      >
+      <div className={compact ? "pm-compact" : "pm-grid"}>
         {/* ========== COL 1: Betting Controls ========== */}
         <div
           style={{
@@ -159,7 +161,11 @@ export function PredictionMarketPanel({
 
           {/* Agent buttons side by side */}
           <div
-            style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: compact ? 6 : 8 }}
+            style={{
+              display: "grid",
+              gridTemplateColumns: "1fr 1fr",
+              gap: compact ? 6 : 8,
+            }}
           >
             {/* Agent 1 */}
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
@@ -198,7 +204,9 @@ export function PredictionMarketPanel({
                     letterSpacing: 1.5,
                     textTransform: "uppercase",
                     fontFamily: "var(--hm-font-display)",
-                    color: yesSelected ? C_YES_TEXT : "var(--hm-text-dim, rgba(255,255,255,0.5))",
+                    color: yesSelected
+                      ? C_YES_TEXT
+                      : "var(--hm-text-dim, rgba(255,255,255,0.5))",
                     textShadow: yesSelected ? `0 0 10px ${C_YES_GLOW}` : "none",
                     overflow: "hidden",
                     textOverflow: "ellipsis",
@@ -211,7 +219,9 @@ export function PredictionMarketPanel({
                   style={{
                     fontSize: 22,
                     fontWeight: 900,
-                    color: yesSelected ? "var(--hm-text, #fff)" : "var(--hm-text-muted, rgba(255,255,255,0.25))",
+                    color: yesSelected
+                      ? "var(--hm-text, #fff)"
+                      : "var(--hm-text-muted, rgba(255,255,255,0.25))",
                     fontFamily: "var(--hm-font-display)",
                     fontVariantNumeric: "tabular-nums",
                     lineHeight: 1,
@@ -221,7 +231,7 @@ export function PredictionMarketPanel({
                       : "none",
                   }}
                 >
-                  {yesPercent}%
+                  {yesPercentLabel}
                 </div>
                 {compact ? (
                   <div
@@ -261,7 +271,8 @@ export function PredictionMarketPanel({
                   style={{
                     padding: "5px 4px",
                     borderRadius: 8,
-                    border: "1px solid var(--hm-buy-soft, rgba(34,197,94,0.15))",
+                    border:
+                      "1px solid var(--hm-buy-soft, rgba(34,197,94,0.15))",
                     cursor: "pointer",
                     fontSize: 10,
                     fontWeight: 800,
@@ -320,7 +331,9 @@ export function PredictionMarketPanel({
                     letterSpacing: 1.5,
                     textTransform: "uppercase",
                     fontFamily: "var(--hm-font-display)",
-                    color: noSelected ? "var(--hm-sell)" : "var(--hm-text-dim, rgba(255,255,255,0.5))",
+                    color: noSelected
+                      ? "var(--hm-sell)"
+                      : "var(--hm-text-dim, rgba(255,255,255,0.5))",
                     textShadow: noSelected
                       ? "0 0 10px var(--hm-sell-glow-strong, rgba(232,65,66,0.6))"
                       : "none",
@@ -335,7 +348,9 @@ export function PredictionMarketPanel({
                   style={{
                     fontSize: 22,
                     fontWeight: 900,
-                    color: noSelected ? "var(--hm-text, #fff)" : "var(--hm-text-muted, rgba(255,255,255,0.25))",
+                    color: noSelected
+                      ? "var(--hm-text, #fff)"
+                      : "var(--hm-text-muted, rgba(255,255,255,0.25))",
                     fontFamily: "var(--hm-font-display)",
                     fontVariantNumeric: "tabular-nums",
                     lineHeight: 1,
@@ -345,7 +360,7 @@ export function PredictionMarketPanel({
                       : "none",
                   }}
                 >
-                  {noPercent}%
+                  {noPercentLabel}
                 </div>
                 {compact ? (
                   <div
@@ -374,7 +389,8 @@ export function PredictionMarketPanel({
                       height: 2,
                       background:
                         "linear-gradient(90deg, var(--hm-sell-soft, rgba(232,65,66,0.2)), var(--hm-sell), var(--hm-sell-soft, rgba(232,65,66,0.2)))",
-                      boxShadow: "0 0 8px var(--hm-sell-glow-strong, rgba(232,65,66,0.5))",
+                      boxShadow:
+                        "0 0 8px var(--hm-sell-glow-strong, rgba(232,65,66,0.5))",
                     }}
                   />
                 )}
@@ -386,7 +402,8 @@ export function PredictionMarketPanel({
                   style={{
                     padding: "5px 4px",
                     borderRadius: 8,
-                    border: "1px solid var(--hm-sell-soft, rgba(232,65,66,0.15))",
+                    border:
+                      "1px solid var(--hm-sell-soft, rgba(232,65,66,0.15))",
                     cursor: "pointer",
                     fontSize: 10,
                     fontWeight: 800,
@@ -422,295 +439,325 @@ export function PredictionMarketPanel({
             <div style={{ marginBottom: 4 }}>{pointsDisplay}</div>
           )}
 
-          {/* Buy / Sell Toggle */}
-          <div
-            style={{
-              display: "flex",
-              gap: compact ? 6 : 4,
-              background: compact
-                ? "var(--hm-segmented-bg, rgba(255,255,255,0.03))"
-                : "var(--hm-segmented-bg-strong, rgba(0,0,0,0.25))",
-              borderRadius: compact ? 14 : 12,
-              padding: compact ? 4 : 3,
-              border: compact
-                ? "1px solid var(--hm-border-subtle, rgba(255,255,255,0.06))"
-                : "1px solid var(--hm-border-subtle, rgba(255,255,255,0.08))",
-              boxShadow: compact
-                ? "inset 0 1px 0 rgba(255,255,255,0.04)"
-                : "inset 0 2px 6px rgba(0,0,0,0.3), inset 0 0 0 0.5px rgba(255,255,255,0.04)",
-              backdropFilter: compact ? "none" : "blur(12px)",
-              WebkitBackdropFilter: compact ? "none" : "blur(12px)",
-            }}
-          >
-            <button
-              onClick={() => setActiveTab("buy")}
-              data-testid="prediction-tab-buy"
-              className="gm-tab-btn"
+          {readOnly ? (
+            <div
+              role="status"
               style={{
-                flex: 1,
-                padding: "8px 4px",
-                borderRadius: 9,
-                border: "none",
-                cursor: "pointer",
-                fontWeight: 900,
-                fontSize: compact ? 12 : 13,
-                letterSpacing: compact ? 1.2 : 2,
+                padding: "10px 12px",
+                borderRadius: 10,
+                border: "1px solid rgba(242,208,138,0.22)",
+                background: "rgba(242,208,138,0.07)",
+                color: "rgba(242,208,138,0.86)",
+                fontSize: 10,
+                fontWeight: 800,
+                letterSpacing: 1,
+                lineHeight: 1.5,
+                textAlign: "center",
                 textTransform: "uppercase",
-                transition: "all 0.15s ease",
-                fontFamily: "var(--hm-font-display)",
-                background:
-                  activeTab === "buy"
-                    ? compact
-                      ? "linear-gradient(180deg, var(--hm-buy) 0%, var(--hm-buy-strong, #15803d) 100%)"
-                      : "linear-gradient(180deg, var(--hm-buy) 0%, var(--hm-buy-strong, #15803d) 100%)"
-                    : "transparent",
-                color: activeTab === "buy"
-                  ? "var(--hm-tab-active-text, #fff)"
-                  : "var(--hm-text-muted, rgba(255,255,255,0.35))",
-                boxShadow:
-                  activeTab === "buy"
-                    ? compact
-                      ? "0 2px 8px rgba(34,197,94,0.35), inset 0 1px 0 rgba(255,255,255,0.25)"
-                      : "0 2px 12px var(--hm-buy-glow-soft, rgba(34,197,94,0.4)), inset 0 1px 0 rgba(255,255,255,0.3)"
-                    : "none",
               }}
             >
-              {copy.buy}
-            </button>
-            <button
-              onClick={() => sellSupported && setActiveTab("sell")}
-              data-testid="prediction-tab-sell"
-              className="gm-tab-btn"
-              disabled={!sellSupported}
-              style={{
-                flex: 1,
-                padding: "8px 4px",
-                borderRadius: 9,
-                border: "none",
-                cursor: sellSupported ? "pointer" : "not-allowed",
-                fontWeight: 900,
-                fontSize: compact ? 12 : 13,
-                letterSpacing: compact ? 1.2 : 2,
-                textTransform: "uppercase",
-                transition: "all 0.15s ease",
-                fontFamily: "var(--hm-font-display)",
-                background:
-                  activeTab === "sell"
-                    ? "linear-gradient(180deg, var(--hm-sell) 0%, var(--hm-sell-strong, #b91c1c) 100%)"
-                    : "transparent",
-                color: !sellSupported
-                  ? "var(--hm-text-muted, rgba(255,255,255,0.2))"
-                  : activeTab === "sell"
-                    ? "var(--hm-tab-active-text, #fff)"
-                    : "var(--hm-text-muted, rgba(255,255,255,0.35))",
-                boxShadow:
-                  activeTab === "sell"
-                    ? "0 2px 12px var(--hm-sell-glow-soft, rgba(232,65,66,0.4)), inset 0 1px 0 rgba(255,255,255,0.2)"
-                    : "none",
-              }}
-            >
-              {copy.sell}
-            </button>
-          </div>
+              Spectator mode · transaction controls disabled
+            </div>
+          ) : null}
 
-          {/* Amount + Submit */}
-          {activeTab === "buy" ? (
+          {/* Buy / Sell Toggle */}
+          {!readOnly ? (
             <div
               style={{
                 display: "flex",
-                flexDirection: "column",
-                gap: compact ? 7 : 8,
-                flex: 1,
+                gap: compact ? 6 : 4,
+                background: compact
+                  ? "var(--hm-segmented-bg, rgba(255,255,255,0.03))"
+                  : "var(--hm-segmented-bg-strong, rgba(0,0,0,0.25))",
+                borderRadius: compact ? 14 : 12,
+                padding: compact ? 4 : 3,
+                border: compact
+                  ? "1px solid var(--hm-border-subtle, rgba(255,255,255,0.06))"
+                  : "1px solid var(--hm-border-subtle, rgba(255,255,255,0.08))",
+                boxShadow: compact
+                  ? "inset 0 1px 0 rgba(255,255,255,0.04)"
+                  : "inset 0 2px 6px rgba(0,0,0,0.3), inset 0 0 0 0.5px rgba(255,255,255,0.04)",
+                backdropFilter: compact ? "none" : "blur(12px)",
+                WebkitBackdropFilter: compact ? "none" : "blur(12px)",
               }}
             >
-              <div>
-                {compact ? (
-                  <div
-                    style={{
-                      marginBottom: 5,
-                      fontSize: 9,
-                      fontWeight: 800,
-                      letterSpacing: 0.9,
-                      textTransform: "uppercase",
-                      color: "var(--hm-text-muted, rgba(255,255,255,0.48))",
-                      fontFamily: "var(--hm-font-display)",
-                    }}
-                  >
-                    {copy.betAmountLabel(currencySymbol)}
-                  </div>
-                ) : null}
-                <div style={{ position: "relative" }}>
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.000001"
-                    inputMode="decimal"
-                    aria-label={copy.betAmountLabel(currencySymbol)}
-                    data-testid="prediction-amount-input"
-                    placeholder="0.00"
-                    value={amountInput}
-                    onChange={(event) => setAmountInput(event.target.value)}
-                    className="gm-amount-input"
-                    style={{
-                      width: "100%",
-                      padding: compact ? "8px 52px 8px 11px" : "9px 44px 9px 12px",
-                      borderRadius: 10,
-                      border: "1px solid var(--hm-chip-border, rgba(232,65,66,0.18))",
-                      color: "var(--hm-accent-gold)",
-                      boxSizing: "border-box",
-                      fontSize: compact ? 14 : 15,
-                      fontWeight: 900,
-                      fontFamily: "var(--hm-font-mono)",
-                      fontVariantNumeric: "tabular-nums",
-                      letterSpacing: compact ? 0.4 : 1,
-                      background: "var(--hm-chip-bg-strong, rgba(0,0,0,0.3))",
-                      boxShadow:
-                        "inset 0 2px 8px rgba(0,0,0,0.24), inset 0 0 0 0.5px var(--hm-chip-highlight, rgba(232,65,66,0.06)), 0 1px 0 rgba(255,255,255,0.04)",
-                      backdropFilter: "blur(12px)",
-                      WebkitBackdropFilter: "blur(12px)",
-                    }}
-                  />
-                  <div
-                    style={{
-                      position: "absolute",
-                      right: compact ? 11 : 12,
-                      top: "50%",
-                      transform: "translateY(-50%)",
-                      display: "inline-flex",
-                      alignItems: "center",
-                      height: "100%",
-                      fontSize: compact ? 10 : 9,
-                      fontWeight: 900,
-                      color: "var(--hm-text-muted, rgba(232,65,66,0.45))",
-                      fontFamily: "var(--hm-font-display)",
-                      fontVariantNumeric: "tabular-nums",
-                      letterSpacing: compact ? 1 : 1.5,
-                    }}
-                  >
-                    {currencySymbol}
-                  </div>
-                </div>
-              </div>
               <button
-                disabled={!canBet}
-                onClick={onPlaceBet}
-                data-testid="prediction-submit"
-                className="gm-btn-submit"
+                onClick={() => setActiveTab("buy")}
+                data-testid="prediction-tab-buy"
+                className="gm-tab-btn"
                 style={{
-                  width: "100%",
-                  padding: compact ? "10px 10px" : "10px 6px",
-                  borderRadius: compact ? 12 : 10,
-                  border: canBet
-                    ? `1px solid ${compact ? selectedAccent : "var(--hm-chip-border, rgba(232,65,66,0.5))"}`
-                    : "1px solid var(--hm-border-subtle, rgba(255,255,255,0.08))",
+                  flex: 1,
+                  padding: "8px 4px",
+                  borderRadius: 9,
+                  border: "none",
+                  cursor: "pointer",
                   fontWeight: 900,
-                  fontSize: compact ? 13 : 14,
-                  letterSpacing: compact ? 1.8 : 3,
+                  fontSize: compact ? 12 : 13,
+                  letterSpacing: compact ? 1.2 : 2,
                   textTransform: "uppercase",
-                  cursor: canBet ? "pointer" : "not-allowed",
-                  transition: "all 0.15s cubic-bezier(0.4, 0, 0.2, 1)",
+                  transition: "all 0.15s ease",
                   fontFamily: "var(--hm-font-display)",
-                  background: canBet
-                    ? compact
-                      ? selectedCardBg
-                      : "linear-gradient(180deg, var(--hm-cta-bg-from, #f05252) 0%, var(--hm-cta-bg-mid, #E84142) 50%, var(--hm-cta-bg-to, #b91c1c) 100%)"
-                    : "var(--hm-panel-card-bg, linear-gradient(180deg, rgba(255,255,255,0.05) 0%, rgba(255,255,255,0.02) 100%))",
-                  color: canBet
-                    ? compact
-                      ? "var(--hm-cta-text, #ffffff)"
-                      : "var(--hm-cta-text, #ffffff)"
-                    : "var(--hm-text-muted, rgba(255,255,255,0.15))",
-                  boxShadow: canBet
-                    ? compact
-                      ? `0 10px 28px ${selectedGlow}, inset 0 1px 0 rgba(255,255,255,0.12)`
-                      : "0 4px 24px var(--hm-chip-shadow, rgba(232,65,66,0.2)), inset 0 1px 0 rgba(255,255,255,0.5), inset 0 -1px 0 rgba(0,0,0,0.1)"
-                    : "inset 0 1px 0 rgba(255,255,255,0.05), 0 2px 4px rgba(0,0,0,0.15)",
-                  position: "relative",
-                  overflow: "hidden",
+                  background:
+                    activeTab === "buy"
+                      ? compact
+                        ? "linear-gradient(180deg, var(--hm-buy) 0%, var(--hm-buy-strong, #15803d) 100%)"
+                        : "linear-gradient(180deg, var(--hm-buy) 0%, var(--hm-buy-strong, #15803d) 100%)"
+                      : "transparent",
+                  color:
+                    activeTab === "buy"
+                      ? "var(--hm-tab-active-text, #fff)"
+                      : "var(--hm-text-muted, rgba(255,255,255,0.35))",
+                  boxShadow:
+                    activeTab === "buy"
+                      ? compact
+                        ? "0 2px 8px rgba(34,197,94,0.35), inset 0 1px 0 rgba(255,255,255,0.25)"
+                        : "0 2px 12px var(--hm-buy-glow-soft, rgba(34,197,94,0.4)), inset 0 1px 0 rgba(255,255,255,0.3)"
+                      : "none",
                 }}
               >
-                {canBet && (
-                  <div
-                    style={{
-                      position: "absolute",
-                      top: 0,
-                      left: 0,
-                      width: "40%",
-                      height: "100%",
-                      background:
-                        "linear-gradient(90deg, transparent, rgba(255,255,255,0.25), transparent)",
-                      animation: "shimmerSweep 2.5s ease-in-out infinite",
-                      pointerEvents: "none",
-                    }}
-                  />
-                )}
-                <span style={{ position: "relative", zIndex: 1 }}>
-                  {isWalletReady
-                    ? `${copy.actionLabel(activeTab)} ${side}`
-                    : copy.connectWallet}
-                </span>
+                {copy.buy}
+              </button>
+              <button
+                onClick={() => sellSupported && setActiveTab("sell")}
+                data-testid="prediction-tab-sell"
+                className="gm-tab-btn"
+                disabled={!sellSupported}
+                style={{
+                  flex: 1,
+                  padding: "8px 4px",
+                  borderRadius: 9,
+                  border: "none",
+                  cursor: sellSupported ? "pointer" : "not-allowed",
+                  fontWeight: 900,
+                  fontSize: compact ? 12 : 13,
+                  letterSpacing: compact ? 1.2 : 2,
+                  textTransform: "uppercase",
+                  transition: "all 0.15s ease",
+                  fontFamily: "var(--hm-font-display)",
+                  background:
+                    activeTab === "sell"
+                      ? "linear-gradient(180deg, var(--hm-sell) 0%, var(--hm-sell-strong, #b91c1c) 100%)"
+                      : "transparent",
+                  color: !sellSupported
+                    ? "var(--hm-text-muted, rgba(255,255,255,0.2))"
+                    : activeTab === "sell"
+                      ? "var(--hm-tab-active-text, #fff)"
+                      : "var(--hm-text-muted, rgba(255,255,255,0.35))",
+                  boxShadow:
+                    activeTab === "sell"
+                      ? "0 2px 12px var(--hm-sell-glow-soft, rgba(232,65,66,0.4)), inset 0 1px 0 rgba(255,255,255,0.2)"
+                      : "none",
+                }}
+              >
+                {copy.sell}
               </button>
             </div>
-          ) : (
-            <div
-              style={{
-                padding: 12,
-                borderRadius: 12,
-                flex: 1,
-                background:
-                  "linear-gradient(180deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0.02) 100%)",
-                border: "1px solid rgba(255,255,255,0.08)",
-                boxShadow:
-                  "inset 0 1px 0 rgba(255,255,255,0.06), 0 2px 8px rgba(0,0,0,0.15)",
-                backdropFilter: "blur(12px)",
-                WebkitBackdropFilter: "blur(12px)",
-              }}
-            >
-              {sellSupported ? (
+          ) : null}
+
+          {/* Amount + Submit */}
+          {!readOnly &&
+            (activeTab === "buy" ? (
+              <div
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: compact ? 7 : 8,
+                  flex: 1,
+                }}
+              >
+                <div>
+                  {compact ? (
+                    <div
+                      style={{
+                        marginBottom: 5,
+                        fontSize: 9,
+                        fontWeight: 800,
+                        letterSpacing: 0.9,
+                        textTransform: "uppercase",
+                        color: "var(--hm-text-muted, rgba(255,255,255,0.48))",
+                        fontFamily: "var(--hm-font-display)",
+                      }}
+                    >
+                      {amountLabel ?? copy.betAmountLabel(currencySymbol)}
+                    </div>
+                  ) : null}
+                  <div style={{ position: "relative" }}>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.000001"
+                      inputMode="decimal"
+                      aria-label={
+                        amountLabel ?? copy.betAmountLabel(currencySymbol)
+                      }
+                      data-testid="prediction-amount-input"
+                      placeholder="0.00"
+                      value={amountInput}
+                      onChange={(event) => setAmountInput(event.target.value)}
+                      className="gm-amount-input"
+                      style={{
+                        width: "100%",
+                        padding: compact
+                          ? "8px 52px 8px 11px"
+                          : "9px 44px 9px 12px",
+                        borderRadius: 10,
+                        border:
+                          "1px solid var(--hm-chip-border, rgba(232,65,66,0.18))",
+                        color: "var(--hm-accent-gold)",
+                        boxSizing: "border-box",
+                        fontSize: compact ? 14 : 15,
+                        fontWeight: 900,
+                        fontFamily: "var(--hm-font-mono)",
+                        fontVariantNumeric: "tabular-nums",
+                        letterSpacing: compact ? 0.4 : 1,
+                        background: "var(--hm-chip-bg-strong, rgba(0,0,0,0.3))",
+                        boxShadow:
+                          "inset 0 2px 8px rgba(0,0,0,0.24), inset 0 0 0 0.5px var(--hm-chip-highlight, rgba(232,65,66,0.06)), 0 1px 0 rgba(255,255,255,0.04)",
+                        backdropFilter: "blur(12px)",
+                        WebkitBackdropFilter: "blur(12px)",
+                      }}
+                    />
+                    <div
+                      style={{
+                        position: "absolute",
+                        right: compact ? 11 : 12,
+                        top: "50%",
+                        transform: "translateY(-50%)",
+                        display: "inline-flex",
+                        alignItems: "center",
+                        height: "100%",
+                        fontSize: compact ? 10 : 9,
+                        fontWeight: 900,
+                        color: "var(--hm-text-muted, rgba(232,65,66,0.45))",
+                        fontFamily: "var(--hm-font-display)",
+                        fontVariantNumeric: "tabular-nums",
+                        letterSpacing: compact ? 1 : 1.5,
+                      }}
+                    >
+                      {currencySymbol}
+                    </div>
+                  </div>
+                </div>
                 <button
-                  disabled
+                  disabled={!canBet}
+                  onClick={onPlaceBet}
+                  data-testid="prediction-submit"
+                  className="gm-btn-submit"
                   style={{
                     width: "100%",
-                    padding: "10px",
-                    borderRadius: 8,
-                    border: "none",
-                    fontWeight: 700,
-                    fontSize: 11,
-                    cursor: "not-allowed",
+                    padding: compact ? "10px 10px" : "10px 6px",
+                    borderRadius: compact ? 12 : 10,
+                    border: canBet
+                      ? `1px solid ${compact ? selectedAccent : "var(--hm-chip-border, rgba(232,65,66,0.5))"}`
+                      : "1px solid var(--hm-border-subtle, rgba(255,255,255,0.08))",
+                    fontWeight: 900,
+                    fontSize: compact ? 13 : 14,
+                    letterSpacing: compact ? 1.8 : 3,
                     textTransform: "uppercase",
-                    letterSpacing: 1,
-                    background:
-                      "linear-gradient(180deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0.02) 100%)",
-                    color: "rgba(255,255,255,0.2)",
-                    boxShadow: "inset 0 1px 0 rgba(255,255,255,0.04)",
+                    cursor: canBet ? "pointer" : "not-allowed",
+                    transition: "all 0.15s cubic-bezier(0.4, 0, 0.2, 1)",
+                    fontFamily: "var(--hm-font-display)",
+                    background: canBet
+                      ? compact
+                        ? selectedCardBg
+                        : "linear-gradient(180deg, var(--hm-cta-bg-from, #f05252) 0%, var(--hm-cta-bg-mid, #E84142) 50%, var(--hm-cta-bg-to, #b91c1c) 100%)"
+                      : "var(--hm-panel-card-bg, linear-gradient(180deg, rgba(255,255,255,0.05) 0%, rgba(255,255,255,0.02) 100%))",
+                    color: canBet
+                      ? compact
+                        ? "var(--hm-cta-text, #ffffff)"
+                        : "var(--hm-cta-text, #ffffff)"
+                      : "var(--hm-text-muted, rgba(255,255,255,0.15))",
+                    boxShadow: canBet
+                      ? compact
+                        ? `0 10px 28px ${selectedGlow}, inset 0 1px 0 rgba(255,255,255,0.12)`
+                        : "0 4px 24px var(--hm-chip-shadow, rgba(232,65,66,0.2)), inset 0 1px 0 rgba(255,255,255,0.5), inset 0 -1px 0 rgba(0,0,0,0.1)"
+                      : "inset 0 1px 0 rgba(255,255,255,0.05), 0 2px 4px rgba(0,0,0,0.15)",
+                    position: "relative",
+                    overflow: "hidden",
                   }}
                 >
-                  {copy.noSellAction}
+                  {canBet && (
+                    <div
+                      style={{
+                        position: "absolute",
+                        top: 0,
+                        left: 0,
+                        width: "40%",
+                        height: "100%",
+                        background:
+                          "linear-gradient(90deg, transparent, rgba(255,255,255,0.25), transparent)",
+                        animation: "shimmerSweep 2.5s ease-in-out infinite",
+                        pointerEvents: "none",
+                      }}
+                    />
+                  )}
+                  <span style={{ position: "relative", zIndex: 1 }}>
+                    {isWalletReady
+                      ? `${copy.actionLabel(activeTab)} ${side}`
+                      : copy.connectWallet}
+                  </span>
                 </button>
-              ) : (
-                <button
-                  disabled
-                  style={{
-                    width: "100%",
-                    padding: "10px",
-                    borderRadius: 8,
-                    border: "none",
-                    fontWeight: 700,
-                    fontSize: 11,
-                    cursor: "not-allowed",
-                    textTransform: "uppercase",
-                    letterSpacing: 1,
-                    background:
-                      "linear-gradient(180deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0.02) 100%)",
-                    color: "rgba(255,255,255,0.2)",
-                    boxShadow: "inset 0 1px 0 rgba(255,255,255,0.04)",
-                  }}
-                >
-                  {copy.locked}
-                </button>
-              )}
-            </div>
-          )}
+              </div>
+            ) : (
+              <div
+                style={{
+                  padding: 12,
+                  borderRadius: 12,
+                  flex: 1,
+                  background:
+                    "linear-gradient(180deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0.02) 100%)",
+                  border: "1px solid rgba(255,255,255,0.08)",
+                  boxShadow:
+                    "inset 0 1px 0 rgba(255,255,255,0.06), 0 2px 8px rgba(0,0,0,0.15)",
+                  backdropFilter: "blur(12px)",
+                  WebkitBackdropFilter: "blur(12px)",
+                }}
+              >
+                {sellSupported ? (
+                  <button
+                    disabled
+                    style={{
+                      width: "100%",
+                      padding: "10px",
+                      borderRadius: 8,
+                      border: "none",
+                      fontWeight: 700,
+                      fontSize: 11,
+                      cursor: "not-allowed",
+                      textTransform: "uppercase",
+                      letterSpacing: 1,
+                      background:
+                        "linear-gradient(180deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0.02) 100%)",
+                      color: "rgba(255,255,255,0.2)",
+                      boxShadow: "inset 0 1px 0 rgba(255,255,255,0.04)",
+                    }}
+                  >
+                    {copy.noSellAction}
+                  </button>
+                ) : (
+                  <button
+                    disabled
+                    style={{
+                      width: "100%",
+                      padding: "10px",
+                      borderRadius: 8,
+                      border: "none",
+                      fontWeight: 700,
+                      fontSize: 11,
+                      cursor: "not-allowed",
+                      textTransform: "uppercase",
+                      letterSpacing: 1,
+                      background:
+                        "linear-gradient(180deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0.02) 100%)",
+                      color: "rgba(255,255,255,0.2)",
+                      boxShadow: "inset 0 1px 0 rgba(255,255,255,0.04)",
+                    }}
+                  >
+                    {copy.locked}
+                  </button>
+                )}
+              </div>
+            ))}
           {children ? (
             <div
               style={{
@@ -795,7 +842,10 @@ export function PredictionMarketPanel({
                     fontFamily: "var(--hm-font-display)",
                   }}
                 >
-                  {copy.predictionMarket && false /* Hidden — chart is self-evident */}
+                  {
+                    copy.predictionMarket &&
+                      false /* Hidden — chart is self-evident */
+                  }
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                   <div style={{ textAlign: "right" }}>
@@ -819,7 +869,7 @@ export function PredictionMarketPanel({
                         fontFamily: "var(--hm-font-mono)",
                       }}
                     >
-                      {yesPercent}%
+                      {yesPercentLabel}
                     </div>
                   </div>
                   <div
@@ -850,7 +900,7 @@ export function PredictionMarketPanel({
                         fontFamily: "var(--hm-font-mono)",
                       }}
                     >
-                      {noPercent}%
+                      {noPercentLabel}
                     </div>
                   </div>
                 </div>
@@ -864,12 +914,13 @@ export function PredictionMarketPanel({
                   overflow: "hidden",
                   marginBottom: 6,
                   background: "var(--hm-chip-bg-strong, rgba(0,0,0,0.3))",
-                  border: "1px solid var(--hm-border-subtle, rgba(255,255,255,0.05))",
+                  border:
+                    "1px solid var(--hm-border-subtle, rgba(255,255,255,0.05))",
                 }}
               >
                 <div
                   style={{
-                    width: `${yesPercent}%`,
+                    width: `${yesPercent ?? 0}%`,
                     height: "100%",
                     background:
                       "linear-gradient(90deg, var(--hm-buy), var(--hm-buy-glow-soft, rgba(34,197,94,0.6)))",
@@ -881,7 +932,7 @@ export function PredictionMarketPanel({
                 />
                 <div
                   style={{
-                    width: `${noPercent}%`,
+                    width: `${noPercent ?? 0}%`,
                     height: "100%",
                     background:
                       "linear-gradient(90deg, var(--hm-sell-glow-soft, rgba(232,65,66,0.6)), var(--hm-sell))",
@@ -931,7 +982,8 @@ export function PredictionMarketPanel({
                                 WebkitBackdropFilter: "blur(20px)",
                                 padding: "6px 12px",
                                 borderRadius: 8,
-                                border: "1px solid var(--hm-chip-border, rgba(232,65,66,0.3))",
+                                border:
+                                  "1px solid var(--hm-chip-border, rgba(232,65,66,0.3))",
                                 fontSize: 13,
                                 fontFamily: "var(--hm-font-mono)",
                                 fontWeight: 900,
@@ -949,11 +1001,13 @@ export function PredictionMarketPanel({
                         return null;
                       }}
                     />
-                    <ReferenceLine
-                      y={50}
-                      stroke="rgba(255,255,255,0.1)"
-                      strokeDasharray="4 4"
-                    />
+                    {chartData.length > 0 ? (
+                      <ReferenceLine
+                        y={50}
+                        stroke="rgba(255,255,255,0.1)"
+                        strokeDasharray="4 4"
+                      />
+                    ) : null}
                     <Line
                       type="monotone"
                       dataKey="pct"
@@ -993,12 +1047,12 @@ export function PredictionMarketPanel({
                 yesPot={numericYesPool}
                 noPot={numericNoPool}
                 totalPot={numericYesPool + numericNoPool}
-                goldPriceUsd={goldPriceUsd}
+                assetPriceUsd={assetPriceUsd}
                 locale={resolvedLocale}
                 assetSymbol={marketAssetSymbol}
                 bids={bids}
                 asks={asks}
-                midPrice={yesPercent / 100}
+                midPrice={yesPercent === null ? null : yesPercent / 100}
               />
             </div>
 
@@ -1027,7 +1081,7 @@ export function PredictionMarketPanel({
                 yesPot={numericYesPool}
                 noPot={numericNoPool}
                 totalPot={numericYesPool + numericNoPool}
-                goldPriceUsd={goldPriceUsd}
+                assetPriceUsd={assetPriceUsd}
                 locale={resolvedLocale}
                 assetSymbol={marketAssetSymbol}
                 trades={recentTrades}
@@ -1082,7 +1136,7 @@ export function PredictionMarketPanel({
           filter: brightness(0.95);
         }
 
-        /* ═══ COMPACT / HYPERSCAPE SIDEBAR THEME ═══════════════════════════ */
+        /* ═══ COMPACT / HYPERIA SIDEBAR THEME ═══════════════════════════ */
         /* Square corners everywhere */
         .pm-compact * { border-radius: 2px !important; }
         .pm-compact { font-variant-numeric: tabular-nums; }
@@ -1145,7 +1199,7 @@ export function PredictionMarketPanel({
           box-shadow: 0 0 0 2px rgba(229,184,74,0.1), inset 0 2px 4px rgba(0,0,0,0.5) !important;
         }
 
-        /* Submit button — matches hm-trade-btn gold, touch-friendly */
+        /* Submit button — matches the warm accent theme, touch-friendly */
         .pm-compact .gm-btn-submit {
           border-radius: 2px !important;
           font-family: var(--hm-font-display, 'Geist Sans', system-ui, sans-serif) !important;

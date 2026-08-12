@@ -1,14 +1,16 @@
 import asyncio
 import json
+from collections.abc import Callable
+
 import websockets
-from typing import Callable, List, Optional
+
 
 class HyperbetStreamClient:
     def __init__(self, url: str):
         self.url = url
-        self.callbacks: List[Callable[[dict], None]] = []
-        self._ws: Optional[websockets.WebSocketClientProtocol] = None
-        self._task: Optional[asyncio.Task] = None
+        self.callbacks: list[Callable[[dict], None]] = []
+        self._ws: websockets.WebSocketClientProtocol | None = None
+        self._task: asyncio.Task | None = None
 
     def subscribe(self, cb: Callable[[dict], None]):
         self.callbacks.append(cb)
@@ -20,7 +22,7 @@ class HyperbetStreamClient:
     async def _listen(self):
         if not self._ws:
             return
-        
+
         try:
             async for message in self._ws:
                 try:

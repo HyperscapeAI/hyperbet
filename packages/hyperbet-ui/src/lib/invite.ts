@@ -1,6 +1,6 @@
 const STORAGE_KEY = "arena:invite:code";
 const APPLIED_PREFIX = "arena:invite:applied";
-const WEBSITE_INVITE_ORIGIN = "https://hyperscape.bet";
+const WEBSITE_INVITE_ORIGIN = "https://hyperia.bet";
 const INVITE_QUERY_KEYS = ["invite", "ref", "inviteCode"] as const;
 const INVITE_CODE_PATTERN = /^[A-Z0-9_-]{4,64}$/;
 

@@ -2,13 +2,16 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { buildTestCompetitiveSnapshot } from "../../../keeper/src/testCompetitiveSnapshot";
+
 type E2eState = {
   solanaTraderPublicKey?: string;
-  perpsCharacterId?: string;
-  perpsModelName?: string;
   currentDuelId?: string;
   currentDuelKeyHex?: string;
-  currentDuelSource?: "synthetic_publish" | "real_hyperscapes";
+  currentBetOpenTimeMs?: number;
+  currentBetCloseTimeMs?: number;
+  currentFightStartTimeMs?: number;
+  currentDuelSource?: "synthetic_publish" | "real_hyperia";
 };
 
 async function readState(): Promise<E2eState> {
@@ -53,10 +56,7 @@ async function main(): Promise<void> {
     state.solanaTraderPublicKey,
     "solanaTraderPublicKey",
   );
-  const perpsCharacterId = requireString(
-    state.perpsCharacterId,
-    "perpsCharacterId",
-  );
+  const agentCharacterId = "e2e-solana-agent-a";
   const currentDuelId = requireString(state.currentDuelId, "currentDuelId");
   const currentDuelKeyHex = requireString(
     state.currentDuelKeyHex,
@@ -66,79 +66,33 @@ async function main(): Promise<void> {
     process.env.E2E_DUEL_SOURCE?.trim().toLowerCase() ||
     state.currentDuelSource ||
     "synthetic_publish";
-  const perpsModelName = state.perpsModelName?.trim() || "E2E Model Alpha";
-  const uplineWallet = "SeedReferrer11111111111111111111111111111111";
-  const leaderboardWallet = "SeedLeader1111111111111111111111111111111";
-  const inviteeWallet = "SeedInvitee111111111111111111111111111111";
+  const agentName = "Agent A";
   const now = Date.now();
-
-  const uplineInvite = await requestJson<{ inviteCode: string }>(
-    `${gameApiUrl}/api/arena/invite/${encodeURIComponent(uplineWallet)}?platform=solana`,
-  );
-  await requestJson(`${gameApiUrl}/api/arena/invite/redeem`, {
-    method: "POST",
-    body: JSON.stringify({
-      wallet: primaryWallet,
-      inviteCode: uplineInvite.inviteCode,
-    }),
-  });
-
-  const primaryInvite = await requestJson<{ inviteCode: string }>(
-    `${gameApiUrl}/api/arena/invite/${encodeURIComponent(primaryWallet)}?platform=solana`,
-  );
-  await requestJson(`${gameApiUrl}/api/arena/invite/redeem`, {
-    method: "POST",
-    body: JSON.stringify({
-      wallet: inviteeWallet,
-      inviteCode: primaryInvite.inviteCode,
-    }),
-  });
-
-  await requestJson(`${gameApiUrl}/api/arena/bet/record-external`, {
-    method: "POST",
-    body: JSON.stringify({
-      bettorWallet: primaryWallet,
-      chain: "SOLANA",
-      sourceAsset: "GOLD",
-      sourceAmount: 120,
-      goldAmount: 120,
-      feeBps: 200,
-      txSignature: "seed-primary-bet",
-      externalBetRef: "seed-primary-bet",
-    }),
-  });
-
-  await requestJson(`${gameApiUrl}/api/arena/bet/record-external`, {
-    method: "POST",
-    body: JSON.stringify({
-      bettorWallet: inviteeWallet,
-      chain: "SOLANA",
-      sourceAsset: "GOLD",
-      sourceAmount: 60,
-      goldAmount: 60,
-      feeBps: 200,
-      inviteCode: primaryInvite.inviteCode,
-      txSignature: "seed-invitee-bet",
-      externalBetRef: "seed-invitee-bet",
-    }),
-  });
-
-  await requestJson(`${gameApiUrl}/api/arena/bet/record-external`, {
-    method: "POST",
-    body: JSON.stringify({
-      bettorWallet: leaderboardWallet,
-      chain: "SOLANA",
-      sourceAsset: "GOLD",
-      sourceAmount: 500,
-      goldAmount: 500,
-      feeBps: 200,
-      txSignature: "seed-leader-bet",
-      externalBetRef: "seed-leader-bet",
-    }),
+  const betOpenTime = state.currentBetOpenTimeMs ?? now - 15_000;
+  const betCloseTime = state.currentBetCloseTimeMs ?? now + 300_000;
+  const fightStartTime = state.currentFightStartTimeMs ?? now + 360_000;
+  const competitiveSnapshot = buildTestCompetitiveSnapshot({
+    cycleId: "e2e-cycle-active",
+    duelId: currentDuelId,
+    duelKey: currentDuelKeyHex,
+    betOpenTime,
+    betCloseTime,
+    agent1: {
+      id: agentCharacterId,
+      name: agentName,
+      provider: "Hyperia",
+      model: "alpha-local",
+    },
+    agent2: {
+      id: "e2e-solana-agent-b",
+      name: "Agent B",
+      provider: "OpenRouter",
+      model: "beta-local",
+    },
   });
 
   const publishedState =
-    duelSource === "real_hyperscapes"
+    duelSource === "real_hyperia"
       ? null
       : await requestJson<{ seq: number }>(
           `${gameApiUrl}/api/streaming/state/publish`,
@@ -153,26 +107,30 @@ async function main(): Promise<void> {
                 cycleStartTime: now - 90_000,
                 phaseStartTime: now - 15_000,
                 phaseEndTime: now + 300_000,
-                betOpenTime: now - 15_000,
-                betCloseTime: now + 300_000,
-                fightStartTime: now + 360_000,
+                betOpenTime,
+                betCloseTime,
+                fightStartTime,
                 duelEndTime: null,
+                ...competitiveSnapshot,
                 countdown: 300,
                 timeRemaining: 300_000,
                 winnerId: null,
                 winnerName: null,
                 winReason: null,
                 agent1: {
-                  id: perpsCharacterId,
-                  name: perpsModelName,
-                  provider: "Hyperscape",
+                  id: agentCharacterId,
+                  name: agentName,
+                  provider: "Hyperia",
                   model: "alpha-local",
-                  hp: 68,
+                  hp: 80,
                   maxHp: 100,
                   combatLevel: 88,
                   wins: 12,
                   losses: 4,
                   damageDealtThisFight: 148,
+                  rank: 1,
+                  headToHeadWins: 3,
+                  headToHeadLosses: 2,
                   inventory: [
                     { slot: 0, itemId: "dragon_scimitar", quantity: 1 },
                     { slot: 1, itemId: "shark", quantity: 2 },
@@ -181,7 +139,8 @@ async function main(): Promise<void> {
                     {
                       id: "mono-alpha-1",
                       type: "thought",
-                      content: "Pressure the midpoint and deny the comeback window.",
+                      content:
+                        "Pressure the midpoint and deny the comeback window.",
                       timestamp: now - 12_000,
                     },
                     {
@@ -193,16 +152,19 @@ async function main(): Promise<void> {
                   ],
                 },
                 agent2: {
-                  id: "e2e-rival-beta",
-                  name: "Rival Beta",
+                  id: "e2e-solana-agent-b",
+                  name: "Agent B",
                   provider: "OpenRouter",
                   model: "beta-local",
-                  hp: 41,
+                  hp: 76,
                   maxHp: 100,
                   combatLevel: 84,
-                  wins: 9,
-                  losses: 6,
-                  damageDealtThisFight: 97,
+                  wins: 10,
+                  losses: 5,
+                  damageDealtThisFight: 131,
+                  rank: 2,
+                  headToHeadWins: 2,
+                  headToHeadLosses: 3,
                   inventory: [
                     { slot: 0, itemId: "abyssal_whip", quantity: 1 },
                     { slot: 1, itemId: "anglerfish", quantity: 1 },
@@ -218,17 +180,22 @@ async function main(): Promise<void> {
                     {
                       id: "mono-beta-2",
                       type: "action",
-                      content: "Retreating toward the pillar to reset the exchange.",
+                      content:
+                        "Retreating toward the pillar to reset the exchange.",
                       timestamp: now - 4_000,
                     },
                   ],
+                },
+                arenaPositions: {
+                  agent1: [-1, 0, 0],
+                  agent2: [1, 0, 0],
                 },
               },
               leaderboard: [
                 {
                   rank: 1,
-                  name: perpsModelName,
-                  provider: "Hyperscape",
+                  name: agentName,
+                  provider: "Hyperia",
                   model: "alpha-local",
                   wins: 12,
                   losses: 4,
@@ -237,12 +204,12 @@ async function main(): Promise<void> {
                 },
                 {
                   rank: 2,
-                  name: "Rival Beta",
+                  name: "Agent B",
                   provider: "OpenRouter",
                   model: "beta-local",
-                  wins: 9,
-                  losses: 6,
-                  winRate: 60,
+                  wins: 10,
+                  losses: 5,
+                  winRate: 66.7,
                   currentStreak: 2,
                 },
                 {
@@ -261,20 +228,12 @@ async function main(): Promise<void> {
           },
         );
 
-  const points = await requestJson<{ totalPoints: number }>(
-    `${gameApiUrl}/api/arena/points/${encodeURIComponent(primaryWallet)}?scope=wallet`,
-    { method: "GET" },
-  );
-
   console.log(
     JSON.stringify(
       {
         gameApiUrl,
         primaryWallet,
-        uplineInviteCode: uplineInvite.inviteCode,
-        primaryInviteCode: primaryInvite.inviteCode,
         publishedSeq: publishedState?.seq ?? null,
-        primaryWalletPoints: points.totalPoints,
         duelSource,
       },
       null,

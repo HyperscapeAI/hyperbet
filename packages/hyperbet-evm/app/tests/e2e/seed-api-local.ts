@@ -182,7 +182,7 @@ async function main(): Promise<void> {
           agent1: {
             id: perpsCharacterId,
             name: perpsModelName,
-            provider: "Hyperscape",
+            provider: "Hyperia",
             model: "alpha-local",
             hp: 68,
             maxHp: 100,
@@ -245,7 +245,7 @@ async function main(): Promise<void> {
           {
             rank: 1,
             name: perpsModelName,
-            provider: "Hyperscape",
+            provider: "Hyperia",
             model: "alpha-local",
             wins: 12,
             losses: 4,

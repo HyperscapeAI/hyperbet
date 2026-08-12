@@ -61,10 +61,7 @@ export function changeValue(
       element instanceof window.HTMLSelectElement
         ? window.HTMLSelectElement.prototype
         : window.HTMLInputElement.prototype;
-    const descriptor = Object.getOwnPropertyDescriptor(
-      prototype,
-      "value",
-    );
+    const descriptor = Object.getOwnPropertyDescriptor(prototype, "value");
     descriptor?.set?.call(element, value);
     const valueTracker = (
       element as (HTMLInputElement | HTMLSelectElement) & {

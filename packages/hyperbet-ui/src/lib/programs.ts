@@ -2,12 +2,12 @@ import { AnchorProvider, BN, Idl, Program } from "@coral-xyz/anchor";
 import {
   Connection,
   PublicKey,
+  type Transaction,
+  type VersionedTransaction,
 } from "@solana/web3.js";
-import { WalletContextState } from "@solana/wallet-adapter-react";
 
 import fightOracleIdl from "../idl/fight_oracle.json";
-import goldClobMarketIdl from "../idl/gold_clob_market.json";
-import { CONFIG } from "./config";
+import duelMarketIdl from "../idl/duel_market.json";
 
 function extractProgramAddressFromIdl(idlJson: unknown): string | null {
   if (!idlJson || typeof idlJson !== "object") return null;
@@ -52,36 +52,45 @@ function ensureIdlAddress(idlJson: unknown, programId: PublicKey): Idl {
   } as Idl;
 }
 
-export const FIGHT_ORACLE_PROGRAM_ID = resolveConfiguredProgramId(
-  CONFIG.fightOracleProgramId,
-  fightOracleIdl,
-  "",
-);
-export const GOLD_CLOB_MARKET_PROGRAM_ID = resolveConfiguredProgramId(
-  CONFIG.goldClobMarketProgramId,
-  goldClobMarketIdl,
-  "",
-);
+export type DuelProgramAddresses = {
+  fightOracleProgramId: string;
+  duelMarketProgramId: string;
+};
 
-const FIGHT_ORACLE_IDL = ensureIdlAddress(
-  fightOracleIdl,
-  FIGHT_ORACLE_PROGRAM_ID,
-);
-const GOLD_CLOB_MARKET_IDL = ensureIdlAddress(
-  goldClobMarketIdl,
-  GOLD_CLOB_MARKET_PROGRAM_ID,
-);
+function resolveProgramIdls(addresses: DuelProgramAddresses): {
+  fightOracleIdl: Idl;
+  duelMarketIdl: Idl;
+} {
+  const fightOracleProgramId = resolveConfiguredProgramId(
+    addresses.fightOracleProgramId,
+    fightOracleIdl,
+    "",
+  );
+  const duelMarketProgramId = resolveConfiguredProgramId(
+    addresses.duelMarketProgramId,
+    duelMarketIdl,
+    "",
+  );
+  return {
+    fightOracleIdl: ensureIdlAddress(fightOracleIdl, fightOracleProgramId),
+    duelMarketIdl: ensureIdlAddress(duelMarketIdl, duelMarketProgramId),
+  };
+}
 
 export type ProgramsBundle = {
   provider: AnchorProvider;
   fightOracle: Program<any>;
-  goldClobMarket: Program<any>;
+  duelMarket: Program<any>;
 };
 
 export type SigningWalletLike = {
-  publicKey: WalletContextState["publicKey"];
-  signTransaction?: WalletContextState["signTransaction"];
-  signAllTransactions?: WalletContextState["signAllTransactions"];
+  publicKey: PublicKey | null;
+  signTransaction?: <T extends Transaction | VersionedTransaction>(
+    transaction: T,
+  ) => Promise<T>;
+  signAllTransactions?: <T extends Transaction | VersionedTransaction>(
+    transactions: T[],
+  ) => Promise<T[]>;
 };
 
 function asAnchorWallet(wallet: SigningWalletLike): any {
@@ -114,6 +123,7 @@ function readonlyAnchorWallet(): any {
 export function createPrograms(
   connection: Connection,
   wallet: SigningWalletLike,
+  addresses: DuelProgramAddresses,
 ): ProgramsBundle {
   const anchorWallet = asAnchorWallet(wallet);
   const provider = new AnchorProvider(connection, anchorWallet, {
@@ -121,22 +131,27 @@ export function createPrograms(
     preflightCommitment: "confirmed",
   });
 
-  const fightOracle = new Program(FIGHT_ORACLE_IDL, provider);
-  const goldClobMarket = new Program(GOLD_CLOB_MARKET_IDL, provider);
+  const idls = resolveProgramIdls(addresses);
+  const fightOracle = new Program(idls.fightOracleIdl, provider);
+  const duelMarket = new Program(idls.duelMarketIdl, provider);
 
-  return { provider, fightOracle, goldClobMarket };
+  return { provider, fightOracle, duelMarket };
 }
 
-export function createReadonlyPrograms(connection: Connection): ProgramsBundle {
+export function createReadonlyPrograms(
+  connection: Connection,
+  addresses: DuelProgramAddresses,
+): ProgramsBundle {
   const provider = new AnchorProvider(connection, readonlyAnchorWallet(), {
     commitment: "confirmed",
     preflightCommitment: "confirmed",
   });
 
-  const fightOracle = new Program(FIGHT_ORACLE_IDL, provider);
-  const goldClobMarket = new Program(GOLD_CLOB_MARKET_IDL, provider);
+  const idls = resolveProgramIdls(addresses);
+  const fightOracle = new Program(idls.fightOracleIdl, provider);
+  const duelMarket = new Program(idls.duelMarketIdl, provider);
 
-  return { provider, fightOracle, goldClobMarket };
+  return { provider, fightOracle, duelMarket };
 }
 
 export function toBnAmount(amount: bigint): BN {

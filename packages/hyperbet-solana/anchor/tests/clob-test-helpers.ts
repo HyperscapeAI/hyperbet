@@ -12,7 +12,7 @@ import {
 } from "@solana/web3.js";
 
 import { FightOracle } from "../target/types/fight_oracle";
-import { GoldClobMarket } from "../target/types/gold_clob_market";
+import { DuelMarket } from "../target/types/duel_market";
 import {
   confirmSignatureByPolling,
   sendVersionedTransactionWithLookupTable,
@@ -61,7 +61,8 @@ function u64Le(value: bigint | number): Buffer {
   return buffer;
 }
 
-export const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+export const sleep = (ms: number) =>
+  new Promise((resolve) => setTimeout(resolve, ms));
 
 export async function currentChainUnixTimestamp(
   connection: anchor.web3.Connection,
@@ -70,7 +71,11 @@ export async function currentChainUnixTimestamp(
     try {
       const slot = await connection.getSlot("confirmed");
       const blockTime = await connection.getBlockTime(slot);
-      if (typeof blockTime === "number" && Number.isFinite(blockTime) && blockTime > 0) {
+      if (
+        typeof blockTime === "number" &&
+        Number.isFinite(blockTime) &&
+        blockTime > 0
+      ) {
         return blockTime;
       }
     } catch {
@@ -163,6 +168,23 @@ export function deriveDuelStatePda(
   )[0];
 }
 
+export function deriveProposalRecordPda(
+  programId: PublicKey,
+  duelKey: readonly number[],
+  resultHash: readonly number[],
+  replayHash: readonly number[],
+): PublicKey {
+  return PublicKey.findProgramAddressSync(
+    [
+      Buffer.from("proposal"),
+      Buffer.from(duelKey),
+      Buffer.from(resultHash),
+      Buffer.from(replayHash),
+    ],
+    programId,
+  )[0];
+}
+
 export function deriveMarketConfigPda(programId: PublicKey): PublicKey {
   return PublicKey.findProgramAddressSync(
     [Buffer.from("config")],
@@ -250,8 +272,8 @@ export function hasProgramError(error: unknown, fragment: string): boolean {
 function enumIs(value: unknown, key: string): boolean {
   return Boolean(
     value &&
-      typeof value === "object" &&
-      key in (value as Record<string, unknown>),
+    typeof value === "object" &&
+    key in (value as Record<string, unknown>),
   );
 }
 
@@ -321,7 +343,7 @@ export async function ensureOracleReady(
 }
 
 export async function ensureClobConfig(
-  program: Program<GoldClobMarket>,
+  program: Program<DuelMarket>,
   authority: Keypair,
   options?: {
     marketOperator?: PublicKey;
@@ -418,7 +440,7 @@ export async function upsertDuel(
       toBn(options.betOpenTs),
       toBn(options.betCloseTs),
       toBn(options.duelStartTs ?? options.betCloseTs),
-      options.metadataUri ?? "https://hyperscape.gg/duels/test",
+      options.metadataUri ?? "https://hyperia.gg/duels/test",
       options.status,
     )
     .accountsPartial({
@@ -437,7 +459,7 @@ export async function cancelDuel(
   program: Program<FightOracle>,
   authority: Keypair,
   duelKey: readonly number[],
-  metadataUri = "https://hyperscape.gg/duels/cancelled",
+  metadataUri = "https://hyperia.gg/duels/cancelled",
 ): Promise<PublicKey> {
   const oracleConfig = deriveOracleConfigPda(program.programId);
   const duelState = deriveDuelStatePda(program.programId, duelKey);
@@ -470,27 +492,37 @@ export async function proposeDuelResult(
 ): Promise<PublicKey> {
   const oracleConfig = deriveOracleConfigPda(program.programId);
   const duelState = deriveDuelStatePda(program.programId, duelKey);
+  const replayHash = [
+    ...(options.replayHash ??
+      hashLabel(`${Buffer.from(duelKey).toString("hex")}:replay`)),
+  ];
+  const resultHash = [
+    ...(options.resultHash ??
+      hashLabel(`${Buffer.from(duelKey).toString("hex")}:result`)),
+  ];
+  const proposalRecord = deriveProposalRecordPda(
+    program.programId,
+    duelKey,
+    resultHash,
+    replayHash,
+  );
 
   await program.methods
     .proposeResult(
       [...duelKey],
       options.winner,
       toBn(options.seed ?? 42),
-      [
-        ...(options.replayHash ??
-          hashLabel(`${Buffer.from(duelKey).toString("hex")}:replay`)),
-      ],
-      [
-        ...(options.resultHash ??
-          hashLabel(`${Buffer.from(duelKey).toString("hex")}:result`)),
-      ],
+      replayHash,
+      resultHash,
       toBn(options.duelEndTs),
-      options.metadataUri ?? "https://hyperscape.gg/duels/proposal",
+      options.metadataUri ?? "https://hyperia.gg/duels/proposal",
     )
     .accountsPartial({
       reporter: reporter.publicKey,
       oracleConfig,
       duelState,
+      proposalRecord,
+      systemProgram: SystemProgram.programId,
     })
     .signers([reporter])
     .rpc();
@@ -502,10 +534,17 @@ export async function challengeDuelResult(
   program: Program<FightOracle>,
   challenger: Keypair,
   duelKey: readonly number[],
-  metadataUri = "https://hyperscape.gg/duels/challenged",
+  metadataUri = "https://hyperia.gg/duels/challenged",
 ): Promise<PublicKey> {
   const oracleConfig = deriveOracleConfigPda(program.programId);
   const duelState = deriveDuelStatePda(program.programId, duelKey);
+  const duelStateAccount = await program.account.duelState.fetch(duelState);
+  const proposalRecord = deriveProposalRecordPda(
+    program.programId,
+    duelKey,
+    duelStateAccount.pendingResultHash,
+    duelStateAccount.pendingReplayHash,
+  );
 
   await program.methods
     .challengeResult([...duelKey], metadataUri)
@@ -513,8 +552,56 @@ export async function challengeDuelResult(
       challenger: challenger.publicKey,
       oracleConfig,
       duelState,
+      proposalRecord,
     })
     .signers([challenger])
+    .rpc();
+
+  return duelState;
+}
+
+export async function reproposeDuelResult(
+  program: Program<FightOracle>,
+  reporter: Keypair,
+  duelKey: readonly number[],
+  options: {
+    winner: { a: Record<string, never> } | { b: Record<string, never> };
+    duelEndTs: number;
+    seed?: bigint | number;
+    replayHash: readonly number[];
+    resultHash: readonly number[];
+    metadataUri?: string;
+  },
+): Promise<PublicKey> {
+  const oracleConfig = deriveOracleConfigPda(program.programId);
+  const duelState = deriveDuelStatePda(program.programId, duelKey);
+  const replayHash = [...options.replayHash];
+  const resultHash = [...options.resultHash];
+  const proposalRecord = deriveProposalRecordPda(
+    program.programId,
+    duelKey,
+    resultHash,
+    replayHash,
+  );
+
+  await program.methods
+    .reproposeResult(
+      [...duelKey],
+      options.winner,
+      toBn(options.seed ?? 42),
+      replayHash,
+      resultHash,
+      toBn(options.duelEndTs),
+      options.metadataUri ?? "https://hyperia.gg/duels/reproposal",
+    )
+    .accountsPartial({
+      reporter: reporter.publicKey,
+      oracleConfig,
+      duelState,
+      proposalRecord,
+      systemProgram: SystemProgram.programId,
+    })
+    .signers([reporter])
     .rpc();
 
   return duelState;
@@ -524,7 +611,7 @@ export async function finalizeDuelResult(
   program: Program<FightOracle>,
   finalizer: Keypair,
   duelKey: readonly number[],
-  metadataUri = "https://hyperscape.gg/duels/final",
+  metadataUri = "https://hyperia.gg/duels/final",
   options?: {
     skipDisputeWindowWait?: boolean;
   },
@@ -547,9 +634,35 @@ export async function finalizeDuelResult(
       return duelState;
     } catch (error) {
       lastError = error;
+      if (!hasProgramError(error, "DisputeWindowActive")) {
+        // A concurrently running finalizer may win the account lock after our
+        // transaction was submitted but before its error reaches the client.
+        // Confirm canonical state for a bounded window before treating that
+        // transport/account-lock race as a failed finalization.
+        for (
+          let resolutionCheck = 0;
+          resolutionCheck < 10;
+          resolutionCheck += 1
+        ) {
+          const duelStateAccount =
+            await program.account.duelState.fetch(duelState);
+          if (
+            enumIs(
+              (duelStateAccount as { status?: unknown }).status,
+              "resolved",
+            )
+          ) {
+            return duelState;
+          }
+          await sleep(500);
+        }
+      }
       if (hasProgramError(error, "NotProposed")) {
-        const duelStateAccount = await program.account.duelState.fetch(duelState);
-        if (enumIs((duelStateAccount as { status?: unknown }).status, "resolved")) {
+        const duelStateAccount =
+          await program.account.duelState.fetch(duelState);
+        if (
+          enumIs((duelStateAccount as { status?: unknown }).status, "resolved")
+        ) {
           return duelState;
         }
       }
@@ -565,10 +678,12 @@ export async function finalizeDuelResult(
       ]);
       const finalizableAt =
         bnLikeToNumber(
-          (duelStateAccount as { pendingProposedAt?: unknown }).pendingProposedAt,
+          (duelStateAccount as { pendingProposedAt?: unknown })
+            .pendingProposedAt,
         ) +
         bnLikeToNumber(
-          (oracleConfigAccount as { disputeWindowSecs?: unknown }).disputeWindowSecs,
+          (oracleConfigAccount as { disputeWindowSecs?: unknown })
+            .disputeWindowSecs,
         );
       const now = await currentChainUnixTimestamp(program.provider.connection);
       const remainingMs = Math.max(500, (finalizableAt - now + 1) * 1_000);
@@ -580,7 +695,7 @@ export async function finalizeDuelResult(
 }
 
 export async function initializeCanonicalMarket(
-  program: Program<GoldClobMarket>,
+  program: Program<DuelMarket>,
   operator: Keypair,
   duelState: PublicKey,
   duelKey: readonly number[],
@@ -611,7 +726,7 @@ export async function initializeCanonicalMarket(
 }
 
 export async function ensureVaultRentExempt(
-  program: Program<GoldClobMarket>,
+  program: Program<DuelMarket>,
   funder: Keypair,
   vault: PublicKey,
 ): Promise<void> {
@@ -635,7 +750,7 @@ export async function ensureVaultRentExempt(
 }
 
 export async function syncMarketFromDuel(
-  program: Program<GoldClobMarket>,
+  program: Program<DuelMarket>,
   marketState: PublicKey,
   duelState: PublicKey,
 ): Promise<void> {
@@ -649,7 +764,7 @@ export async function syncMarketFromDuel(
 }
 
 export async function placeClobOrder(
-  program: Program<GoldClobMarket>,
+  program: Program<DuelMarket>,
   args: {
     marketState: PublicKey;
     duelState: PublicKey;
@@ -725,17 +840,16 @@ export async function placeClobOrder(
           [instruction],
           [args.user],
         )
-      : await (
-          program.provider as anchor.AnchorProvider
-        ).sendAndConfirm(new anchor.web3.Transaction().add(instruction), [
-          args.user,
-        ]);
+      : await (program.provider as anchor.AnchorProvider).sendAndConfirm(
+          new anchor.web3.Transaction().add(instruction),
+          [args.user],
+        );
 
   return { userBalance, order, restingLevel, signature };
 }
 
 export async function continueClobOrder(
-  program: Program<GoldClobMarket>,
+  program: Program<DuelMarket>,
   args: {
     marketState: PublicKey;
     duelState: PublicKey;
@@ -792,7 +906,7 @@ export async function continueClobOrder(
 }
 
 export async function cancelClobOrder(
-  program: Program<GoldClobMarket>,
+  program: Program<DuelMarket>,
   args: {
     marketState: PublicKey;
     duelState: PublicKey;
@@ -803,7 +917,7 @@ export async function cancelClobOrder(
     price: number;
     remainingAccounts?: AccountMeta[];
   },
-): Promise<{ order: PublicKey; priceLevel: PublicKey }> {
+): Promise<{ order: PublicKey; priceLevel: PublicKey; signature: string }> {
   const order = deriveOrderPda(
     program.programId,
     args.marketState,
@@ -832,13 +946,71 @@ export async function cancelClobOrder(
     builder = builder.remainingAccounts(args.remainingAccounts);
   }
 
-  await builder.signers([args.user]).rpc();
+  const signature = await builder.signers([args.user]).rpc();
 
-  return { order, priceLevel };
+  return { order, priceLevel, signature };
+}
+
+export async function closeFilledClobOrder(
+  program: Program<DuelMarket>,
+  args: {
+    marketState: PublicKey;
+    user: Keypair;
+    orderId: bigint | number;
+  },
+): Promise<{ order: PublicKey; signature: string }> {
+  const order = deriveOrderPda(
+    program.programId,
+    args.marketState,
+    args.orderId,
+  );
+
+  const signature = await program.methods
+    .closeFilledOrder(toBn(args.orderId))
+    .accountsPartial({
+      marketState: args.marketState,
+      order,
+      user: args.user.publicKey,
+    })
+    .signers([args.user])
+    .rpc();
+
+  return { order, signature };
+}
+
+export async function closeEmptyClobPriceLevel(
+  program: Program<DuelMarket>,
+  args: {
+    marketState: PublicKey;
+    side: number;
+    price: number;
+    rentRecipient: PublicKey;
+    closer: Keypair;
+  },
+): Promise<{ priceLevel: PublicKey; signature: string }> {
+  const priceLevel = derivePriceLevelPda(
+    program.programId,
+    args.marketState,
+    args.side,
+    args.price,
+  );
+
+  const signature = await program.methods
+    .closeEmptyPriceLevel(args.side, args.price)
+    .accountsPartial({
+      marketState: args.marketState,
+      priceLevel,
+      rentRecipient: args.rentRecipient,
+      closer: args.closer.publicKey,
+    })
+    .signers([args.closer])
+    .rpc();
+
+  return { priceLevel, signature };
 }
 
 export async function reclaimClobOrder(
-  program: Program<GoldClobMarket>,
+  program: Program<DuelMarket>,
   args: {
     marketState: PublicKey;
     duelState: PublicKey;
@@ -849,7 +1021,7 @@ export async function reclaimClobOrder(
     price: number;
     remainingAccounts?: AccountMeta[];
   },
-): Promise<{ order: PublicKey; priceLevel: PublicKey }> {
+): Promise<{ order: PublicKey; priceLevel: PublicKey; signature: string }> {
   const order = deriveOrderPda(
     program.programId,
     args.marketState,
@@ -878,13 +1050,13 @@ export async function reclaimClobOrder(
     builder = builder.remainingAccounts(args.remainingAccounts);
   }
 
-  await builder.signers([args.user]).rpc();
+  const signature = await builder.signers([args.user]).rpc();
 
-  return { order, priceLevel };
+  return { order, priceLevel, signature };
 }
 
 export async function claimClobWinnings(
-  program: Program<GoldClobMarket>,
+  program: Program<DuelMarket>,
   args: {
     marketState: PublicKey;
     duelState: PublicKey;
@@ -918,9 +1090,98 @@ export async function claimClobWinnings(
   return userBalance;
 }
 
+export async function claimClobWinningsWithSignature(
+  program: Program<DuelMarket>,
+  args: {
+    marketState: PublicKey;
+    duelState: PublicKey;
+    config: PublicKey;
+    marketMaker: PublicKey;
+    vault: PublicKey;
+    user: Keypair;
+  },
+): Promise<{ userBalance: PublicKey; signature: string }> {
+  const userBalance = deriveUserBalancePda(
+    program.programId,
+    args.marketState,
+    args.user.publicKey,
+  );
+
+  const signature = await program.methods
+    .claim()
+    .accountsPartial({
+      marketState: args.marketState,
+      duelState: args.duelState,
+      userBalance,
+      config: args.config,
+      marketMaker: args.marketMaker,
+      vault: args.vault,
+      user: args.user.publicKey,
+      systemProgram: SystemProgram.programId,
+    })
+    .signers([args.user])
+    .rpc();
+
+  return { userBalance, signature };
+}
+
+export async function closeLosingClobBalance(
+  program: Program<DuelMarket>,
+  args: {
+    marketState: PublicKey;
+    duelState: PublicKey;
+    user: Keypair;
+  },
+): Promise<PublicKey> {
+  const userBalance = deriveUserBalancePda(
+    program.programId,
+    args.marketState,
+    args.user.publicKey,
+  );
+
+  await program.methods
+    .closeLosingBalance()
+    .accountsPartial({
+      marketState: args.marketState,
+      duelState: args.duelState,
+      userBalance,
+      user: args.user.publicKey,
+    })
+    .signers([args.user])
+    .rpc();
+
+  return userBalance;
+}
+
+export async function withdrawResolvedClobTradeFees(
+  program: Program<DuelMarket>,
+  args: {
+    marketState: PublicKey;
+    duelState: PublicKey;
+    treasury: PublicKey;
+    marketMaker: PublicKey;
+    vault: PublicKey;
+    submitter: Keypair;
+  },
+): Promise<string> {
+  return program.methods
+    .withdrawResolvedTradeFees()
+    .accountsPartial({
+      marketState: args.marketState,
+      duelState: args.duelState,
+      treasury: args.treasury,
+      marketMaker: args.marketMaker,
+      vault: args.vault,
+      submitter: args.submitter.publicKey,
+      systemProgram: SystemProgram.programId,
+    })
+    .signers([args.submitter])
+    .rpc();
+}
+
 export async function createOpenMarketFixture(
   fightProgram: Program<FightOracle>,
-  clobProgram: Program<GoldClobMarket>,
+  clobProgram: Program<DuelMarket>,
   authority: Keypair,
   options?: {
     duelKey?: readonly number[];
@@ -934,6 +1195,8 @@ export async function createOpenMarketFixture(
     betOpenTs?: number;
     betCloseTs?: number;
     duelStartTs?: number;
+    participantAHash?: readonly number[];
+    participantBHash?: readonly number[];
     metadataUri?: string;
   },
 ): Promise<{
@@ -955,6 +1218,9 @@ export async function createOpenMarketFixture(
     marketOperator: options?.marketOperator ?? authority.publicKey,
     treasury,
     marketMaker,
+    tradeTreasuryFeeBps: options?.tradeTreasuryFeeBps,
+    tradeMarketMakerFeeBps: options?.tradeMarketMakerFeeBps,
+    winningsMarketMakerFeeBps: options?.winningsMarketMakerFeeBps,
   });
   const duelState = await upsertDuel(fightProgram, authority, duelKey, {
     status: options?.duelStatus ?? duelStatusBettingOpen(),
@@ -962,6 +1228,8 @@ export async function createOpenMarketFixture(
     betCloseTs: options?.betCloseTs ?? now + 3600,
     duelStartTs:
       options?.duelStartTs ?? (options?.betCloseTs ?? now + 3600) + 60,
+    participantAHash: options?.participantAHash,
+    participantBHash: options?.participantBHash,
     metadataUri: options?.metadataUri,
   });
   const { marketState, vault } = await initializeCanonicalMarket(

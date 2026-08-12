@@ -26,7 +26,7 @@
     "typecheck": "bunx tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
     "verify:chains": "bun src/verify-chains.ts",
-    "verify:chains:env": "SOLANA_VERIFY_RPC_URL=$SOLANA_RPC_URL SOLANA_VERIFY_PROGRAM_ID=${GOLD_CLOB_MARKET_PROGRAM_ID:-$SOLANA_ARENA_MARKET_PROGRAM_ID} bun src/verify-chains.ts",
+    "verify:chains:env": "SOLANA_VERIFY_RPC_URL=$SOLANA_RPC_URL SOLANA_VERIFY_PROGRAM_ID=${DUEL_MARKET_PROGRAM_ID:-$SOLANA_ARENA_MARKET_PROGRAM_ID} bun src/verify-chains.ts",
     "verify:forks": "bun src/fork-harness.ts"
   },
   "dependencies": {

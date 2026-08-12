@@ -17,7 +17,7 @@ describe("RecentTrades", () => {
         yesPot={0}
         noPot={0}
         totalPot={0}
-        goldPriceUsd={null}
+        assetPriceUsd={null}
         trades={[]}
       />,
     );
@@ -33,7 +33,7 @@ describe("RecentTrades", () => {
         yesPot={20}
         noPot={30}
         totalPot={50}
-        goldPriceUsd={1934.2}
+        assetPriceUsd={1934.2}
         trades={[
           { id: "t-1", side: "YES", amount: 12.3456, time: 30_000 },
           { id: "t-2", side: "NO", amount: 1_500, time: 119_000 },
@@ -56,7 +56,7 @@ describe("RecentTrades", () => {
         yesPot={20}
         noPot={30}
         totalPot={50}
-        goldPriceUsd={1934.2}
+        assetPriceUsd={1934.2}
         locale="zh"
         trades={[{ id: "t-1", side: "YES", amount: 12.3456, time: 30_000 }]}
       />,
